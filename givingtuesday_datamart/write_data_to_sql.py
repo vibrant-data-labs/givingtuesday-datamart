@@ -214,14 +214,15 @@ def _write_with_session(session, df, table_name, overwrite):
             schema_name = None
             actual_table_name = table_name
         
-        # Convert to pandas for table operations
-        pandas_df = df.to_pandas()
-        
         # Step 1: Create table structure using pandas (creates schema)
+        # ONLY convert first 100 rows to pandas to avoid OOM on large datasets
+        logger.info(f"Creating table schema for '{table_name}'...")
+        sample_df = df.head(100).to_pandas()
+        
         # Use first row to create table, then we'll use COPY for the bulk insert
         if overwrite:
             # Create table with proper schema by writing just first row
-            pandas_df.head(1).to_sql(
+            sample_df.head(1).to_sql(
                 name=actual_table_name,
                 schema=schema_name,
                 con=engine,
@@ -240,7 +241,7 @@ def _write_with_session(session, df, table_name, overwrite):
             
             if not table_exists:
                 # Create table with proper schema
-                pandas_df.head(1).to_sql(
+                sample_df.head(1).to_sql(
                     name=actual_table_name,
                     schema=schema_name,
                     con=engine,
@@ -251,6 +252,8 @@ def _write_with_session(session, df, table_name, overwrite):
                 with engine.connect() as conn:
                     conn.execute(text(f"TRUNCATE TABLE {table_name}"))
                     conn.commit()
+        
+        logger.info(f"Table schema created successfully")
         
         # Step 2: Use COPY for fast bulk insert with streaming batches
         raw_conn = engine.raw_connection()
