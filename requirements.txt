@@ -1,0 +1,6 @@
+vdl-tools
+wget
+polars
+pandas
+sqlalchemy
+psycopg2-binary
