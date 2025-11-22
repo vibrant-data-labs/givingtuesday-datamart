@@ -202,7 +202,7 @@ def write_dataframe_to_table(
 
 
 def _write_with_session(session, df, table_name, overwrite):
-    """Helper function to write data using a session."""
+    """Helper function to write data using a session. Uses streaming batches to avoid OOM."""
     try:
         # Get the engine from the session
         engine = session.bind
@@ -252,40 +252,55 @@ def _write_with_session(session, df, table_name, overwrite):
                     conn.execute(text(f"TRUNCATE TABLE {table_name}"))
                     conn.commit()
         
-        # Step 2: Use COPY for fast bulk insert
+        # Step 2: Use COPY for fast bulk insert with streaming batches
         raw_conn = engine.raw_connection()
         try:
             cursor = raw_conn.cursor()
             
-            # Convert Polars DataFrame to list of tuples for COPY
             # Get column names (already lowercase and sanitized from rename_columns_to_lowercase)
             columns = df.columns
             column_names = ', '.join(columns)
             
-            # Convert DataFrame to list of tuples
-            data_tuples = [tuple(row) for row in df.iter_rows()]
+            # Stream data in batches to avoid loading everything into memory
+            # Process 100k rows at a time
+            batch_size = 100000
+            total_rows = len(df)
+            rows_written = 0
             
-            # Use COPY FROM with StringIO for fastest bulk insert
-            # This is 10-100x faster than INSERT statements
-            output = io.StringIO()
-            writer = csv.writer(output, quoting=csv.QUOTE_MINIMAL)
-            for row in data_tuples:
-                # Convert None to empty string (PostgreSQL COPY will handle NULL)
-                csv_row = [val if val is not None else '' for val in row]
-                writer.writerow(csv_row)
+            logger.info(f"Writing {total_rows} rows in batches of {batch_size}...")
             
-            output.seek(0)
-            
-            # Use COPY FROM STDIN with CSV format (fastest method)
-            cursor.copy_expert(
-                f"COPY {table_name} ({column_names}) FROM STDIN WITH (FORMAT csv, NULL '')",
-                output
-            )
+            for batch_start in range(0, total_rows, batch_size):
+                batch_end = min(batch_start + batch_size, total_rows)
+                batch_df = df[batch_start:batch_end]
+                
+                # Create CSV output for this batch
+                output = io.StringIO()
+                writer = csv.writer(output, quoting=csv.QUOTE_MINIMAL)
+                
+                for row in batch_df.iter_rows():
+                    # Convert None to empty string (PostgreSQL COPY will handle NULL)
+                    csv_row = [val if val is not None else '' for val in row]
+                    writer.writerow(csv_row)
+                
+                output.seek(0)
+                
+                # Use COPY FROM STDIN with CSV format (fastest method)
+                cursor.copy_expert(
+                    f"COPY {table_name} ({column_names}) FROM STDIN WITH (FORMAT csv, NULL '')",
+                    output
+                )
+                
+                rows_written += len(batch_df)
+                progress = (rows_written / total_rows) * 100
+                logger.info(f"Progress: {progress:.1f}% ({rows_written:,} / {total_rows:,} rows)")
+                
+                # Clean up the StringIO for this batch
+                output.close()
             
             raw_conn.commit()
             cursor.close()
             
-            logger.info(f"Successfully wrote {len(df)} rows to table '{table_name}' using COPY")
+            logger.info(f"Successfully wrote {total_rows:,} rows to table '{table_name}' using COPY")
         finally:
             raw_conn.close()
         
