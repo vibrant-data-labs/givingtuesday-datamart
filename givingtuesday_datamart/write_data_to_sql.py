@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 
 import polars as pl
 import psycopg2
+import requests
 from sqlalchemy import create_engine, text
 
 from vdl_tools.shared_tools.database_cache.database_utils import get_session
@@ -56,6 +57,7 @@ def download_csv_from_url(url: str, cache_dir: Path = None, use_cache: bool = Tr
     """
     Download a CSV file from a URL and return it as a Polars DataFrame.
     Checks for local cached file first, downloads only if not found.
+    Uses streaming download to handle large files without OOM errors.
     
     Args:
         url: URL of the CSV file to download
@@ -83,30 +85,50 @@ def download_csv_from_url(url: str, cache_dir: Path = None, use_cache: bool = Tr
             logger.warning(f"Failed to read cached file {local_path}: {e}. Will download from URL.")
             # Continue to download if reading cached file fails
     
-    # Download from URL
+    # Download from URL using streaming to avoid OOM errors
     logger.info(f"Downloading CSV from: {url}")
     try:
-        # Polars can read directly from URLs
-        # Use robust parsing options to handle schema inference issues:
-        # - infer_schema_length=10000: Sample more rows for better type inference
-        # - ignore_errors=True: Handle problematic values gracefully (converts to null)
-        # - try_parse_dates=True: Attempt to parse dates automatically
+        # Stream download to disk in chunks (avoids loading entire file into memory)
+        logger.info(f"Streaming download to: {local_path}")
+        response = requests.get(url, stream=True, timeout=300)
+        response.raise_for_status()
+        
+        # Get file size if available
+        total_size = int(response.headers.get('content-length', 0))
+        if total_size > 0:
+            logger.info(f"File size: {total_size / (1024*1024):.2f} MB")
+        
+        # Write to file in chunks (10MB at a time)
+        chunk_size = 10 * 1024 * 1024  # 10 MB chunks
+        downloaded = 0
+        
+        with open(local_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=chunk_size):
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size > 0:
+                        progress = (downloaded / total_size) * 100
+                        logger.info(f"Download progress: {progress:.1f}% ({downloaded / (1024*1024):.2f} MB)")
+        
+        logger.info(f"Download complete. File saved to: {local_path}")
+        
+        # Now read the file with Polars
+        logger.info("Reading CSV file into memory...")
         df = pl.read_csv(
-            url,
+            str(local_path),
             infer_schema_length=10000,
             ignore_errors=True,
             try_parse_dates=True
         )
         
-        # Save to cache for future use
-        if use_cache:
-            logger.info(f"Caching file to: {local_path}")
-            df.write_csv(str(local_path))
-            logger.info(f"File cached successfully")
-        
+        logger.info(f"Successfully loaded {len(df)} rows with {len(df.columns)} columns")
         return df
+        
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Failed to download CSV from URL: {url}. Error: {e}")
     except Exception as e:
-        raise Exception(f"Failed to download or read CSV from URL: {url}. Error: {e}")
+        raise Exception(f"Failed to read CSV from downloaded file: {local_path}. Error: {e}")
 
 
 def rename_columns_to_lowercase(df: pl.DataFrame) -> pl.DataFrame:
