@@ -16,9 +16,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import polars as pl
-import psycopg2
 import requests
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
 from vdl_tools.shared_tools.database_cache.database_utils import get_session
 from vdl_tools.shared_tools.tools.logger import logger
@@ -74,12 +73,12 @@ def download_csv_from_url(url: str, cache_dir: Path = None, use_cache: bool = Tr
         logger.info(f"Found cached file: {local_path}")
         logger.info(f"Reading from local file instead of downloading from: {url}")
         try:
-            df = pl.read_csv(
+            df = pl.scan_csv(
                 str(local_path),
-                infer_schema_length=10000,
+                infer_schema_length=1000,
                 ignore_errors=True,
-                try_parse_dates=True
-            )
+                try_parse_dates=False,
+            ).collect()
             return df
         except Exception as e:
             logger.warning(f"Failed to read cached file {local_path}: {e}. Will download from URL.")
@@ -113,14 +112,14 @@ def download_csv_from_url(url: str, cache_dir: Path = None, use_cache: bool = Tr
         
         logger.info(f"Download complete. File saved to: {local_path}")
         
-        # Now read the file with Polars
+        # Now read the file with Polars (lazy scan + collect is faster)
         logger.info("Reading CSV file into memory...")
-        df = pl.read_csv(
+        df = pl.scan_csv(
             str(local_path),
-            infer_schema_length=10000,
+            infer_schema_length=1000,
             ignore_errors=True,
-            try_parse_dates=True
-        )
+            try_parse_dates=False,
+        ).collect()
         
         logger.info(f"Successfully loaded {len(df)} rows with {len(df.columns)} columns")
         return df
@@ -343,7 +342,7 @@ def write_csv_url_to_table(
         # Step 1: Download CSV from URL (or use cached version)
         df = download_csv_from_url(url, cache_dir=cache_dir, use_cache=use_cache)
         logger.info(f"Loaded {len(df)} rows with {len(df.columns)} columns")
-        
+
         # Step 2: Rename columns to lowercase
         logger.info("Renaming columns to lowercase...")
         df = rename_columns_to_lowercase(df)
