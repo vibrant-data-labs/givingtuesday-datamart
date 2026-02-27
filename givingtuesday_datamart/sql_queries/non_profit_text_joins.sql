@@ -1,8 +1,9 @@
+DROP TABLE IF EXISTS irs_filings.non_profit_joins_for_text;
 WITH program_max_year AS (
 	SELECT filerein::text,
 	MAX(programs.taxyear) AS taxyear
 	FROM irs_filings.programs
-	WHERE 
+	WHERE
 		actividescri1 IS NOT NULL OR
 		actividescri2 IS NOT NULL OR
 		actividescri3 IS NOT NULL
@@ -11,7 +12,7 @@ WITH program_max_year AS (
 mission_max_year AS (
 	SELECT filerein::text, MAX(taxyear) AS taxyear
 	FROM irs_filings.mission_statements
-	WHERE 
+	WHERE
 		mission IS NOT NULL
 	GROUP BY filerein::text
 ),
@@ -20,7 +21,7 @@ schedule_o_part_iii_concatenated AS (
 		filerein::text,
 		STRING_AGG(supinfdetexp, ' $$$ ') AS supinfdetexp
 	FROM irs_filings.schedule_o_part_iii
-	WHERE 
+	WHERE
 		supinfdetexp IS NOT NULL
 	GROUP BY filerein::text
 ),
@@ -56,7 +57,7 @@ SELECT
 	lp.actividescri2,
 	lp.actividescri3,
 	so.supinfdetexp
-INTO TABLE irs_filings.non_profit_joins_for_text2
+INTO TABLE irs_filings.non_profit_joins_for_text
 FROM basic_fields_avg_rev bf
 JOIN latest_programs lp
 	ON bf.filerein = lp.filerein
