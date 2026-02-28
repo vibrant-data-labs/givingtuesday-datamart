@@ -7,6 +7,7 @@ import type { GrantRow } from '@/types/grant';
 import { useGrantsReceived } from '@/hooks/useGrants';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { GrantsAgGrid } from '@/components/org/GrantsAgGrid';
+import { GrantsFilterBar, matchesNumericFilter, type NumericFilter } from '@/components/org/GrantsFilterBar';
 import { formatCurrencyFull, formatEIN, formatOrgName } from '@/lib/utils/formatters';
 
 // Fetch all rows at once so AgGrid can sort / filter client-side
@@ -35,85 +36,78 @@ function GrantorCellRenderer({ data }: ICellRendererParams<GrantRow>) {
   );
 }
 
+const columnDefs: ColDef<GrantRow>[] = [
+  {
+    headerName: 'Grantor',
+    field: 'granterName',
+    flex: 2,
+    minWidth: 180,
+    cellRenderer: GrantorCellRenderer,
+    valueGetter: (params: ValueGetterParams<GrantRow>) => {
+      const g = params.data!;
+      return formatOrgName(g.granterName, g.granterName2);
+    },
+  },
+  {
+    headerName: 'Amount',
+    field: 'grantAmount',
+    flex: 1,
+    minWidth: 120,
+    type: 'numericColumn',
+    valueFormatter: (params) => formatCurrencyFull(params.value),
+    cellClass: 'font-mono text-sm font-medium text-zinc-900',
+  },
+  {
+    headerName: 'Year',
+    field: 'taxyear',
+    flex: 0.6,
+    minWidth: 70,
+    cellClass: 'text-zinc-600',
+  },
+  {
+    headerName: 'Purpose',
+    field: 'grantPurpose',
+    flex: 2,
+    minWidth: 180,
+    valueFormatter: (params) => params.value ?? '—',
+    cellClass: 'text-zinc-500 text-xs truncate',
+    tooltipField: 'grantPurpose',
+  },
+  {
+    headerName: 'Status',
+    field: 'grantStatus',
+    flex: 0.8,
+    minWidth: 90,
+    valueFormatter: (params) => params.value ?? '—',
+    cellClass: 'text-zinc-500 text-xs',
+  },
+  {
+    headerName: 'Relationship',
+    field: 'grantRelationship',
+    flex: 1,
+    minWidth: 110,
+    valueFormatter: (params) => params.value ?? '—',
+    cellClass: 'text-zinc-500 text-xs',
+  },
+];
+
 export function GrantsReceivedTable({ ein }: GrantsReceivedTableProps) {
   const [search, setSearch] = useState('');
+  const [amountFilter, setAmountFilter] = useState<NumericFilter>({ op: '>=', value: '' });
+  const [yearFilter, setYearFilter] = useState<NumericFilter>({ op: '=', value: '' });
+
   const { data, isLoading, isError } = useGrantsReceived(ein, 1, ALL_LIMIT);
 
-  const columnDefs: ColDef<GrantRow>[] = useMemo(
-    () => [
-      {
-        headerName: 'Grantor',
-        field: 'granterName',
-        flex: 2,
-        minWidth: 180,
-        cellRenderer: GrantorCellRenderer,
-        // valueGetter gives a plain-text value for sorting and quick-filter
-        valueGetter: (params: ValueGetterParams<GrantRow>) => {
-          const g = params.data!;
-          return formatOrgName(g.granterName, g.granterName2);
-        },
-      },
-      {
-        headerName: 'Amount',
-        field: 'grantAmount',
-        flex: 1,
-        minWidth: 120,
-        type: 'numericColumn',
-        filter: 'agNumberColumnFilter',
-        floatingFilter: true,
-        filterParams: {
-          filterOptions: ['equals', 'greaterThan', 'greaterThanOrEqual', 'lessThan', 'lessThanOrEqual', 'inRange'],
-          defaultOption: 'greaterThanOrEqual',
-        },
-        valueFormatter: (params) => formatCurrencyFull(params.value),
-        cellClass: 'font-mono text-sm font-medium text-zinc-900',
-      },
-      {
-        headerName: 'Year',
-        field: 'taxyear',
-        flex: 0.6,
-        minWidth: 70,
-        filter: 'agNumberColumnFilter',
-        floatingFilter: true,
-        filterParams: {
-          filterOptions: ['equals', 'greaterThan', 'greaterThanOrEqual', 'lessThan', 'lessThanOrEqual', 'inRange'],
-          defaultOption: 'equals',
-          maxNumConditions: 1,
-        },
-        cellClass: 'text-zinc-600',
-      },
-      {
-        headerName: 'Purpose',
-        field: 'grantPurpose',
-        flex: 2,
-        minWidth: 180,
-        valueFormatter: (params) => params.value ?? '—',
-        cellClass: 'text-zinc-500 text-xs truncate',
-        tooltipField: 'grantPurpose',
-      },
-      {
-        headerName: 'Status',
-        field: 'grantStatus',
-        flex: 0.8,
-        minWidth: 90,
-        valueFormatter: (params) => params.value ?? '—',
-        cellClass: 'text-zinc-500 text-xs',
-      },
-      {
-        headerName: 'Relationship',
-        field: 'grantRelationship',
-        flex: 1,
-        minWidth: 110,
-        valueFormatter: (params) => params.value ?? '—',
-        cellClass: 'text-zinc-500 text-xs',
-      },
-    ],
-    []
-  );
+  const filteredGrants = useMemo(() => {
+    if (!data?.grants) return [];
+    return data.grants.filter(
+      (g) =>
+        matchesNumericFilter(g.grantAmount, amountFilter) &&
+        matchesNumericFilter(g.taxyear, yearFilter)
+    );
+  }, [data?.grants, amountFilter, yearFilter]);
 
-  const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setSearch(e.target.value);
-  }, []);
+  const handleSearchChange = useCallback((v: string) => setSearch(v), []);
 
   return (
     <div>
@@ -130,16 +124,15 @@ export function GrantsReceivedTable({ ein }: GrantsReceivedTableProps) {
         <div className="w-2 h-2 rounded-full bg-indigo-400" />
       </div>
 
-      {/* Search input */}
-      <div className="mb-2">
-        <input
-          type="search"
-          value={search}
-          onChange={handleSearchChange}
-          placeholder="Search grants…"
-          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-        />
-      </div>
+      {/* Filter bar */}
+      <GrantsFilterBar
+        search={search}
+        onSearchChange={handleSearchChange}
+        amountFilter={amountFilter}
+        onAmountChange={setAmountFilter}
+        yearFilter={yearFilter}
+        onYearChange={setYearFilter}
+      />
 
       {/* Table */}
       <div className="bg-white rounded-xl ring-1 ring-zinc-200 shadow-sm overflow-hidden">
@@ -154,7 +147,7 @@ export function GrantsReceivedTable({ ein }: GrantsReceivedTableProps) {
           />
         ) : (
           <GrantsAgGrid
-            rowData={data?.grants ?? []}
+            rowData={filteredGrants}
             columnDefs={columnDefs as ColDef[]}
             quickFilterText={search}
             loading={isLoading}

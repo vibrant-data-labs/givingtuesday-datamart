@@ -30,7 +30,6 @@ export function GrantsAgGrid({ rowData, columnDefs, quickFilterText, loading }: 
     () => ({
       sortable: true,
       filter: false,
-      floatingFilter: false,
       resizable: true,
       autoHeight: false,
       wrapText: false,
@@ -57,8 +56,8 @@ export function GrantsAgGrid({ rowData, columnDefs, quickFilterText, loading }: 
 
   return (
     <>
-      {/* ~42px per row × 10 rows + 40px header + 48px floating filter row + 56px pagination bar */}
-      <div className="ag-theme-alpine w-full" style={{ height: '584px' }}>
+      {/* ~42px per row × 10 rows + 40px header + 56px pagination bar */}
+      <div className="ag-theme-alpine w-full" style={{ height: '536px' }}>
         <AgGridReact
           ref={gridRef}
           rowData={rowData}
@@ -76,7 +75,6 @@ export function GrantsAgGrid({ rowData, columnDefs, quickFilterText, loading }: 
           suppressCellFocus={true}
           rowHeight={42}
           headerHeight={40}
-          floatingFiltersHeight={48}
           animateRows={true}
         />
       </div>
