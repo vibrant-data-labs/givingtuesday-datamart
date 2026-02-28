@@ -1,0 +1,48 @@
+import Link from 'next/link';
+import type { OrgProfile } from '@/types/org';
+import { Badge } from '@/components/ui/Badge';
+import { formatEIN, formatOrgName } from '@/lib/utils/formatters';
+
+interface OrgHeaderProps {
+  org: OrgProfile;
+}
+
+export function OrgHeader({ org }: OrgHeaderProps) {
+  return (
+    <div>
+      <div className="mb-4">
+        <Link
+          href="/"
+          className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-900 transition-colors"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+          </svg>
+          Back to Search
+        </Link>
+      </div>
+
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h1 className="text-2xl font-bold text-zinc-900">
+              {formatOrgName(org.name1, org.name2)}
+            </h1>
+            <Badge variant={org.orgType === 'foundation' ? 'indigo' : 'green'} className="text-sm px-2.5 py-1">
+              {org.orgType === 'foundation' ? 'Private Foundation (990-PF)' : 'Nonprofit (990)'}
+            </Badge>
+          </div>
+          <div className="mt-2 flex items-center gap-2 text-sm text-zinc-500">
+            <span className="font-mono text-zinc-600">{formatEIN(org.ein)}</span>
+            <span>·</span>
+            <span>
+              {org.firstYear === org.lastYear
+                ? `${org.firstYear}`
+                : `${org.firstYear}–${org.lastYear}`}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
