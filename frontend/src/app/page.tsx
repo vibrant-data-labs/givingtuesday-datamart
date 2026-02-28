@@ -3,17 +3,13 @@ export const revalidate = 3600; // re-render at most once per hour
 import { Suspense } from 'react';
 import { SearchBar } from '@/components/search/SearchBar';
 import { SearchTabs } from '@/components/search/SearchTabs';
-import { SearchResults } from '@/components/search/SearchResults';
-import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import { searchOrgs } from '@/lib/queries/search';
+import { SearchResultsClient } from '@/components/search/SearchResultsClient';
 import {
   sanitizeSearchQuery,
   sanitizePage,
   sanitizeLimit,
   sanitizeOrgType,
-  type OrgTypeFilter,
 } from '@/lib/utils/validation';
-import type { SearchResponse } from '@/types/org';
 
 interface HomeProps {
   searchParams: {
@@ -22,30 +18,6 @@ interface HomeProps {
     page?: string;
     limit?: string;
   };
-}
-
-async function SearchResultsServer({ q, type, page, limit }: {
-  q: string;
-  type: OrgTypeFilter;
-  page: number;
-  limit: number;
-}) {
-  try {
-    const { results, total } = await searchOrgs(q, type, page, limit);
-    const data: SearchResponse = { results, total, page, limit };
-    return <SearchResults data={data} />;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    return (
-      <div className="rounded-xl bg-rose-50 ring-1 ring-rose-200 px-5 py-4 text-sm text-rose-700">
-        <p className="font-medium">Could not connect to the database.</p>
-        <p className="mt-1 text-xs text-rose-500">{message}</p>
-        <p className="mt-2 text-xs text-rose-400">
-          Make sure your <code className="font-mono">.env.local</code> is configured with valid database credentials.
-        </p>
-      </div>
-    );
-  }
 }
 
 export default function HomePage({ searchParams }: HomeProps) {
@@ -95,9 +67,7 @@ export default function HomePage({ searchParams }: HomeProps) {
       {/* Results */}
       <div className="mt-6">
         {hasQuery ? (
-          <Suspense fallback={<LoadingSpinner />} key={`${q}-${type}-${page}`}>
-            <SearchResultsServer q={q} type={type} page={page} limit={limit} />
-          </Suspense>
+          <SearchResultsClient q={q} type={type} page={page} limit={limit} />
         ) : (
           <div className="mt-16 grid grid-cols-1 sm:grid-cols-3 gap-4">
             <FeatureCard

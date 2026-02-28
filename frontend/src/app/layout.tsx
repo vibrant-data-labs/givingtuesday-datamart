@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import { Header } from "@/components/layout/Header";
+import { Providers } from "./providers";
 import "./globals.css";
 
 const geistSans = localFont({
@@ -27,17 +28,19 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
-        <Header />
-        <main className="min-h-screen">
-          {children}
-        </main>
-        <footer className="border-t border-zinc-200 mt-16">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-            <p className="text-xs text-zinc-400 text-center">
-              IRS 990 data sourced from public filings. Data may be delayed or incomplete.
-            </p>
-          </div>
-        </footer>
+        <Providers>
+          <Header />
+          <main className="min-h-screen">
+            {children}
+          </main>
+          <footer className="border-t border-zinc-200 mt-16">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+              <p className="text-xs text-zinc-400 text-center">
+                IRS 990 data sourced from public filings. Data may be delayed or incomplete.
+              </p>
+            </div>
+          </footer>
+        </Providers>
       </body>
     </html>
   );

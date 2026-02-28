@@ -157,3 +157,95 @@ GROUP BY
 	addressstate_key,
 	addresszip_key;
 
+
+DROP TABLE IF EXISTS irs_filings.unioned_grants;
+SELECT *
+INTO irs_filings.unioned_grants
+FROM (
+    SELECT
+        filerein::text AS granter_ein,
+        filername1 AS granter_name,
+        filername2 AS granter_name2,
+        filesha256 AS filesha256,
+        url AS url,
+        taxyear::int AS taxyear,
+        taxperbegin::timestamp AS taxperbegin,
+        taxperend::timestamp AS taxperend,
+        recipeint_ein_key::text AS grantee_ein,
+        sigocpyrpnam AS grantee_person_name,
+        sigocpyrbnbn1 AS grantee_organization_name1,
+        sigocpyrbnbn2 AS grantee_organization_name2,
+        sigocpyrfaal1 AS grantee_address1,
+        sigocpyrfaal2 AS grantee_address2,
+        sigocpyrfaci AS grantee_city,
+        sigocpyrfapo AS grantee_state,
+        sigocpyrfapc AS grantee_zip,
+        sigocpyamoun::bigint AS grant_amount,
+        sigocpypogoc AS grant_purpose,
+        sigocpyrfsta AS grant_status,
+        sigocpyrrela AS grant_relationship
+    FROM irs_filings.privategrants_w_recipient_ein_match
+    UNION
+    SELECT
+        filerein::text AS granter_ein,
+        filername1 AS granter_name,
+        filername2 AS granter_name2,
+        filesha256,
+        url,
+        taxyear::int AS taxyear,
+        taxperbegin::timestamp AS taxperbegin,
+        taxperend::timestamp AS taxperend,
+        recipeint_ein_key::text AS grantee_ein,
+        sigocpyrpnam AS grantee_person_name,
+        sigocpyrbnbn1 AS grantee_organization_name1,
+        sigocpyrbnbn2 AS grantee_organization_name2,
+        sigocpyrfaal1 AS grantee_address1,
+        sigocpyrfaal2 AS grantee_address2,
+        sigocpyrfaci AS grantee_city,
+        sigocpyrfapo AS grantee_state,
+        sigocpyrfapc AS grantee_zip,
+        sigocpyamoun::bigint AS grant_amount,
+        sigocpypogoc AS grant_purpose,
+        sigocpyrfsta AS grant_status,
+        sigocpyrrela AS grant_relationship
+     FROM irs_filings.privategrants_w_recipient_ed_gt_basic_fields_unique_names
+
+    UNION
+
+    SELECT
+        filerein::text AS granter_ein,
+        filername1 AS granter_name,
+        filername2 AS granter_name2,
+        NULL AS filesha256,
+        url,
+        taxyear::int AS taxyear,
+        taxperbegin::timestamp AS taxperbegin,
+        taxperend::timestamp AS taxperend,
+        rteinorecipi::text AS grantee_ein,
+        NULL AS grantee_person_name,
+        rtrnbbnline11 AS grantee_organization_name1,
+        rtrnbbnline22 AS grantee_organization_name2,
+        retaadadliin1 AS grantee_address1,
+        retaadadliin2 AS grantee_address2,
+        rectabaddcit AS grantee_city,
+        rectabaddsta AS grantee_state,
+        rtazipcode::text AS grantee_zip,
+        retaamofcagr::bigint AS grant_amount,
+        -- rtaoncassist,
+        -- retameofvaal,
+        -- rtdoncassist,
+        retapuofgrra AS grant_purpose,
+        NULL AS grant_status,
+        NULL AS grant_relationship
+    FROM irs_filings.grants_to_domestic_organizations
+)
+CREATE INDEX IF NOT EXISTS idx_unioned_grants_granter_ein ON irs_filings.unioned_grants (granter_ein);
+CREATE INDEX IF NOT EXISTS idx_unioned_grants_grantee_ein ON irs_filings.unioned_grants (grantee_ein);
+CREATE INDEX IF NOT EXISTS idx_unioned_grants_taxyear ON irs_filings.unioned_grants (taxyear);
+
+
+
+
+
+-- CREATE INDEX IF NOT EXISTS idx_basic_fields_filerein ON irs_filings.basic_fields (filerein);
+-- CREATE INDEX IF NOT EXISTS idx_basic_fields_taxyear ON irs_filings.basic_fields (taxyear);
