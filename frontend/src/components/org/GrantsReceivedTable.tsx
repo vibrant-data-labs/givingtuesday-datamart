@@ -59,6 +59,12 @@ export function GrantsReceivedTable({ ein }: GrantsReceivedTableProps) {
         flex: 1,
         minWidth: 120,
         type: 'numericColumn',
+        filter: 'agNumberColumnFilter',
+        floatingFilter: true,
+        filterParams: {
+          filterOptions: ['equals', 'greaterThan', 'greaterThanOrEqual', 'lessThan', 'lessThanOrEqual', 'inRange'],
+          defaultOption: 'greaterThanOrEqual',
+        },
         valueFormatter: (params) => formatCurrencyFull(params.value),
         cellClass: 'font-mono text-sm font-medium text-zinc-900',
       },
@@ -67,6 +73,13 @@ export function GrantsReceivedTable({ ein }: GrantsReceivedTableProps) {
         field: 'taxyear',
         flex: 0.6,
         minWidth: 70,
+        filter: 'agNumberColumnFilter',
+        floatingFilter: true,
+        filterParams: {
+          filterOptions: ['equals', 'greaterThan', 'greaterThanOrEqual', 'lessThan', 'lessThanOrEqual', 'inRange'],
+          defaultOption: 'equals',
+          maxNumConditions: 1,
+        },
         cellClass: 'text-zinc-600',
       },
       {
