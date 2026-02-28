@@ -1,13 +1,12 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import Link from 'next/link';
 import type { ColDef, ICellRendererParams, ValueGetterParams } from 'ag-grid-community';
 import type { GrantRow } from '@/types/grant';
 import { useGrantsReceived } from '@/hooks/useGrants';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { GrantsAgGrid } from '@/components/org/GrantsAgGrid';
-import { GrantsFilterBar, matchesNumericFilter, type NumericFilter } from '@/components/org/GrantsFilterBar';
 import { formatCurrencyFull, formatEIN, formatOrgName } from '@/lib/utils/formatters';
 
 // Fetch all rows at once so AgGrid can sort / filter client-side
@@ -54,6 +53,7 @@ const columnDefs: ColDef<GrantRow>[] = [
     flex: 1,
     minWidth: 120,
     type: 'numericColumn',
+    filter: 'agNumberColumnFilter',
     valueFormatter: (params) => formatCurrencyFull(params.value),
     cellClass: 'font-mono text-sm font-medium text-zinc-900',
   },
@@ -62,6 +62,7 @@ const columnDefs: ColDef<GrantRow>[] = [
     field: 'taxyear',
     flex: 0.6,
     minWidth: 70,
+    filter: 'agNumberColumnFilter',
     cellClass: 'text-zinc-600',
   },
   {
@@ -93,21 +94,8 @@ const columnDefs: ColDef<GrantRow>[] = [
 
 export function GrantsReceivedTable({ ein }: GrantsReceivedTableProps) {
   const [search, setSearch] = useState('');
-  const [amountFilter, setAmountFilter] = useState<NumericFilter>({ op: '>=', value: '' });
-  const [yearFilter, setYearFilter] = useState<NumericFilter>({ op: '=', value: '' });
-
   const { data, isLoading, isError } = useGrantsReceived(ein, 1, ALL_LIMIT);
-
-  const filteredGrants = useMemo(() => {
-    if (!data?.grants) return [];
-    return data.grants.filter(
-      (g) =>
-        matchesNumericFilter(g.grantAmount, amountFilter) &&
-        matchesNumericFilter(g.taxyear, yearFilter)
-    );
-  }, [data?.grants, amountFilter, yearFilter]);
-
-  const handleSearchChange = useCallback((v: string) => setSearch(v), []);
+  const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value), []);
 
   return (
     <div>
@@ -124,15 +112,16 @@ export function GrantsReceivedTable({ ein }: GrantsReceivedTableProps) {
         <div className="w-2 h-2 rounded-full bg-indigo-400" />
       </div>
 
-      {/* Filter bar */}
-      <GrantsFilterBar
-        search={search}
-        onSearchChange={handleSearchChange}
-        amountFilter={amountFilter}
-        onAmountChange={setAmountFilter}
-        yearFilter={yearFilter}
-        onYearChange={setYearFilter}
-      />
+      {/* Search input */}
+      <div className="mb-2">
+        <input
+          type="search"
+          value={search}
+          onChange={handleSearchChange}
+          placeholder="Search grants…"
+          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+        />
+      </div>
 
       {/* Table */}
       <div className="bg-white rounded-xl ring-1 ring-zinc-200 shadow-sm overflow-hidden">
@@ -147,7 +136,7 @@ export function GrantsReceivedTable({ ein }: GrantsReceivedTableProps) {
           />
         ) : (
           <GrantsAgGrid
-            rowData={filteredGrants}
+            rowData={data?.grants ?? []}
             columnDefs={columnDefs as ColDef[]}
             quickFilterText={search}
             loading={isLoading}
