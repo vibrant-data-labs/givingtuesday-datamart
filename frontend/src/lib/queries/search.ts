@@ -1,8 +1,11 @@
 import { cache } from 'react';
+import { unstable_cache } from 'next/cache';
 import { sql } from 'kysely';
 import { getDb } from '@/lib/db';
 import type { OrgResult } from '@/types/org';
 import type { OrgTypeFilter } from '@/lib/utils/validation';
+
+const SEARCH_CACHE_REVALIDATE_SECONDS = 600; // 10 minutes
 
 async function searchTable(
   table: 'irs_filings.basic_fields' | 'irs_filings.basic_fields_pf',
@@ -46,7 +49,7 @@ type SearchRow = {
   org_type: string;
 };
 
-export const searchOrgs = cache(async function searchOrgs(
+async function runSearch(
   rawQuery: string,
   orgType: OrgTypeFilter,
   page: number,
@@ -80,4 +83,19 @@ export const searchOrgs = cache(async function searchOrgs(
     })),
     total,
   };
+}
+
+const getCachedSearch = unstable_cache(
+  runSearch,
+  ['search'],
+  { revalidate: SEARCH_CACHE_REVALIDATE_SECONDS, tags: ['search'] }
+);
+
+export const searchOrgs = cache(async function searchOrgs(
+  rawQuery: string,
+  orgType: OrgTypeFilter,
+  page: number,
+  limit: number
+): Promise<{ results: OrgResult[]; total: number }> {
+  return getCachedSearch(rawQuery, orgType, page, limit);
 });

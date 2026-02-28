@@ -64,17 +64,19 @@ FROM irs_filings.basic_fields
 WHERE filerein = '100004885'
 
 
+SELECT *
+FROM irs_filings.privategrants_w_recipient_ed_gt_basic_fields_unique_names
+LIMIT 10
+
+
 WITH tracker_eins AS (
 	SELECT recipeint_ein_key
 	FROM irs_filings.privategrants_w_recipient_ed_gt_basic_fields_unique_names
-	WHERE meta_data_source = 'Candid'
 )
 SELECT recipeint_ein_key, taxyear, SUM(amount)
 FROM (
 	SELECT recipeint_ein_key::text, taxyear::int, SUM(sigocpyamoun::bigint) AS amount
-	FROM irs_filings.privategrants_w_recipient_ein_match
-	JOIN tracker_eins
-		ON recipeint_ein_key::text = tracker_eins.recipeint_ein_key
+	FROM irs_filings.privategrants_w_recipient_ed_gt_basic_fields_unique_names
 	WHERE taxyear::int >= 2018
 	GROUP BY recipeint_ein_key, taxyear
 UNION ALL
@@ -88,6 +90,15 @@ UNION ALL
 	)
 GROUP BY recipeint_ein_key, taxyear
 ORDER BY taxyear
+
+
+SELECT *
+FROM irs_filings.privategrants_w_recipient_ed_gt_basic_fields_unique_names
+WHERE recipeint_ein_key = '100004885'
+
+
+SELECT COUNT(DISTINCT recipeint_ein_key)
+FROM irs_filings.privategrants_w_recipient_ed_gt_basic_fields_unique_names
 
 
 SELECT taxyear::int, taxperbegin, taxperend
@@ -113,4 +124,45 @@ SELECT COUNT(*)
 FROM irs_filings.ed_gt_basic_fields_unique_names
 
 SELECT COUNT(*)
-FROM irs_filings.privategrants_w_recipient_ed_gt_basic_fields_unique_names
+FROM (
+	SELECT 1
+	FROM irs_filings.privategrants_w_recipient_ed_gt_basic_fields_unique_names
+	GROUP BY recipeint_ein_key
+)
+
+
+
+-- What's wrong with this query?
+-- The WHERE clause is improperly placed: it only applies to the second SELECT in the UNION, not to the UNIONed result.
+-- Also, `UNION` (without `ALL`) removes duplicates, which may or may not be intended.
+-- To fix: wrap the UNION in a subquery/CTE, then apply the WHERE clause to the unioned result.
+
+SELECT *
+FROM (
+    SELECT * FROM irs_filings.privategrants_w_recipient_ein_match
+    UNION
+    SELECT * FROM irs_filings.privategrants_w_recipient_ed_gt_basic_fields_unique_names
+) unioned_results
+WHERE recipeint_ein_key = '852588841' -- One Earth
+
+
+
+SELECT COUNT(*)
+FROM
+(
+	SELECT 1
+	FROM irs_filings.basic_fields_w_column_keys bf
+	WHERE taxyear::int >= 2015
+	AND totacashcont::bigint > 100000
+	GROUP BY
+		filerein_key,
+		name1_key,
+		name2_key,
+		address1_key,
+		address2_key,
+		addresscity_key,
+		addressstate_key,
+		addresszip_key
+)x
+
+SELECT COUNT(*) FROM irs_filings.ed_gt_basic_fields_unique_names

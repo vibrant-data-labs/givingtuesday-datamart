@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import type { GrantRow, GrantsResponse } from '@/types/grant';
+import type { GrantRow } from '@/types/grant';
+import { useGrantsGiven } from '@/hooks/useGrants';
 import { Badge } from '@/components/ui/Badge';
 import { Pagination } from '@/components/ui/Pagination';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -17,28 +18,7 @@ interface GrantsGivenTableProps {
 
 export function GrantsGivenTable({ ein }: GrantsGivenTableProps) {
   const [page, setPage] = useState(1);
-  const [data, setData] = useState<GrantsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchGrants = useCallback(async (p: number) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/orgs/${ein}/grants-given?page=${p}&limit=${LIMIT}`);
-      if (!res.ok) throw new Error('Failed to load');
-      const json: GrantsResponse = await res.json();
-      setData(json);
-    } catch {
-      setError('Failed to load grants. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  }, [ein]);
-
-  useEffect(() => {
-    fetchGrants(page);
-  }, [fetchGrants, page]);
+  const { data, isLoading, isError } = useGrantsGiven(ein, page, LIMIT);
 
   function handlePageChange(p: number) {
     setPage(p);
@@ -73,11 +53,11 @@ export function GrantsGivenTable({ ein }: GrantsGivenTableProps) {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-50">
-              {loading ? (
+              {isLoading ? (
                 <SkeletonRows rows={5} cols={6} />
-              ) : error ? (
+              ) : isError ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-xs text-rose-500">{error}</td>
+                  <td colSpan={6} className="px-4 py-8 text-center text-xs text-rose-500">Failed to load grants. Please try again.</td>
                 </tr>
               ) : data && data.grants.length === 0 ? (
                 <tr>

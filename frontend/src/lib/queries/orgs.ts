@@ -1,4 +1,5 @@
 import { cache } from 'react';
+import { unstable_cache } from 'next/cache';
 import { sql } from 'kysely';
 import { getDb } from '@/lib/db';
 import type { OrgProfile } from '@/types/org';
@@ -59,7 +60,9 @@ async function fetchRevenueHistory(
   }));
 }
 
-export const getOrgProfile = cache(async function getOrgProfile(ein: string): Promise<OrgProfile | null> {
+const ORG_CACHE_REVALIDATE_SECONDS = 600; // 10 minutes
+
+async function getOrgProfileUncached(ein: string): Promise<OrgProfile | null> {
   const [nonprofitRow, foundationRow] = await Promise.all([
     fetchOrgFromTable('irs_filings.basic_fields', ein),
     fetchOrgFromTable('irs_filings.basic_fields_pf', ein),
@@ -88,4 +91,14 @@ export const getOrgProfile = cache(async function getOrgProfile(ein: string): Pr
     orgType,
     revenueByYear,
   };
+}
+
+const getCachedOrgProfile = unstable_cache(
+  (ein: string) => getOrgProfileUncached(ein),
+  ['org-profile'],
+  { revalidate: ORG_CACHE_REVALIDATE_SECONDS, tags: ['org'] }
+);
+
+export const getOrgProfile = cache(async function getOrgProfile(ein: string): Promise<OrgProfile | null> {
+  return getCachedOrgProfile(ein);
 });

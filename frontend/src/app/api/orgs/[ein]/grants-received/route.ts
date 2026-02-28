@@ -15,7 +15,7 @@ export async function GET(
 
   const { searchParams } = request.nextUrl;
   const page = sanitizePage(searchParams.get('page'));
-  const limit = sanitizeLimit(searchParams.get('limit'), 50);
+  const limit = sanitizeLimit(searchParams.get('limit'), 5000);
 
   try {
     const { grants, total } = await getGrantsReceived(ein, page, limit);

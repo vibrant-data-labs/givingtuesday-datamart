@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import { useTransition, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import type { OrgResult, SearchResponse } from '@/types/org';
 import { Badge } from '@/components/ui/Badge';
@@ -15,6 +15,15 @@ interface SearchResultsProps {
 export function SearchResults({ data }: SearchResultsProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [isPending, startTransition] = useTransition();
+  const [navigatingTo, setNavigatingTo] = useState<string | null>(null);
+
+  function handleOrgClick(ein: string, rowKey: string) {
+    setNavigatingTo(rowKey);
+    startTransition(() => {
+      router.push(`/orgs/${ein}`);
+    });
+  }
 
   function handlePageChange(page: number) {
     const params = new URLSearchParams(searchParams.toString());
@@ -45,9 +54,17 @@ export function SearchResults({ data }: SearchResultsProps) {
       </div>
 
       <div className="bg-white rounded-xl ring-1 ring-zinc-200 shadow-sm divide-y divide-zinc-100 overflow-hidden">
-        {data.results.map((org) => (
-          <OrgResultRow key={`${org.ein}-${org.orgType}`} org={org} />
-        ))}
+        {data.results.map((org) => {
+          const rowKey = `${org.ein}-${org.orgType}`;
+          return (
+            <OrgResultRow
+              key={rowKey}
+              org={org}
+              isNavigating={navigatingTo === rowKey && isPending}
+              onNavigate={() => handleOrgClick(org.ein, rowKey)}
+            />
+          );
+        })}
       </div>
 
       <div className="mt-2">
@@ -62,11 +79,21 @@ export function SearchResults({ data }: SearchResultsProps) {
   );
 }
 
-function OrgResultRow({ org }: { org: OrgResult }) {
+function OrgResultRow({
+  org,
+  isNavigating,
+  onNavigate,
+}: {
+  org: OrgResult;
+  isNavigating: boolean;
+  onNavigate: () => void;
+}) {
   return (
-    <Link
-      href={`/orgs/${org.ein}`}
-      className="flex items-start justify-between px-5 py-4 hover:bg-zinc-50 transition-colors group"
+    <button
+      type="button"
+      onClick={onNavigate}
+      disabled={isNavigating}
+      className="w-full flex items-start justify-between px-5 py-4 hover:bg-zinc-50 transition-colors group text-left disabled:opacity-70 disabled:cursor-wait"
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
@@ -91,10 +118,14 @@ function OrgResultRow({ org }: { org: OrgResult }) {
         <Badge variant="zinc">
           {org.firstYear === org.lastYear ? `${org.firstYear}` : `${org.firstYear}–${org.lastYear}`}
         </Badge>
-        <svg className="w-4 h-4 text-zinc-300 group-hover:text-indigo-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-        </svg>
+        {isNavigating ? (
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-200 border-t-indigo-600" />
+        ) : (
+          <svg className="w-4 h-4 text-zinc-300 group-hover:text-indigo-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+          </svg>
+        )}
       </div>
-    </Link>
+    </button>
   );
 }

@@ -9,6 +9,9 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.90.21",
+    "ag-grid-community": "^35.1.0",
+    "ag-grid-react": "^35.1.0",
     "clsx": "^2.1.1",
     "kysely": "^0.28.11",
     "next": "14.2.35",
