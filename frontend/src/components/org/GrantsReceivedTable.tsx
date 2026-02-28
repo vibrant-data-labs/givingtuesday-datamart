@@ -1,32 +1,110 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import Link from 'next/link';
+import type { ColDef, ICellRendererParams, ValueGetterParams } from 'ag-grid-community';
 import type { GrantRow } from '@/types/grant';
 import { useGrantsReceived } from '@/hooks/useGrants';
-import { Badge } from '@/components/ui/Badge';
-import { Pagination } from '@/components/ui/Pagination';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { SkeletonRows } from '@/components/ui/LoadingSpinner';
+import { GrantsAgGrid } from '@/components/org/GrantsAgGrid';
 import { formatCurrencyFull, formatEIN, formatOrgName } from '@/lib/utils/formatters';
 
-const LIMIT = 20;
+// Fetch all rows at once so AgGrid can sort / filter client-side
+const ALL_LIMIT = 5000;
 
 interface GrantsReceivedTableProps {
   ein: string;
 }
 
-export function GrantsReceivedTable({ ein }: GrantsReceivedTableProps) {
-  const [page, setPage] = useState(1);
-  const { data, isLoading, isError } = useGrantsReceived(ein, page, LIMIT);
+// React cell renderer for the Grantor column
+function GrantorCellRenderer({ data }: ICellRendererParams<GrantRow>) {
+  if (!data) return null;
+  const name = formatOrgName(data.granterName, data.granterName2);
 
-  function handlePageChange(p: number) {
-    setPage(p);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
+  return (
+    <div className="py-1 leading-snug">
+      <Link
+        href={`/orgs/${data.granterEin}`}
+        className="font-medium text-indigo-600 hover:text-indigo-800 hover:underline transition-colors"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {name}
+      </Link>
+      <p className="text-xs text-zinc-400 font-mono">{formatEIN(data.granterEin)}</p>
+    </div>
+  );
+}
+
+export function GrantsReceivedTable({ ein }: GrantsReceivedTableProps) {
+  const [search, setSearch] = useState('');
+  const { data, isLoading, isError } = useGrantsReceived(ein, 1, ALL_LIMIT);
+
+  const columnDefs: ColDef<GrantRow>[] = useMemo(
+    () => [
+      {
+        headerName: 'Grantor',
+        field: 'granterName',
+        flex: 2,
+        minWidth: 180,
+        cellRenderer: GrantorCellRenderer,
+        // valueGetter gives a plain-text value for sorting and quick-filter
+        valueGetter: (params: ValueGetterParams<GrantRow>) => {
+          const g = params.data!;
+          return formatOrgName(g.granterName, g.granterName2);
+        },
+      },
+      {
+        headerName: 'Amount',
+        field: 'grantAmount',
+        flex: 1,
+        minWidth: 120,
+        type: 'numericColumn',
+        valueFormatter: (params) => formatCurrencyFull(params.value),
+        cellClass: 'font-mono text-sm font-medium text-zinc-900',
+      },
+      {
+        headerName: 'Year',
+        field: 'taxyear',
+        flex: 0.6,
+        minWidth: 70,
+        cellClass: 'text-zinc-600',
+      },
+      {
+        headerName: 'Purpose',
+        field: 'grantPurpose',
+        flex: 2,
+        minWidth: 180,
+        valueFormatter: (params) => params.value ?? '—',
+        cellClass: 'text-zinc-500 text-xs truncate',
+        tooltipField: 'grantPurpose',
+      },
+      {
+        headerName: 'Status',
+        field: 'grantStatus',
+        flex: 0.8,
+        minWidth: 90,
+        valueFormatter: (params) => params.value ?? '—',
+        cellClass: 'text-zinc-500 text-xs',
+      },
+      {
+        headerName: 'Relationship',
+        field: 'grantRelationship',
+        flex: 1,
+        minWidth: 110,
+        valueFormatter: (params) => params.value ?? '—',
+        cellClass: 'text-zinc-500 text-xs',
+      },
+    ],
+    []
+  );
+
+  const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearch(e.target.value);
+  }, []);
 
   return (
     <div>
+      {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div>
           <h2 className="text-base font-semibold text-zinc-900">Grants Received</h2>
@@ -39,87 +117,37 @@ export function GrantsReceivedTable({ ein }: GrantsReceivedTableProps) {
         <div className="w-2 h-2 rounded-full bg-indigo-400" />
       </div>
 
-      <div className="bg-white rounded-xl ring-1 ring-zinc-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-zinc-100">
-                <th className="px-4 py-3 text-left text-xs font-medium text-zinc-400 uppercase tracking-wide">Grantor</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-zinc-400 uppercase tracking-wide">Amount</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-zinc-400 uppercase tracking-wide">Year</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-zinc-400 uppercase tracking-wide">Purpose</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-zinc-400 uppercase tracking-wide">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-zinc-400 uppercase tracking-wide">Relationship</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-50">
-              {isLoading ? (
-                <SkeletonRows rows={5} cols={6} />
-              ) : isError ? (
-                <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-xs text-rose-500">Failed to load grants. Please try again.</td>
-                </tr>
-              ) : data && data.grants.length === 0 ? (
-                <tr>
-                  <td colSpan={6}>
-                    <EmptyState title="No grants received" description="This organization has no incoming grants in our database." />
-                  </td>
-                </tr>
-              ) : (
-                data?.grants.map((grant, i) => (
-                  <GrantorRow key={i} grant={grant} />
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+      {/* Search input */}
+      <div className="mb-2">
+        <input
+          type="search"
+          value={search}
+          onChange={handleSearchChange}
+          placeholder="Search grants…"
+          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+        />
+      </div>
 
-        {data && data.total > LIMIT && (
-          <Pagination
-            page={page}
-            total={data.total}
-            limit={LIMIT}
-            onPageChange={handlePageChange}
+      {/* Table */}
+      <div className="bg-white rounded-xl ring-1 ring-zinc-200 shadow-sm overflow-hidden">
+        {isError ? (
+          <p className="px-4 py-8 text-center text-xs text-rose-500">
+            Failed to load grants. Please try again.
+          </p>
+        ) : !isLoading && data && data.grants.length === 0 ? (
+          <EmptyState
+            title="No grants received"
+            description="This organization has no incoming grants in our database."
+          />
+        ) : (
+          <GrantsAgGrid
+            rowData={data?.grants ?? []}
+            columnDefs={columnDefs as ColDef[]}
+            quickFilterText={search}
+            loading={isLoading}
           />
         )}
       </div>
     </div>
-  );
-}
-
-function GrantorRow({ grant }: { grant: GrantRow }) {
-  const name = formatOrgName(grant.granterName, grant.granterName2);
-
-  return (
-    <tr className="hover:bg-zinc-50 transition-colors">
-      <td className="px-4 py-3">
-        <Link
-          href={`/orgs/${grant.granterEin}`}
-          className="font-medium text-indigo-600 hover:text-indigo-800 transition-colors hover:underline"
-        >
-          {name}
-        </Link>
-        <p className="text-xs text-zinc-400 mt-0.5 font-mono">{formatEIN(grant.granterEin)}</p>
-      </td>
-      <td className="px-4 py-3 text-right font-mono text-sm font-medium text-zinc-900 whitespace-nowrap">
-        {grant.grantAmount != null ? formatCurrencyFull(grant.grantAmount) : '—'}
-      </td>
-      <td className="px-4 py-3 text-zinc-600 whitespace-nowrap">{grant.taxyear}</td>
-      <td className="px-4 py-3 text-zinc-500 max-w-xs">
-        <p className="truncate text-xs" title={grant.grantPurpose ?? undefined}>
-          {grant.grantPurpose || '—'}
-        </p>
-      </td>
-      <td className="px-4 py-3">
-        {grant.grantStatus ? (
-          <Badge variant="zinc">{grant.grantStatus}</Badge>
-        ) : (
-          <span className="text-zinc-400 text-xs">—</span>
-        )}
-      </td>
-      <td className="px-4 py-3 text-xs text-zinc-500">
-        {grant.grantRelationship || '—'}
-      </td>
-    </tr>
   );
 }

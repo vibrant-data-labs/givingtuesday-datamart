@@ -9,7 +9,7 @@ import {
   type CellClickedEvent,
   type GridReadyEvent,
 } from 'ag-grid-community';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Modal } from '@/components/ui/Modal';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -25,31 +25,29 @@ interface GrantsAgGridProps {
 export function GrantsAgGrid({ rowData, columnDefs, quickFilterText, loading }: GrantsAgGridProps) {
   const gridRef = useRef<AgGridReact>(null);
   const [cellDetail, setCellDetail] = useState<{ column: string; value: unknown } | null>(null);
-  const [cellDetailOpen, setCellDetailOpen] = useState(false);
 
   const defaultColDef: ColDef = useMemo(
     () => ({
       sortable: true,
-      filter: false, // We use the quick filter instead
+      filter: false,
       resizable: true,
       autoHeight: false,
       wrapText: false,
       suppressMovable: true,
+      cellStyle: { cursor: 'pointer' },
     }),
     []
   );
 
   const handleCellClicked = useCallback((event: CellClickedEvent) => {
     const columnHeader = event.colDef.headerName ?? event.colDef.field ?? 'Value';
-    // Get a plain text representation of the value
     const value =
       event.value != null
         ? typeof event.value === 'object'
-          ? JSON.stringify(event.value)
+          ? JSON.stringify(event.value, null, 2)
           : String(event.value)
         : null;
     setCellDetail({ column: columnHeader, value });
-    setCellDetailOpen(true);
   }, []);
 
   const onGridReady = useCallback((params: GridReadyEvent) => {
@@ -58,10 +56,8 @@ export function GrantsAgGrid({ rowData, columnDefs, quickFilterText, loading }: 
 
   return (
     <>
-      <div
-        className="ag-theme-alpine w-full"
-        style={{ height: `${PAGE_SIZE * 42 + 112}px` }} // ~42px per row + header + pagination
-      >
+      {/* ~42px per row × 10 rows + 40px header + 56px pagination bar */}
+      <div className="ag-theme-alpine w-full" style={{ height: '536px' }}>
         <AgGridReact
           ref={gridRef}
           rowData={rowData}
@@ -79,25 +75,23 @@ export function GrantsAgGrid({ rowData, columnDefs, quickFilterText, loading }: 
           suppressCellFocus={true}
           rowHeight={42}
           headerHeight={40}
-          suppressRowHoverHighlight={false}
           animateRows={true}
         />
       </div>
 
-      <Dialog open={cellDetailOpen} onOpenChange={setCellDetailOpen}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-auto">
-          <DialogHeader>
-            <DialogTitle>{cellDetail?.column}</DialogTitle>
-          </DialogHeader>
-          <div className="mt-4 whitespace-pre-wrap break-words text-sm">
-            {cellDetail?.value != null ? (
-              String(cellDetail.value)
-            ) : (
-              <span className="text-muted-foreground italic">Empty</span>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <Modal
+        open={cellDetail !== null}
+        onClose={() => setCellDetail(null)}
+        title={cellDetail?.column}
+      >
+        <div className="whitespace-pre-wrap break-words text-sm text-zinc-700">
+          {cellDetail?.value != null ? (
+            String(cellDetail.value)
+          ) : (
+            <span className="text-zinc-400 italic">Empty</span>
+          )}
+        </div>
+      </Modal>
     </>
   );
 }
