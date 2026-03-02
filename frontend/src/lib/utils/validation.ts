@@ -22,3 +22,25 @@ export function sanitizeOrgType(type: unknown): OrgTypeFilter {
   if (type === 'nonprofit' || type === 'foundation') return type;
   return 'all';
 }
+
+export type GrantSortColumn = 'name' | 'amount' | 'year';
+
+export function sanitizeSortColumn(col: unknown, allowed: GrantSortColumn[]): GrantSortColumn {
+  if (allowed.includes(col as GrantSortColumn)) return col as GrantSortColumn;
+  return 'year';
+}
+
+export function sanitizeSortOrder(order: unknown): 'asc' | 'desc' {
+  if (order === 'asc' || order === 'desc') return order;
+  return 'desc';
+}
+
+export function sanitizeAmount(v: unknown): number | null {
+  const n = parseInt(String(v), 10);
+  return isNaN(n) || n < 0 ? null : n;
+}
+
+export function sanitizeYear(v: unknown): number | null {
+  const n = parseInt(String(v), 10);
+  return isNaN(n) || n < 1900 || n > 2100 ? null : n;
+}
