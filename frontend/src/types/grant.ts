@@ -19,9 +19,32 @@ export interface GrantRow {
   grantRelationship: string | null;
 }
 
+export interface GrantsAggregates {
+  totalCount: number;
+  totalAmount: number;
+  avgAmount: number;
+}
+
+export interface GrantGroupRow {
+  groupKey: string;
+  groupKeyEin: string | null;
+  grantCount: number;
+  totalAmount: number;
+  avgAmount: number;
+}
+
 export interface GrantsResponse {
   grants: GrantRow[];
   total: number;
   page: number;
   limit: number;
+  aggregates: GrantsAggregates;
+}
+
+export interface GrantsGroupResponse {
+  groups: GrantGroupRow[];
+  total: number;
+  page: number;
+  limit: number;
+  aggregates: GrantsAggregates;
 }

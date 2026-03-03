@@ -1,7 +1,7 @@
 export const revalidate = 3600;
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getGrantsGiven } from '@/lib/queries/grants';
+import { getGrantsGiven, getGrantsGivenGrouped } from '@/lib/queries/grants';
 import {
   sanitizeEIN,
   sanitizePage,
@@ -11,9 +11,11 @@ import {
   sanitizeSortOrder,
   sanitizeAmount,
   sanitizeYear,
+  sanitizeGroupBy,
 } from '@/lib/utils/validation';
 
 const ALLOWED_SORT_COLS = ['name', 'amount', 'year'] as const;
+const CACHE_HEADERS = { 'Cache-Control': 's-maxage=3600, stale-while-revalidate=86400' };
 
 export async function GET(
   request: NextRequest,
@@ -37,21 +39,21 @@ export async function GET(
   const maxAmount = sanitizeAmount(searchParams.get('maxAmount'));
   const sortCol = sanitizeSortColumn(searchParams.get('sort'), [...ALLOWED_SORT_COLS]);
   const sortOrder = sanitizeSortOrder(searchParams.get('order'));
+  const groupBy = sanitizeGroupBy(searchParams.get('groupBy'));
+
+  const rawEntityEin = searchParams.get('entityEin') ?? '';
+  const entityEin = rawEntityEin ? sanitizeEIN(rawEntityEin) : undefined;
+
+  const filter = { name, purpose, year, minAmount, maxAmount, entityEin, sortCol, sortOrder };
 
   try {
-    const { grants, total } = await getGrantsGiven(ein, page, limit, {
-      name,
-      purpose,
-      year,
-      minAmount,
-      maxAmount,
-      sortCol,
-      sortOrder,
-    });
-    return NextResponse.json(
-      { grants, total, page, limit },
-      { headers: { 'Cache-Control': 's-maxage=3600, stale-while-revalidate=86400' } }
-    );
+    if (groupBy) {
+      const { groups, total, aggregates } = await getGrantsGivenGrouped(ein, page, limit, groupBy, filter);
+      return NextResponse.json({ groups, total, page, limit, aggregates }, { headers: CACHE_HEADERS });
+    }
+
+    const { grants, total, aggregates } = await getGrantsGiven(ein, page, limit, filter);
+    return NextResponse.json({ grants, total, page, limit, aggregates }, { headers: CACHE_HEADERS });
   } catch (err) {
     console.error('Grants given error:', err);
     return NextResponse.json({ error: 'Failed to load grants' }, { status: 500 });

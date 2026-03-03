@@ -1,8 +1,8 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import type { GrantsResponse } from '@/types/grant';
-import type { GrantSortColumn } from '@/lib/utils/validation';
+import type { GrantsResponse, GrantsGroupResponse } from '@/types/grant';
+import type { GrantSortColumn, GrantGroupByColumn } from '@/lib/utils/validation';
 
 export interface GrantsParams {
   page: number;
@@ -12,15 +12,17 @@ export interface GrantsParams {
   year?: number | null;
   minAmount?: number | null;
   maxAmount?: number | null;
+  entityEin?: string;
   sort?: GrantSortColumn;
   order?: 'asc' | 'desc';
+  groupBy?: GrantGroupByColumn | null;
 }
 
 async function fetchGrants(
   ein: string,
   kind: 'grants-given' | 'grants-received',
   params: GrantsParams
-): Promise<GrantsResponse> {
+): Promise<GrantsResponse | GrantsGroupResponse> {
   const sp = new URLSearchParams();
   sp.set('page', String(params.page));
   sp.set('limit', String(params.limit));
@@ -29,12 +31,20 @@ async function fetchGrants(
   if (params.year != null) sp.set('year', String(params.year));
   if (params.minAmount != null) sp.set('minAmount', String(params.minAmount));
   if (params.maxAmount != null) sp.set('maxAmount', String(params.maxAmount));
+  if (params.entityEin) sp.set('entityEin', params.entityEin);
   if (params.sort) sp.set('sort', params.sort);
   if (params.order) sp.set('order', params.order);
+  if (params.groupBy) sp.set('groupBy', params.groupBy);
 
   const res = await fetch(`/api/orgs/${ein}/${kind}?${sp.toString()}`);
   if (!res.ok) throw new Error('Failed to load grants');
   return res.json();
+}
+
+export function isGroupedResponse(
+  data: GrantsResponse | GrantsGroupResponse
+): data is GrantsGroupResponse {
+  return 'groups' in data;
 }
 
 // 1 hour — matches server-side revalidate = 3600

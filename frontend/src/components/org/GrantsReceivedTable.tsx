@@ -82,6 +82,7 @@ export function GrantsReceivedTable({ ein }: { ein: string }) {
       emptyDescription="This organization has no incoming grants matching your filters."
       accentColor="indigo"
       nameFilterPlaceholder="Search grantor…"
+      entityLabel="Donor"
     />
   );
 }
