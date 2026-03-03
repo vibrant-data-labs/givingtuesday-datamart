@@ -44,3 +44,10 @@ export function sanitizeYear(v: unknown): number | null {
   const n = parseInt(String(v), 10);
   return isNaN(n) || n < 1900 || n > 2100 ? null : n;
 }
+
+export type GrantGroupByColumn = 'year' | 'entity';
+
+export function sanitizeGroupBy(value: unknown): GrantGroupByColumn | null {
+  if (value === 'year' || value === 'entity') return value;
+  return null;
+}
