@@ -13,6 +13,16 @@ interface BasicFieldsTable {
   fileruszip: string | null;
   totrevcuryea: string | null;
   taxyear: string;
+  url: string | null;
+  // Part 8 Line 1 contribution breakdown (990 only)
+  federacampai: string | null;
+  memberduesue: string | null;
+  fundraevents: string | null;
+  relateorgani: string | null;
+  governgrants: string | null;
+  alloothecont: string | null;
+  noncascontri: string | null;
+  totacashcont: string | null;
 }
 
 interface UnionedGrantsTable {
