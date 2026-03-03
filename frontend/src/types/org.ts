@@ -11,6 +11,21 @@ export interface OrgResult {
   orgType: OrgType;
 }
 
+export interface RevenueDetail {
+  year: number;
+  url: string | null;
+  totalRevenue: number | null;
+  totalContributions: number | null;
+  // 990-only Part 8 Line 1 breakdown (null for foundations)
+  federatedCampaigns: number | null;
+  membershipDues: number | null;
+  fundraisingEvents: number | null;
+  relatedOrganizations: number | null;
+  governmentGrants: number | null;
+  allOtherContributions: number | null;
+  nonCashContributions: number | null;
+}
+
 export interface OrgProfile {
   ein: string;
   name1: string;
@@ -25,6 +40,7 @@ export interface OrgProfile {
   lastYear: number;
   orgType: OrgType;
   revenueByYear: { year: number; revenue: number | null }[];
+  revenueDetails: RevenueDetail[];
 }
 
 export interface SearchResponse {

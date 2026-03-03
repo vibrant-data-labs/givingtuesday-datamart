@@ -1,7 +1,7 @@
 import { getDb } from '@/lib/db';
 import { sql } from 'kysely';
-import type { GrantRow } from '@/types/grant';
-import type { GrantSortColumn } from '@/lib/utils/validation';
+import type { GrantRow, GrantsAggregates, GrantGroupRow } from '@/types/grant';
+import type { GrantSortColumn, GrantGroupByColumn } from '@/lib/utils/validation';
 
 const GRANT_COLUMNS = [
   'granter_ein',
@@ -53,6 +53,7 @@ export interface GrantsFilter {
   year?: number | null;
   minAmount?: number | null;
   maxAmount?: number | null;
+  entityEin?: string;
   sortCol?: GrantSortColumn;
   sortOrder?: 'asc' | 'desc';
 }
@@ -70,15 +71,56 @@ const RECEIVED_SORT_COL: Record<GrantSortColumn, string> = {
   year: 'taxyear',
 };
 
+// ---------- helpers for applying filters ----------
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applyCommonFilters(query: any, filter: GrantsFilter, nameColumns: string[]) {
+  const { name, purpose, year, minAmount, maxAmount } = filter;
+
+  if (name) {
+    const like = `%${name}%`;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    query = query.where((eb: any) =>
+      eb.or(nameColumns.map((col: string) => eb(col, 'ilike', like)))
+    );
+  }
+  if (purpose) {
+    query = query.where('grant_purpose', 'ilike', `%${purpose}%`);
+  }
+  if (year != null) {
+    query = query.where(sql`taxyear::int`, '=', year);
+  }
+  if (minAmount != null) {
+    query = query.where(sql`grant_amount::bigint`, '>=', minAmount);
+  }
+  if (maxAmount != null) {
+    query = query.where(sql`grant_amount::bigint`, '<=', maxAmount);
+  }
+  return query;
+}
+
+const GIVEN_NAME_COLS = ['grantee_organization_name1', 'grantee_organization_name2', 'grantee_person_name'];
+const RECEIVED_NAME_COLS = ['granter_name', 'granter_name2'];
+
+function parseAggregates(row: Record<string, unknown> | undefined): GrantsAggregates {
+  return {
+    totalCount: Number(row?.total ?? 0),
+    totalAmount: Number(row?.total_amount ?? 0),
+    avgAmount: Math.round(Number(row?.avg_amount ?? 0)),
+  };
+}
+
+// ---------- row-level queries ----------
+
 export async function getGrantsGiven(
   ein: string,
   page: number,
   limit: number,
   filter: GrantsFilter = {}
-): Promise<{ grants: GrantRow[]; total: number }> {
+): Promise<{ grants: GrantRow[]; total: number; aggregates: GrantsAggregates }> {
   const db = getDb();
   const offset = (page - 1) * limit;
-  const { name, purpose, year, minAmount, maxAmount, sortCol = 'year', sortOrder = 'desc' } = filter;
+  const { sortCol = 'year', sortOrder = 'desc' } = filter;
   const primaryCol = GIVEN_SORT_COL[sortCol];
 
   let rowsQuery = db
@@ -86,47 +128,21 @@ export async function getGrantsGiven(
     .select(GRANT_COLUMNS)
     .where('granter_ein', '=', ein);
 
-  let countQuery = db
+  let aggQuery = db
     .selectFrom('irs_filings.unioned_grants')
-    .select((eb) => eb.fn.countAll<number>().as('total'))
+    .select([
+      sql<number>`COUNT(*)::int`.as('total'),
+      sql<number>`COALESCE(SUM(grant_amount::bigint), 0)`.as('total_amount'),
+      sql<number>`COALESCE(AVG(grant_amount::bigint), 0)::bigint`.as('avg_amount'),
+    ])
     .where('granter_ein', '=', ein);
 
-  if (name) {
-    const like = `%${name}%`;
-    rowsQuery = rowsQuery.where((eb) =>
-      eb.or([
-        eb('grantee_organization_name1', 'ilike', like),
-        eb('grantee_organization_name2', 'ilike', like),
-        eb('grantee_person_name', 'ilike', like),
-      ])
-    );
-    countQuery = countQuery.where((eb) =>
-      eb.or([
-        eb('grantee_organization_name1', 'ilike', like),
-        eb('grantee_organization_name2', 'ilike', like),
-        eb('grantee_person_name', 'ilike', like),
-      ])
-    );
-  }
+  rowsQuery = applyCommonFilters(rowsQuery, filter, GIVEN_NAME_COLS);
+  aggQuery = applyCommonFilters(aggQuery, filter, GIVEN_NAME_COLS);
 
-  if (purpose) {
-    rowsQuery = rowsQuery.where('grant_purpose', 'ilike', `%${purpose}%`);
-    countQuery = countQuery.where('grant_purpose', 'ilike', `%${purpose}%`);
-  }
-
-  if (year != null) {
-    rowsQuery = rowsQuery.where(sql`taxyear::int`, '=', year);
-    countQuery = countQuery.where(sql`taxyear::int`, '=', year);
-  }
-
-  if (minAmount != null) {
-    rowsQuery = rowsQuery.where(sql`grant_amount::bigint`, '>=', minAmount);
-    countQuery = countQuery.where(sql`grant_amount::bigint`, '>=', minAmount);
-  }
-
-  if (maxAmount != null) {
-    rowsQuery = rowsQuery.where(sql`grant_amount::bigint`, '<=', maxAmount);
-    countQuery = countQuery.where(sql`grant_amount::bigint`, '<=', maxAmount);
+  if (filter.entityEin) {
+    rowsQuery = rowsQuery.where('grantee_ein', '=', filter.entityEin);
+    aggQuery = aggQuery.where('grantee_ein', '=', filter.entityEin);
   }
 
   rowsQuery = rowsQuery
@@ -136,14 +152,17 @@ export async function getGrantsGiven(
     .limit(limit)
     .offset(offset);
 
-  const [rows, countRow] = await Promise.all([
+  const [rows, aggRow] = await Promise.all([
     rowsQuery.execute(),
-    countQuery.executeTakeFirst(),
+    aggQuery.executeTakeFirst(),
   ]);
+
+  const aggregates = parseAggregates(aggRow as Record<string, unknown> | undefined);
 
   return {
     grants: rows.map((r) => mapGrant(r as Record<string, unknown>)),
-    total: Number(countRow?.total ?? 0),
+    total: aggregates.totalCount,
+    aggregates,
   };
 }
 
@@ -152,10 +171,10 @@ export async function getGrantsReceived(
   page: number,
   limit: number,
   filter: GrantsFilter = {}
-): Promise<{ grants: GrantRow[]; total: number }> {
+): Promise<{ grants: GrantRow[]; total: number; aggregates: GrantsAggregates }> {
   const db = getDb();
   const offset = (page - 1) * limit;
-  const { name, purpose, year, minAmount, maxAmount, sortCol = 'year', sortOrder = 'desc' } = filter;
+  const { sortCol = 'year', sortOrder = 'desc' } = filter;
   const primaryCol = RECEIVED_SORT_COL[sortCol];
 
   let rowsQuery = db
@@ -163,45 +182,21 @@ export async function getGrantsReceived(
     .select(GRANT_COLUMNS)
     .where('grantee_ein', '=', ein);
 
-  let countQuery = db
+  let aggQuery = db
     .selectFrom('irs_filings.unioned_grants')
-    .select((eb) => eb.fn.countAll<number>().as('total'))
+    .select([
+      sql<number>`COUNT(*)::int`.as('total'),
+      sql<number>`COALESCE(SUM(grant_amount::bigint), 0)`.as('total_amount'),
+      sql<number>`COALESCE(AVG(grant_amount::bigint), 0)::bigint`.as('avg_amount'),
+    ])
     .where('grantee_ein', '=', ein);
 
-  if (name) {
-    const like = `%${name}%`;
-    rowsQuery = rowsQuery.where((eb) =>
-      eb.or([
-        eb('granter_name', 'ilike', like),
-        eb('granter_name2', 'ilike', like),
-      ])
-    );
-    countQuery = countQuery.where((eb) =>
-      eb.or([
-        eb('granter_name', 'ilike', like),
-        eb('granter_name2', 'ilike', like),
-      ])
-    );
-  }
+  rowsQuery = applyCommonFilters(rowsQuery, filter, RECEIVED_NAME_COLS);
+  aggQuery = applyCommonFilters(aggQuery, filter, RECEIVED_NAME_COLS);
 
-  if (purpose) {
-    rowsQuery = rowsQuery.where('grant_purpose', 'ilike', `%${purpose}%`);
-    countQuery = countQuery.where('grant_purpose', 'ilike', `%${purpose}%`);
-  }
-
-  if (year != null) {
-    rowsQuery = rowsQuery.where(sql`taxyear::int`, '=', year);
-    countQuery = countQuery.where(sql`taxyear::int`, '=', year);
-  }
-
-  if (minAmount != null) {
-    rowsQuery = rowsQuery.where(sql`grant_amount::bigint`, '>=', minAmount);
-    countQuery = countQuery.where(sql`grant_amount::bigint`, '>=', minAmount);
-  }
-
-  if (maxAmount != null) {
-    rowsQuery = rowsQuery.where(sql`grant_amount::bigint`, '<=', maxAmount);
-    countQuery = countQuery.where(sql`grant_amount::bigint`, '<=', maxAmount);
+  if (filter.entityEin) {
+    rowsQuery = rowsQuery.where('granter_ein', '=', filter.entityEin);
+    aggQuery = aggQuery.where('granter_ein', '=', filter.entityEin);
   }
 
   rowsQuery = rowsQuery
@@ -211,13 +206,182 @@ export async function getGrantsReceived(
     .limit(limit)
     .offset(offset);
 
-  const [rows, countRow] = await Promise.all([
+  const [rows, aggRow] = await Promise.all([
     rowsQuery.execute(),
-    countQuery.executeTakeFirst(),
+    aggQuery.executeTakeFirst(),
   ]);
+
+  const aggregates = parseAggregates(aggRow as Record<string, unknown> | undefined);
 
   return {
     grants: rows.map((r) => mapGrant(r as Record<string, unknown>)),
-    total: Number(countRow?.total ?? 0),
+    total: aggregates.totalCount,
+    aggregates,
+  };
+}
+
+// ---------- grouped queries ----------
+
+interface GroupedResult {
+  groups: GrantGroupRow[];
+  total: number;
+  aggregates: GrantsAggregates;
+}
+
+export async function getGrantsGivenGrouped(
+  ein: string,
+  page: number,
+  limit: number,
+  groupBy: GrantGroupByColumn,
+  filter: GrantsFilter = {}
+): Promise<GroupedResult> {
+  const db = getDb();
+  const offset = (page - 1) * limit;
+
+  const isYear = groupBy === 'year';
+  const groupExpr = isYear
+    ? sql`taxyear::int`
+    : sql`COALESCE(grantee_organization_name1, grantee_person_name, 'Unknown')`;
+  const groupEinExpr = isYear
+    ? sql<string | null>`NULL`
+    : sql<string | null>`grantee_ein`;
+
+  let groupQuery = db
+    .selectFrom('irs_filings.unioned_grants')
+    .select([
+      groupExpr.as('group_key'),
+      groupEinExpr.as('group_key_ein'),
+      sql<number>`COUNT(*)::int`.as('grant_count'),
+      sql<number>`COALESCE(SUM(grant_amount::bigint), 0)`.as('total_amount'),
+      sql<number>`COALESCE(AVG(grant_amount::bigint), 0)::bigint`.as('avg_amount'),
+    ])
+    .where('granter_ein', '=', ein);
+
+  groupQuery = applyCommonFilters(groupQuery, filter, GIVEN_NAME_COLS);
+
+  if (isYear) {
+    groupQuery = groupQuery.groupBy(sql`taxyear::int`);
+  } else {
+    groupQuery = groupQuery
+      .groupBy(sql`COALESCE(grantee_organization_name1, grantee_person_name, 'Unknown')`)
+      .groupBy('grantee_ein');
+  }
+
+  const countDistinctExpr = isYear
+    ? sql<number>`COUNT(DISTINCT taxyear::int)`
+    : sql<number>`COUNT(DISTINCT COALESCE(grantee_organization_name1, grantee_person_name, 'Unknown'))`;
+
+  let overallQuery = db
+    .selectFrom('irs_filings.unioned_grants')
+    .select([
+      sql<number>`COUNT(*)::int`.as('total'),
+      sql<number>`COALESCE(SUM(grant_amount::bigint), 0)`.as('total_amount'),
+      sql<number>`COALESCE(AVG(grant_amount::bigint), 0)::bigint`.as('avg_amount'),
+      countDistinctExpr.as('group_count'),
+    ])
+    .where('granter_ein', '=', ein);
+
+  overallQuery = applyCommonFilters(overallQuery, filter, GIVEN_NAME_COLS);
+
+  const sortExpr = isYear ? sql`group_key` : sql`total_amount`;
+
+  const [groupRows, overallRow] = await Promise.all([
+    groupQuery
+      .orderBy(sortExpr, 'desc')
+      .limit(limit)
+      .offset(offset)
+      .execute(),
+    overallQuery.executeTakeFirst(),
+  ]);
+
+  return {
+    groups: groupRows.map((r: Record<string, unknown>) => ({
+      groupKey: String(r.group_key),
+      groupKeyEin: (r.group_key_ein as string) ?? null,
+      grantCount: Number(r.grant_count),
+      totalAmount: Number(r.total_amount),
+      avgAmount: Math.round(Number(r.avg_amount)),
+    })),
+    total: Number((overallRow as Record<string, unknown>)?.group_count ?? 0),
+    aggregates: parseAggregates(overallRow as Record<string, unknown> | undefined),
+  };
+}
+
+export async function getGrantsReceivedGrouped(
+  ein: string,
+  page: number,
+  limit: number,
+  groupBy: GrantGroupByColumn,
+  filter: GrantsFilter = {}
+): Promise<GroupedResult> {
+  const db = getDb();
+  const offset = (page - 1) * limit;
+
+  const isYear = groupBy === 'year';
+  const groupExpr = isYear
+    ? sql`taxyear::int`
+    : sql`COALESCE(granter_name, 'Unknown')`;
+  const groupEinExpr = isYear
+    ? sql<string | null>`NULL`
+    : sql<string | null>`granter_ein`;
+
+  let groupQuery = db
+    .selectFrom('irs_filings.unioned_grants')
+    .select([
+      groupExpr.as('group_key'),
+      groupEinExpr.as('group_key_ein'),
+      sql<number>`COUNT(*)::int`.as('grant_count'),
+      sql<number>`COALESCE(SUM(grant_amount::bigint), 0)`.as('total_amount'),
+      sql<number>`COALESCE(AVG(grant_amount::bigint), 0)::bigint`.as('avg_amount'),
+    ])
+    .where('grantee_ein', '=', ein);
+
+  groupQuery = applyCommonFilters(groupQuery, filter, RECEIVED_NAME_COLS);
+
+  if (isYear) {
+    groupQuery = groupQuery.groupBy(sql`taxyear::int`);
+  } else {
+    groupQuery = groupQuery
+      .groupBy(sql`COALESCE(granter_name, 'Unknown')`)
+      .groupBy('granter_ein');
+  }
+
+  const countDistinctExpr = isYear
+    ? sql<number>`COUNT(DISTINCT taxyear::int)`
+    : sql<number>`COUNT(DISTINCT COALESCE(granter_name, 'Unknown'))`;
+
+  let overallQuery = db
+    .selectFrom('irs_filings.unioned_grants')
+    .select([
+      sql<number>`COUNT(*)::int`.as('total'),
+      sql<number>`COALESCE(SUM(grant_amount::bigint), 0)`.as('total_amount'),
+      sql<number>`COALESCE(AVG(grant_amount::bigint), 0)::bigint`.as('avg_amount'),
+      countDistinctExpr.as('group_count'),
+    ])
+    .where('grantee_ein', '=', ein);
+
+  overallQuery = applyCommonFilters(overallQuery, filter, RECEIVED_NAME_COLS);
+
+  const sortExpr = isYear ? sql`group_key` : sql`total_amount`;
+
+  const [groupRows, overallRow] = await Promise.all([
+    groupQuery
+      .orderBy(sortExpr, 'desc')
+      .limit(limit)
+      .offset(offset)
+      .execute(),
+    overallQuery.executeTakeFirst(),
+  ]);
+
+  return {
+    groups: groupRows.map((r: Record<string, unknown>) => ({
+      groupKey: String(r.group_key),
+      groupKeyEin: (r.group_key_ein as string) ?? null,
+      grantCount: Number(r.grant_count),
+      totalAmount: Number(r.total_amount),
+      avgAmount: Math.round(Number(r.avg_amount)),
+    })),
+    total: Number((overallRow as Record<string, unknown>)?.group_count ?? 0),
+    aggregates: parseAggregates(overallRow as Record<string, unknown> | undefined),
   };
 }
