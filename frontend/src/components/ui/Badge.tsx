@@ -3,10 +3,10 @@ import { twMerge } from 'tailwind-merge';
 type BadgeVariant = 'indigo' | 'amber' | 'green' | 'zinc' | 'rose';
 
 const variantClasses: Record<BadgeVariant, string> = {
-  indigo: 'bg-indigo-50 text-indigo-700 ring-indigo-600/20',
-  amber: 'bg-amber-50 text-amber-700 ring-amber-600/20',
-  green: 'bg-green-50 text-green-700 ring-green-600/20',
-  zinc: 'bg-zinc-100 text-zinc-600 ring-zinc-500/20',
+  indigo: 'bg-primary/10 text-primary ring-primary/20',
+  amber: 'bg-amber-50 text-amber-800 ring-amber-700/20',
+  green: 'bg-emerald-50 text-emerald-800 ring-emerald-700/20',
+  zinc: 'bg-secondary text-muted-foreground ring-border',
   rose: 'bg-rose-50 text-rose-700 ring-rose-600/20',
 };
 

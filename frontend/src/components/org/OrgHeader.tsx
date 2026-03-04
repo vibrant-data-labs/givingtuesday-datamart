@@ -13,7 +13,7 @@ export function OrgHeader({ org }: OrgHeaderProps) {
       <div className="mb-4">
         <Link
           href="/"
-          className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-900 transition-colors"
+          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
@@ -25,15 +25,15 @@ export function OrgHeader({ org }: OrgHeaderProps) {
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <div className="flex items-center gap-2.5 flex-wrap">
-            <h1 className="text-2xl font-bold text-zinc-900">
+            <h1 className="text-2xl font-bold text-foreground font-serif">
               {formatOrgName(org.name1, org.name2)}
             </h1>
             <Badge variant={org.orgType === 'foundation' ? 'indigo' : 'green'} className="text-sm px-2.5 py-1">
               {org.orgType === 'foundation' ? 'Private Foundation (990-PF)' : 'Nonprofit (990)'}
             </Badge>
           </div>
-          <div className="mt-2 flex items-center gap-2 text-sm text-zinc-500">
-            <span className="font-mono text-zinc-600">{formatEIN(org.ein)}</span>
+          <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+            <span className="font-mono text-foreground/70">{formatEIN(org.ein)}</span>
             <span>·</span>
             <span>
               {org.firstYear === org.lastYear
