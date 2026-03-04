@@ -245,23 +245,28 @@ def match_records(
         'filerein_key': 'recipeint_ein_key',
     }, inplace=True)
 
+    temp_join_table_name = "pf_grant_matching_temp_table"
+    logger.info(f"Writing to database: {temp_join_table_name}")
     with get_session() as session:
         connection = session.connection()
         full_data_df.to_sql(
-            f"pf_grant_matching_{basic_fields_unique_names_table}",
+            temp_join_table_name,
             connection,
             schema="irs_filings",
             if_exists="replace"
         )
 
-        connection.execute(text(f"DROP TABLE IF EXISTS irs_filings.privategrants_w_recipient_{basic_fields_unique_names_table}"))
+        private_grants_w_recipient_table_name = f"privategrants_w_recipients"
+        logger.info(f"Dropping table: {private_grants_w_recipient_table_name}")
+        connection.execute(text(f"DROP TABLE IF EXISTS irs_filings.{private_grants_w_recipient_table_name}"))
+        logger.info(f"Creating table: {private_grants_w_recipient_table_name}")
         connection.execute(text(f"""
             SELECT
                 pg.*,
                 pfgm.recipeint_ein_key
-            INTO irs_filings.privategrants_w_recipient_{basic_fields_unique_names_table}
+            INTO irs_filings.{private_grants_w_recipient_table_name}
             FROM irs_filings.privategrants_w_column_keys pg
-            JOIN irs_filings.pf_grant_matching_{basic_fields_unique_names_table} pfgm
+            JOIN irs_filings.{temp_join_table_name} pfgm
                 ON pfgm.name1_key = pg.name1_key
                 AND pfgm.name2_key = pg.name2_key
                 AND pfgm.address1_key = pg.address1_key
@@ -271,9 +276,10 @@ def match_records(
                 AND pfgm.addresszip_key = pg.addresszip_key
             ;
         """))
+        connection.execute(text(f"DROP TABLE IF EXISTS irs_filings.{temp_join_table_name}"))
     return full_data_df
 
 if __name__ == "__main__":
     match_records(
-        basic_fields_unique_names_table="ed_gt_basic_fields_unique_names",
+        basic_fields_unique_names_table="basic_fields_unique_names",
     )
