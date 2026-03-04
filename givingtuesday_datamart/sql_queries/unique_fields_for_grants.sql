@@ -1,17 +1,3 @@
--- Confirm that all EINs in the tracker are in the basic_fields table
-WITH tracker_gt_eins AS (
-	SELECT REPLACE(REPLACE(meta_uid, 'givingtuesday_', ''),'-', '') ein
-	FROM ed_tracker_d703fa.meta_df_limited
-	WHERE meta_data_source = 'Giving Tuesday'
-)
-SELECT COUNT(*)
-FROM tracker_gt_eins gt
-LEFT JOIN irs_filings.basic_fields bf
-	ON bf.filerein::text = gt.ein
-WHERE bf.filerein IS NULL;
-
-
-
 DROP VIEW IF EXISTS irs_filings.privategrants_w_column_keys_view;
 CREATE VIEW irs_filings.privategrants_w_column_keys_view AS (
 	SELECT
@@ -50,29 +36,6 @@ CREATE VIEW irs_filings.privategrants_unique_names_view AS (
 		addresszip_key
 );
 
-
--- DROP TABLE IF EXISTS irs_filings.privategrants_unique_names;
--- CREATE TABLE irs_filings.privategrants_unique_names AS (
--- 		SELECT
--- 		name1_key,
--- 		name2_key,
--- 		address1_key,
--- 		address2_key,
--- 		addresscity_key,
--- 		addressstate_key,
--- 		addresszip_key
--- 	FROM irs_filings.privategrants_w_column_keys_view
--- 	-- WHERE taxyear::int >= 2018 AND sigocpyamoun::bigint >= 10000
--- 	WHERE taxyear::int >= 2015
--- 	GROUP BY
--- 		name1_key,
--- 		name2_key,
--- 		address1_key,
--- 		address2_key,
--- 		addresscity_key,
--- 		addressstate_key,
--- 		addresszip_key
--- );
 
 
 DROP VIEW IF EXISTS irs_filings.basic_fields_w_column_keys_view;
@@ -126,66 +89,11 @@ FROM irs_filings.basic_fields_unique_names_view;
 
 
 
--- Latest CFT
-DROP TABLE IF EXISTS irs_filings.basic_fields_unique_names_cft;
-WITH tracker_eins AS (
-	SELECT REPLACE(REPLACE(meta_uid, 'givingtuesday_', ''),'-', '') ein
-	FROM dashboard_cft_update112025_0.meta_df_limited
-	WHERE meta_data_source = 'Candid'
-)
-SELECT
-  	filerein_key,
-  	name1_key,
-  	name2_key,
-  	address1_key,
-  	address2_key,
-  	addresscity_key,
-  	addressstate_key,
-  	addresszip_key
-INTO irs_filings.basic_fields_unique_names_cft
-FROM irs_filings.basic_fields_w_column_keys bf
-JOIN tracker_eins gt
-	ON bf.filerein::text = gt.ein
-WHERE taxyear::int >= 2018
-GROUP BY
-	filerein_key,
-	name1_key,
-	name2_key,
-	address1_key,
-	address2_key,
-	addresscity_key,
-	addressstate_key,
-	addresszip_key;
-
 
 DROP TABLE IF EXISTS irs_filings.unioned_grants;
 SELECT *
 INTO irs_filings.unioned_grants
 FROM (
-    SELECT
-        filerein::text AS granter_ein,
-        filername1 AS granter_name,
-        filername2 AS granter_name2,
-        filesha256 AS filesha256,
-        url AS url,
-        taxyear::int AS taxyear,
-        taxperbegin::timestamp AS taxperbegin,
-        taxperend::timestamp AS taxperend,
-        recipeint_ein_key::text AS grantee_ein,
-        sigocpyrpnam AS grantee_person_name,
-        sigocpyrbnbn1 AS grantee_organization_name1,
-        sigocpyrbnbn2 AS grantee_organization_name2,
-        sigocpyrfaal1 AS grantee_address1,
-        sigocpyrfaal2 AS grantee_address2,
-        sigocpyrfaci AS grantee_city,
-        sigocpyrfapo AS grantee_state,
-        sigocpyrfapc AS grantee_zip,
-        sigocpyamoun::bigint AS grant_amount,
-        sigocpypogoc AS grant_purpose,
-        sigocpyrfsta AS grant_status,
-        sigocpyrrela AS grant_relationship
-    FROM irs_filings.privategrants_w_recipient_ein_match
-    UNION
     SELECT
         filerein::text AS granter_ein,
         filername1 AS granter_name,
@@ -208,7 +116,7 @@ FROM (
         sigocpypogoc AS grant_purpose,
         sigocpyrfsta AS grant_status,
         sigocpyrrela AS grant_relationship
-     FROM irs_filings.privategrants_w_recipient_ed_gt_basic_fields_unique_names
+     FROM irs_filings.privategrants_w_recipients
 
     UNION
 
@@ -238,7 +146,11 @@ FROM (
         NULL AS grant_status,
         NULL AS grant_relationship
     FROM irs_filings.grants_to_domestic_organizations
-)
+);
+DROP INDEX IF EXISTS idx_unioned_grants_granter_ein;
+DROP INDEX IF EXISTS idx_unioned_grants_grantee_ein;
+DROP INDEX IF EXISTS idx_unioned_grants_taxyear;
+
 CREATE INDEX IF NOT EXISTS idx_unioned_grants_granter_ein ON irs_filings.unioned_grants (granter_ein);
 CREATE INDEX IF NOT EXISTS idx_unioned_grants_grantee_ein ON irs_filings.unioned_grants (grantee_ein);
 CREATE INDEX IF NOT EXISTS idx_unioned_grants_taxyear ON irs_filings.unioned_grants (taxyear);
