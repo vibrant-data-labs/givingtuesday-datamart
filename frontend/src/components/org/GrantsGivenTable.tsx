@@ -23,14 +23,14 @@ const columns: ColumnDef<GrantRow>[] = [
           {g.granteeEin ? (
             <Link
               href={`/orgs/${g.granteeEin}`}
-              className="font-medium text-indigo-600 hover:text-indigo-800 hover:underline transition-colors"
+              className="font-medium text-primary hover:text-primary/80 hover:underline transition-colors"
               onClick={(e) => e.stopPropagation()}
             >
               {name}
             </Link>
           ) : (
             <span className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-zinc-700">{name}</span>
+              <span className="text-foreground/80">{name}</span>
               <Badge variant="amber">Unmatched</Badge>
             </span>
           )}
@@ -43,7 +43,7 @@ const columns: ColumnDef<GrantRow>[] = [
     id: 'grantAmount',
     header: 'Amount',
     cell: ({ row }) => (
-      <span className="font-mono font-medium text-zinc-900 text-right block whitespace-nowrap">
+      <span className="font-mono font-medium text-foreground text-right block whitespace-nowrap">
         {row.original.grantAmount != null ? formatCurrencyFull(row.original.grantAmount) : '—'}
       </span>
     ),
@@ -52,7 +52,7 @@ const columns: ColumnDef<GrantRow>[] = [
     id: 'taxyear',
     header: 'Year',
     cell: ({ row }) => (
-      <span className="text-zinc-600 block text-center">{row.original.taxyear}</span>
+      <span className="text-muted-foreground block text-center">{row.original.taxyear}</span>
     ),
   },
   {

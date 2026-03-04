@@ -1,17 +1,25 @@
 import type { Metadata } from "next";
+import { Sora, Plus_Jakarta_Sans } from "next/font/google";
 import localFont from "next/font/local";
 import { Header } from "@/components/layout/Header";
 import { Providers } from "./providers";
 import "./globals.css";
 
-const geistSans = localFont({
-  src: "./fonts/GeistVF.woff",
-  variable: "--font-geist-sans",
-  weight: "100 900",
+const display = Sora({
+  subsets: ["latin"],
+  variable: "--font-serif",
+  display: "swap",
 });
-const geistMono = localFont({
+
+const sans = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  variable: "--font-sans",
+  display: "swap",
+});
+
+const mono = localFont({
   src: "./fonts/GeistMonoVF.woff",
-  variable: "--font-geist-mono",
+  variable: "--font-mono",
   weight: "100 900",
 });
 
@@ -27,15 +35,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable}`}>
+      <body className={`${display.variable} ${sans.variable} ${mono.variable} font-sans`}>
         <Providers>
           <Header />
           <main className="min-h-screen">
             {children}
           </main>
-          <footer className="border-t border-zinc-200 mt-16">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-              <p className="text-xs text-zinc-400 text-center">
+          <footer className="border-t border-border mt-16">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+              <p className="text-xs text-muted-foreground text-center tracking-wide">
                 IRS 990 data sourced from public filings. Data may be delayed or incomplete.
               </p>
             </div>

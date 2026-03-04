@@ -32,7 +32,7 @@ export function SearchBar({ initialQuery = '', autoFocus = false }: SearchBarPro
   return (
     <form onSubmit={handleSubmit} className="relative">
       <div className="relative flex items-center">
-        <div className="absolute left-4 text-zinc-400">
+        <div className="absolute left-4 text-muted-foreground">
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
           </svg>
@@ -43,11 +43,11 @@ export function SearchBar({ initialQuery = '', autoFocus = false }: SearchBarPro
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search by organization name or EIN (e.g. 04-3494831)"
           autoFocus={autoFocus}
-          className="w-full pl-11 pr-32 py-3.5 text-sm bg-white border border-zinc-300 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder:text-zinc-400 text-zinc-900"
+          className="w-full pl-11 pr-32 py-3.5 text-sm bg-card border border-border rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent placeholder:text-muted-foreground text-foreground transition-shadow"
         />
         <button
           type="submit"
-          className="absolute right-2 px-4 py-2 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+          className="absolute right-2 px-4 py-2 bg-primary text-primary-foreground text-xs font-medium rounded-lg hover:bg-primary/90 transition-colors"
         >
           Search
         </button>

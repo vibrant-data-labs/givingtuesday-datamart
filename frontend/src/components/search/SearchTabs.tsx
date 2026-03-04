@@ -27,7 +27,7 @@ export function SearchTabs({ currentType }: SearchTabsProps) {
   }
 
   return (
-    <div className="flex gap-1 p-1 bg-zinc-100 rounded-lg w-fit">
+    <div className="flex gap-1 p-1 bg-secondary rounded-lg w-fit">
       {tabs.map((tab) => (
         <button
           key={tab.id}
@@ -35,8 +35,8 @@ export function SearchTabs({ currentType }: SearchTabsProps) {
           className={twMerge(
             'px-3 py-1.5 text-xs font-medium rounded-md transition-all',
             currentType === tab.id
-              ? 'bg-white text-zinc-900 shadow-sm'
-              : 'text-zinc-500 hover:text-zinc-700'
+              ? 'bg-card text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
           )}
         >
           {tab.label}

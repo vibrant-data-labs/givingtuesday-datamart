@@ -23,7 +23,7 @@ export function SearchResultsClient({
   if (isLoading) return <LoadingSpinner />;
   if (isError) {
     return (
-      <div className="rounded-xl bg-rose-50 ring-1 ring-rose-200 px-5 py-4 text-sm text-rose-700">
+      <div className="rounded-xl bg-rose-50 border border-rose-200 px-5 py-4 text-sm text-rose-700">
         <p className="font-medium">Could not load search results.</p>
         <p className="mt-1 text-xs text-rose-500">{error?.message ?? 'Unknown error'}</p>
         <p className="mt-2 text-xs text-rose-400">

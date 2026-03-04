@@ -48,12 +48,12 @@ export function SearchResults({ data }: SearchResultsProps) {
   return (
     <div>
       <div className="mb-3 flex items-center justify-between">
-        <p className="text-xs text-zinc-500">
-          <span className="font-medium text-zinc-700">{data.total.toLocaleString()}</span> organization{data.total !== 1 ? 's' : ''} found
+        <p className="text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">{data.total.toLocaleString()}</span> organization{data.total !== 1 ? 's' : ''} found
         </p>
       </div>
 
-      <div className="bg-white rounded-xl ring-1 ring-zinc-200 shadow-sm divide-y divide-zinc-100 overflow-hidden">
+      <div className="bg-card rounded-xl border border-border shadow-sm divide-y divide-border/50 overflow-hidden">
         {data.results.map((org) => {
           const rowKey = `${org.ein}-${org.orgType}`;
           return (
@@ -93,18 +93,18 @@ function OrgResultRow({
       type="button"
       onClick={onNavigate}
       disabled={isNavigating}
-      className="w-full flex items-start justify-between px-5 py-4 hover:bg-zinc-50 transition-colors group text-left disabled:opacity-70 disabled:cursor-wait"
+      className="w-full flex items-start justify-between px-5 py-4 hover:bg-muted/50 transition-colors group text-left disabled:opacity-70 disabled:cursor-wait"
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-medium text-zinc-900 group-hover:text-indigo-600 transition-colors truncate">
+          <span className="text-sm font-medium text-foreground group-hover:text-primary transition-colors truncate">
             {formatOrgName(org.name1, org.name2)}
           </span>
           <Badge variant={org.orgType === 'foundation' ? 'indigo' : 'green'}>
             {org.orgType === 'foundation' ? '990-PF' : '990'}
           </Badge>
         </div>
-        <div className="mt-1 flex items-center gap-3 text-xs text-zinc-500">
+        <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
           <span className="font-mono">{formatEIN(org.ein)}</span>
           {(org.city || org.state) && (
             <>
@@ -119,9 +119,9 @@ function OrgResultRow({
           {org.firstYear === org.lastYear ? `${org.firstYear}` : `${org.firstYear}–${org.lastYear}`}
         </Badge>
         {isNavigating ? (
-          <div className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-200 border-t-indigo-600" />
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-primary" />
         ) : (
-          <svg className="w-4 h-4 text-zinc-300 group-hover:text-indigo-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg className="w-4 h-4 text-border group-hover:text-primary transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
           </svg>
         )}
