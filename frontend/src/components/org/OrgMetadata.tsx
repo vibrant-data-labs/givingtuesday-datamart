@@ -12,9 +12,9 @@ interface OrgMetadataProps {
 function FundingRow({ label, value }: { label: string; value: number | null }) {
   return (
     <div className="flex items-baseline justify-between py-1.5">
-      <span className="text-sm text-zinc-600">{label}</span>
-      <span className="text-sm font-medium text-zinc-900 tabular-nums">
-        {value != null ? formatCurrencyFull(value) : <span className="text-zinc-400">Not reported</span>}
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <span className="text-sm font-medium text-foreground tabular-nums">
+        {value != null ? formatCurrencyFull(value) : <span className="text-muted-foreground/50">Not reported</span>}
       </span>
     </div>
   );
@@ -35,14 +35,14 @@ function FundingDetail({ detail, orgType }: { detail: RevenueDetail; orgType: Or
   return (
     <div className="space-y-1">
       <FundingRow label="Total Revenue" value={detail.totalRevenue} />
-      <div className="border-t border-zinc-100 mt-1 pt-1">
+      <div className="border-t border-border/50 mt-1 pt-1">
         <FundingRow
           label={isNonprofit ? 'Total Contributions (Line 1h)' : 'Contributions Received'}
           value={detail.totalContributions}
         />
       </div>
       {hasBreakdown && (
-        <div className="pl-4 border-l-2 border-zinc-100 ml-1 space-y-0">
+        <div className="pl-4 border-l-2 border-border/50 ml-1 space-y-0">
           <FundingRow label="Federated Campaigns (1a)" value={detail.federatedCampaigns} />
           <FundingRow label="Membership Dues (1b)" value={detail.membershipDues} />
           <FundingRow label="Fundraising Events (1c)" value={detail.fundraisingEvents} />
@@ -69,47 +69,47 @@ export function OrgMetadata({ org }: OrgMetadataProps) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       <Card className="p-4 lg:col-span-2">
-        <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Address</p>
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Address</p>
         {address || cityStateZip ? (
-          <div className="text-sm text-zinc-700 space-y-0.5">
+          <div className="text-sm text-foreground/80 space-y-0.5">
             {address && <p>{address}</p>}
             {cityStateZip && <p>{cityStateZip}</p>}
           </div>
         ) : (
-          <p className="text-sm text-zinc-400">Not available</p>
+          <p className="text-sm text-muted-foreground/50">Not available</p>
         )}
       </Card>
 
       <Card className="p-4">
-        <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Total Revenue</p>
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Total Revenue</p>
         {org.totalRevenue != null ? (
           <>
-            <p className="text-xl font-bold text-zinc-900">{formatCurrency(org.totalRevenue)}</p>
-            <p className="text-xs text-zinc-400 mt-1">{formatCurrencyFull(org.totalRevenue)}</p>
+            <p className="text-xl font-bold text-foreground font-serif">{formatCurrency(org.totalRevenue)}</p>
+            <p className="text-xs text-muted-foreground mt-1">{formatCurrencyFull(org.totalRevenue)}</p>
           </>
         ) : (
-          <p className="text-sm text-zinc-400">Not reported</p>
+          <p className="text-sm text-muted-foreground/50">Not reported</p>
         )}
       </Card>
 
       <Card className="p-4">
-        <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Filing History</p>
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Filing History</p>
         {org.revenueByYear.length > 0 ? (
           <>
-            <p className="text-xl font-bold text-zinc-900">{org.revenueByYear.length}</p>
-            <p className="text-xs text-zinc-400 mt-1">
+            <p className="text-xl font-bold text-foreground font-serif">{org.revenueByYear.length}</p>
+            <p className="text-xs text-muted-foreground mt-1">
               {org.firstYear === org.lastYear ? `${org.firstYear}` : `${org.firstYear}–${org.lastYear}`}
             </p>
           </>
         ) : (
-          <p className="text-sm text-zinc-400">No history</p>
+          <p className="text-sm text-muted-foreground/50">No history</p>
         )}
       </Card>
 
       {details.length > 0 && (
         <Card className="p-4 lg:col-span-4">
           <div className="flex items-center justify-between mb-3">
-            <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
               Funding Details
               {org.orgType === 'nonprofit' && (
                 <span className="normal-case ml-1">(Part VIII, Line 1)</span>
@@ -135,12 +135,12 @@ export function OrgMetadata({ org }: OrgMetadataProps) {
                       >
                         <div
                           className={`w-8 rounded-t transition-colors ${
-                            isSelected ? 'bg-indigo-500' : 'bg-indigo-200 hover:bg-indigo-300'
+                            isSelected ? 'bg-primary' : 'bg-primary/20 hover:bg-primary/35'
                           }`}
                           style={{ height: `${height}px` }}
                           title={`${year}: ${formatCurrencyFull(revenue)}`}
                         />
-                        <span className={`text-xs ${isSelected ? 'text-indigo-600 font-semibold' : 'text-zinc-400'}`}>
+                        <span className={`text-xs ${isSelected ? 'text-primary font-semibold' : 'text-muted-foreground'}`}>
                           {year}
                         </span>
                       </button>
@@ -161,8 +161,8 @@ export function OrgMetadata({ org }: OrgMetadataProps) {
                   onClick={() => setSelectedYear(year)}
                   className={`px-2.5 py-1 text-xs rounded-full transition-colors ${
                     year === selectedYear
-                      ? 'bg-indigo-100 text-indigo-700 font-semibold'
-                      : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'
+                      ? 'bg-primary/15 text-primary font-semibold'
+                      : 'bg-secondary text-muted-foreground hover:bg-secondary/80'
                   }`}
                 >
                   {year}
@@ -176,12 +176,12 @@ export function OrgMetadata({ org }: OrgMetadataProps) {
             <>
               <FundingDetail detail={selectedDetail} orgType={org.orgType} />
               {selectedDetail.url && (
-                <div className="mt-3 pt-3 border-t border-zinc-100">
+                <div className="mt-3 pt-3 border-t border-border/50">
                   <a
                     href={`/api/filing?url=${encodeURIComponent(selectedDetail.url)}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-xs text-indigo-500 hover:text-indigo-700 transition-colors"
+                    className="text-xs text-primary hover:text-primary/80 transition-colors"
                   >
                     View original filing &rarr;
                   </a>
@@ -189,7 +189,7 @@ export function OrgMetadata({ org }: OrgMetadataProps) {
               )}
             </>
           ) : (
-            <p className="text-sm text-zinc-400">Select a year to view details</p>
+            <p className="text-sm text-muted-foreground/50">Select a year to view details</p>
           )}
         </Card>
       )}

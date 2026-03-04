@@ -30,7 +30,7 @@ export function OrgPageClient() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex flex-col items-center justify-center py-24 gap-4">
           <LoadingSpinner />
-          <p className="text-sm text-zinc-500">Loading organization…</p>
+          <p className="text-sm text-muted-foreground">Loading organization…</p>
         </div>
       </div>
     );
@@ -39,7 +39,7 @@ export function OrgPageClient() {
   if (isError) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="rounded-xl bg-rose-50 ring-1 ring-rose-200 px-5 py-4 text-sm text-rose-700">
+        <div className="rounded-xl bg-rose-50 border border-rose-200 px-5 py-4 text-sm text-rose-700">
           <p className="font-medium">Could not connect to the database.</p>
           <p className="mt-1 text-xs text-rose-500">{error?.message ?? 'Unknown error'}</p>
         </div>

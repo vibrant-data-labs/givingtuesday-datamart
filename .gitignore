@@ -171,3 +171,6 @@ player
 data/source_data
 config.ini
 *.DS_Store
+
+# Claude Code
+.claude/

@@ -35,9 +35,9 @@ const SORTABLE_COLS: Record<string, GrantSortColumn> = {
 };
 
 function SortIndicator({ sorted }: { sorted: false | 'asc' | 'desc' }) {
-  if (sorted === 'asc') return <ChevronUp className="ml-1 h-3.5 w-3.5 text-indigo-500 inline shrink-0" />;
-  if (sorted === 'desc') return <ChevronDown className="ml-1 h-3.5 w-3.5 text-indigo-500 inline shrink-0" />;
-  return <ChevronsUpDown className="ml-1 h-3.5 w-3.5 text-zinc-300 inline shrink-0" />;
+  if (sorted === 'asc') return <ChevronUp className="ml-1 h-3.5 w-3.5 text-primary inline shrink-0" />;
+  if (sorted === 'desc') return <ChevronDown className="ml-1 h-3.5 w-3.5 text-primary inline shrink-0" />;
+  return <ChevronsUpDown className="ml-1 h-3.5 w-3.5 text-border inline shrink-0" />;
 }
 
 // ---------- grouped column defs ----------
@@ -56,20 +56,20 @@ function getGroupedColumns(
           return (
             <Link
               href={`/orgs/${g.groupKeyEin}`}
-              className="text-sm font-medium text-indigo-600 hover:text-indigo-800 hover:underline transition-colors"
+              className="text-sm font-medium text-primary hover:text-primary/80 hover:underline transition-colors"
             >
               {g.groupKey}
             </Link>
           );
         }
-        return <span className="text-sm font-medium text-zinc-900">{g.groupKey}</span>;
+        return <span className="text-sm font-medium text-foreground">{g.groupKey}</span>;
       },
     },
     {
       id: 'grantCount',
       header: 'Grants',
       cell: ({ row }) => (
-        <span className="text-sm text-zinc-600 tabular-nums block text-right">
+        <span className="text-sm text-muted-foreground tabular-nums block text-right">
           {row.original.grantCount.toLocaleString()}
         </span>
       ),
@@ -78,7 +78,7 @@ function getGroupedColumns(
       id: 'totalAmount',
       header: 'Total',
       cell: ({ row }) => (
-        <span className="text-sm font-mono font-medium text-zinc-900 block text-right whitespace-nowrap">
+        <span className="text-sm font-mono font-medium text-foreground block text-right whitespace-nowrap">
           {formatCurrencyFull(row.original.totalAmount)}
         </span>
       ),
@@ -87,7 +87,7 @@ function getGroupedColumns(
       id: 'avgAmount',
       header: 'Average',
       cell: ({ row }) => (
-        <span className="text-sm font-mono text-zinc-500 block text-right whitespace-nowrap">
+        <span className="text-sm font-mono text-muted-foreground block text-right whitespace-nowrap">
           {formatCurrencyFull(row.original.avgAmount)}
         </span>
       ),
@@ -100,11 +100,11 @@ function getGroupedColumns(
 function SummaryBar({ aggregates, isLoading }: { aggregates?: GrantsAggregates; isLoading: boolean }) {
   if (isLoading) {
     return (
-      <div className="flex items-center gap-4 px-1 py-2 text-xs text-zinc-500">
+      <div className="flex items-center gap-4 px-1 py-2 text-xs text-muted-foreground">
         <div className="h-3 w-16 bg-muted rounded animate-pulse" />
-        <span className="text-zinc-300">&middot;</span>
+        <span className="text-border">&middot;</span>
         <div className="h-3 w-20 bg-muted rounded animate-pulse" />
-        <span className="text-zinc-300">&middot;</span>
+        <span className="text-border">&middot;</span>
         <div className="h-3 w-20 bg-muted rounded animate-pulse" />
       </div>
     );
@@ -112,11 +112,11 @@ function SummaryBar({ aggregates, isLoading }: { aggregates?: GrantsAggregates; 
   if (!aggregates || aggregates.totalCount === 0) return null;
 
   return (
-    <div className="flex items-center gap-4 px-1 py-2 text-xs text-zinc-500">
+    <div className="flex items-center gap-4 px-1 py-2 text-xs text-muted-foreground">
       <span>{aggregates.totalCount.toLocaleString()} grants</span>
-      <span className="text-zinc-300">&middot;</span>
-      <span className="font-medium text-zinc-700">{formatCurrencyFull(aggregates.totalAmount)}</span>
-      <span className="text-zinc-300">&middot;</span>
+      <span className="text-border">&middot;</span>
+      <span className="font-medium text-foreground">{formatCurrencyFull(aggregates.totalAmount)}</span>
+      <span className="text-border">&middot;</span>
       <span>{formatCurrencyFull(aggregates.avgAmount)} avg</span>
     </div>
   );
@@ -183,7 +183,7 @@ function ExpandedGroupRows({
       <Table>
         <TableHeader>
           {table.getHeaderGroups().map((headerGroup) => (
-            <TableRow key={headerGroup.id} className="hover:bg-transparent border-b border-zinc-100">
+            <TableRow key={headerGroup.id} className="hover:bg-transparent border-b border-border/30">
               {headerGroup.headers.map((header) => (
                 <TableHead key={header.id}>
                   <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">
@@ -196,7 +196,7 @@ function ExpandedGroupRows({
         </TableHeader>
         <TableBody>
           {table.getRowModel().rows.map((row) => (
-            <TableRow key={row.id} className="border-b border-zinc-50">
+            <TableRow key={row.id} className="border-b border-border/20">
               {row.getVisibleCells().map((cell) => (
                 <TableCell key={cell.id} className="py-1.5">
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -334,17 +334,17 @@ export function GrantsTable({
 
   const activeCols = grouped ? groupedColumns : columns;
 
-  const dotColor = accentColor === 'green' ? 'bg-green-400' : 'bg-indigo-400';
+  const dotColor = accentColor === 'green' ? 'bg-emerald-500' : 'bg-primary';
 
   const inputClass =
-    'rounded-md border border-input bg-background px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring';
+    'rounded-md border border-input bg-card px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring transition-shadow';
 
   return (
     <div>
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div>
-          <h2 className="text-base font-semibold text-zinc-900">{title}</h2>
+          <h2 className="text-base font-semibold text-foreground font-serif">{title}</h2>
           {data && (
             <p className="text-xs text-muted-foreground mt-0.5">
               {(grouped ? data.aggregates.totalCount : data.total).toLocaleString()} grant{(grouped ? data.aggregates.totalCount : data.total) !== 1 ? 's' : ''} found
@@ -353,7 +353,7 @@ export function GrantsTable({
         </div>
         <div className="flex items-center gap-3">
           {/* Group-by toggle */}
-          <div className="flex items-center gap-0.5 bg-zinc-100/60 rounded-md p-0.5">
+          <div className="flex items-center gap-0.5 bg-secondary/60 rounded-md p-0.5">
             <Button
               variant={groupBy === null ? 'secondary' : 'ghost'}
               size="sm"
@@ -430,7 +430,7 @@ export function GrantsTable({
       <SummaryBar aggregates={aggregates} isLoading={isLoading} />
 
       {/* Table */}
-      <div className="rounded-xl border shadow-sm overflow-hidden">
+      <div className="rounded-xl border border-border shadow-sm overflow-hidden">
         {isError ? (
           <p className="px-4 py-8 text-center text-xs text-destructive">
             Failed to load grants. Please try again.
@@ -503,7 +503,7 @@ export function GrantsTable({
                                   {idx === 0 ? (
                                     <div className="flex items-center gap-1.5">
                                       <ChevronRight
-                                        className={`h-3.5 w-3.5 text-zinc-400 shrink-0 transition-transform duration-150 ${isExpanded ? 'rotate-90' : ''}`}
+                                        className={`h-3.5 w-3.5 text-muted-foreground shrink-0 transition-transform duration-150 ${isExpanded ? 'rotate-90' : ''}`}
                                       />
                                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                                     </div>
@@ -514,7 +514,7 @@ export function GrantsTable({
                               ))}
                             </TableRow>
                             {isExpanded && groupBy && (
-                              <TableRow className="bg-zinc-50/50 hover:bg-zinc-50/50">
+                              <TableRow className="bg-muted/30 hover:bg-muted/30">
                                 <TableCell colSpan={groupedColumns.length} className="p-0 pl-6">
                                   <ExpandedGroupRows
                                     ein={ein}
