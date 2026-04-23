@@ -1,5 +1,4 @@
 import re
-from pathlib import Path
 
 import pandas as pd
 import recordlinkage
@@ -9,7 +8,8 @@ from tqdm import tqdm
 from vdl_tools.shared_tools.tools.logger import logger
 from vdl_tools.shared_tools.database_cache.database_utils import get_session
 from vdl_tools.shared_tools.tools.address_cleaning import create_clean_address
-
+from vdl_tools.shared_tools.s3_tools import key_exists
+from vdl_tools.shared_tools import parquet_cache as pqc
 
 # Derived from USPS Publication 28 - Postal Addressing Standards
 
@@ -77,9 +77,9 @@ def filter_match_rules(
 def match_records(
     basic_fields_unique_names_table: str = "basic_fields_unique_names_view",
     chunk_size: int = 50000,
-    checkpoint_root_dir: str = "tmp/matching_checkpoints",
+    s3_bucket: str = "givingtuesday-datamart",
+    s3_prefix: str = "grant_matching_checkpoints",
     resume_from_checkpoints: bool = True,
-    checkpoint_compression: str = "zstd",
 ):
     # --- 3. APPLY CLEANING ---
     logger.info("Preparing data...")
@@ -143,9 +143,8 @@ def match_records(
     total_chunks = (total_pairs + chunk_size - 1) // chunk_size if total_pairs else 0
     logger.info(f"Found {total_chunks} chunks to compute.")
 
-    checkpoint_dir = Path(checkpoint_root_dir) / basic_fields_unique_names_table
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Using checkpoint directory: {checkpoint_dir}")
+    checkpoint_uri_base = f"s3://{s3_bucket}/{s3_prefix}"
+    logger.info(f"Using checkpoint directory: {checkpoint_uri_base}")
 
     logger.info("Computing matches...")
     results = []
@@ -153,10 +152,12 @@ def match_records(
     computed_chunks = 0
 
     for chunk_idx in tqdm(range(total_chunks), desc="Matching"):
-        checkpoint_file = checkpoint_dir / f"chunk_{chunk_idx:05d}.parquet"
+        filename = f"chunk_{chunk_idx:05d}.parquet"
+        full_key = f"{s3_prefix}/{filename}"
+        checkpoint_uri = f"{checkpoint_uri_base}/{filename}"
 
-        if resume_from_checkpoints and checkpoint_file.exists():
-            features = pd.read_parquet(checkpoint_file)
+        if resume_from_checkpoints and key_exists(bucket=s3_bucket, key=full_key):
+            features = pqc.read_dataframe(checkpoint_uri)
             loaded_from_checkpoint += 1
             results.append(features)
             continue
@@ -176,9 +177,7 @@ def match_records(
             good_enough_name_addr_min=0.85,
         )
 
-        temp_checkpoint_file = checkpoint_file.with_suffix(".tmp.parquet")
-        features.to_parquet(temp_checkpoint_file, compression=checkpoint_compression)
-        temp_checkpoint_file.replace(checkpoint_file)
+        pqc.write_dataframe(features, checkpoint_uri)
 
         computed_chunks += 1
         results.append(features)
@@ -276,7 +275,8 @@ def match_records(
                 AND pfgm.addresszip_key = pg.addresszip_key
             ;
         """))
-        connection.execute(text(f"DROP TABLE IF EXISTS irs_filings.{temp_join_table_name}"))
+        # NOTE: Uncomment this to drop the temporary table but leave for now for debugging
+        # connection.execute(text(f"DROP TABLE IF EXISTS irs_filings.{temp_join_table_name}"))
     return full_data_df
 
 if __name__ == "__main__":
