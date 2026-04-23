@@ -215,15 +215,24 @@ def match_records(
 
     matches = matches.drop_duplicates()
 
+    # Each private_foundations record (grant recipient) should map to exactly one
+    # basic_fields org. When fuzzy matching finds multiple candidates, keep the one
+    # with the highest combined score; name_score is weighted 2x since the name is the
+    # primary identifier and address collisions (shared buildings, PO boxes) are common.
+    pre_resolve_count = len(matches)
+    matches = matches.assign(_combined_score=matches['name_score'] * 2 + matches['addr_score'])
+    matches = matches.sort_values('_combined_score', ascending=False)
+    matches = matches.drop_duplicates(subset=['private_foundations_df_index'], keep='first')
+    matches = matches.drop(columns='_combined_score')
+    logger.info(
+        f"Resolved multi-matches: {pre_resolve_count} -> {len(matches)} "
+        f"pairs after keeping the best basic_fields match per private_foundations record."
+    )
+
     basic_fields_df_matched_w_nulls = basic_fields_df.merge(matches, left_index=True, right_on='basic_fields_df_index', how='left')
     basic_fields_df_matched = basic_fields_df_matched_w_nulls[basic_fields_df_matched_w_nulls['private_foundations_df_index'].notna()]
 
     logger.info(basic_fields_df_matched.head())
-
-    # TODO: Handle multi-matches?
-    multi_matches = basic_fields_df_matched.groupby('private_foundations_df_index').agg({'filerein_key': 'nunique'})
-    multi_matches = multi_matches[multi_matches['filerein_key'] > 1]
-    multi_matches = multi_matches.sort_values(by='filerein_key', ascending=False)
 
     percentage_matched = basic_fields_df_matched[basic_fields_df_matched['private_foundations_df_index'].notna()]['filerein_key'].nunique() / basic_fields_df['filerein_key'].nunique()
     logger.info(f'% of Organizations matched to a private foundation name: {percentage_matched}')
