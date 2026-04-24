@@ -63,6 +63,16 @@ Prints a table: logical name, target staging table, latest S3 version date,
 filename, size. Fast (S3 list only, no DB, no downloads).
 
 ```bash
+# What tables have been loaded into gt_datamart, at what version, how long ago?
+$GT_PY -m givingtuesday_datamart.sources loaded
+```
+
+Queries `datamart_meta.ingest_runs` and shows the latest run per source:
+status (`success` / `failed` / `skipped` / `never`), version, row count,
+when it finished, and age. Failed runs are re-surfaced as warnings below
+the table. Hits the DB only, no S3.
+
+```bash
 # Ingest everything (~32 GB of CSV total; run overnight)
 $GT_PY -m givingtuesday_datamart.sources refresh
 

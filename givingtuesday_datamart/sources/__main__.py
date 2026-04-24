@@ -5,7 +5,10 @@ Subcommands:
 
 * ``status`` — print each registered source alongside the newest matching file
   currently in S3. Answers "is our pinned ingestion stale?" without running a
-  full refresh.
+  full refresh. S3-only; no DB connection.
+* ``loaded`` — print the most recent run per source from
+  ``datamart_meta.ingest_runs``. Answers "what tables have been loaded, at
+  what version, and how long ago?" Hits the DB; no S3.
 * ``refresh`` — resolve the newest file for each registered source and ingest
   it into its staging table, stamping lineage columns on every row and
   recording the run in ``datamart_meta.ingest_runs``. Idempotent: re-running
@@ -89,6 +92,114 @@ def _select_specs(source_names: list[str] | None) -> list[SourceSpec]:
     return [get_source(name) for name in source_names]
 
 
+def _format_age(delta) -> str:
+    """Format a timedelta as a short, human-readable age string."""
+    if delta is None:
+        return "—"
+    seconds = int(delta.total_seconds())
+    if seconds < 0:
+        return "—"
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, _ = divmod(rem, 60)
+    if days:
+        return f"{days}d {hours}h"
+    if hours:
+        return f"{hours}h {minutes}m"
+    if minutes:
+        return f"{minutes}m"
+    return f"{seconds}s"
+
+
+def cmd_loaded() -> int:
+    """Show the latest run per source from datamart_meta.ingest_runs."""
+    # Imports are deferred so `status` does not pay the SQLAlchemy init cost.
+    from datetime import datetime, timezone
+
+    from sqlalchemy import text
+
+    from givingtuesday_datamart.ingestion import (
+        INGEST_RUNS_TABLE,
+        datamart_config,
+        ensure_meta_schema,
+    )
+    from vdl_tools.shared_tools.database_cache.database_utils import get_session
+
+    # Make sure the meta table exists so the query below doesn't 42P01 when the
+    # database exists but no refresh has run yet.
+    ensure_meta_schema()
+
+    # Most recent run per logical_name (by started_at), regardless of status.
+    # Showing failed/skipped runs too — a failed run is useful information,
+    # not something to hide.
+    query = text(
+        f"""
+        SELECT DISTINCT ON (logical_name)
+            logical_name, staging_table, source_version, status, row_count,
+            started_at, finished_at, error
+        FROM {INGEST_RUNS_TABLE}
+        ORDER BY logical_name, started_at DESC
+        """
+    )
+    with get_session(config=datamart_config()) as session:
+        rows = session.execute(query).all()
+
+    latest_by_name = {r.logical_name: r for r in rows}
+    now = datetime.now(timezone.utc)
+
+    headers = (
+        "logical_name", "staging_table", "status",
+        "version", "rows", "last_ingested_at", "age",
+    )
+    out_rows: list[tuple[str, ...]] = []
+    for spec in REGISTRY:
+        run = latest_by_name.get(spec.logical_name)
+        if run is None:
+            out_rows.append(
+                (spec.logical_name, spec.staging_table_name, "never", "—", "—", "—", "—")
+            )
+            continue
+        # Age from finished_at if we have one, else from started_at.
+        ref = run.finished_at or run.started_at
+        age = _format_age(now - ref) if ref is not None else "—"
+        last = ref.strftime("%Y-%m-%d %H:%M UTC") if ref else "—"
+        rows_str = f"{run.row_count:,}" if run.row_count is not None else "—"
+        out_rows.append(
+            (
+                spec.logical_name,
+                spec.staging_table_name,
+                run.status,
+                run.source_version or "—",
+                rows_str,
+                last,
+                age,
+            )
+        )
+
+    widths = [max(len(r[i]) for r in (*out_rows, headers)) for i in range(len(headers))]
+
+    def fmt(r: tuple[str, ...]) -> str:
+        return "  ".join(cell.ljust(widths[i]) for i, cell in enumerate(r))
+
+    print(fmt(headers))
+    print(fmt(tuple("-" * w for w in widths)))
+    for r in out_rows:
+        print(fmt(r))
+
+    # Surface any failed runs loudly since the table format can lose them in the noise.
+    failed = [r for r in latest_by_name.values() if r.status == "failed"]
+    if failed:
+        print()
+        for r in failed:
+            err = (r.error or "").splitlines()[0] if r.error else ""
+            logger.warning(
+                "Latest run FAILED for %s (version %s): %s",
+                r.logical_name, r.source_version, err[:200],
+            )
+        return 1
+    return 0
+
+
 def cmd_refresh(source_names: list[str] | None, *, force: bool) -> int:
     # Import here so `status` does not pay for the SQLAlchemy / vdl-tools init cost.
     from givingtuesday_datamart.ingestion import ingest_source
@@ -156,7 +267,12 @@ def main(argv: list[str] | None = None) -> int:
 
     subparsers.add_parser(
         "status",
-        help="Show latest available version for each registered source.",
+        help="Show latest available version in S3 for each registered source.",
+    )
+
+    subparsers.add_parser(
+        "loaded",
+        help="Show the latest ingest run per source from datamart_meta.ingest_runs.",
     )
 
     refresh_parser = subparsers.add_parser(
@@ -179,6 +295,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "status":
         return cmd_status()
+    if args.command == "loaded":
+        return cmd_loaded()
     if args.command == "refresh":
         return cmd_refresh(args.sources, force=args.force)
     return 2
