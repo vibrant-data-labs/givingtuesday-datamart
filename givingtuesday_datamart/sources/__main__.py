@@ -13,6 +13,9 @@ Subcommands:
   it into its staging table, stamping lineage columns on every row and
   recording the run in ``datamart_meta.ingest_runs``. Idempotent: re-running
   against the same source version is a no-op unless ``--force`` is passed.
+* ``build-canonical`` — (re)build the Phase 2 canonical tables
+  (``public.nonprofit_canonical`` + ``public.nonprofit_text``) from current
+  staging. DROP + CREATE, idempotent. Run after a successful ``refresh``.
 """
 
 from __future__ import annotations
@@ -242,6 +245,32 @@ def cmd_loaded() -> int:
     return 0
 
 
+def cmd_build_canonical() -> int:
+    """Rebuild the Phase 2 canonical tables from current staging."""
+    from givingtuesday_datamart.canonical.build import build_canonical
+
+    try:
+        result = build_canonical()
+    except Exception as err:
+        logger.error("Canonical build failed: %s", err)
+        return 1
+
+    duration = (result.finished_at - result.started_at).total_seconds()
+    print()
+    print(f"Canonical build {result.build_id} success ({duration:.1f}s):")
+    print(f"  schedule_o_part_iii: {result.schedule_o_part_iii_rows:,} rows")
+    print(f"  nonprofit_canonical: {result.nonprofit_canonical_rows:,} rows")
+    print(f"  nonprofit_text:      {result.nonprofit_text_rows:,} rows")
+    print(f"  funder_canonical:    {result.funder_canonical_rows:,} rows")
+    print(f"  person_canonical:    {result.person_canonical_rows:,} rows")
+    print(f"  org_person_role:     {result.org_person_role_rows:,} rows")
+    print()
+    print("Source lineage (logical_name → run_id@source_version):")
+    for name in sorted(result.source_runs):
+        print(f"  {name}: {result.source_runs[name] or '—'}")
+    return 0
+
+
 def cmd_refresh(source_names: list[str] | None, *, force: bool) -> int:
     # Import here so `status` does not pay for the SQLAlchemy / vdl-tools init cost.
     from givingtuesday_datamart.ingestion import ingest_source
@@ -334,6 +363,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Re-ingest even if a successful run already exists for this (source, version).",
     )
 
+    subparsers.add_parser(
+        "build-canonical",
+        help="Rebuild Phase 2 canonical tables (nonprofit_canonical + nonprofit_text) from staging.",
+    )
+
     args = parser.parse_args(argv)
     if args.command == "status":
         return cmd_status()
@@ -341,6 +375,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_loaded()
     if args.command == "refresh":
         return cmd_refresh(args.sources, force=args.force)
+    if args.command == "build-canonical":
+        return cmd_build_canonical()
     return 2
 
 
