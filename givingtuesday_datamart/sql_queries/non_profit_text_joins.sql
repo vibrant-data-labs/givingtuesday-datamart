@@ -1,7 +1,8 @@
 DROP TABLE IF EXISTS irs_filings.non_profit_joins_for_text;
 WITH program_max_year AS (
-	SELECT filerein::text,
-	MAX(programs.taxyear) AS taxyear
+	SELECT
+		filerein::text,
+		MAX(programs.taxyear) AS taxyear
 	FROM irs_filings.programs
 	WHERE
 		actividescri1 IS NOT NULL OR
@@ -10,7 +11,9 @@ WITH program_max_year AS (
 	GROUP BY filerein::text
 ),
 mission_max_year AS (
-	SELECT filerein::text, MAX(taxyear) AS taxyear
+	SELECT
+		filerein::text,
+		MAX(taxyear) AS taxyear,
 	FROM irs_filings.mission_statements
 	WHERE
 		mission IS NOT NULL

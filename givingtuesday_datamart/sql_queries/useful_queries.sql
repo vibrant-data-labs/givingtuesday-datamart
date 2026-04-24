@@ -19,6 +19,17 @@ SELECT *
 FROM irs_filings.unioned_grants
 WHERE granter_ein = '852588841' -- One Earth
 
+SELECT grantee_ein, bf.filername1, grantee_organization_name1, grantee_address1, grant_amount, grant_purpose grantee_ein, ug.taxyear
+FROM irs_filings.unioned_grants ug
+JOIN irs_filings.basic_fields bf ON ug.grantee_ein = bf.filerein::text
+WHERE granter_ein = '273116560' -- Hopper Dean
+ORDER BY grantee_organization_name1, grant_amount, taxyear DESC
+
+SELECT *
+FROM irs_filings.privategrants_w_recipients
+WHERE filerein = '273116560'
+ORDER BY recipeint_ein_key
+
 SELECT *
 FROM irs_filings.basic_fields
 WHERE filerein = '462550705'

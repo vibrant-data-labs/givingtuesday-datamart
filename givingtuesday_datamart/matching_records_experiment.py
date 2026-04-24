@@ -75,7 +75,7 @@ def filter_match_rules(
 
 
 def match_records(
-    basic_fields_unique_names_table: str = "basic_fields_unique_names_view",
+    basic_fields_unique_names_table: str = "basic_fields_unique_names",
     chunk_size: int = 50000,
     s3_bucket: str = "givingtuesday-datamart",
     s3_prefix: str = "grant_matching_checkpoints",
