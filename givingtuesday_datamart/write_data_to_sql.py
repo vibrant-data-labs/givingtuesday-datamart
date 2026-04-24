@@ -35,6 +35,48 @@ csv.field_size_limit(sys.maxsize)
 # Python-side `batch` list and csv.writer StringIO buffer.
 STREAMING_BATCH_SIZE = 50000
 
+# Bytes per iter_content chunk. 256 KB is urllib3's ball-park default and
+# keeps the number of Python-level iterations manageable on multi-GB inputs.
+HTTP_CHUNK_SIZE = 256 * 1024
+
+
+class _IterBytesReader(io.RawIOBase):
+    """Expose a bytes-chunk iterator as a readable raw stream.
+
+    Wraps ``requests.Response.iter_content()`` so it can be handed to
+    ``io.BufferedReader`` + ``io.TextIOWrapper`` + ``csv.reader``. Using the
+    supported ``iter_content`` streaming API (rather than ``response.raw``)
+    avoids the surprising close semantics we hit on long-running streams —
+    ``response.raw`` is a lower-level urllib3 object that can get torn down
+    out from under us under keep-alive / chunked-encoding conditions, and
+    ``iter_content`` also handles gzip/deflate transport decoding for free.
+
+    Holds a strong reference to the ``Response`` so nothing critical gets
+    GC'd mid-read.
+    """
+
+    def __init__(self, iterator, response):
+        self._iter = iter(iterator)
+        self._buffer = b""
+        self._response = response
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, b) -> int:
+        want = len(b)
+        while len(self._buffer) < want:
+            try:
+                chunk = next(self._iter)
+            except StopIteration:
+                break
+            if chunk:
+                self._buffer += chunk
+        take = min(want, len(self._buffer))
+        b[:take] = self._buffer[:take]
+        self._buffer = self._buffer[take:]
+        return take
+
 
 def _sanitize_column_name(col: str) -> str:
     """Lowercase and strip non-SQL-safe characters from a single column name."""
@@ -150,19 +192,24 @@ def stream_csv_url_to_table(
     try:
         response = requests.get(url, stream=True, timeout=3600)
         response.raise_for_status()
-        # Transparently decode gzip/deflate transport encodings if the server
-        # applied them. No-op on uncompressed responses.
-        response.raw.decode_content = True
 
         total_size = int(response.headers.get('content-length', 0))
         if total_size > 0:
             logger.info(f"File size: {total_size / (1024 ** 3):.2f} GB (uncompressed server hint)")
 
+        # Feed bytes through iter_content (the supported streaming API) rather
+        # than response.raw — the latter closes out from under us on
+        # minutes-long streams. Layer: iter_content -> RawIOBase wrapper ->
+        # BufferedReader -> TextIOWrapper -> csv.reader.
+        byte_chunks = response.iter_content(chunk_size=HTTP_CHUNK_SIZE)
+        raw_stream = _IterBytesReader(byte_chunks, response)
+        buffered = io.BufferedReader(raw_stream, buffer_size=HTTP_CHUNK_SIZE)
+
         # newline="" is required so the csv module controls newline handling;
         # otherwise TextIOWrapper's universal newline translation would split
         # multi-line quoted fields before csv.reader ever sees them.
         text_stream = io.TextIOWrapper(
-            response.raw, encoding='utf-8', errors='replace', newline='',
+            buffered, encoding='utf-8', errors='replace', newline='',
         )
         reader = csv.reader(text_stream)
 
