@@ -21,10 +21,7 @@ from vdl_tools.shared_tools.tools.logger import logger
 
 from givingtuesday_datamart.sources.resolver import ResolvedVersion, resolve_latest
 from givingtuesday_datamart.sources.spec import SourceSpec
-from givingtuesday_datamart.write_data_to_sql import (
-    stream_csv_url_to_table,
-    write_csv_url_to_table_standard,
-)
+from givingtuesday_datamart.write_data_to_sql import stream_csv_url_to_table
 
 
 # Dedicated database on the shared VDL RDS host. Kept separate from the main
@@ -247,22 +244,13 @@ def ingest_source(
 
     db_cfg = datamart_config()
     try:
-        if spec.needs_streaming:
-            row_count = stream_csv_url_to_table(
-                url=resolved.url,
-                table_name=spec.staging_table_name,
-                overwrite=True,
-                extra_columns=lineage,
-                db_config=db_cfg,
-            )
-        else:
-            row_count = write_csv_url_to_table_standard(
-                url=resolved.url,
-                table_name=spec.staging_table_name,
-                overwrite=True,
-                extra_columns=lineage,
-                db_config=db_cfg,
-            )
+        row_count = stream_csv_url_to_table(
+            url=resolved.url,
+            table_name=spec.staging_table_name,
+            overwrite=True,
+            extra_columns=lineage,
+            db_config=db_cfg,
+        )
     except Exception as err:
         finished_at = datetime.now(timezone.utc)
         _finalize_run(

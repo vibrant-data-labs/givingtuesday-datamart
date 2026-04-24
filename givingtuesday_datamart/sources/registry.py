@@ -17,7 +17,6 @@ def _spec(
     filename_regex: str,
     *,
     primary_key: tuple[str, ...] | None = None,
-    needs_streaming: bool = True,
 ) -> SourceSpec:
     return SourceSpec(
         logical_name=logical_name,
@@ -28,7 +27,6 @@ def _spec(
         s3_prefix=S3_PREFIX,
         filename_regex=filename_regex,
         primary_key=primary_key,
-        needs_streaming=needs_streaming,
     )
 
 
@@ -46,7 +44,6 @@ REGISTRY: tuple[SourceSpec, ...] = (
         form_type="990-PF",
         description="Form 990-PF standard header + financial summary fields, one row per filing.",
         filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_990PFStandardFields\.csv$",
-        needs_streaming=False,
     ),
     _spec(
         logical_name="irs_990_missions",

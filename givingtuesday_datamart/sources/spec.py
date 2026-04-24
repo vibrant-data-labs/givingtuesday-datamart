@@ -40,7 +40,6 @@ class SourceSpec:
 
     columns: tuple[ColumnSpec, ...] = ()
     primary_key: tuple[str, ...] | None = None
-    needs_streaming: bool = True
 
     def compiled_regex(self) -> re.Pattern[str]:
         return re.compile(self.filename_regex)
