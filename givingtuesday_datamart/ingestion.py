@@ -9,6 +9,7 @@ that already has a successful run is a no-op unless ``force=True``.
 
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -21,6 +22,7 @@ from vdl_tools.shared_tools.tools.logger import logger
 
 from givingtuesday_datamart.sources.resolver import ResolvedVersion, resolve_latest
 from givingtuesday_datamart.sources.spec import SourceSpec
+from givingtuesday_datamart.validation import ValidationError, validate_ingest
 from givingtuesday_datamart.write_data_to_sql import stream_csv_url_to_table
 
 
@@ -73,7 +75,12 @@ class IngestResult:
 
 
 def ensure_meta_schema() -> None:
-    """Create ``datamart_meta`` schema and ``ingest_runs`` table if missing."""
+    """Create ``datamart_meta`` schema and ``ingest_runs`` table if missing.
+
+    Also runs additive ``ADD COLUMN IF NOT EXISTS`` migrations for columns
+    introduced after the initial table creation, so existing databases pick
+    them up without a separate migration step.
+    """
     with get_session(config=datamart_config()) as session:
         session.execute(text(f"CREATE SCHEMA IF NOT EXISTS {META_SCHEMA}"))
         session.execute(
@@ -91,6 +98,17 @@ def ensure_meta_schema() -> None:
                     row_count BIGINT,
                     error TEXT
                 )
+                """
+            )
+        )
+        # Added with the validation step. JSONB (not TEXT+cast) so jsonb
+        # operators work cleanly in ad-hoc queries.
+        session.execute(
+            text(
+                f"""
+                ALTER TABLE {INGEST_RUNS_TABLE}
+                ADD COLUMN IF NOT EXISTS column_list JSONB,
+                ADD COLUMN IF NOT EXISTS validation JSONB
                 """
             )
         )
@@ -161,7 +179,16 @@ def _finalize_run(
     status: str,
     row_count: int | None = None,
     error: str | None = None,
+    column_list: list[str] | None = None,
+    validation: list[dict] | None = None,
 ) -> None:
+    """Write the terminal state of an ingest run.
+
+    ``column_list`` and ``validation`` are JSONB on the DB side; we cast the
+    bound parameter explicitly so sqlalchemy/psycopg2 doesn't try to infer.
+    Either can be None — on a COPY failure (before validation runs) both
+    will be, which is the right signal that validation never got a chance.
+    """
     with get_session(config=datamart_config()) as session:
         session.execute(
             text(
@@ -170,7 +197,9 @@ def _finalize_run(
                 SET finished_at = :finished_at,
                     status = :status,
                     row_count = :row_count,
-                    error = :error
+                    error = :error,
+                    column_list = CAST(:column_list AS JSONB),
+                    validation = CAST(:validation AS JSONB)
                 WHERE run_id = :run_id
                 """
             ),
@@ -180,6 +209,12 @@ def _finalize_run(
                 "status": status,
                 "row_count": row_count,
                 "error": error,
+                "column_list": (
+                    json.dumps(column_list) if column_list is not None else None
+                ),
+                "validation": (
+                    json.dumps({"checks": validation}) if validation is not None else None
+                ),
             },
         )
 
@@ -273,8 +308,52 @@ def ingest_source(
             error=str(err),
         )
 
+    # Post-ingest validation. Hard-fail checks raise ValidationError → the run
+    # is marked 'failed' (the staging table stays as-is; consumers filter by
+    # status='success', so failed runs are self-quarantining). Soft warnings
+    # are returned inline and recorded in the validation JSONB.
+    try:
+        check_results, column_list = validate_ingest(
+            spec=spec,
+            staging_table=spec.staging_table_name,
+            source_version=resolved.version_date,
+            row_count=row_count,
+            db_config=db_cfg,
+        )
+    except ValidationError as verr:
+        finished_at = datetime.now(timezone.utc)
+        checks = getattr(verr, "results", None)
+        _finalize_run(
+            run_id=run_id,
+            finished_at=finished_at,
+            status="failed",
+            row_count=row_count,
+            error=str(verr)[:4000],
+            validation=[c.to_dict() for c in checks] if checks else None,
+        )
+        logger.error("Validation failed for %s: %s", spec.logical_name, verr)
+        return IngestResult(
+            run_id=run_id,
+            logical_name=spec.logical_name,
+            staging_table=spec.staging_table_name,
+            source_version=resolved.version_date,
+            source_url=resolved.url,
+            status="failed",
+            row_count=row_count,
+            started_at=started_at,
+            finished_at=finished_at,
+            error=str(verr),
+        )
+
     finished_at = datetime.now(timezone.utc)
-    _finalize_run(run_id=run_id, finished_at=finished_at, status="success", row_count=row_count)
+    _finalize_run(
+        run_id=run_id,
+        finished_at=finished_at,
+        status="success",
+        row_count=row_count,
+        column_list=column_list,
+        validation=[c.to_dict() for c in check_results],
+    )
     logger.info(
         "Ingest success: %s rows=%s duration=%.1fs",
         spec.logical_name,

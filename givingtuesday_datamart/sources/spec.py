@@ -41,6 +41,11 @@ class SourceSpec:
     columns: tuple[ColumnSpec, ...] = ()
     primary_key: tuple[str, ...] | None = None
 
+    # Columns the validator requires to be present and mostly non-null on every
+    # ingest. Empty tuple = skip the required-column check for this source
+    # (safe default — used when we haven't yet committed to a key column set).
+    required_columns: tuple[str, ...] = ()
+
     def compiled_regex(self) -> re.Pattern[str]:
         return re.compile(self.filename_regex)
 

@@ -17,6 +17,7 @@ def _spec(
     filename_regex: str,
     *,
     primary_key: tuple[str, ...] | None = None,
+    required_columns: tuple[str, ...] = (),
 ) -> SourceSpec:
     return SourceSpec(
         logical_name=logical_name,
@@ -27,6 +28,7 @@ def _spec(
         s3_prefix=S3_PREFIX,
         filename_regex=filename_regex,
         primary_key=primary_key,
+        required_columns=required_columns,
     )
 
 
@@ -37,6 +39,7 @@ REGISTRY: tuple[SourceSpec, ...] = (
         form_type="990",
         description="Form 990 standard header + financial summary fields, one row per filing.",
         filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_990StandardFields\.csv$",
+        required_columns=("filerein", "taxyear"),
     ),
     _spec(
         logical_name="irs_990pf_basic_fields",
@@ -44,6 +47,7 @@ REGISTRY: tuple[SourceSpec, ...] = (
         form_type="990-PF",
         description="Form 990-PF standard header + financial summary fields, one row per filing.",
         filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_990PFStandardFields\.csv$",
+        required_columns=("filerein", "taxyear"),
     ),
     _spec(
         logical_name="irs_990_missions",
@@ -51,6 +55,7 @@ REGISTRY: tuple[SourceSpec, ...] = (
         form_type="990",
         description="Form 990 Part I mission statement narrative, one row per filing.",
         filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_990Part1Missions\.csv$",
+        required_columns=("filerein",),
     ),
     _spec(
         logical_name="irs_990_programs",
@@ -58,6 +63,7 @@ REGISTRY: tuple[SourceSpec, ...] = (
         form_type="990",
         description="Form 990 Part III program accomplishment narratives (activities 1/2/3).",
         filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_990Part3Programs\.csv$",
+        required_columns=("filerein",),
     ),
     _spec(
         logical_name="irs_schedule_o",
@@ -65,6 +71,7 @@ REGISTRY: tuple[SourceSpec, ...] = (
         form_type="990",
         description="Schedule O supplemental narrative (including Part III program descriptions).",
         filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_Schedule_?O\.csv$",
+        required_columns=("filerein",),
     ),
     _spec(
         logical_name="irs_schedule_i_grants",
@@ -72,6 +79,7 @@ REGISTRY: tuple[SourceSpec, ...] = (
         form_type="990",
         description="Schedule I Part II — grants and other assistance to domestic organizations.",
         filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_ScheduleIPart2Grants\.csv$",
+        required_columns=("filerein",),
     ),
     _spec(
         logical_name="irs_990pf_grants",
@@ -79,6 +87,7 @@ REGISTRY: tuple[SourceSpec, ...] = (
         form_type="990-PF",
         description="Form 990-PF Part XIV Grants/Contributions Paid (3A) — grant line items from private foundations.",
         filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_990PFPart14Grants3A\.csv$",
+        required_columns=("filerein",),
     ),
     _spec(
         logical_name="irs_990_officers",
@@ -86,6 +95,7 @@ REGISTRY: tuple[SourceSpec, ...] = (
         form_type="990",
         description="Form 990 Part VII-A — officers, directors, trustees, and key employees (with compensation).",
         filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_990Part7AOfficers\.csv$",
+        required_columns=("filerein",),
     ),
     _spec(
         logical_name="irs_990pf_officers",
@@ -93,6 +103,7 @@ REGISTRY: tuple[SourceSpec, ...] = (
         form_type="990-PF",
         description="Form 990-PF Part VII p1 — list of officers, directors, trustees, foundation managers.",
         filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_990PFPart7p1-?Officers\.csv$",
+        required_columns=("filerein",),
     ),
 )
 

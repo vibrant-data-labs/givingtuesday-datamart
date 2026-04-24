@@ -136,7 +136,7 @@ def cmd_loaded() -> int:
         f"""
         SELECT DISTINCT ON (logical_name)
             logical_name, staging_table, source_version, status, row_count,
-            started_at, finished_at, error
+            started_at, finished_at, error, validation
         FROM {INGEST_RUNS_TABLE}
         ORDER BY logical_name, started_at DESC
         """
@@ -147,16 +147,31 @@ def cmd_loaded() -> int:
     latest_by_name = {r.logical_name: r for r in rows}
     now = datetime.now(timezone.utc)
 
+    def _warn_count(validation) -> int:
+        """Pull warning count from the validation JSONB blob (tolerant of None/str)."""
+        import json as _json
+        if validation is None:
+            return 0
+        if isinstance(validation, str):
+            try:
+                validation = _json.loads(validation)
+            except (ValueError, TypeError):
+                return 0
+        checks = validation.get("checks") if isinstance(validation, dict) else None
+        if not checks:
+            return 0
+        return sum(1 for c in checks if isinstance(c, dict) and c.get("status") == "warn")
+
     headers = (
         "logical_name", "staging_table", "status",
-        "version", "rows", "last_ingested_at", "age",
+        "version", "rows", "last_ingested_at", "age", "warns",
     )
     out_rows: list[tuple[str, ...]] = []
     for spec in REGISTRY:
         run = latest_by_name.get(spec.logical_name)
         if run is None:
             out_rows.append(
-                (spec.logical_name, spec.staging_table_name, "never", "—", "—", "—", "—")
+                (spec.logical_name, spec.staging_table_name, "never", "—", "—", "—", "—", "—")
             )
             continue
         # Age from finished_at if we have one, else from started_at.
@@ -164,6 +179,8 @@ def cmd_loaded() -> int:
         age = _format_age(now - ref) if ref is not None else "—"
         last = ref.strftime("%Y-%m-%d %H:%M UTC") if ref else "—"
         rows_str = f"{run.row_count:,}" if run.row_count is not None else "—"
+        warns = _warn_count(run.validation)
+        warns_str = str(warns) if warns else "—"
         out_rows.append(
             (
                 spec.logical_name,
@@ -173,6 +190,7 @@ def cmd_loaded() -> int:
                 rows_str,
                 last,
                 age,
+                warns_str,
             )
         )
 
@@ -196,6 +214,30 @@ def cmd_loaded() -> int:
                 "Latest run FAILED for %s (version %s): %s",
                 r.logical_name, r.source_version, err[:200],
             )
+
+    # Surface validation warnings on successful runs so they don't hide in the JSONB.
+    import json as _json
+    warning_lines: list[tuple[str, str]] = []
+    for r in latest_by_name.values():
+        if r.status != "success":
+            continue
+        validation = r.validation
+        if isinstance(validation, str):
+            try:
+                validation = _json.loads(validation)
+            except (ValueError, TypeError):
+                continue
+        if not isinstance(validation, dict):
+            continue
+        for c in validation.get("checks") or []:
+            if isinstance(c, dict) and c.get("status") == "warn":
+                warning_lines.append((r.logical_name, f"[{c.get('name')}] {c.get('detail')}"))
+    if warning_lines:
+        print()
+        for logical_name, line in warning_lines:
+            logger.warning("Validation warn for %s: %s", logical_name, line)
+
+    if failed:
         return 1
     return 0
 
