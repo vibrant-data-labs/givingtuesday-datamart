@@ -1,97 +1,219 @@
-# VDL Project Template
+# Giving Tuesday Datamart
 
-A template repository for all VDL projects. This template provides the basic structure and setup instructions for new VDL projects.
+VDL's internal data backbone for IRS 990 / 990-PF filings. Pulls the Giving
+Tuesday Datamart CSVs from S3, ingests them into PostgreSQL with full lineage
+tracking, and feeds downstream analyses and the React explorer in `frontend/`.
 
-## Repository Layout
+## Overview
 
-The project follows a specific processing pipeline with the following order of operations:
+- **Source**: `gt990datalake-analytics-and-datamarts` S3 bucket (public-read;
+  no credentials needed).
+- **Target**: `gt_datamart` database on the shared VDL RDS host. Dedicated
+  database (not shared with the rest of the VDL Postgres) so a bad refresh
+  can't damage unrelated data, and so we can drop/recreate cheaply during
+  early-phase work.
+- **Schemas in `gt_datamart`**:
+  - `public.*` — all 9 staging tables (`basic_fields`, `mission_statements`,
+    `programs`, `schedule_o`, `grants_to_domestic_organizations`,
+    `privategrants`, `basic_fields_pf`, `officers`, `officers_pf`).
+  - `datamart_meta.ingest_runs` — one row per ingest, records what was
+    pulled, when, and how it went.
+- **Every staging row** gets 4 lineage columns stamped at COPY time:
+  `_source_version`, `_source_url`, `_ingested_at`, `_ingest_run_id`.
+- **Every staging column is `TEXT`**. Zero-padded EINs (`012345678`), ZIPs
+  (`01234`), and phones round-trip intact. Consumers cast at query time
+  (`SUM(totrevcuryea::bigint)`).
 
-1. **Data Preprocessing**
-   - Location: `data_preprocessing`
-   - Purpose: Initial data cleaning and preparation for creating a unified dataset.
-   - Main Script: `process_data.py`
+## Setup
 
-2. **Data Enrichment**
-   - Location: `data_enrichment`
-   - Purpose: Adding additional features and transformations to the preprocessed data
-   - Main Script: `enrich_data.py`
+### 1. Python environment
 
-3. **Player Building**
-   - Location: `player_building`
-   - Purpose: Final player construction and output generation
-   - Main Script: `run_full_player.py`
-   In `run_full_player.py` you will need to change the `bucket` variable
-   You will very likely need to change the base assumptions in each of the files and definitely change
-   vdl_project_template/player_building/player_attribute_settings.xlsx
+Use the `givingtuesday` pyenv (has the required deps — `polars` and friends):
 
-Each step builds upon the previous one, creating a clear pipeline for data processing and player model development.
+```bash
+GT_PY=~/.pyenv/versions/3.12.11/envs/givingtuesday/bin/python
+```
 
-## Initial Setup
+### 2. VDL config
 
-### Clone Key Repositories
+Standard VDL `config.ini` with a `[postgres]` section pointing at the RDS
+host. See `vdl-tools` setup if you don't already have one.
 
-1. Create a directory on your computer called `vdl` and clone the following repositories into it:
+### 3. Create the `gt_datamart` database (one-time)
 
-   - **VDL-Tools**: Our central repository for shared tools
-   - **Shared-Data**: Repository for data shared across projects (project-specific data will live in project-specific repositories)
+The ingestion path deliberately does **not** create databases. Before the
+first refresh:
 
-### Development Environment Setup
+```bash
+psql -h <rds-host> -U <vdl-user> -d postgres -c "CREATE DATABASE gt_datamart;"
+```
 
-1. **Create a Virtual Environment**
-   - Create a virtual environment named `vdl-env`
-   - Note: If you use PyCharm, you may have your own preferred method for this
+(Or `createdb gt_datamart` if your libpq env is set.)
 
-2. **Install VDL-Tools**
-   - Install `vdl-tools` in your virtual environment using:
-   ```bash
-   pip install -e <path_to_vdl-tools_root>
-   ```
-   - Example: If you cloned vdl-tools at `/home/vdl/vdl-tools`, the command would be:
-   ```bash
-   pip install -e /home/vdl/vdl-tools
-   ```
+## Commands
 
-3. **Install Git LFS**
-   - Install Git LFS (Large File Storage)
-   - Note: This should be done before cloning shared-data
+All via the sources CLI:
 
-4. **Configuration Setup**
-   - Ensure you have a `config.ini` file in your `vdl/` directory
-   - Contact Lara Reichmann or Mike Tulubaev for a copy of this file
-   - Set an environment variable pointing to your config.ini
-   - For bash users, add this to your `.bashrc`:
-   ```bash
-   export VDL_CONFIG_PATH=/path/to/your/config.ini
-   ```
+```bash
+# What's currently in S3 vs. what we know about?
+$GT_PY -m givingtuesday_datamart.sources status
+```
 
-## Project Setup
+Prints a table: logical name, target staging table, latest S3 version date,
+filename, size. Fast (S3 list only, no DB, no downloads).
 
-After cloning this template:
-1. Rename the directory `vdl_project_template` to your project name
-2. Update this README with project-specific information
-3. Follow the setup instructions above to configure your development environment
+```bash
+# Ingest everything (~32 GB of CSV total; run overnight)
+$GT_PY -m givingtuesday_datamart.sources refresh
 
+# Single source
+$GT_PY -m givingtuesday_datamart.sources refresh --source irs_990_missions
 
-## Running the Pipeline
+# Multiple sources in one command
+$GT_PY -m givingtuesday_datamart.sources refresh \
+    --source irs_990_basic_fields \
+    --source irs_990_missions
 
-To run the complete pipeline, execute the scripts in the following order:
+# Force re-ingest (bypass idempotency; drops + recreates the staging table)
+$GT_PY -m givingtuesday_datamart.sources refresh --source irs_990_missions --force
+```
 
-1. **Data Preprocessing**
-   ```bash
-   python data_preprocessing/process_data.py
-   ```
-   This will create a unified dataset from the raw data.
+### Idempotency
 
-2. **Data Enrichment**
-   ```bash
-   python data_enrichment/enrich_data.py
-   ```
-   This will add additional features to the preprocessed data.
+`refresh` is idempotent on `(logical_name, source_version)`. If a successful
+run already exists in `datamart_meta.ingest_runs` for the same source +
+version, the refresh is skipped with status `skipped`. Use `--force` to
+override (drops the staging table and reingests).
 
-3. **Player Building**
-   ```bash
-   python player_building/run_full_player.py
-   ```
-   This will generate the final player output.
+A `failed` run does **not** block a retry — rerun the same command and it
+will try again.
 
-Note: Make sure each step completes successfully before moving to the next one, as each script depends on the output of the previous step.
+### Recommended first-run order
+
+Smallest to largest, so errors surface fast:
+
+```bash
+$GT_PY -m givingtuesday_datamart.sources refresh --source irs_990pf_basic_fields   # ~730 MB
+$GT_PY -m givingtuesday_datamart.sources refresh --source irs_990pf_officers       # ~1.0 GB
+$GT_PY -m givingtuesday_datamart.sources refresh --source irs_990_missions         # ~1.0 GB
+$GT_PY -m givingtuesday_datamart.sources refresh --source irs_schedule_i_grants    # ~1.9 GB
+$GT_PY -m givingtuesday_datamart.sources refresh --source irs_990_basic_fields     # ~2.1 GB
+$GT_PY -m givingtuesday_datamart.sources refresh --source irs_990_programs         # ~2.2 GB
+$GT_PY -m givingtuesday_datamart.sources refresh --source irs_990pf_grants         # ~4.4 GB
+$GT_PY -m givingtuesday_datamart.sources refresh --source irs_990_officers         # ~8.6 GB
+$GT_PY -m givingtuesday_datamart.sources refresh --source irs_schedule_o           # ~10  GB
+```
+
+## Verifying a refresh
+
+Connect to `gt_datamart` and check the run table and the lineage columns:
+
+```sql
+-- All runs, newest first
+SELECT run_id, logical_name, source_version, status, row_count,
+       finished_at - started_at AS duration, error
+FROM datamart_meta.ingest_runs
+ORDER BY started_at DESC;
+
+-- Most recent run per source
+SELECT DISTINCT ON (logical_name)
+    logical_name, source_version, status, row_count, finished_at
+FROM datamart_meta.ingest_runs
+ORDER BY logical_name, finished_at DESC;
+
+-- Lineage stamped on every row (exactly one version per staging table)
+SELECT DISTINCT _source_version, _ingest_run_id
+FROM public.mission_statements;
+
+-- Row count parity with ingest_runs
+SELECT COUNT(*) FROM public.mission_statements;
+```
+
+## Adding a new source
+
+Edit [`givingtuesday_datamart/sources/registry.py`](givingtuesday_datamart/sources/registry.py)
+and append a new `_spec(...)` entry:
+
+```python
+_spec(
+    logical_name="irs_new_thing",
+    staging_table_name="public.new_thing",
+    form_type="990",  # or "990-PF"
+    description="Short human-readable description of what this table is.",
+    filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_NewThingPattern\.csv$",
+),
+```
+
+The **first capture group** of `filename_regex` must capture `YYYY_MM_DD` so
+the resolver can pick the newest matching file.
+
+Verify with `status` before running `refresh`:
+
+```bash
+$GT_PY -m givingtuesday_datamart.sources status
+```
+
+If the new source shows `NOT FOUND`, the regex doesn't match anything in the
+bucket — fix it before running `refresh`.
+
+## Design notes
+
+- **All-TEXT staging.** Every column created by `_create_table_from_columns`
+  is `TEXT`. Zero-padded EINs, ZIPs, and phones round-trip intact. Consumers
+  cast at query time (`::bigint`, `::double precision`, etc.). Typed
+  canonical views are a Phase 2 concern.
+- **Streaming ingestion.** No disk cache, no pandas in the hot path. CSV is
+  parsed via `csv.reader` over an `io.TextIOWrapper(newline="")` on top of a
+  `BufferedReader` wrapping `response.iter_content()`. Quoted multi-line
+  fields (mission statements, Schedule O narratives) are preserved — a
+  naive `iter_lines` split would mangle them.
+- **COPY in batches of 50,000.** Each batch is stamped with the 4 lineage
+  columns in the same COPY command — no second pass.
+- **Idempotency is enforced in the app layer**, not via DB constraints.
+  Before creating a run row, we check `datamart_meta.ingest_runs` for an
+  existing successful `(logical_name, source_version)`. Simple and easy to
+  reason about; future work could add a unique constraint if needed.
+- **Database isolation.** `gt_datamart` is a separate database on the same
+  RDS host as the main VDL DB. Threaded via `get_session(config=datamart_config())`
+  rather than a parallel connection module.
+
+## Troubleshooting
+
+**"Skipping" when you want to re-ingest.** That's idempotency working. Pass
+`--force` to drop the staging table and re-run.
+
+**"database 'gt_datamart' does not exist".** Do the one-time `createdb
+gt_datamart` step above.
+
+**"No module named 'polars'" (or pandas, psycopg2, etc.).** You're not in the
+`givingtuesday` pyenv — `vdl-tools-312` is missing polars. Use
+`~/.pyenv/versions/3.12.11/envs/givingtuesday/bin/python`.
+
+**"NOT FOUND" for a source in `status`.** Giving Tuesday occasionally
+renames files (e.g., `990PFPart7p1Officers.csv` vs `990PFPart7p1-Officers.csv`).
+The `filename_regex` in the registry needs an update; make the pattern
+tolerant (`-?`, character classes) rather than exact.
+
+**Staging columns showing up as `bigint` / `double precision`.** You're
+looking at a table that was ingested by the deleted standard (pandas
+`to_sql`) path, before we switched to streaming-only. `--force` re-ingest
+and it'll come out as all-`TEXT`.
+
+## Repo layout
+
+```
+givingtuesday_datamart/
+  sources/
+    spec.py          # SourceSpec / ColumnSpec dataclasses
+    registry.py      # One SourceSpec per ingested table
+    resolver.py      # Picks the latest matching file from S3 (boto3 unsigned)
+    __main__.py      # CLI: status, refresh
+  ingestion.py       # ingest_source() + ingest_latest(), ingest_runs tracking
+  write_data_to_sql.py  # Streaming CSV -> COPY (all-TEXT columns, lineage stamping)
+  sql_queries/       # Downstream analytical SQL (build canonical views, grants unions, etc.)
+  matching_records_experiment.py  # recordlinkage pipeline (Phase 3 work)
+scripts/
+  create_tables.py   # Thin wrapper around `sources refresh`
+frontend/            # Next.js app (reads from the old VDL DB today; migration to gt_datamart TBD)
+```
+
