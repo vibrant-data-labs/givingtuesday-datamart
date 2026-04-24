@@ -215,5 +215,14 @@ givingtuesday_datamart/
 scripts/
   create_tables.py   # Thin wrapper around `sources refresh`
 frontend/            # Next.js app (reads from the old VDL DB today; migration to gt_datamart TBD)
+docs/
+  backbone-plan.md   # Phased plan for the full data backbone (ingestion, query surfaces, matching)
 ```
 
+## The full plan
+
+[`docs/backbone-plan.md`](docs/backbone-plan.md) has the phased roadmap for
+this work — all three phases (ingestion + lineage; query surfaces and
+canonical entity views; matching, classification, and person dedup), the
+architecture decisions behind them, critical files, and verification
+criteria per phase. Read it before starting anything non-trivial.
