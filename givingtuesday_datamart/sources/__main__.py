@@ -245,12 +245,12 @@ def cmd_loaded() -> int:
     return 0
 
 
-def cmd_build_canonical() -> int:
+def cmd_build_canonical(*, include_people: bool = False) -> int:
     """Rebuild the Phase 2 canonical tables from current staging."""
     from givingtuesday_datamart.canonical.build import build_canonical
 
     try:
-        result = build_canonical()
+        result = build_canonical(include_people=include_people)
     except Exception as err:
         logger.error("Canonical build failed: %s", err)
         return 1
@@ -363,9 +363,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Re-ingest even if a successful run already exists for this (source, version).",
     )
 
-    subparsers.add_parser(
+    bc_parser = subparsers.add_parser(
         "build-canonical",
         help="Rebuild Phase 2 canonical tables (nonprofit_canonical + nonprofit_text) from staging.",
+    )
+    bc_parser.add_argument(
+        "--with-people",
+        action="store_true",
+        help="Also build person_canonical + org_person_role from the officers tables. "
+             "Off by default — those tables materialize ~90M rows and need extra RDS storage. "
+             "Turn on once storage is sized for it.",
     )
 
     args = parser.parse_args(argv)
@@ -376,7 +383,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "refresh":
         return cmd_refresh(args.sources, force=args.force)
     if args.command == "build-canonical":
-        return cmd_build_canonical()
+        return cmd_build_canonical(include_people=args.with_people)
     return 2
 
 

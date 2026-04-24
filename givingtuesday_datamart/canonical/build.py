@@ -636,13 +636,21 @@ def _build_org_person_role(session) -> int:
     return count
 
 
-def build_canonical() -> BuildResult:
+def build_canonical(*, include_people: bool = False) -> BuildResult:
     """Rebuild all Phase 2 canonical tables from current staging.
 
-    Both tables are rebuilt inside a single transaction so a failure leaves
-    the old canonical state intact — downstream consumers never see a
+    All tables build inside a single transaction so a failure leaves the
+    old canonical state intact — downstream consumers never see a
     half-built canonical layer. The overall build is recorded in
     ``datamart_meta.canonical_builds`` for lineage.
+
+    ``include_people`` controls the officers-derived tables
+    (``person_canonical`` + ``org_person_role``). They are off by default
+    because together they materialize 90M+ rows, which we found we don't
+    have RDS disk headroom for yet. Flip on once storage is sized for it
+    (and once a downstream consumer — frontend profile pages, Phase 3
+    person matching — actually needs them). When skipped, those tables'
+    rowcount fields on ``BuildResult`` come back as 0.
     """
     ensure_canonical_meta()
     build_id = str(uuid.uuid4())
@@ -668,7 +676,10 @@ def build_canonical() -> BuildResult:
             },
         )
 
-    logger.info("Starting canonical build %s", build_id)
+    logger.info(
+        "Starting canonical build %s (include_people=%s)",
+        build_id, include_people,
+    )
     try:
         with get_session(config=datamart_config()) as session:
             # schedule_o_part_iii must land before nonprofit_text because the
@@ -678,8 +689,16 @@ def build_canonical() -> BuildResult:
             np_rows = _build_nonprofit_canonical(session)
             txt_rows = _build_nonprofit_text(session)
             fn_rows = _build_funder_canonical(session)
-            person_rows = _build_person_canonical(session)
-            role_rows = _build_org_person_role(session)
+            if include_people:
+                person_rows = _build_person_canonical(session)
+                role_rows = _build_org_person_role(session)
+            else:
+                logger.info(
+                    "Skipping person_canonical + org_person_role "
+                    "(include_people=False; ~90M rows of disk would be needed)"
+                )
+                person_rows = 0
+                role_rows = 0
     except Exception as err:
         finished_at = datetime.now(timezone.utc)
         with get_session(config=datamart_config()) as session:
