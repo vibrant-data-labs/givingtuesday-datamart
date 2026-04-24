@@ -199,23 +199,26 @@ def write_dataframe_to_table(
     df: pl.DataFrame,
     table_name: str,
     overwrite: bool = True,
-    session=None
+    session=None,
+    db_config: dict | None = None,
 ):
     """
     Write a Polars DataFrame to a database table using psycopg2 COPY.
     This is the fastest method for bulk loading data into PostgreSQL.
-    
+
     Args:
         df: Polars DataFrame to write
         table_name: Name of the target database table
         overwrite: If True, drop the table if it exists before writing
         session: SQLAlchemy session (if None, will get a new session)
+        db_config: Optional vdl-tools config dict override (used when ``session``
+            is None) to target a non-default database on the VDL RDS host.
     """
     if session is None:
-        with get_session() as session:
+        with get_session(config=db_config) as session:
             _write_df_with_session(session, df, table_name, overwrite)
         return
-    
+
     _write_df_with_session(session, df, table_name, overwrite)
 
 
@@ -317,19 +320,27 @@ def write_csv_url_to_table_standard(
     overwrite: bool = True,
     cache_dir: Path = None,
     use_cache: bool = True,
-):
+    extra_columns: dict[str, str] | None = None,
+    db_config: dict | None = None,
+) -> int:
     """
     Download a CSV from a URL and write it to a database table (standard mode).
-    
+
     This function downloads the file to disk, loads it into memory, then writes to DB.
     Best for files that fit comfortably in memory (< 1-2 GB).
-    
+
     Args:
         url: URL of the CSV file to download
         table_name: Name of the database table to write to
         overwrite: If True, drop the table if it exists before writing
         cache_dir: Directory to cache files (default: data/source_data)
         use_cache: If True, check for and use cached files
+        extra_columns: Optional mapping of column_name -> constant value. Each
+            entry adds a TEXT column to the created table, and every written
+            row gets the matching constant value stamped on it.
+
+    Returns:
+        Number of rows written.
     """
     try:
         df = download_csv_from_url(url, cache_dir=cache_dir, use_cache=use_cache)
@@ -337,17 +348,28 @@ def write_csv_url_to_table_standard(
 
         logger.info("Renaming columns to lowercase...")
         df = rename_columns_to_lowercase(df)
+
+        if extra_columns:
+            df = df.with_columns([
+                pl.lit(value).alias(name) for name, value in extra_columns.items()
+            ])
+            logger.info(
+                f"Stamped {len(extra_columns)} lineage column(s): {', '.join(extra_columns.keys())}"
+            )
+
         logger.info(f"Columns: {', '.join(df.columns)}")
-        
+
         logger.info(f"Writing to table '{table_name}'...")
         write_dataframe_to_table(
             df=df,
             table_name=table_name,
             overwrite=overwrite,
+            db_config=db_config,
         )
-        
+
         logger.info("Script completed successfully!")
-        
+        return len(df)
+
     except Exception as e:
         raise Exception(f"Failed to write CSV from URL to table: {e}")
 
@@ -360,7 +382,7 @@ def write_csv_url_to_table_standard(
 def _create_table_from_columns(engine, table_name: str, columns: list[str], overwrite: bool):
     """
     Create a table with TEXT columns (we'll let PostgreSQL infer types aren't needed for most analytics).
-    
+
     Args:
         engine: SQLAlchemy engine
         table_name: Full table name (schema.table or just table)
@@ -369,39 +391,52 @@ def _create_table_from_columns(engine, table_name: str, columns: list[str], over
     """
     # Build column definitions - use TEXT for everything (safest for large varied data)
     col_defs = ', '.join([f'"{col}" TEXT' for col in columns])
-    
+
     with engine.connect() as conn:
         if overwrite:
             conn.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
-        
+
         conn.execute(text(f"CREATE TABLE IF NOT EXISTS {table_name} ({col_defs})"))
         conn.commit()
-    
+
     logger.info(f"Created table {table_name} with {len(columns)} columns")
 
 
-def _write_batch_to_db(cursor, table_name: str, columns: list[str], rows: list[list]):
+def _write_batch_to_db(
+    cursor,
+    table_name: str,
+    columns: list[str],
+    rows: list[list],
+    extra_values: list | None = None,
+):
     """
     Write a batch of rows to the database using COPY.
-    
+
     Args:
         cursor: psycopg2 cursor
         table_name: Target table name
-        columns: List of column names
-        rows: List of row data (list of lists)
+        columns: List of column names (including any extra/lineage columns)
+        rows: List of row data (list of lists) — one entry per source column
+        extra_values: Optional list of constant values (one per extra column)
+            appended to every row. Must align with the trailing columns of
+            ``columns``.
     """
     if not rows:
         return
-    
+
     output = io.StringIO()
     writer = csv.writer(output, quoting=csv.QUOTE_MINIMAL)
-    
+
+    extras: list = list(extra_values) if extra_values else []
+
     for row in rows:
         csv_row = [val if val is not None else '' for val in row]
+        if extras:
+            csv_row.extend(extras)
         writer.writerow(csv_row)
-    
+
     output.seek(0)
-    
+
     column_names = ', '.join([f'"{col}"' for col in columns])
     cursor.copy_expert(
         f"COPY {table_name} ({column_names}) FROM STDIN WITH (FORMAT csv, NULL '')",
@@ -415,116 +450,134 @@ def stream_csv_url_to_table(
     table_name: str,
     overwrite: bool = True,
     batch_size: int = STREAMING_BATCH_SIZE,
-):
+    extra_columns: dict[str, str] | None = None,
+    db_config: dict | None = None,
+) -> int:
     """
     Stream a CSV from a URL directly to a database table.
-    
+
     This function streams the download and processes rows in batches,
     never loading the entire file into memory or disk.
-    
+
     Designed for very large files (10GB+) on memory-constrained systems.
-    
+
     Args:
         url: URL of the CSV file to download
         table_name: Name of the database table to write to
         overwrite: If True, drop the table if it exists before writing
         batch_size: Number of rows to process at a time (default: 50000)
+        extra_columns: Optional mapping of column_name -> constant value. Each
+            entry adds a TEXT column to the created table, and every written
+            row gets the matching constant value stamped on it. Used by the
+            ingestion layer to stamp lineage metadata without a second pass.
+
+    Returns:
+        Number of rows written.
     """
     logger.info(f"Streaming CSV from: {url}")
     logger.info(f"Target table: {table_name}")
     logger.info(f"Batch size: {batch_size:,} rows")
-    
+
+    extra_names: list[str] = list(extra_columns.keys()) if extra_columns else []
+    extra_vals: list[str] = [extra_columns[k] for k in extra_names] if extra_columns else []
+
     try:
         # Start streaming download
         response = requests.get(url, stream=True, timeout=3600)  # 1 hour timeout for large files
         response.raise_for_status()
-        
+
         # Get file size if available
         total_size = int(response.headers.get('content-length', 0))
         if total_size > 0:
             logger.info(f"File size: {total_size / (1024*1024*1024):.2f} GB")
-        
+
         # Wrap response in a text stream for CSV reader
         # Use iter_lines for memory-efficient line-by-line reading
         lines_iter = response.iter_lines(decode_unicode=True)
-        
+
         # Read header line
         header_line = next(lines_iter)
         csv_reader = csv.reader([header_line])
         original_columns = next(csv_reader)
-        
+
         # Build column mapping and get sanitized names
         column_mapping = _build_column_mapping(original_columns)
-        sanitized_columns = [column_mapping[col] for col in original_columns]
-        
-        logger.info(f"Found {len(sanitized_columns)} columns")
-        logger.info(f"Columns: {', '.join(sanitized_columns[:10])}{'...' if len(sanitized_columns) > 10 else ''}")
-        
+        source_columns = [column_mapping[col] for col in original_columns]
+        all_columns = source_columns + extra_names
+
+        logger.info(f"Found {len(source_columns)} source columns (+ {len(extra_names)} lineage columns)")
+        logger.info(f"Columns: {', '.join(all_columns[:10])}{'...' if len(all_columns) > 10 else ''}")
+
         # Create table
-        with get_session() as session:
+        with get_session(config=db_config) as session:
             engine = session.bind
-            _create_table_from_columns(engine, table_name, sanitized_columns, overwrite)
-            
+            _create_table_from_columns(engine, table_name, all_columns, overwrite)
+
             # Get raw connection for COPY
             raw_conn = engine.raw_connection()
             try:
                 cursor = raw_conn.cursor()
-                
+
                 # Process rows in batches
                 batch = []
                 total_rows = 0
                 bytes_processed = 0
-                
+
                 for line in lines_iter:
                     if not line:  # Skip empty lines
                         continue
-                    
+
                     bytes_processed += len(line.encode('utf-8'))
-                    
+
                     # Parse the CSV line
                     try:
                         csv_reader = csv.reader([line])
                         row = next(csv_reader)
-                        
-                        # Ensure row has correct number of columns
-                        if len(row) < len(sanitized_columns):
-                            row.extend([''] * (len(sanitized_columns) - len(row)))
-                        elif len(row) > len(sanitized_columns):
-                            row = row[:len(sanitized_columns)]
-                        
+
+                        # Ensure row has correct number of source columns
+                        if len(row) < len(source_columns):
+                            row.extend([''] * (len(source_columns) - len(row)))
+                        elif len(row) > len(source_columns):
+                            row = row[:len(source_columns)]
+
                         batch.append(row)
                     except Exception as e:
                         # Skip malformed rows
                         logger.warning(f"Skipping malformed row: {e}")
                         continue
-                    
+
                     # Write batch when full
                     if len(batch) >= batch_size:
-                        _write_batch_to_db(cursor, table_name, sanitized_columns, batch)
+                        _write_batch_to_db(
+                            cursor, table_name, all_columns, batch, extra_values=extra_vals,
+                        )
                         raw_conn.commit()
-                        
+
                         total_rows += len(batch)
                         batch = []
-                        
+
                         # Log progress
                         if total_size > 0:
                             progress = (bytes_processed / total_size) * 100
                             logger.info(f"Progress: {progress:.1f}% - {total_rows:,} rows written")
                         else:
                             logger.info(f"Rows written: {total_rows:,}")
-                
+
                 # Write remaining rows
                 if batch:
-                    _write_batch_to_db(cursor, table_name, sanitized_columns, batch)
+                    _write_batch_to_db(
+                        cursor, table_name, all_columns, batch, extra_values=extra_vals,
+                    )
                     raw_conn.commit()
                     total_rows += len(batch)
-                
+
                 cursor.close()
                 logger.info(f"Successfully wrote {total_rows:,} rows to table '{table_name}'")
-                
+                return total_rows
+
             finally:
                 raw_conn.close()
-                
+
     except requests.exceptions.RequestException as e:
         raise Exception(f"Failed to download CSV from URL: {url}. Error: {e}")
     except Exception as e:
@@ -539,10 +592,12 @@ def write_csv_url_to_table(
     batch_size: int = STREAMING_BATCH_SIZE,
     cache_dir: Path = None,
     use_cache: bool = True,
-):
+    extra_columns: dict[str, str] | None = None,
+    db_config: dict | None = None,
+) -> int:
     """
     Download a CSV from a URL and write it to a database table.
-    
+
     Args:
         url: URL of the CSV file to download
         table_name: Name of the database table to write to
@@ -551,29 +606,35 @@ def write_csv_url_to_table(
         batch_size: (streaming mode only) Number of rows to process at a time
         cache_dir: (standard mode only) Directory to cache files
         use_cache: (standard mode only) If True, check for and use cached files
-    
+        extra_columns: Optional mapping of column_name -> constant value stamped
+            on every row (used for lineage metadata).
+
     Returns:
-        None
-    
+        Number of rows written.
+
     Raises:
         Exception: If any step fails (download, processing, or database write)
     """
     if streaming:
         logger.info("Using STREAMING mode (memory-efficient for large files)")
-        stream_csv_url_to_table(
+        return stream_csv_url_to_table(
             url=url,
             table_name=table_name,
             overwrite=overwrite,
             batch_size=batch_size,
+            extra_columns=extra_columns,
+            db_config=db_config,
         )
     else:
         logger.info("Using STANDARD mode (downloads to disk, loads into memory)")
-        write_csv_url_to_table_standard(
+        return write_csv_url_to_table_standard(
             url=url,
             table_name=table_name,
             overwrite=overwrite,
             cache_dir=cache_dir,
             use_cache=use_cache,
+            extra_columns=extra_columns,
+            db_config=db_config,
         )
 
 

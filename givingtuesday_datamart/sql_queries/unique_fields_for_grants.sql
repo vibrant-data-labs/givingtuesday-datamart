@@ -1,5 +1,5 @@
-DROP VIEW IF EXISTS irs_filings.privategrants_w_column_keys_view;
-CREATE VIEW irs_filings.privategrants_w_column_keys_view AS (
+DROP VIEW IF EXISTS public.privategrants_w_column_keys_view;
+CREATE VIEW public.privategrants_w_column_keys_view AS (
 	SELECT
 		*,
 		CASE WHEN sigocpyrbnbn1 IS NULL THEN '' ELSE LOWER(sigocpyrbnbn1) END name1_key,
@@ -9,12 +9,12 @@ CREATE VIEW irs_filings.privategrants_w_column_keys_view AS (
 		LOWER(sigocpyrfaci) addresscity_key,
 		LOWER(sigocpyrfapo) addressstate_key,
 		LOWER(LEFT(sigocpyrfapc, 5)) addresszip_key
-	FROM irs_filings.privategrants
+	FROM public.privategrants
 );
 
 
-DROP VIEW IF EXISTS irs_filings.privategrants_unique_names_view;
-CREATE VIEW irs_filings.privategrants_unique_names_view AS (
+DROP VIEW IF EXISTS public.privategrants_unique_names_view;
+CREATE VIEW public.privategrants_unique_names_view AS (
 		SELECT
 		name1_key,
 		name2_key,
@@ -23,7 +23,7 @@ CREATE VIEW irs_filings.privategrants_unique_names_view AS (
 		addresscity_key,
 		addressstate_key,
 		addresszip_key
-	FROM irs_filings.privategrants_w_column_keys_view
+	FROM public.privategrants_w_column_keys_view
 	-- WHERE taxyear::int >= 2018 AND sigocpyamoun::bigint >= 10000
 	WHERE taxyear::int >= 2015
 	GROUP BY
@@ -38,8 +38,8 @@ CREATE VIEW irs_filings.privategrants_unique_names_view AS (
 
 
 
-DROP VIEW IF EXISTS irs_filings.basic_fields_w_column_keys_view;
-CREATE VIEW irs_filings.basic_fields_w_column_keys_view AS (
+DROP VIEW IF EXISTS public.basic_fields_w_column_keys_view;
+CREATE VIEW public.basic_fields_w_column_keys_view AS (
 	SELECT
 		*,
 		CASE WHEN filerein IS NULL THEN '' ELSE LOWER(filerein::text) END filerein_key,
@@ -50,15 +50,15 @@ CREATE VIEW irs_filings.basic_fields_w_column_keys_view AS (
 		LOWER(fileruscity) addresscity_key,
 		LOWER(filerusstate) addressstate_key,
 		LOWER(LEFT(fileruszip::text, 5)) addresszip_key
-	FROM irs_filings.basic_fields
+	FROM public.basic_fields
 );
 
 
 
 
 -- All
-DROP VIEW IF EXISTS irs_filings.basic_fields_unique_names_view;
-CREATE VIEW irs_filings.basic_fields_unique_names_view AS (
+DROP VIEW IF EXISTS public.basic_fields_unique_names_view;
+CREATE VIEW public.basic_fields_unique_names_view AS (
 	SELECT
 		filerein_key,
 		name1_key,
@@ -68,7 +68,7 @@ CREATE VIEW irs_filings.basic_fields_unique_names_view AS (
 		addresscity_key,
 		addressstate_key,
 		addresszip_key
-	FROM irs_filings.basic_fields_w_column_keys_view bf
+	FROM public.basic_fields_w_column_keys_view bf
 	WHERE taxyear::int >= 2015
 	GROUP BY
 		filerein_key,
@@ -82,17 +82,17 @@ CREATE VIEW irs_filings.basic_fields_unique_names_view AS (
 )
 
 SELECT COUNT(*)
-FROM irs_filings.basic_fields_unique_names;
+FROM public.basic_fields_unique_names;
 
 SELECT COUNT(*)
-FROM irs_filings.basic_fields_unique_names_view;
+FROM public.basic_fields_unique_names_view;
 
 
 
 
-DROP TABLE IF EXISTS irs_filings.unioned_grants;
+DROP TABLE IF EXISTS public.unioned_grants;
 SELECT *
-INTO irs_filings.unioned_grants
+INTO public.unioned_grants
 FROM (
     SELECT
         filerein::text AS granter_ein,
@@ -116,7 +116,7 @@ FROM (
         sigocpypogoc AS grant_purpose,
         sigocpyrfsta AS grant_status,
         sigocpyrrela AS grant_relationship
-     FROM irs_filings.privategrants_w_recipients
+     FROM public.privategrants_w_recipients
 
     UNION
 
@@ -145,19 +145,19 @@ FROM (
         retapuofgrra AS grant_purpose,
         NULL AS grant_status,
         NULL AS grant_relationship
-    FROM irs_filings.grants_to_domestic_organizations
+    FROM public.grants_to_domestic_organizations
 );
 DROP INDEX IF EXISTS idx_unioned_grants_granter_ein;
 DROP INDEX IF EXISTS idx_unioned_grants_grantee_ein;
 DROP INDEX IF EXISTS idx_unioned_grants_taxyear;
 
-CREATE INDEX IF NOT EXISTS idx_unioned_grants_granter_ein ON irs_filings.unioned_grants (granter_ein);
-CREATE INDEX IF NOT EXISTS idx_unioned_grants_grantee_ein ON irs_filings.unioned_grants (grantee_ein);
-CREATE INDEX IF NOT EXISTS idx_unioned_grants_taxyear ON irs_filings.unioned_grants (taxyear);
+CREATE INDEX IF NOT EXISTS idx_unioned_grants_granter_ein ON public.unioned_grants (granter_ein);
+CREATE INDEX IF NOT EXISTS idx_unioned_grants_grantee_ein ON public.unioned_grants (grantee_ein);
+CREATE INDEX IF NOT EXISTS idx_unioned_grants_taxyear ON public.unioned_grants (taxyear);
 
 
 
 
 
--- CREATE INDEX IF NOT EXISTS idx_basic_fields_filerein ON irs_filings.basic_fields (filerein);
--- CREATE INDEX IF NOT EXISTS idx_basic_fields_taxyear ON irs_filings.basic_fields (taxyear);
+-- CREATE INDEX IF NOT EXISTS idx_basic_fields_filerein ON public.basic_fields (filerein);
+-- CREATE INDEX IF NOT EXISTS idx_basic_fields_taxyear ON public.basic_fields (taxyear);

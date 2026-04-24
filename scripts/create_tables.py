@@ -1,45 +1,20 @@
-from givingtuesday_datamart.write_data_to_sql import write_csv_url_to_table
+"""Thin wrapper around ``python -m givingtuesday_datamart.sources refresh``.
 
+Previously this script hardcoded dated S3 URLs per table. The source registry
+in ``givingtuesday_datamart.sources`` now owns URL resolution, lineage
+stamping, and idempotency. This file exists only to preserve the familiar
+entrypoint (``python scripts/create_tables.py``) — it delegates to the CLI.
 
-TABLES_TO_CREATE = [
-    (
-        "irs_filings.basic_fields",
-        "https://gt990datalake-analytics-and-datamarts.s3.us-east-1.amazonaws.com/EfileDataMarts/2025_10_18_All_Years_990StandardFields.csv"
-    ),
-    (
-        "irs_filings.basic_fields_pf",
-        "https://gt990datalake-analytics-and-datamarts.s3.us-east-1.amazonaws.com/EfileDataMarts/2025_08_29_All_Years_990PFStandardFields.csv",
-    ),
-    (
-        "irs_filings.grants_to_domestic_organizations",
-        "https://gt990datalake-analytics-and-datamarts.s3.us-east-1.amazonaws.com/EfileDataMarts/2025_08_29_All_Years_ScheduleIPart2Grants.csv"
-    ),
-    (
-        'irs_filings.mission_statements',
-        "https://gt990datalake-analytics-and-datamarts.s3.us-east-1.amazonaws.com/EfileDataMarts/2025_08_29_All_Years_990Part1Missions.csv"
-    ),
-    (
-        'irs_filings.privategrants',
-        'https://gt990datalake-analytics-and-datamarts.s3.us-east-1.amazonaws.com/EfileDataMarts/2025_08_29_All_Years_990PFPart14Grants3A.csv',
-    ),
-    (
-        'irs_filings.programs',
-        'https://gt990datalake-analytics-and-datamarts.s3.us-east-1.amazonaws.com/EfileDataMarts/2025_08_29_All_Years_990Part3Programs.csv',
-    ),
-    (
-        'irs_filings.schedule_o',
-        'https://gt990datalake-analytics-and-datamarts.s3.us-east-1.amazonaws.com/EfileDataMarts/2025_08_29_All_Years_ScheduleO.csv',
-    )
+Prefer ``python -m givingtuesday_datamart.sources refresh`` directly.
+"""
 
-]
+from __future__ import annotations
+
+import sys
+
+from givingtuesday_datamart.sources.__main__ import main as sources_main
 
 
 if __name__ == "__main__":
-    for table_name, url in TABLES_TO_CREATE:
-        write_csv_url_to_table(
-            url,
-            table_name,
-            overwrite=True,
-            use_cache=True,
-            streaming=True,
-        )
+    # Translate any CLI args through to the `refresh` subcommand.
+    sys.exit(sources_main(["refresh", *sys.argv[1:]]))

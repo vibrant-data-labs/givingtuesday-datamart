@@ -1,6 +1,6 @@
 
 SELECT *
-FROM irs_filings.privategrants_w_recipient_ein_match
+FROM public.privategrants_w_recipient_ein_match
 WHERE recipeint_ein_key = '852588841'
 
 
@@ -15,7 +15,7 @@ FROM (
 		recipeint_ein_key::text,
 		taxyear::int,
 		SUM(sigocpyamoun::bigint) amount
-	FROM irs_filings.privategrants_w_recipient_ein_match
+	FROM public.privategrants_w_recipient_ein_match
 	GROUP BY recipeint_ein_key, taxyear
 
 	UNION ALL
@@ -24,7 +24,7 @@ FROM (
 		rteinorecipi::text recipeint_ein_key,
 		taxyear::int,
 		SUM(retaamofcagr::bigint) amount
-	FROM irs_filings.grants_to_domestic_organizations
+	FROM public.grants_to_domestic_organizations
 	GROUP BY rteinorecipi, taxyear
 )
 JOIN tracker_eins gt
@@ -34,55 +34,55 @@ ORDER BY recipeint_ein_key, taxyear
 
 
 SELECT *
-FROM irs_filings.grants_to_domestic_organizations
+FROM public.grants_to_domestic_organizations
 WHERE rteinorecipi = 0
 
 SELECT taxyear, MIN(rteinorecipi), MAX(rteinorecipi)
-FROM irs_filings.grants_to_domestic_organizations
+FROM public.grants_to_domestic_organizations
 GROUP BY taxyear
 
 SELECT taxyear, SUM(sigocpyamoun::bigint)
-FROM irs_filings.privategrants_w_recipient_ein_match
+FROM public.privategrants_w_recipient_ein_match
 WHERE recipeint_ein_key = '100004885'
 GROUP BY taxyear
 ORDER BY taxyear
 
 SELECT *
-FROM irs_filings.privategrants
+FROM public.privategrants
 WHERE taxyear = '2021'
 AND filerein = '043494831'
 
 -- This is a random non profit that has more funding here than in Candid Data....
 SELECT *
-FROM irs_filings.privategrants_w_recipient_ein_match
+FROM public.privategrants_w_recipient_ein_match
 WHERE recipeint_ein_key = '100004885'
 ORDER BY filerein, taxyear
 
 
 SELECT *
-FROM irs_filings.basic_fields
+FROM public.basic_fields
 WHERE filerein = '100004885'
 
 
 SELECT *
-FROM irs_filings.privategrants_w_recipient_ed_gt_basic_fields_unique_names
+FROM public.privategrants_w_recipient_ed_gt_basic_fields_unique_names
 LIMIT 10
 
 
 WITH tracker_eins AS (
 	SELECT recipeint_ein_key
-	FROM irs_filings.privategrants_w_recipient_ed_gt_basic_fields_unique_names
+	FROM public.privategrants_w_recipient_ed_gt_basic_fields_unique_names
 )
 SELECT recipeint_ein_key, taxyear, SUM(amount)
 FROM (
 	SELECT recipeint_ein_key::text, taxyear::int, SUM(sigocpyamoun::bigint) AS amount
-	FROM irs_filings.privategrants_w_recipient_ed_gt_basic_fields_unique_names
+	FROM public.privategrants_w_recipient_ed_gt_basic_fields_unique_names
 	WHERE taxyear::int >= 2018
 	GROUP BY recipeint_ein_key, taxyear
 UNION ALL
 
 	SELECT rteinorecipi::text recipeint_ein_key, taxyear::int, SUM(retaamofcagr::bigint) AS amount
-	FROM irs_filings.grants_to_domestic_organizations
+	FROM public.grants_to_domestic_organizations
 	JOIN tracker_eins
 		ON rteinorecipi::text = tracker_eins.recipeint_ein_key
 	WHERE taxyear::int >= 2018
@@ -93,40 +93,40 @@ ORDER BY taxyear
 
 
 SELECT *
-FROM irs_filings.privategrants_w_recipient_ed_gt_basic_fields_unique_names
+FROM public.privategrants_w_recipient_ed_gt_basic_fields_unique_names
 WHERE recipeint_ein_key = '100004885'
 
 
 SELECT COUNT(DISTINCT recipeint_ein_key)
-FROM irs_filings.privategrants_w_recipient_ed_gt_basic_fields_unique_names
+FROM public.privategrants_w_recipient_ed_gt_basic_fields_unique_names
 
 
 SELECT taxyear::int, taxperbegin, taxperend
-FROM irs_filings.privategrants
+FROM public.privategrants
 WHERE taxyear::int > 2020
 	AND EXTRACT(YEAR FROM taxperend::date) != EXTRACT(YEAR FROM taxperbegin::date)
 ORDER BY taxyear::int
 
 
 SELECT *
-FROM irs_filings.basic_fields
+FROM public.basic_fields
 WHERE filerein = '521384139'
 
 SELECT COUNT(*)
-FROM irs_filings.basic_fields_unique_names
+FROM public.basic_fields_unique_names
 LIMIT 10
 
 SELECT *
-FROM irs_filings.ed_gt_basic_fields_unique_names
+FROM public.ed_gt_basic_fields_unique_names
 LIMIT 10
 
 SELECT COUNT(*)
-FROM irs_filings.ed_gt_basic_fields_unique_names
+FROM public.ed_gt_basic_fields_unique_names
 
 SELECT COUNT(*)
 FROM (
 	SELECT 1
-	FROM irs_filings.privategrants_w_recipient_ed_gt_basic_fields_unique_names
+	FROM public.privategrants_w_recipient_ed_gt_basic_fields_unique_names
 	GROUP BY recipeint_ein_key
 )
 
@@ -139,9 +139,9 @@ FROM (
 
 SELECT *
 FROM (
-    SELECT * FROM irs_filings.privategrants_w_recipient_ein_match
+    SELECT * FROM public.privategrants_w_recipient_ein_match
     UNION
-    SELECT * FROM irs_filings.privategrants_w_recipient_ed_gt_basic_fields_unique_names
+    SELECT * FROM public.privategrants_w_recipient_ed_gt_basic_fields_unique_names
 ) unioned_results
 WHERE recipeint_ein_key = '852588841' -- One Earth
 
@@ -151,7 +151,7 @@ SELECT COUNT(*)
 FROM
 (
 	SELECT 1
-	FROM irs_filings.basic_fields_w_column_keys bf
+	FROM public.basic_fields_w_column_keys bf
 	WHERE taxyear::int >= 2015
 	AND totacashcont::bigint > 100000
 	GROUP BY
@@ -165,4 +165,4 @@ FROM
 		addresszip_key
 )x
 
-SELECT COUNT(*) FROM irs_filings.ed_gt_basic_fields_unique_names
+SELECT COUNT(*) FROM public.ed_gt_basic_fields_unique_names
