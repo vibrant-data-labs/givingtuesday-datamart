@@ -1,5 +1,29 @@
 # Giving Tuesday Datamart
 
+# Specific Asks for Giving Tuesday Team
+### High Priority
+
+* Parsed Attachments for the 990PF current grants and future grants tables when stated as attachment
+  * We'd "settle" for a pointer to the raw XMLs or the files themselves
+* Understanding of cadence for publishing updates.
+  * Ideally at least quarterly
+  * Understanding of the formats for the names so we can automate scripts
+
+### Medium Priority
+* Adding the raw XML column to the Basic Fields tables
+* LinkedIn URLs for non-profits, private foundations, people (if you have through open corporates)
+* Categorization for the PFs (DAF / community foundation / government / corporate / family, etc--can provide full Candid category if helpful)
+* Processed clean files where names have been normalized, zip-codes are cleaned, etc
+
+### Lower Priority / Things We will Do But would be helpful
+* A canoncial representation of the non-profits, private foundations, and people that can be connected back to the original data that is done by year.
+* Matched Grants to Recipients (we've done it but would love some help with test sets for measuring regression)
+* All of this hosted in a database with access available (or a way to create a copy of it)
+  * I think we'd actually prefer _not_ to have _only_ HTTPS API only because so much will be bulk. (happy to hear thoughts too)
+
+
+# Our Notes / Current Work so Far
+
 # Ingestion
 
 ## Write Raw Data from Datamart to SQL
@@ -50,9 +74,9 @@ Given a non-profit, join the text from the following sources to the non-profit. 
 [Python File](givingtuesday_datamart/matching_records_experiment.py)
 Given a grant from a private foundation, match it to a non-profit. [Datamart Table](https://nonprofitecosystem.givingtuesday.org/datamarts/?limit=9&sort=title:asc&co-item=current-grants-679696bc141dbd17de689e82)
 Two sided matching problem to match the grant recipient to a list of potential non-profits.
-* First tries to limit the potential number of matches getting unique   non-profit names and addresses
+* First tries to limit the potential number of matches getting unique  non-profit names and addresses
 * Same for unique grant recipient names and addresses
-* SQL Queries
+* [SQL Queries](givingtuesday_datamart/sql_queries/unique_fields_for_grants.sql)
 * Uses [recordlinkage](https://recordlinkage.readthedocs.io/en/stable/) to match the grant recipient to a list of potential non-profits
 * Writes the matching results to a table (has to do an intermediate join to the unique non-profit names and addresses)
 * Creates a Unioned Table Across the matched grants and [grants to domestic organizations](https://nonprofitecosystem.givingtuesday.org/datamarts/?page=2&limit=9&sort=title:asc&co-item=grants-to-domestic-orgs-679696bc141dbd17de689eb0) to get a single table of grant maker, grant recipient regardless of grant maker type.
@@ -91,6 +115,7 @@ We use the data in our current pipeline by [Module](https://github.com/vibrant-d
 
 
 # Web Application
+[Vercel Deployment Here](https://givingtuesday-datamart.vercel.app/)
 We created a really generic web application to explore the non-profits and private foundations quickly and gut check funding / grants
 
 ### Does Well

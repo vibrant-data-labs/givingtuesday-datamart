@@ -343,7 +343,7 @@ def match_records(
         full_key = f"{s3_prefix}/{filename}"
         checkpoint_uri = f"{checkpoint_uri_base}/{filename}"
 
-        if resume_from_checkpoints and key_exists(bucket=s3_bucket, key=full_key):
+        if resume_from_checkpoints and key_exists(bucket_name=s3_bucket, key=full_key):
             features = pqc.read_dataframe(checkpoint_uri)
             loaded_from_checkpoint += 1
             results.append(features)
