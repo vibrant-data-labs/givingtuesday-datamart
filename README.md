@@ -221,7 +221,7 @@ givingtuesday_datamart/
   ingestion.py       # ingest_source() + ingest_latest(), ingest_runs tracking
   write_data_to_sql.py  # Streaming CSV -> COPY (all-TEXT columns, lineage stamping)
   sql_queries/       # Downstream analytical SQL (build canonical views, grants unions, etc.)
-  matching_records_experiment.py  # recordlinkage pipeline (Phase 3 work)
+  grant_matching.py  # recordlinkage pipeline: PF grants → recipient EINs, rebuilds public.unioned_grants
 scripts/
   create_tables.py   # Thin wrapper around `sources refresh`
 frontend/            # Next.js app (reads from the old VDL DB today; migration to gt_datamart TBD)

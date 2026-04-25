@@ -1,5 +1,3 @@
-import re
-
 import pandas as pd
 import recordlinkage
 from sqlalchemy import text
@@ -11,7 +9,191 @@ from vdl_tools.shared_tools.tools.address_cleaning import create_clean_address
 from vdl_tools.shared_tools.s3_tools import key_exists
 from vdl_tools.shared_tools import parquet_cache as pqc
 
+from givingtuesday_datamart.ingestion import datamart_config
+
 # Derived from USPS Publication 28 - Postal Addressing Standards
+
+
+# --- 1. SQL DDL HELPERS ---
+# These were previously in sql_queries/unique_fields_for_grants.sql. Lifted into
+# Python so the matching pipeline owns its own preconditions and postconditions
+# in one place. The views must exist before matching reads them; unioned_grants
+# must be rebuilt after matching writes privategrants_w_recipients.
+
+# 4 views built on top of the raw `public.privategrants` and `public.basic_fields`
+# staging tables. Both `_w_column_keys_view` views normalize names/addresses
+# (lowercase, 5-digit zip) into `*_key` columns the matching pipeline blocks/joins
+# on. Both `_unique_names_view` views collapse to DISTINCT (key tuple) for orgs
+# that filed in 2015+.
+_VIEW_DDL = [
+    """
+    CREATE OR REPLACE VIEW public.privategrants_w_column_keys_view AS (
+        SELECT
+            *,
+            CASE WHEN sigocpyrbnbn1 IS NULL THEN '' ELSE LOWER(sigocpyrbnbn1) END name1_key,
+            CASE WHEN sigocpyrbnbn2 IS NULL THEN '' ELSE LOWER(sigocpyrbnbn2) END name2_key,
+            CASE WHEN sigocpyrfaal1 IS NULL THEN '' ELSE LOWER(sigocpyrfaal1) END address1_key,
+            CASE WHEN sigocpyrfaal2 IS NULL THEN '' ELSE LOWER(sigocpyrfaal2) END address2_key,
+            LOWER(sigocpyrfaci) addresscity_key,
+            LOWER(sigocpyrfapo) addressstate_key,
+            LOWER(LEFT(sigocpyrfapc, 5)) addresszip_key
+        FROM public.privategrants
+    )
+    """,
+    """
+    CREATE OR REPLACE VIEW public.privategrants_unique_names_view AS (
+        SELECT
+            name1_key,
+            name2_key,
+            address1_key,
+            address2_key,
+            addresscity_key,
+            addressstate_key,
+            addresszip_key
+        FROM public.privategrants_w_column_keys_view
+        WHERE taxyear::int >= 2015
+        GROUP BY
+            name1_key,
+            name2_key,
+            address1_key,
+            address2_key,
+            addresscity_key,
+            addressstate_key,
+            addresszip_key
+    )
+    """,
+    """
+    CREATE OR REPLACE VIEW public.basic_fields_w_column_keys_view AS (
+        SELECT
+            *,
+            CASE WHEN filerein IS NULL THEN '' ELSE LOWER(filerein::text) END filerein_key,
+            CASE WHEN filername1 IS NULL THEN '' ELSE LOWER(filername1) END name1_key,
+            CASE WHEN filername2 IS NULL THEN '' ELSE LOWER(filername2) END name2_key,
+            CASE WHEN filerus1 IS NULL THEN '' ELSE LOWER(filerus1) END address1_key,
+            CASE WHEN filerus2 IS NULL THEN '' ELSE LOWER(filerus2) END address2_key,
+            LOWER(fileruscity) addresscity_key,
+            LOWER(filerusstate) addressstate_key,
+            LOWER(LEFT(fileruszip::text, 5)) addresszip_key
+        FROM public.basic_fields
+    )
+    """,
+    """
+    CREATE OR REPLACE VIEW public.basic_fields_unique_names_view AS (
+        SELECT
+            filerein_key,
+            name1_key,
+            name2_key,
+            address1_key,
+            address2_key,
+            addresscity_key,
+            addressstate_key,
+            addresszip_key
+        FROM public.basic_fields_w_column_keys_view bf
+        WHERE taxyear::int >= 2015
+        GROUP BY
+            filerein_key,
+            name1_key,
+            name2_key,
+            address1_key,
+            address2_key,
+            addresscity_key,
+            addressstate_key,
+            addresszip_key
+    )
+    """,
+]
+
+
+# Union of (a) matched private foundation grants written to
+# public.privategrants_w_recipients and (b) Schedule I grants from 990 filers.
+# Column aliases preserved verbatim from the original SQL so downstream
+# consumers see the same shape.
+_UNIONED_GRANTS_DDL = """
+DROP TABLE IF EXISTS public.unioned_grants;
+SELECT *
+INTO public.unioned_grants
+FROM (
+    SELECT
+        filerein::text AS granter_ein,
+        filername1 AS granter_name,
+        filername2 AS granter_name2,
+        filesha256,
+        url,
+        taxyear::int AS taxyear,
+        taxperbegin::timestamp AS taxperbegin,
+        taxperend::timestamp AS taxperend,
+        recipeint_ein_key::text AS grantee_ein,
+        sigocpyrpnam AS grantee_person_name,
+        sigocpyrbnbn1 AS grantee_organization_name1,
+        sigocpyrbnbn2 AS grantee_organization_name2,
+        sigocpyrfaal1 AS grantee_address1,
+        sigocpyrfaal2 AS grantee_address2,
+        sigocpyrfaci AS grantee_city,
+        sigocpyrfapo AS grantee_state,
+        sigocpyrfapc AS grantee_zip,
+        sigocpyamoun::bigint AS grant_amount,
+        sigocpypogoc AS grant_purpose,
+        sigocpyrfsta AS grant_status,
+        sigocpyrrela AS grant_relationship
+    FROM public.privategrants_w_recipients
+
+    UNION
+
+    SELECT
+        filerein::text AS granter_ein,
+        filername1 AS granter_name,
+        filername2 AS granter_name2,
+        NULL AS filesha256,
+        url,
+        taxyear::int AS taxyear,
+        taxperbegin::timestamp AS taxperbegin,
+        taxperend::timestamp AS taxperend,
+        rteinorecipi::text AS grantee_ein,
+        NULL AS grantee_person_name,
+        rtrnbbnline11 AS grantee_organization_name1,
+        rtrnbbnline22 AS grantee_organization_name2,
+        retaadadliin1 AS grantee_address1,
+        retaadadliin2 AS grantee_address2,
+        rectabaddcit AS grantee_city,
+        rectabaddsta AS grantee_state,
+        rtazipcode::text AS grantee_zip,
+        retaamofcagr::bigint AS grant_amount,
+        retapuofgrra AS grant_purpose,
+        NULL AS grant_status,
+        NULL AS grant_relationship
+    FROM public.grants_to_domestic_organizations
+) sub;
+"""
+
+_UNIONED_GRANTS_INDEXES = [
+    "DROP INDEX IF EXISTS idx_unioned_grants_granter_ein",
+    "DROP INDEX IF EXISTS idx_unioned_grants_grantee_ein",
+    "DROP INDEX IF EXISTS idx_unioned_grants_taxyear",
+    "CREATE INDEX IF NOT EXISTS idx_unioned_grants_granter_ein ON public.unioned_grants (granter_ein)",
+    "CREATE INDEX IF NOT EXISTS idx_unioned_grants_grantee_ein ON public.unioned_grants (grantee_ein)",
+    "CREATE INDEX IF NOT EXISTS idx_unioned_grants_taxyear ON public.unioned_grants (taxyear)",
+]
+
+
+def create_or_replace_views(connection):
+    """Idempotently (re)create the 4 views the matching pipeline reads from.
+
+    Safe to call on every run: `CREATE OR REPLACE VIEW` updates definitions
+    in place without touching dependent objects.
+    """
+    logger.info("Creating/replacing grant matching views in public.*")
+    for ddl in _VIEW_DDL:
+        connection.execute(text(ddl))
+
+
+def rebuild_unioned_grants(connection):
+    """Drop and rebuild public.unioned_grants from the matched PF grants
+    and the 990 Schedule I grants. Recreates the 3 EIN/year indexes after.
+    """
+    logger.info("Rebuilding public.unioned_grants")
+    connection.execute(text(_UNIONED_GRANTS_DDL))
+    for stmt in _UNIONED_GRANTS_INDEXES:
+        connection.execute(text(stmt))
 
 
 # --- 2. CLEANING FUNCTIONS ---
@@ -75,22 +257,27 @@ def filter_match_rules(
 
 
 def match_records(
-    basic_fields_unique_names_table: str = "basic_fields_unique_names",
     chunk_size: int = 50000,
     s3_bucket: str = "givingtuesday-datamart",
-    s3_prefix: str = "grant_matching_checkpoints",
+    s3_prefix: str = "grant_matching_checkpoints/gt_datamart",
     resume_from_checkpoints: bool = True,
 ):
     # --- 3. APPLY CLEANING ---
     logger.info("Preparing data...")
     # 1. LOAD DATA
-    # (Replace with your actual paths)
-    with get_session() as session:
+    with get_session(config=datamart_config()) as session:
         connection = session.connection()
-        logger.info(f"Reading basic fields unique names table: {basic_fields_unique_names_table}")
-        basic_fields_df = pd.read_sql_table(basic_fields_unique_names_table, connection, schema="irs_filings")
-        logger.info(f"Reading private foundations unique names table: privategrants_unique_names")
-        private_foundations_df = pd.read_sql_table("privategrants_unique_names", connection, schema="irs_filings")
+        create_or_replace_views(connection)
+        logger.info("Reading public.basic_fields_unique_names_view")
+        basic_fields_df = pd.read_sql_query(
+            text("SELECT * FROM public.basic_fields_unique_names_view"),
+            connection,
+        )
+        logger.info("Reading public.privategrants_unique_names_view")
+        private_foundations_df = pd.read_sql_query(
+            text("SELECT * FROM public.privategrants_unique_names_view"),
+            connection,
+        )
 
     basic_fields_df.fillna("", inplace=True)
     private_foundations_df.fillna("", inplace=True)
@@ -255,26 +442,29 @@ def match_records(
 
     temp_join_table_name = "pf_grant_matching_temp_table"
     logger.info(f"Writing to database: {temp_join_table_name}")
-    with get_session() as session:
+    with get_session(config=datamart_config()) as session:
         connection = session.connection()
         full_data_df.to_sql(
             temp_join_table_name,
             connection,
-            schema="irs_filings",
+            schema="public",
             if_exists="replace"
         )
 
-        private_grants_w_recipient_table_name = f"privategrants_w_recipients"
+        private_grants_w_recipient_table_name = "privategrants_w_recipients"
         logger.info(f"Dropping table: {private_grants_w_recipient_table_name}")
-        connection.execute(text(f"DROP TABLE IF EXISTS irs_filings.{private_grants_w_recipient_table_name}"))
+        connection.execute(text(f"DROP TABLE IF EXISTS public.{private_grants_w_recipient_table_name}"))
         logger.info(f"Creating table: {private_grants_w_recipient_table_name}")
+        # Joins against the *_view rather than a materialized table — only the
+        # view exists in gt_datamart's public schema. SELECT INTO materializes
+        # the join result into a real table.
         connection.execute(text(f"""
             SELECT
                 pg.*,
                 pfgm.recipeint_ein_key
-            INTO irs_filings.{private_grants_w_recipient_table_name}
-            FROM irs_filings.privategrants_w_column_keys pg
-            JOIN irs_filings.{temp_join_table_name} pfgm
+            INTO public.{private_grants_w_recipient_table_name}
+            FROM public.privategrants_w_column_keys_view pg
+            JOIN public.{temp_join_table_name} pfgm
                 ON pfgm.name1_key = pg.name1_key
                 AND pfgm.name2_key = pg.name2_key
                 AND pfgm.address1_key = pg.address1_key
@@ -285,10 +475,14 @@ def match_records(
             ;
         """))
         # NOTE: Uncomment this to drop the temporary table but leave for now for debugging
-        # connection.execute(text(f"DROP TABLE IF EXISTS irs_filings.{temp_join_table_name}"))
+        # connection.execute(text(f"DROP TABLE IF EXISTS public.{temp_join_table_name}"))
+
+        # Final step: rebuild the public.unioned_grants table from the freshly-
+        # written privategrants_w_recipients + the 990 Schedule I grants. Same
+        # session as the SELECT INTO above so a mid-pipeline failure leaves an
+        # obviously-incomplete state rather than a stale unioned_grants.
+        rebuild_unioned_grants(connection)
     return full_data_df
 
 if __name__ == "__main__":
-    match_records(
-        basic_fields_unique_names_table="basic_fields_unique_names",
-    )
+    match_records()
