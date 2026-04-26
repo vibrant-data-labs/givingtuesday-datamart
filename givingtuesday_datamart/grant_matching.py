@@ -196,6 +196,48 @@ def rebuild_unioned_grants(connection):
         connection.execute(text(stmt))
 
 
+# Logical names of the two staging tables the matching pipeline reads from.
+# These are the only data dependencies whose freshness affects checkpoint
+# validity. Schedule-I grants feed unioned_grants but not the matching itself.
+_MATCHING_INPUT_LOGICAL_NAMES = ("irs_990pf_grants", "irs_990_basic_fields")
+
+
+def _resolve_checkpoint_prefix(
+    connection,
+    base_prefix: str = "grant_matching_checkpoints",
+) -> str:
+    """Build an S3 prefix that's keyed on the source versions of both
+    upstream staging tables. A new ingest of either source produces a fresh
+    prefix, so old checkpoints can never silently be reused against new data.
+
+    Resolves the latest successful (status='success') ingest_run per
+    logical_name from datamart_meta.ingest_runs. Raises if either source has
+    no successful run on record.
+    """
+    rows = connection.execute(
+        text("""
+            SELECT DISTINCT ON (logical_name) logical_name, source_version
+            FROM datamart_meta.ingest_runs
+            WHERE logical_name = ANY(:names)
+              AND status = 'success'
+            ORDER BY logical_name, finished_at DESC
+        """),
+        {"names": list(_MATCHING_INPUT_LOGICAL_NAMES)},
+    ).fetchall()
+    versions = {logical_name: source_version for logical_name, source_version in rows}
+    missing = set(_MATCHING_INPUT_LOGICAL_NAMES) - versions.keys()
+    if missing:
+        raise RuntimeError(
+            f"No successful ingest run on record for: {sorted(missing)}. "
+            "Run `python -m givingtuesday_datamart.sources refresh` first."
+        )
+    return (
+        f"{base_prefix}/"
+        f"pg_{versions['irs_990pf_grants']}"
+        f"__bf_{versions['irs_990_basic_fields']}"
+    )
+
+
 # --- 2. CLEANING FUNCTIONS ---
 
 def clean_year(series):
@@ -259,15 +301,29 @@ def filter_match_rules(
 def match_records(
     chunk_size: int = 50000,
     s3_bucket: str = "givingtuesday-datamart",
-    s3_prefix: str = "grant_matching_checkpoints/gt_datamart",
+    s3_prefix: str | None = None,
     resume_from_checkpoints: bool = True,
 ):
+    """Run the recordlinkage grant-matching pipeline against gt_datamart.
+
+    ``s3_prefix`` defaults to a lineage-keyed path derived from the latest
+    successful ingest_runs of irs_990pf_grants + irs_990_basic_fields, e.g.
+    ``grant_matching_checkpoints/pg_2026_04_15__bf_2026_04_18``. This means
+    checkpoints can only be resumed against the exact source versions that
+    produced them — re-ingesting either source forces a clean recompute.
+    Pass an explicit string to override (e.g. for testing).
+    """
     # --- 3. APPLY CLEANING ---
     logger.info("Preparing data...")
     # 1. LOAD DATA
     with get_session(config=datamart_config()) as session:
         connection = session.connection()
         create_or_replace_views(connection)
+        if s3_prefix is None:
+            s3_prefix = _resolve_checkpoint_prefix(connection)
+            logger.info(f"Resolved checkpoint prefix from lineage: {s3_prefix}")
+        else:
+            logger.info(f"Using caller-supplied checkpoint prefix: {s3_prefix}")
         logger.info("Reading public.basic_fields_unique_names_view")
         basic_fields_df = pd.read_sql_query(
             text("SELECT * FROM public.basic_fields_unique_names_view"),
