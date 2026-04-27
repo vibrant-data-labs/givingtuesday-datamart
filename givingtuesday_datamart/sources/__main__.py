@@ -91,7 +91,10 @@ def cmd_status() -> int:
 
 def _select_specs(source_names: list[str] | None) -> list[SourceSpec]:
     if not source_names:
-        return list(REGISTRY)
+        # Default refresh excludes sources flagged skip_default_refresh
+        # (currently officers / officers_pf — see registry.py for context).
+        # An explicit --source <name> still resolves them via get_source().
+        return [s for s in REGISTRY if not s.skip_default_refresh]
     return [get_source(name) for name in source_names]
 
 

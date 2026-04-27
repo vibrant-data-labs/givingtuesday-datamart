@@ -46,6 +46,14 @@ class SourceSpec:
     # (safe default — used when we haven't yet committed to a key column set).
     required_columns: tuple[str, ...] = ()
 
+    # When True, this source is excluded from the default `refresh` (no
+    # --source filter). It can still be ingested explicitly via
+    # `refresh --source <logical_name>`. Used to keep the registry truthful
+    # about what we've configured to ingest while keeping bulky-but-deferred
+    # sources from being re-ingested by accident. Lineage rows in
+    # datamart_meta.ingest_runs are unaffected.
+    skip_default_refresh: bool = False
+
     def compiled_regex(self) -> re.Pattern[str]:
         return re.compile(self.filename_regex)
 

@@ -18,6 +18,7 @@ def _spec(
     *,
     primary_key: tuple[str, ...] | None = None,
     required_columns: tuple[str, ...] = (),
+    skip_default_refresh: bool = False,
 ) -> SourceSpec:
     return SourceSpec(
         logical_name=logical_name,
@@ -29,6 +30,7 @@ def _spec(
         filename_regex=filename_regex,
         primary_key=primary_key,
         required_columns=required_columns,
+        skip_default_refresh=skip_default_refresh,
     )
 
 
@@ -89,6 +91,17 @@ REGISTRY: tuple[SourceSpec, ...] = (
         filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_990PFPart14Grants3A\.csv$",
         required_columns=("filerein",),
     ),
+    # Officers staging tables are skipped from default refresh (2026-04-27).
+    # The raw officers CSV is ~18 GB hot, ~2 GB for the PF side; together they
+    # were the binding constraint on the shared RDS. Both `public.officers`
+    # and `public.officers_pf` were dropped, and the `--with-people` canonical
+    # build (person_canonical, org_person_role) is indefinitely deferred.
+    # Re-introduce by:
+    #   1) flipping skip_default_refresh=False here, OR
+    #   2) explicit one-off: `refresh --source irs_990_officers`
+    # When that happens, also revisit the pre-process plan in the project
+    # backbone notes (year filter, column prune, possibly stream-direct-to-
+    # canonical) so we don't re-create the disk pressure.
     _spec(
         logical_name="irs_990_officers",
         staging_table_name="public.officers",
@@ -96,6 +109,7 @@ REGISTRY: tuple[SourceSpec, ...] = (
         description="Form 990 Part VII-A — officers, directors, trustees, and key employees (with compensation).",
         filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_990Part7AOfficers\.csv$",
         required_columns=("filerein",),
+        skip_default_refresh=True,
     ),
     _spec(
         logical_name="irs_990pf_officers",
@@ -104,6 +118,7 @@ REGISTRY: tuple[SourceSpec, ...] = (
         description="Form 990-PF Part VII p1 — list of officers, directors, trustees, foundation managers.",
         filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_990PFPart7p1-?Officers\.csv$",
         required_columns=("filerein",),
+        skip_default_refresh=True,
     ),
 )
 
