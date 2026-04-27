@@ -1,3 +1,7 @@
+import json
+import uuid
+from datetime import datetime, timezone
+
 import pandas as pd
 import recordlinkage
 from sqlalchemy import text
@@ -10,6 +14,11 @@ from vdl_tools.shared_tools.s3_tools import key_exists
 from vdl_tools.shared_tools import parquet_cache as pqc
 
 from givingtuesday_datamart.ingestion import datamart_config
+from givingtuesday_datamart.canonical.build import (
+    CANONICAL_BUILDS_TABLE,
+    ensure_canonical_meta,
+    latest_successful_run_ids,
+)
 
 # Derived from USPS Publication 28 - Postal Addressing Standards
 
@@ -202,6 +211,84 @@ def rebuild_unioned_grants(connection):
 _MATCHING_INPUT_LOGICAL_NAMES = ("irs_990pf_grants", "irs_990_basic_fields")
 
 
+def _insert_started_build(build_id: str, started_at: datetime, source_runs: dict) -> None:
+    """Stamp a 'started' row in datamart_meta.canonical_builds.
+
+    Mirrors the Phase 2 canonical-build pattern: insert a breadcrumb so a
+    crash mid-run leaves a 'started'-status row that's distinguishable from
+    a successful or failed build.
+    """
+    with get_session(config=datamart_config()) as session:
+        session.execute(
+            text(
+                f"""
+                INSERT INTO {CANONICAL_BUILDS_TABLE} (
+                    build_id, build_kind, started_at, status, source_runs
+                ) VALUES (
+                    :build_id, 'grant_matching', :started_at, 'started',
+                    CAST(:source_runs AS JSONB)
+                )
+                """
+            ),
+            {
+                "build_id": build_id,
+                "started_at": started_at,
+                "source_runs": json.dumps(source_runs),
+            },
+        )
+
+
+def _finalize_build_failed(build_id: str, error: BaseException) -> None:
+    """Mark a grant matching build as failed in canonical_builds."""
+    finished_at = datetime.now(timezone.utc)
+    with get_session(config=datamart_config()) as session:
+        session.execute(
+            text(
+                f"""
+                UPDATE {CANONICAL_BUILDS_TABLE}
+                SET finished_at = :finished_at,
+                    status = 'failed',
+                    error = :error
+                WHERE build_id = :build_id
+                """
+            ),
+            {
+                "build_id": build_id,
+                "finished_at": finished_at,
+                "error": str(error)[:4000],
+            },
+        )
+
+
+def _finalize_build_success(
+    build_id: str,
+    privategrants_w_recipients_rows: int,
+    unioned_grants_rows: int,
+) -> None:
+    """Mark a grant matching build as successful and stamp the row counts
+    of the two output tables."""
+    finished_at = datetime.now(timezone.utc)
+    with get_session(config=datamart_config()) as session:
+        session.execute(
+            text(
+                f"""
+                UPDATE {CANONICAL_BUILDS_TABLE}
+                SET finished_at = :finished_at,
+                    status = 'success',
+                    privategrants_w_recipients_rows = :pg_rows,
+                    unioned_grants_rows = :ug_rows
+                WHERE build_id = :build_id
+                """
+            ),
+            {
+                "build_id": build_id,
+                "finished_at": finished_at,
+                "pg_rows": privategrants_w_recipients_rows,
+                "ug_rows": unioned_grants_rows,
+            },
+        )
+
+
 def _resolve_checkpoint_prefix(
     connection,
     base_prefix: str = "grant_matching_checkpoints",
@@ -312,6 +399,54 @@ def match_records(
     checkpoints can only be resumed against the exact source versions that
     produced them — re-ingesting either source forces a clean recompute.
     Pass an explicit string to override (e.g. for testing).
+
+    Each run is recorded in ``datamart_meta.canonical_builds`` with
+    ``build_kind='grant_matching'``, the ingest_run_ids of every staging
+    source at run time, and (on success) the row counts of
+    ``public.privategrants_w_recipients`` and ``public.unioned_grants``.
+    Consumers can join against ``datamart_meta.ingest_runs`` to detect
+    when the matched/unioned tables are stale relative to upstream.
+    """
+    ensure_canonical_meta()
+    build_id = str(uuid.uuid4())
+    started_at = datetime.now(timezone.utc)
+    source_runs = latest_successful_run_ids()
+    _insert_started_build(build_id, started_at, source_runs)
+    logger.info(f"Starting grant matching build {build_id}")
+
+    try:
+        full_data_df, pg_rows, ug_rows = _do_match_records(
+            chunk_size=chunk_size,
+            s3_bucket=s3_bucket,
+            s3_prefix=s3_prefix,
+            resume_from_checkpoints=resume_from_checkpoints,
+        )
+    except BaseException as err:
+        _finalize_build_failed(build_id, err)
+        logger.exception(f"Grant matching build {build_id} failed")
+        raise
+
+    _finalize_build_success(build_id, pg_rows, ug_rows)
+    duration = (datetime.now(timezone.utc) - started_at).total_seconds()
+    logger.info(
+        f"Grant matching build {build_id} success: "
+        f"privategrants_w_recipients={pg_rows:,}, "
+        f"unioned_grants={ug_rows:,}, duration={duration:.1f}s"
+    )
+    return full_data_df
+
+
+def _do_match_records(
+    chunk_size: int,
+    s3_bucket: str,
+    s3_prefix: str | None,
+    resume_from_checkpoints: bool,
+):
+    """Inner pipeline body. Returns ``(full_data_df, pg_rows, ug_rows)``.
+
+    Split out from ``match_records`` so the canonical_builds lifecycle
+    (insert started → try → finalize success/failed) wraps the whole
+    pipeline cleanly without indenting 200 lines.
     """
     # --- 3. APPLY CLEANING ---
     logger.info("Preparing data...")
@@ -538,7 +673,18 @@ def match_records(
         # session as the SELECT INTO above so a mid-pipeline failure leaves an
         # obviously-incomplete state rather than a stale unioned_grants.
         rebuild_unioned_grants(connection)
-    return full_data_df
+
+        # Row counts of the two output tables, captured in the same session
+        # that wrote them so they're guaranteed-consistent with what just
+        # committed. Bubbled up to the canonical_builds 'success' row.
+        pg_rows = connection.execute(
+            text("SELECT COUNT(*) FROM public.privategrants_w_recipients")
+        ).scalar_one()
+        ug_rows = connection.execute(
+            text("SELECT COUNT(*) FROM public.unioned_grants")
+        ).scalar_one()
+    return full_data_df, pg_rows, ug_rows
+
 
 if __name__ == "__main__":
     match_records()

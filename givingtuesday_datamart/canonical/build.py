@@ -107,6 +107,12 @@ def ensure_canonical_meta() -> None:
     existing databases pick up columns introduced after the original
     ``CREATE`` without a separate migration step (matches the pattern in
     ``ensure_meta_schema``).
+
+    The table is shared with the grant matching pipeline
+    (``givingtuesday_datamart.grant_matching``); ``build_kind`` discriminates
+    Phase 2 canonical builds from grant-matching runs, and the
+    ``privategrants_w_recipients_rows`` / ``unioned_grants_rows`` columns
+    are populated by grant matching.
     """
     ensure_meta_schema()
     with get_session(config=datamart_config()) as session:
@@ -115,6 +121,7 @@ def ensure_canonical_meta() -> None:
                 f"""
                 CREATE TABLE IF NOT EXISTS {CANONICAL_BUILDS_TABLE} (
                     build_id UUID PRIMARY KEY,
+                    build_kind TEXT NOT NULL DEFAULT 'canonical',
                     started_at TIMESTAMPTZ NOT NULL,
                     finished_at TIMESTAMPTZ,
                     status TEXT NOT NULL,
@@ -124,6 +131,8 @@ def ensure_canonical_meta() -> None:
                     funder_canonical_rows BIGINT,
                     person_canonical_rows BIGINT,
                     org_person_role_rows BIGINT,
+                    privategrants_w_recipients_rows BIGINT,
+                    unioned_grants_rows BIGINT,
                     source_runs JSONB,
                     error TEXT
                 )
@@ -134,20 +143,25 @@ def ensure_canonical_meta() -> None:
             text(
                 f"""
                 ALTER TABLE {CANONICAL_BUILDS_TABLE}
+                ADD COLUMN IF NOT EXISTS build_kind TEXT NOT NULL DEFAULT 'canonical',
                 ADD COLUMN IF NOT EXISTS schedule_o_part_iii_rows BIGINT,
                 ADD COLUMN IF NOT EXISTS funder_canonical_rows BIGINT,
                 ADD COLUMN IF NOT EXISTS person_canonical_rows BIGINT,
-                ADD COLUMN IF NOT EXISTS org_person_role_rows BIGINT
+                ADD COLUMN IF NOT EXISTS org_person_role_rows BIGINT,
+                ADD COLUMN IF NOT EXISTS privategrants_w_recipients_rows BIGINT,
+                ADD COLUMN IF NOT EXISTS unioned_grants_rows BIGINT
                 """
             )
         )
 
 
-def _latest_successful_run_ids() -> dict[str, str | None]:
+def latest_successful_run_ids() -> dict[str, str | None]:
     """Map each logical_name → most recent successful run_id (or None).
 
-    Recorded on every canonical build so we can later answer "which source
-    versions is this canonical table derived from?" without re-deriving.
+    Recorded on every canonical build (and every grant matching run) so we
+    can later answer "which source versions is this canonical/matched
+    table derived from?" without re-deriving. Shared between the Phase 2
+    canonical builder and the grant matching pipeline.
     """
     from givingtuesday_datamart.sources.registry import REGISTRY
 
@@ -655,7 +669,7 @@ def build_canonical(*, include_people: bool = False) -> BuildResult:
     ensure_canonical_meta()
     build_id = str(uuid.uuid4())
     started_at = datetime.now(timezone.utc)
-    source_runs = _latest_successful_run_ids()
+    source_runs = latest_successful_run_ids()
 
     # Insert "started" row so a crash mid-build leaves a breadcrumb.
     with get_session(config=datamart_config()) as session:
@@ -785,4 +799,5 @@ __all__ = [
     "SCHEDULE_O_PART_III_TABLE",
     "build_canonical",
     "ensure_canonical_meta",
+    "latest_successful_run_ids",
 ]
