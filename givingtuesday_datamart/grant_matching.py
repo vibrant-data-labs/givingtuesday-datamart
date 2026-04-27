@@ -318,10 +318,13 @@ def _resolve_checkpoint_prefix(
             f"No successful ingest run on record for: {sorted(missing)}. "
             "Run `python -m givingtuesday_datamart.sources refresh` first."
         )
+    # Nested rather than flat (`pg_X__bf_Y`) so `aws s3 ls` is actually
+    # browseable: each level shows progressively narrower scope, and a single
+    # source version's chunks can be `aws s3 rm --recursive`'d in one shot.
     return (
         f"{base_prefix}/"
-        f"pg_{versions['irs_990pf_grants']}"
-        f"__bf_{versions['irs_990_basic_fields']}"
+        f"pg_{versions['irs_990pf_grants']}/"
+        f"bf_{versions['irs_990_basic_fields']}"
     )
 
 
@@ -395,7 +398,7 @@ def match_records(
 
     ``s3_prefix`` defaults to a lineage-keyed path derived from the latest
     successful ingest_runs of irs_990pf_grants + irs_990_basic_fields, e.g.
-    ``grant_matching_checkpoints/pg_2026_04_15__bf_2026_04_18``. This means
+    ``grant_matching_checkpoints/pg_2026_04_15/bf_2026_04_18``. This means
     checkpoints can only be resumed against the exact source versions that
     produced them — re-ingesting either source forces a clean recompute.
     Pass an explicit string to override (e.g. for testing).
