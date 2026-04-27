@@ -69,6 +69,17 @@ _VIEW_DDL = [
             addresscity_key,
             addressstate_key,
             addresszip_key
+        -- ORDER BY makes row order deterministic so chunk checkpoints
+        -- (which key on integer DataFrame position) stay valid across
+        -- re-runs against the same upstream data.
+        ORDER BY
+            name1_key,
+            name2_key,
+            address1_key,
+            address2_key,
+            addresscity_key,
+            addressstate_key,
+            addresszip_key
     )
     """,
     """
@@ -100,6 +111,18 @@ _VIEW_DDL = [
         FROM public.basic_fields_w_column_keys_view bf
         WHERE taxyear::int >= 2015
         GROUP BY
+            filerein_key,
+            name1_key,
+            name2_key,
+            address1_key,
+            address2_key,
+            addresscity_key,
+            addressstate_key,
+            addresszip_key
+        -- ORDER BY makes row order deterministic so chunk checkpoints
+        -- (which key on integer DataFrame position) stay valid across
+        -- re-runs against the same upstream data.
+        ORDER BY
             filerein_key,
             name1_key,
             name2_key,
@@ -462,14 +485,28 @@ def _do_match_records(
             logger.info(f"Resolved checkpoint prefix from lineage: {s3_prefix}")
         else:
             logger.info(f"Using caller-supplied checkpoint prefix: {s3_prefix}")
+        # Explicit ORDER BY (redundant with the view's own ORDER BY, but
+        # contractual): row order MUST be deterministic across runs because
+        # chunk checkpoints reference DataFrame rows by integer position.
+        # If row order shifts between runs, resumed chunks would point at
+        # the wrong rows and produce silently-incorrect matches.
         logger.info("Reading public.basic_fields_unique_names_view")
         basic_fields_df = pd.read_sql_query(
-            text("SELECT * FROM public.basic_fields_unique_names_view"),
+            text("""
+                SELECT * FROM public.basic_fields_unique_names_view
+                ORDER BY filerein_key, name1_key, name2_key, address1_key,
+                         address2_key, addresscity_key, addressstate_key,
+                         addresszip_key
+            """),
             connection,
         )
         logger.info("Reading public.privategrants_unique_names_view")
         private_foundations_df = pd.read_sql_query(
-            text("SELECT * FROM public.privategrants_unique_names_view"),
+            text("""
+                SELECT * FROM public.privategrants_unique_names_view
+                ORDER BY name1_key, name2_key, address1_key, address2_key,
+                         addresscity_key, addressstate_key, addresszip_key
+            """),
             connection,
         )
 
