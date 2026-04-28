@@ -609,6 +609,17 @@ def _do_match_records(
         final_features = pd.DataFrame(columns=['zip_score', 'name_score', 'addr_score'])
     else:
         final_features = pd.concat(results)
+    # Force consistent MultiIndex level names regardless of how recordlinkage
+    # / pyarrow round-tripped them through parquet. Older recordlinkage left
+    # the levels unnamed (so reset_index would yield 'level_0'/'level_1'), but
+    # the parquet checkpoint round-trip can rename them — we hit a KeyError
+    # on a chunk-resumed run because the rename below quietly didn't apply.
+    # Setting names here means reset_index() yields predictable column names
+    # and we don't need the brittle rename at all.
+    if final_features.index.nlevels == 2:
+        final_features.index = final_features.index.set_names(
+            ['basic_fields_df_index', 'private_foundations_df_index']
+        )
     logger.info(f"Finished matching")
 
     # --- 7. FILTER ---
@@ -625,11 +636,12 @@ def _do_match_records(
 
     logger.info(f"Found {len(matches)} matches.")
 
-    matches.reset_index(inplace=True)
-    matches.rename(columns={
-        'level_0': 'basic_fields_df_index',
-        'level_1': 'private_foundations_df_index'
-    }, inplace=True)
+    # reset_index() non-inplace: filter_match_rules returns a boolean-mask
+    # slice (a view), and inplace operations on views silently fail to
+    # propagate (SettingWithCopyWarning). Reassigning gives us a fresh frame
+    # we own outright. Columns are now named 'basic_fields_df_index' and
+    # 'private_foundations_df_index' from the index-level names set above.
+    matches = matches.reset_index()
 
     matches = matches.drop_duplicates()
 
