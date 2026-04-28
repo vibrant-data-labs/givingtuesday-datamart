@@ -569,6 +569,17 @@ def _do_match_records(
     loaded_from_checkpoint = 0
     computed_chunks = 0
 
+    # The candidate_links MultiIndex's level positions ARE the row positions
+    # in basic_fields_df / private_foundations_df we need to merge back to
+    # later. vdl_tools.parquet_cache.write_dataframe calls
+    # `pa.Table.from_pandas(df, preserve_index=False)` — i.e. it silently
+    # drops any index on write. So if we wrote chunks with the MultiIndex
+    # intact, the row-position info would be permanently lost on a resumed
+    # run (chunks come back with a meaningless RangeIndex). Materialize the
+    # MultiIndex as named columns BEFORE every write, and use those columns
+    # directly in post-processing — no reset_index / rename gymnastics.
+    INDEX_COLS = ['basic_fields_df_index', 'private_foundations_df_index']
+
     for chunk_idx in tqdm(range(total_chunks), desc="Matching"):
         filename = f"chunk_{chunk_idx:05d}.parquet"
         full_key = f"{s3_prefix}/{filename}"
@@ -576,9 +587,20 @@ def _do_match_records(
 
         if resume_from_checkpoints and key_exists(bucket_name=s3_bucket, key=full_key):
             features = pqc.read_dataframe(checkpoint_uri)
-            loaded_from_checkpoint += 1
-            results.append(features)
-            continue
+            # Old chunks (pre-fix) lack the index columns — the parquet
+            # silently dropped the MultiIndex on write, so the row positions
+            # are unrecoverable. Detect and force a recompute (the new write
+            # path overwrites cleanly).
+            if not set(INDEX_COLS).issubset(features.columns):
+                logger.warning(
+                    f"Chunk {full_key} predates index-preservation fix "
+                    f"(missing {set(INDEX_COLS) - set(features.columns)}); "
+                    "recomputing."
+                )
+            else:
+                loaded_from_checkpoint += 1
+                results.append(features)
+                continue
 
         start_idx = chunk_idx * chunk_size
         end_idx = min(start_idx + chunk_size, total_pairs)
@@ -595,6 +617,11 @@ def _do_match_records(
             good_enough_name_addr_min=0.85,
         )
 
+        # Materialize the (basic_fields_idx, privategrants_idx) MultiIndex
+        # as regular columns so it survives the parquet round-trip.
+        features.index = features.index.set_names(INDEX_COLS)
+        features = features.reset_index()
+
         pqc.write_dataframe(features, checkpoint_uri)
 
         computed_chunks += 1
@@ -606,20 +633,11 @@ def _do_match_records(
     )
 
     if not results:
-        final_features = pd.DataFrame(columns=['zip_score', 'name_score', 'addr_score'])
-    else:
-        final_features = pd.concat(results)
-    # Force consistent MultiIndex level names regardless of how recordlinkage
-    # / pyarrow round-tripped them through parquet. Older recordlinkage left
-    # the levels unnamed (so reset_index would yield 'level_0'/'level_1'), but
-    # the parquet checkpoint round-trip can rename them — we hit a KeyError
-    # on a chunk-resumed run because the rename below quietly didn't apply.
-    # Setting names here means reset_index() yields predictable column names
-    # and we don't need the brittle rename at all.
-    if final_features.index.nlevels == 2:
-        final_features.index = final_features.index.set_names(
-            ['basic_fields_df_index', 'private_foundations_df_index']
+        final_features = pd.DataFrame(
+            columns=INDEX_COLS + ['zip_score', 'name_score', 'addr_score']
         )
+    else:
+        final_features = pd.concat(results, ignore_index=True)
     logger.info(f"Finished matching")
 
     # --- 7. FILTER ---
@@ -636,12 +654,12 @@ def _do_match_records(
 
     logger.info(f"Found {len(matches)} matches.")
 
-    # reset_index() non-inplace: filter_match_rules returns a boolean-mask
-    # slice (a view), and inplace operations on views silently fail to
-    # propagate (SettingWithCopyWarning). Reassigning gives us a fresh frame
-    # we own outright. Columns are now named 'basic_fields_df_index' and
-    # 'private_foundations_df_index' from the index-level names set above.
-    matches = matches.reset_index()
+    # filter_match_rules returns a boolean-mask slice (a view). Take an
+    # explicit copy so subsequent assignments don't trigger
+    # SettingWithCopyWarning on a view. The index columns are already
+    # regular columns on `matches` (materialized at chunk-write time), so
+    # no reset_index / rename gymnastics needed.
+    matches = matches.copy()
 
     matches = matches.drop_duplicates()
 
