@@ -416,6 +416,7 @@ def match_records(
     s3_bucket: str = "givingtuesday-datamart",
     s3_prefix: str | None = None,
     resume_from_checkpoints: bool = True,
+    limit: int | None = None,
 ):
     """Run the recordlinkage grant-matching pipeline against gt_datamart.
 
@@ -425,6 +426,16 @@ def match_records(
     checkpoints can only be resumed against the exact source versions that
     produced them — re-ingesting either source forces a clean recompute.
     Pass an explicit string to override (e.g. for testing).
+
+    ``limit`` (test-only): caps both view reads to the first N rows. Used
+    to validate the chunk write/read round-trip end-to-end without paying
+    for a full multi-hour run. When set, chunks are namespaced under a
+    ``_test_limit_<N>`` subdirectory so they can't be confused with
+    production chunks (the row positions differ between subsets and would
+    silently produce wrong matches if mixed). The output tables
+    ``public.privategrants_w_recipients`` and ``public.unioned_grants``
+    are still rebuilt — small data while testing, restored to full data
+    on the next non-limited run.
 
     Each run is recorded in ``datamart_meta.canonical_builds`` with
     ``build_kind='grant_matching'``, the ingest_run_ids of every staging
@@ -446,6 +457,7 @@ def match_records(
             s3_bucket=s3_bucket,
             s3_prefix=s3_prefix,
             resume_from_checkpoints=resume_from_checkpoints,
+            limit=limit,
         )
     except BaseException as err:
         _finalize_build_failed(build_id, err)
@@ -467,6 +479,7 @@ def _do_match_records(
     s3_bucket: str,
     s3_prefix: str | None,
     resume_from_checkpoints: bool,
+    limit: int | None = None,
 ):
     """Inner pipeline body. Returns ``(full_data_df, pg_rows, ug_rows)``.
 
@@ -485,6 +498,19 @@ def _do_match_records(
             logger.info(f"Resolved checkpoint prefix from lineage: {s3_prefix}")
         else:
             logger.info(f"Using caller-supplied checkpoint prefix: {s3_prefix}")
+
+        # Test mode: namespace chunks so they can't pollute production
+        # checkpoints. Row positions in a limited subset don't correspond
+        # to row positions in a full run — mixing the two would silently
+        # produce wrong matches.
+        if limit is not None:
+            s3_prefix = f"{s3_prefix}/_test_limit_{int(limit)}"
+            logger.info(
+                f"limit={limit} (TEST MODE) — chunks namespaced under {s3_prefix}"
+            )
+
+        limit_clause = f"LIMIT {int(limit)}" if limit is not None else ""
+
         # Explicit ORDER BY (redundant with the view's own ORDER BY, but
         # contractual): row order MUST be deterministic across runs because
         # chunk checkpoints reference DataFrame rows by integer position.
@@ -492,20 +518,22 @@ def _do_match_records(
         # the wrong rows and produce silently-incorrect matches.
         logger.info("Reading public.basic_fields_unique_names_view")
         basic_fields_df = pd.read_sql_query(
-            text("""
+            text(f"""
                 SELECT * FROM public.basic_fields_unique_names_view
                 ORDER BY filerein_key, name1_key, name2_key, address1_key,
                          address2_key, addresscity_key, addressstate_key,
                          addresszip_key
+                {limit_clause}
             """),
             connection,
         )
         logger.info("Reading public.privategrants_unique_names_view")
         private_foundations_df = pd.read_sql_query(
-            text("""
+            text(f"""
                 SELECT * FROM public.privategrants_unique_names_view
                 ORDER BY name1_key, name2_key, address1_key, address2_key,
                          addresscity_key, addressstate_key, addresszip_key
+                {limit_clause}
             """),
             connection,
         )
@@ -757,4 +785,32 @@ def _do_match_records(
 
 
 if __name__ == "__main__":
-    match_records()
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Run the grant matching pipeline against gt_datamart."
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help=(
+            "Test mode: cap both view reads to N rows. Chunks are written "
+            "to a `_test_limit_<N>` subdirectory of the lineage-keyed "
+            "prefix so they can't be confused with production chunks. "
+            "Output tables (privategrants_w_recipients, unioned_grants) "
+            "are still rebuilt — small data while testing, restored on "
+            "the next non-limited run."
+        ),
+    )
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help=(
+            "Force full recompute by ignoring any existing chunks in S3. "
+            "Useful if you suspect the chunks are corrupt or stale."
+        ),
+    )
+    args = parser.parse_args()
+
+    match_records(limit=args.limit, resume_from_checkpoints=not args.no_resume)
