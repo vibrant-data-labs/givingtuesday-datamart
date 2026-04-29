@@ -19,7 +19,7 @@ All work to date lives on `zein/raw_notes`, not yet merged to main.
 
 **Phase 1 — complete.** Ingestion + lineage shipped end-to-end on `gt_datamart` (a dedicated database on the shared VDL RDS, isolated via `datamart_config()` override to `get_session`). All 9 sources (basic_fields, basic_fields_pf, mission_statements, programs, schedule_o, grants_to_domestic_organizations, privategrants, officers, officers_pf) ingested with full lineage stamping and idempotent re-runs. Two intentional deviations from the original plan: (a) all-TEXT staging instead of typed schemas — typing the IRS columns needs domain knowledge we don't have yet, and the matching pipeline casts at query time; (b) versioned snapshots + `_current` views skipped — overwrite-on-success + validation has been sufficient.
 
-**Phase 2 — partially complete.** Canonical surfaces live: `schedule_o_part_iii` (964K rows), `nonprofit_canonical` (465K), `nonprofit_text` with GIN-indexed `tsvector` (511K), `funder_canonical` (157K). FTS measured at sub-second on multi-token queries with stemming. Lineage table `datamart_meta.canonical_builds` records every build with the upstream `ingest_run_id`s that fed it. **Person canonical layer (`person_canonical`, `org_person_role`) indefinitely deferred** — see RDS storage section below. Two Phase 2 items still active: vdl-tools client module, and the expanded frontend organization profile.
+**Phase 2 — partially complete.** Canonical surfaces live: `schedule_o_part_iii` (964K rows), `nonprofit_canonical` (465K), `nonprofit_text` with GIN-indexed `tsvector` (511K), `funder_canonical` (157K). FTS measured at sub-second on multi-token queries with stemming. Lineage table `datamart_meta.canonical_builds` records every build with the upstream `ingest_run_id`s that fed it. **Person canonical layer (`person_canonical`, `org_person_role`) indefinitely deferred** — see RDS storage section below. **Track B (frontend cutover + profile expansion) shipped on `zein/raw_notes` 2026-04-29** — three commits (`0baa2fd`, `3b3f958`, `26fb8c7`) covering the parity-only DB cutover, the new identity/narrative/lineage profile sections, and a name/narrative/both search mode toggle with FTS boolean syntax. One Phase 2 item still active: vdl-tools client module (Track A).
 
 **Grant matching pipeline — ported and resumable.** `matching_records_experiment.py` → `grant_matching.py`, on `gt_datamart` + `public.*`, with lineage-keyed S3 checkpoint prefixes (`grant_matching_checkpoints/pg_<v>/bf_<v>/`), deterministic input ordering, parquet-index-preserving chunk writes, and parallel chunk resume via direct boto3 (bypasses the fsspec layer that was capping throughput). Each run stamps `datamart_meta.canonical_builds` with `build_kind='grant_matching'` plus output rowcounts and source-run IDs.
 
@@ -27,14 +27,13 @@ All work to date lives on `zein/raw_notes`, not yet merged to main.
 
 **Matching result at sources (`pg_2025_10_28`, `bf_2025_10_18`):** 648M candidate ZIP-blocked pairs → 1,993,316 post-stage-1 matches → 1,098,084 unique privategrants → recipient mappings after multi-match resolution. **Quantitative diff vs. the old `irs_filings.unioned_grants` cleared on 2026-04-29** — port produces equivalent matches.
 
-**Merge gate: full parity.** `zein/raw_notes` does NOT merge to main on the strength of the matching diff alone. Every downstream consumer of the old VDL DB (vdl-tools' `query_prepare_givingtuesday.py`, the frontend) must be cut over to `gt_datamart` and verified to produce equivalent results. Both tracks below are part of that gate. Both branch directly off `zein/raw_notes`.
+**Merge gate: full parity.** `zein/raw_notes` does NOT merge to main on the strength of the matching diff alone. Every downstream consumer of the old VDL DB (vdl-tools' `query_prepare_givingtuesday.py`, the frontend) must be cut over to `gt_datamart` and verified to produce equivalent results. Track B (frontend) cleared its parity diff on 2026-04-29; Track A (vdl-tools) is the remaining open leg.
 
-**Active priorities** (two parallel tracks; sessions are independent):
-1. **Track A — vdl-tools client module** (`givingtuesday_datamart/client/`). Python API: `search_nonprofits`, `get_nonprofit`, `get_grants`. Hides SQL from consumers; cuts `vdl_tools/scrape_enrich/givingtuesday/query_prepare_givingtuesday.py` over from the old VDL DB to `gt_datamart` via FTS. Parity check: equivalent EIN sets before/after cutover on a representative keyword run. Touches only `givingtuesday_datamart/client/*` + the vdl-tools cutover.
-2. **Track B — frontend organization profile expansion** against the new canonical surfaces. Identity / mission+programs / multi-year financials / grants given+received / lineage footer; all fed by a single `get_nonprofit_profile(ein)` API route reading from `gt_datamart`. Parity check: post-cutover page surfaces at least what the pre-cutover page did. Person section deferred until `person_canonical` returns. Touches only `frontend/*`.
-3. Drop `public.schedule_o` raw staging once consumers are confirmed off it (~17 GB recovery; opportunistic).
-
-Tracks A and B touch disjoint paths and read from the same canonical SQL surface — they can run in parallel sessions without conflicting. Whichever track lands second rebases on `zein/raw_notes` to pick up the first.
+**Active priorities:**
+1. **Track A — vdl-tools client module** (`givingtuesday_datamart/client/`). Python API: `search_nonprofits`, `get_nonprofit`, `get_grants`. Hides SQL from consumers; cuts `vdl_tools/scrape_enrich/givingtuesday/query_prepare_givingtuesday.py` over from the old VDL DB to `gt_datamart` via FTS. Parity check: equivalent EIN sets before/after cutover on a representative keyword run. Touches only `givingtuesday_datamart/client/*` + the vdl-tools cutover. Branches off `zein/raw_notes`.
+2. ✅ **Track B — frontend cutover + profile expansion** *(complete, on `zein/raw_notes` head)*. Profile API and the search route now read from `gt_datamart`. Identity (DBAs / formation year / website / country) sourced from `nonprofit_canonical`; three-section narrative (Mission / Program activities / Schedule O Part III) sourced from staging tables on EIN-indexed lookups; lineage footer shows `_source_version` and 8-char `source_run_id` prefix. New `mode` query param (name / narrative / both) with a segmented control on the home page; instructions describe the FTS boolean syntax (AND default, `OR`, leading `-` for negation, `"phrase quotes"`, plus stemming and stop-word semantics). Profile p95 ~165ms cold / ~10ms warm.
+3. **Plumb staging-table indexes into Python ingestion.** Track B applied four `CREATE INDEX … (filerein)` statements directly to `gt_datamart` (on `basic_fields`, `basic_fields_pf`, `programs`, `mission_statements`) to meet the 30s statement-timeout. Without these, profile p95 goes from ~10ms to >30s timeouts. They are NOT yet captured in `givingtuesday_datamart/sources/`, so a future re-ingest will drop them. Cleanest plumbing: add an `indexes: tuple[str, ...] = ()` field to `SourceSpec` in `givingtuesday_datamart/sources/registry.py` and emit `CREATE INDEX IF NOT EXISTS` after the COPY in `givingtuesday_datamart/sources/ingestion.py`. **This must land before merging `zein/raw_notes` to main** or the frontend silently regresses on the next refresh.
+4. Drop `public.schedule_o` raw staging once consumers are confirmed off it (~17 GB recovery; opportunistic).
 
 ## Strategic framing
 
@@ -60,7 +59,7 @@ Key work:
 - ✅ **Single entrypoint.** `python -m givingtuesday_datamart.sources refresh [--source NAME] [--force]`.
 - ✅ **Observability.** `datamart_meta.ingest_runs` table; `status` CLI for S3 freshness; `loaded` CLI for DB state.
 
-### Phase 2 — Query surfaces *(🟡 partial — canonical layer + FTS shipped; client + frontend still active)*
+### Phase 2 — Query surfaces *(🟡 partial — canonical layer + FTS + frontend shipped; client module still active)*
 
 **Goal:** Kill in-memory keyword search. Make the web app fast. Give vdl-tools a fast, indexed surface to call.
 
@@ -74,17 +73,25 @@ Key work:
   Aliases and history not built — preserve revisiting until the canonical lookup hits a real consumer need.
 - ✅ **Postgres FTS for nonprofit text.** `public.nonprofit_text` (511K rows) is a per-EIN deduplicated UNION across Mission Statement, Activities 1/2/3, and Schedule O Part III, with `tsvector` + GIN index. Field-level dedup via UNION collapses copy-pasted text across years and across activity slots. FTS measured at sub-second on multi-token queries, ~10ms on simple terms.
 - ❌ **API shape for vdl-tools** — still active. A small Python client module inside `givingtuesday_datamart/client/` that vdl-tools imports. Methods: `search_nonprofits(keywords, filters)`, `get_nonprofit(ein)`, `get_grants(ein)`. Hides SQL from consumers so schema changes don't cascade.
-- 🟡 **Web app speedup.** Web app still runs on the old VDL DB; will benefit once it cuts over to `gt_datamart` via the client module above.
-- ❌ **Frontend: richer organization profiles** — still active. Current profiles only surface name + contributions/grants — a small fraction of what the 990 actually contains. Expand organization detail views to include (at minimum):
-  - Identity block: canonical name, EIN, NTEE classification, address, founding/ruling date, website
-  - Mission Statement + Program descriptions + Schedule O Part III narrative (the same deduped text now powering FTS — surface it here too so users see what matched)
-  - Financial snapshot across years: revenue, expenses, net assets, employees, volunteers (trend sparklines, not just latest)
+- ✅ **Web app cut over to `gt_datamart`.** Frontend reads from `public.*` on `gt_datamart` (commit `0baa2fd`). Profile + grants endpoints verified shape-equivalent or strict superset on a 6-EIN diff (gt_datamart carries fresher 2022/2023 filings + restored zero-padded EINs/ZIPs the old VDL DB had stripped).
+- ✅ **Frontend search rewritten as a tiered hybrid** (commit `0baa2fd`, refined in `26fb8c7`):
+  - ILIKE on `nonprofit_canonical` name + secondary + DBAs (rank tier `1e6`)
+  - EIN exact-match on `nonprofit_canonical.ein` / `funder_canonical.ein` (rank tier `2e6`)
+  - Postgres FTS via `websearch_to_tsquery('english', q)` over `nonprofit_text.text_tsv` (raw `ts_rank_cd` score)
+  - Tier separation guarantees name matches always rank above narrative-only matches.
+  - Home page exposes a `mode` query param (`name` / `narrative` / `both`, default `both`) with a segmented toggle and an instructions block describing the FTS boolean syntax (AND default, `OR`, leading `-` for negation, `"phrase quotes"`, plus stemming and stop-word semantics inherited from the english config).
+- ✅ **Frontend: richer organization profiles** *(shipped — commits `3b3f958` + `26fb8c7`)*:
+  - Identity block: canonical name, EIN, address, formation year, country, website (sourced from `nonprofit_canonical` / `funder_canonical`)
+  - Mission Statement + Program activities + Schedule O Part III narrative — three collapsible sub-sections sourced directly from `mission_statements`, `programs`, `schedule_o_part_iii`. Most recent entry shown by default with "Show N earlier filings" + per-entry "Read more" expanders.
+  - Financial snapshot across years (already existed; preserved on cutover) — revenue trend chart with per-year breakdown of Part VIII Line 1 contribution sources.
   - People — *deferred with `person_canonical` / `org_person_role`*. When that layer comes back online, this section returns to scope.
-  - Governance/compliance flags worth surfacing (public charity status, 501(c) subsection, etc.)
-  - Grants given + received (already there, but driven off `funder_canonical` / `nonprofit_canonical` so names and EINs are consistent and clickable; the matched union lives in `public.unioned_grants`).
-  - Lineage footer: which Datamart version and tax years power this profile (drives trust + debugging). Source: `_source_version` on each row plus the relevant build row in `datamart_meta.canonical_builds`.
+  - Governance/compliance flags — *not yet surfaced; next iteration*.
+  - Grants given + received — preserved from previous design, now driven off `public.unioned_grants` and the canonical name lookup.
+  - Lineage footer — shows `_source_version` (e.g. `2025-10-18`) and 8-char prefix of `source_run_id`, full UUID on hover, plus the originating `irs_990_basic_fields` / `irs_990pf_basic_fields` logical name.
 
-  Implementation note: the goal is "show the analyst or investigator what the 990 actually says about this org at a glance," not a pretty-but-shallow card. Design the backend query as a single `get_nonprofit_profile(ein)` call that returns everything needed for the view, to keep the frontend simple and the backend auditable.
+  Implementation: `getOrgProfile(ein)` is one server-side call that fans out into ~6 parallel queries (canonical identity, basic_fields aggregation, revenue history, revenue details, mission, programs, schedule_o) via `Promise.all`. p95 ~165ms cold, ~10ms warm against `gt_datamart`. Frontend types and hook unchanged for callers — `OrgProfile` extended with `dba1`, `dba2`, `careOf`, `country`, `website`, `formationYear`, `narrative`, `lineage` fields.
+
+- 🟡 **Staging-table indexes on `gt_datamart` are out-of-band.** Track B ran four `CREATE INDEX … (filerein)` statements directly against the DB to meet the profile p95 target (`basic_fields`, `basic_fields_pf`, `programs`, `mission_statements`). Without them, profile loads sequential-scan 3 GB tables and time out at 30s. The DDL is **not yet captured in `givingtuesday_datamart/sources/`** — a future re-ingest will drop the indexes and silently regress the profile page. **Plumb before merging `zein/raw_notes` to main.** Cleanest target: extend `SourceSpec` in `givingtuesday_datamart/sources/registry.py` with an `indexes: tuple[str, ...] = ()` field; emit `CREATE INDEX IF NOT EXISTS` (and `ANALYZE`) after the COPY in `givingtuesday_datamart/sources/ingestion.py`. Four sources need entries: `irs_990_basic_fields`, `irs_990pf_basic_fields`, `irs_990_programs`, `irs_990_missions`.
 
 ### Phase 3 — Ongoing capability upgrades
 
@@ -157,9 +164,18 @@ What landed (Phase 1 + Phase 2 canonical + Phase 3 matching):
 - [givingtuesday_datamart/sql_queries/non_profit_text_joins.sql](givingtuesday_datamart/sql_queries/non_profit_text_joins.sql) — *retained as historical/reference, but the canonical build's `_build_nonprofit_text` is the real implementation now*.
 - ~~`givingtuesday_datamart/sql_queries/unique_fields_for_grants.sql`~~ — **deleted**; DDL lifted into `grant_matching.py` (`create_or_replace_views`, `rebuild_unioned_grants`).
 
+What landed for Track B (frontend cutover + profile expansion):
+- [frontend/src/lib/db.ts](frontend/src/lib/db.ts) — Kysely `Database` interface modeling `public.*` tables on `gt_datamart`.
+- [frontend/src/lib/queries/orgs.ts](frontend/src/lib/queries/orgs.ts) — canonical identity + narrative + lineage fetchers (`fetchCanonicalIdentity`, `fetchMissionStatements`, `fetchPrograms`, `fetchScheduleO`).
+- [frontend/src/lib/queries/grants.ts](frontend/src/lib/queries/grants.ts) — schema repoint to `public.unioned_grants`.
+- [frontend/src/lib/queries/search.ts](frontend/src/lib/queries/search.ts) — tiered hybrid (ILIKE + EIN-exact + FTS) with mode gating.
+- [frontend/src/components/org/OrgIdentityCard.tsx](frontend/src/components/org/OrgIdentityCard.tsx), [OrgNarrative.tsx](frontend/src/components/org/OrgNarrative.tsx), [LineageFooter.tsx](frontend/src/components/org/LineageFooter.tsx) — new profile sections.
+- [frontend/src/components/search/SearchModeToggle.tsx](frontend/src/components/search/SearchModeToggle.tsx) — segmented control + URL state.
+- [frontend/src/app/page.tsx](frontend/src/app/page.tsx) — instructions block describing the search modes and FTS boolean syntax.
+
 Still pending:
-- `givingtuesday_datamart/client/` — Python client consumed by vdl-tools (the next active priority after grant matching verification).
-- Frontend `frontend/src/lib/**` — still reads from old VDL DB; cuts over after the client lands.
+- `givingtuesday_datamart/client/` — Python client consumed by vdl-tools (the remaining active priority).
+- `SourceSpec.indexes` plumbing — see Active Priorities item 3 above.
 
 ## Verification
 
@@ -171,16 +187,17 @@ Still pending:
 - ✅ Validation failures hard-fail the refresh; per-check warn-vs-fail policy.
 - ✅ README documents the flow (`README.md`).
 
-**Phase 2 — 🟡 canonical surfaces shipped; consumer-facing pieces pending.**
+**Phase 2 — 🟡 canonical surfaces + frontend shipped; vdl-tools client still pending.**
 - ❌ vdl-tools `query_prepare_givingtuesday.py` cuts over to the new client + FTS — *pending the client module*.
 - ✅ `nonprofit_canonical`, `funder_canonical`, `nonprofit_text` exist with the expected shape and rowcounts; lineage in `datamart_meta.canonical_builds`.
-- ❌ Frontend organization profile page expanded — *pending the client module + design pass*.
-- 🟡 Profile query speedup — measurable once the client + frontend cut over.
+- ✅ Frontend organization profile page expanded — identity card, three-section narrative (Mission / Programs / Schedule O Part III), lineage footer. Shipped 2026-04-29 (commits `0baa2fd`, `3b3f958`, `26fb8c7`).
+- ✅ Frontend search rewritten as tiered hybrid (ILIKE + EIN-exact + FTS), with `mode` toggle (name / narrative / both) and FTS boolean syntax instructions.
+- ✅ Profile query speedup measured: ~165ms cold / ~10ms warm after staging-table indexes. **Index DDL not yet plumbed into Python — see Active Priorities item 3.**
 
 **Phase 3 — ongoing, measured per capability.**
 - ✅ Grant matching pipeline ported, lineage-stamped, resumable. End-to-end run on EC2 confirmed 2026-04-29 (resume = 27s for 12,972 chunks; produced 1,098,084 unique privategrants → recipient mappings).
 - ✅ Quantitative correctness diff of `public.unioned_grants` vs. the prior `irs_filings.unioned_grants` — cleared 2026-04-29. Port produces equivalent matches.
-- 🟡 **Full-parity merge gate** — open until the vdl-tools consumer (`query_prepare_givingtuesday.py`) and the frontend profile page are cut over from the old VDL DB to `gt_datamart` and verified to produce equivalent results. The matching diff alone does NOT clear the merge gate.
+- 🟡 **Full-parity merge gate** — frontend leg ✅ cleared 2026-04-29; vdl-tools consumer (`query_prepare_givingtuesday.py`) still pending. **Also blocked on plumbing the four staging-table indexes into `SourceSpec`** (see Active Priorities item 3) — the frontend perf depends on them and the next re-ingest will silently drop them.
 - ❌ Matching threshold regression harness — pending.
 - ❌ Matching memory footprint — still requires r7a.4xlarge.
 - ❌ Funder classification, attachment-grant extraction, cross-org person dedup, address sanitization — pending (cross-org person dedup blocked on `person_canonical` returning).
@@ -189,4 +206,4 @@ Still pending:
 
 1. **Refresh cadence.** Quarterly? Aligned to a specific IRS drop? Needs a conversation with Giving Tuesday before we commit. The plan works for any cadence but ops details (cron schedule, notification surface, EC2 sizing) depend on it.
 2. **Dedicated `gt_datamart` RDS vs. shared.** The current "drop staging that isn't strictly needed" approach buys runway but doesn't solve the underlying problem. Eventually `person_canonical` or another large derived table will need to come back, and we hit the wall again. Needs a sizing + cost conversation before the next big build.
-3. **Branch strategy.** `zein/raw_notes` will not merge to main until full parity (vdl-tools + frontend consumer cutovers verified). Both new tracks (client module, frontend profile) branch from `zein/raw_notes` directly.
+3. **Branch strategy.** `zein/raw_notes` will not merge to main until (a) vdl-tools `query_prepare_givingtuesday.py` is cut over to `gt_datamart`, and (b) the staging-table index DDL is plumbed into `SourceSpec`. Frontend cutover ✅ shipped to `zein/raw_notes` head (three commits, 2026-04-29). Track A (client module) branches from `zein/raw_notes` directly.
