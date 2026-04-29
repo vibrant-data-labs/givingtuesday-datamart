@@ -2,7 +2,14 @@ import { cache } from 'react';
 import { unstable_cache } from 'next/cache';
 import { sql } from 'kysely';
 import { getDb } from '@/lib/db';
-import type { OrgProfile, RevenueDetail } from '@/types/org';
+import type {
+  NarrativeEntry,
+  OrgLineage,
+  OrgNarrativeBundle,
+  OrgProfile,
+  OrgType,
+  RevenueDetail,
+} from '@/types/org';
 
 // basic_fields uses totrevcuryea; basic_fields_pf uses areterexpnss
 const REVENUE_COL = {
@@ -138,38 +145,179 @@ async function fetchRevenueDetails(
 
 const ORG_CACHE_REVALIDATE_SECONDS = 600; // 10 minutes
 
+type CanonicalIdentity = {
+  name: string | null;
+  name_secondary: string | null;
+  dba_1: string | null;
+  dba_2: string | null;
+  care_of: string | null;
+  addr_line_1: string | null;
+  addr_line_2: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  addr_country: string | null;
+  website: string | null;
+  formation_year: string | null;
+  source_run_id: string;
+  source_version: string;
+  built_at: Date;
+};
+
+async function fetchCanonicalIdentity(
+  table: 'public.nonprofit_canonical' | 'public.funder_canonical',
+  ein: string,
+): Promise<CanonicalIdentity | null> {
+  const db = getDb();
+  // Funder canonical lacks website/dba/care_of/formation_year — synthesize as
+  // NULL so both branches produce the same shape.
+  const isFunder = table === 'public.funder_canonical';
+  const rows = await sql<CanonicalIdentity>`
+    SELECT
+      name,
+      name_secondary,
+      ${isFunder ? sql`NULL::text` : sql`dba_1`} AS dba_1,
+      ${isFunder ? sql`NULL::text` : sql`dba_2`} AS dba_2,
+      ${isFunder ? sql`NULL::text` : sql`care_of`} AS care_of,
+      addr_line_1,
+      addr_line_2,
+      city,
+      state,
+      zip,
+      addr_country,
+      ${isFunder ? sql`NULL::text` : sql`website`} AS website,
+      ${isFunder ? sql`NULL::text` : sql`formation_year`} AS formation_year,
+      source_run_id,
+      source_version,
+      _built_at AS built_at
+    FROM ${sql.table(table)}
+    WHERE ein = ${ein}
+  `.execute(db);
+  return rows.rows[0] ?? null;
+}
+
+async function fetchMissionStatements(ein: string): Promise<NarrativeEntry[]> {
+  const db = getDb();
+  const rows = await db
+    .selectFrom('public.mission_statements')
+    .select([
+      sql<number | null>`NULLIF(taxyear, '')::int`.as('taxyear'),
+      sql<string>`mission`.as('mission'),
+    ])
+    .where(sql`filerein::text`, '=', ein)
+    .where(sql`COALESCE(mission, '')`, '<>', '')
+    .orderBy(sql`NULLIF(taxyear, '')::int`, 'desc')
+    .execute();
+
+  return rows.map((r) => ({ taxyear: r.taxyear, text: r.mission }));
+}
+
+async function fetchPrograms(ein: string): Promise<NarrativeEntry[]> {
+  const db = getDb();
+  // Single index scan; flatten the three activity slots in JS. Three-column
+  // SELECT is one btree lookup vs UNION-ALL's three.
+  const rows = await db
+    .selectFrom('public.programs')
+    .select([
+      sql<number | null>`NULLIF(taxyear, '')::int`.as('taxyear'),
+      sql<string | null>`actividescri1`.as('a1'),
+      sql<string | null>`actividescri2`.as('a2'),
+      sql<string | null>`actividescri3`.as('a3'),
+    ])
+    .where(sql`filerein::text`, '=', ein)
+    .orderBy(sql`NULLIF(taxyear, '')::int`, 'desc')
+    .execute();
+
+  const entries: NarrativeEntry[] = [];
+  for (const r of rows) {
+    for (const text of [r.a1, r.a2, r.a3]) {
+      if (text && text.trim() !== '') entries.push({ taxyear: r.taxyear, text });
+    }
+  }
+  return entries;
+}
+
+async function fetchScheduleO(ein: string): Promise<NarrativeEntry[]> {
+  const db = getDb();
+  const rows = await db
+    .selectFrom('public.schedule_o_part_iii')
+    .select([
+      sql<number | null>`NULLIF(taxyear, '')::int`.as('taxyear'),
+      sql<string>`supinfdetexp`.as('text'),
+    ])
+    .where(sql`filerein::text`, '=', ein)
+    .where(sql`COALESCE(supinfdetexp, '')`, '<>', '')
+    .orderBy(sql`NULLIF(taxyear, '')::int`, 'desc')
+    .execute();
+  return rows.map((r) => ({ taxyear: r.taxyear, text: r.text }));
+}
+
 async function getOrgProfileUncached(ein: string): Promise<OrgProfile | null> {
-  const [nonprofitRow, foundationRow] = await Promise.all([
+  // Identity comes from canonical (DISTINCT-ON-latest-filing winner) — but the
+  // basic_fields aggregation still seeds firstYear/lastYear/totalRevenue and
+  // tells us nonprofit-vs-foundation. Fire all four in parallel.
+  const [npIdentity, pfIdentity, npAgg, pfAgg] = await Promise.all([
+    fetchCanonicalIdentity('public.nonprofit_canonical', ein),
+    fetchCanonicalIdentity('public.funder_canonical', ein),
     fetchOrgFromTable('public.basic_fields', ein),
     fetchOrgFromTable('public.basic_fields_pf', ein),
   ]);
 
-  const row = nonprofitRow ?? foundationRow;
-  if (!row) return null;
+  // 990 takes precedence when an EIN somehow appears in both surfaces.
+  const orgType: OrgType = npAgg ? 'nonprofit' : pfAgg ? 'foundation' : npIdentity ? 'nonprofit' : pfIdentity ? 'foundation' : 'nonprofit';
+  const agg = npAgg ?? pfAgg;
+  if (!agg) return null;
+  const identity = orgType === 'nonprofit' ? npIdentity : pfIdentity;
 
-  const orgType = nonprofitRow ? 'nonprofit' : 'foundation';
-  const table = nonprofitRow ? 'public.basic_fields' : 'public.basic_fields_pf';
+  const table = orgType === 'nonprofit' ? 'public.basic_fields' : 'public.basic_fields_pf';
 
-  const [revenueByYear, revenueDetails] = await Promise.all([
+  const [revenueByYear, revenueDetails, missions, programs, scheduleO] = await Promise.all([
     fetchRevenueHistory(table, ein),
     fetchRevenueDetails(table, ein),
+    // Narrative tables are 990-only — funders have no FTS surface today, so
+    // skip the round-trips entirely for foundations.
+    orgType === 'nonprofit' ? fetchMissionStatements(ein) : Promise.resolve([]),
+    orgType === 'nonprofit' ? fetchPrograms(ein) : Promise.resolve([]),
+    orgType === 'nonprofit' ? fetchScheduleO(ein) : Promise.resolve([]),
   ]);
 
+  const narrative: OrgNarrativeBundle = {
+    mission: missions,
+    programs,
+    scheduleO,
+  };
+
+  const lineage: OrgLineage = identity
+    ? {
+        sourceVersion: identity.source_version,
+        sourceRunId: identity.source_run_id,
+        builtAt: identity.built_at ? new Date(identity.built_at).toISOString() : null,
+      }
+    : { sourceVersion: null, sourceRunId: null, builtAt: null };
+
   return {
-    ein: row.ein,
-    name1: row.filername1,
-    name2: row.filername2,
-    address1: row.filerus1,
-    address2: row.filerus2,
-    city: row.fileruscity,
-    state: row.filerusstate,
-    zip: row.fileruszip,
-    totalRevenue: row.total_revenue ? parseInt(row.total_revenue as unknown as string, 10) : null,
-    firstYear: row.first_year,
-    lastYear: row.last_year,
+    ein: agg.ein,
+    name1: identity?.name ?? agg.filername1,
+    name2: identity?.name_secondary ?? agg.filername2,
+    dba1: identity?.dba_1 ?? null,
+    dba2: identity?.dba_2 ?? null,
+    careOf: identity?.care_of ?? null,
+    address1: identity?.addr_line_1 ?? agg.filerus1,
+    address2: identity?.addr_line_2 ?? agg.filerus2,
+    city: identity?.city ?? agg.fileruscity,
+    state: identity?.state ?? agg.filerusstate,
+    zip: identity?.zip ?? agg.fileruszip,
+    country: identity?.addr_country ?? null,
+    website: identity?.website ?? null,
+    formationYear: identity?.formation_year ?? null,
+    totalRevenue: agg.total_revenue ? parseInt(agg.total_revenue as unknown as string, 10) : null,
+    firstYear: agg.first_year,
+    lastYear: agg.last_year,
     orgType,
     revenueByYear,
     revenueDetails,
+    narrative,
+    lineage,
   };
 }
 

@@ -32,7 +32,7 @@ export function OrgHeader({ org }: OrgHeaderProps) {
               {org.orgType === 'foundation' ? 'Private Foundation (990-PF)' : 'Nonprofit (990)'}
             </Badge>
           </div>
-          <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+          <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
             <span className="font-mono text-foreground/70">{formatEIN(org.ein)}</span>
             <span>·</span>
             <span>
@@ -40,6 +40,19 @@ export function OrgHeader({ org }: OrgHeaderProps) {
                 ? `${org.firstYear}`
                 : `${org.firstYear}–${org.lastYear}`}
             </span>
+            {org.website && (
+              <>
+                <span>·</span>
+                <a
+                  href={/^https?:\/\//i.test(org.website) ? org.website : `https://${org.website}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline lowercase"
+                >
+                  {org.website.replace(/^https?:\/\//i, '').toLowerCase()}
+                </a>
+              </>
+            )}
           </div>
         </div>
       </div>
