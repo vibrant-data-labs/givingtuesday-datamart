@@ -1,21 +1,28 @@
 """
 Read-only Python client over the ``gt_datamart`` canonical surface.
 
-Hides the SQL layer from vdl-tools consumers so future schema changes are
-bounded to this module. Every method opens its own session via
-``get_session(config=datamart_config())`` — no long-lived connection state
-on the client. Returns frozen dataclasses (see ``models.py``); consumers
-that want a DataFrame call ``pd.DataFrame.from_records([asdict(x) ...])``
-themselves (the client deliberately does not depend on pandas).
+Hides the SQL layer from consumers so future schema changes are bounded to
+this module. Owns its own SQLAlchemy engine and session factory — does
+**not** import vdl-tools, so this sub-module is shippable as a standalone
+library and consumers (e.g. vdl-tools) can depend on it without creating
+a circular package dependency.
+
+Returns frozen dataclasses (see ``models.py``); consumers that want a
+DataFrame call ``pd.DataFrame.from_records([asdict(x) ...])`` themselves
+(the client deliberately does not depend on pandas).
 """
 
 from __future__ import annotations
 
-from typing import Literal
+import logging
+import os
+from contextlib import contextmanager
+from typing import Iterator, Literal
 
-from sqlalchemy import text
-from vdl_tools.shared_tools.database_cache.database_utils import get_session
-from vdl_tools.shared_tools.tools.logger import logger
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.engine.url import URL
+from sqlalchemy.orm import Session, sessionmaker
 
 from givingtuesday_datamart.client.models import (
     BasicFieldsRow,
@@ -23,18 +30,106 @@ from givingtuesday_datamart.client.models import (
     Nonprofit,
     NonprofitHit,
 )
-from givingtuesday_datamart.ingestion import datamart_config
 
+
+logger = logging.getLogger(__name__)
 
 GranteeOrGranter = Literal["grantee", "granter"]
 
+DEFAULT_DATABASE = "gt_datamart"
+DEFAULT_PORT = 5432
+
+# Env var names checked when no explicit connection components are passed
+# to the constructor. Mirrors the shape of vdl-tools' postgres config but
+# under a GT_DATAMART_ namespace so the client never collides with — or
+# depends on — vdl-tools' configuration system.
+ENV_HOST = "GT_DATAMART_PG_HOST"
+ENV_PORT = "GT_DATAMART_PG_PORT"
+ENV_USER = "GT_DATAMART_PG_USER"
+ENV_PASSWORD = "GT_DATAMART_PG_PASSWORD"
+ENV_DATABASE = "GT_DATAMART_PG_DATABASE"
+
+
+def _engine_from_components(
+    host: str | None,
+    port: int | None,
+    user: str | None,
+    password: str | None,
+    database: str | None,
+) -> Engine:
+    """Build a psycopg2 engine, falling back to GT_DATAMART_PG_* env vars."""
+    host = host or os.environ.get(ENV_HOST)
+    port = port or (int(os.environ[ENV_PORT]) if os.environ.get(ENV_PORT) else DEFAULT_PORT)
+    user = user or os.environ.get(ENV_USER)
+    password = password or os.environ.get(ENV_PASSWORD)
+    database = database or os.environ.get(ENV_DATABASE) or DEFAULT_DATABASE
+
+    missing = [
+        name
+        for name, value in (("host", host), ("user", user), ("password", password))
+        if not value
+    ]
+    if missing:
+        raise RuntimeError(
+            "GtDatamartClient missing connection components: "
+            f"{missing}. Pass them to the constructor or set "
+            f"{ENV_HOST}/{ENV_USER}/{ENV_PASSWORD} (and optionally "
+            f"{ENV_PORT}, {ENV_DATABASE})."
+        )
+
+    url = URL.create(
+        "postgresql",
+        username=user,
+        password=password,
+        host=host,
+        port=port,
+        database=database,
+    )
+    return create_engine(url, future=True)
+
 
 class GtDatamartClient:
-    def __init__(self, config: dict | None = None) -> None:
-        self._config = config
+    """Read-only client over gt_datamart.
 
-    def _config_or_default(self) -> dict:
-        return self._config if self._config is not None else datamart_config()
+    Connection inputs (in order of precedence):
+
+    1. ``engine`` — a pre-built SQLAlchemy ``Engine``. Useful for tests,
+       custom pooling, or sharing one engine across multiple clients.
+    2. ``url`` — a SQLAlchemy URL string.
+    3. ``host``/``port``/``user``/``password``/``database`` — components.
+    4. ``GT_DATAMART_PG_*`` environment variables (with sensible defaults
+       for ``port`` and ``database``).
+
+    The client does not commit; every method opens a short-lived session
+    against the persistent engine, runs a single SELECT, and closes it.
+    """
+
+    def __init__(
+        self,
+        *,
+        engine: Engine | None = None,
+        url: str | None = None,
+        host: str | None = None,
+        port: int | None = None,
+        user: str | None = None,
+        password: str | None = None,
+        database: str | None = None,
+    ) -> None:
+        if engine is not None:
+            self._engine = engine
+        elif url is not None:
+            self._engine = create_engine(url, future=True)
+        else:
+            self._engine = _engine_from_components(host, port, user, password, database)
+        self._sessionmaker = sessionmaker(bind=self._engine, expire_on_commit=False)
+
+    @contextmanager
+    def _session(self) -> Iterator[Session]:
+        session = self._sessionmaker()
+        try:
+            yield session
+        finally:
+            session.close()
 
     def search_nonprofits(
         self,
@@ -95,7 +190,7 @@ class GtDatamartClient:
             min_rank,
             limit,
         )
-        with get_session(config=self._config_or_default()) as session:
+        with self._session() as session:
             rows = session.execute(text(sql), params).mappings().all()
 
         hits = [
@@ -139,7 +234,7 @@ class GtDatamartClient:
             LEFT JOIN public.nonprofit_text nt USING (ein)
             WHERE nc.ein = :ein
         """
-        with get_session(config=self._config_or_default()) as session:
+        with self._session() as session:
             row = session.execute(text(sql), {"ein": ein}).mappings().first()
         if row is None:
             return None
@@ -188,7 +283,7 @@ class GtDatamartClient:
             sql += " AND NULLIF(taxyear, '')::int >= :min_taxyear"
             params["min_taxyear"] = min_taxyear
 
-        with get_session(config=self._config_or_default()) as session:
+        with self._session() as session:
             rows = session.execute(text(sql), params).mappings().all()
         return [BasicFieldsRow(**dict(r)) for r in rows]
 
@@ -244,6 +339,6 @@ class GtDatamartClient:
             sql += " AND taxyear >= :min_taxyear"
             params["min_taxyear"] = min_taxyear
 
-        with get_session(config=self._config_or_default()) as session:
+        with self._session() as session:
             rows = session.execute(text(sql), params).mappings().all()
         return [Grant(**dict(r)) for r in rows]
