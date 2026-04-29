@@ -4,12 +4,14 @@ import { Suspense } from 'react';
 import { Building2, Landmark, ArrowRightLeft } from 'lucide-react';
 import { SearchBar } from '@/components/search/SearchBar';
 import { SearchTabs } from '@/components/search/SearchTabs';
+import { SearchModeToggle } from '@/components/search/SearchModeToggle';
 import { SearchResultsClient } from '@/components/search/SearchResultsClient';
 import {
   sanitizeSearchQuery,
   sanitizePage,
   sanitizeLimit,
   sanitizeOrgType,
+  sanitizeSearchMode,
 } from '@/lib/utils/validation';
 
 interface HomeProps {
@@ -18,6 +20,7 @@ interface HomeProps {
     type?: string;
     page?: string;
     limit?: string;
+    mode?: string;
   };
 }
 
@@ -26,6 +29,7 @@ export default function HomePage({ searchParams }: HomeProps) {
   const type = sanitizeOrgType(searchParams.type);
   const page = sanitizePage(searchParams.page);
   const limit = sanitizeLimit(searchParams.limit, 25);
+  const mode = sanitizeSearchMode(searchParams.mode);
 
   const hasQuery = q.length > 0;
 
@@ -62,18 +66,32 @@ export default function HomePage({ searchParams }: HomeProps) {
             <Suspense fallback={null}>
               <SearchTabs currentType={type} />
             </Suspense>
-            {hasQuery && (
-              <p className="text-xs text-muted-foreground">
-                Searching for <span className="font-medium text-foreground">&ldquo;{q}&rdquo;</span>
-              </p>
-            )}
+            <Suspense fallback={null}>
+              <SearchModeToggle currentMode={mode} />
+            </Suspense>
           </div>
+
+          {hasQuery && (
+            <p className="text-xs text-muted-foreground">
+              Searching{' '}
+              {mode === 'name'
+                ? 'organization names + DBAs'
+                : mode === 'narrative'
+                  ? 'Form 990 mission, programs, and Schedule O Part III narratives'
+                  : 'organization names, DBAs, and Form 990 narratives'}
+              {' '}for <span className="font-medium text-foreground">&ldquo;{q}&rdquo;</span>.
+            </p>
+          )}
+
+          {!hasQuery && (
+            <SearchInstructions />
+          )}
         </div>
 
         {/* Results */}
         <div className="mt-8">
           {hasQuery ? (
-            <SearchResultsClient q={q} type={type} page={page} limit={limit} />
+            <SearchResultsClient q={q} type={type} page={page} limit={limit} mode={mode} />
           ) : (
             <div className="mt-20 grid grid-cols-1 sm:grid-cols-3 gap-5">
               <FeatureCard
@@ -97,6 +115,65 @@ export default function HomePage({ searchParams }: HomeProps) {
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SearchInstructions() {
+  return (
+    <div className="rounded-lg border border-border/60 bg-card/40 p-4 text-xs text-muted-foreground leading-relaxed space-y-3">
+      <div className="space-y-1.5">
+        <p>
+          <span className="font-semibold text-foreground/80">Tip:</span>{' '}
+          Type an organization name, an EIN (with or without the dash), or words that describe what the org does.
+          Use the <span className="font-medium text-foreground/80">Match on</span> toggle to control where matching runs:
+        </p>
+        <ul className="list-disc pl-5 space-y-0.5">
+          <li>
+            <span className="font-medium text-foreground/80">Name only</span> — matches the canonical org name, secondary name, and DBAs as a plain substring (no boolean operators). Best when you know the organization.
+          </li>
+          <li>
+            <span className="font-medium text-foreground/80">Narrative only</span> — full-text search over Form 990 mission, program activities, and Schedule O Part III, with English stemming. Best for &ldquo;what nonprofits do X.&rdquo; 990 nonprofits only.
+          </li>
+          <li>
+            <span className="font-medium text-foreground/80">Name + narrative</span> (default) — both signals; name matches always rank above narrative-only matches.
+          </li>
+        </ul>
+      </div>
+
+      <div className="space-y-1.5 pt-2 border-t border-border/40">
+        <p>
+          <span className="font-semibold text-foreground/80">Boolean syntax</span> (applies to narrative matching — the name path is a plain substring search):
+        </p>
+        <ul className="list-disc pl-5 space-y-0.5">
+          <li>
+            Multiple words are <span className="font-medium text-foreground/80">ANDed</span> by default —{' '}
+            <code className="font-mono bg-secondary/60 px-1 py-0.5 rounded">climate adaptation</code>{' '}
+            requires both terms to appear.
+          </li>
+          <li>
+            Use <code className="font-mono bg-secondary/60 px-1 py-0.5 rounded">OR</code> between terms for either-or —{' '}
+            <code className="font-mono bg-secondary/60 px-1 py-0.5 rounded">solar OR wind</code>.
+          </li>
+          <li>
+            Use a leading <code className="font-mono bg-secondary/60 px-1 py-0.5 rounded">-</code> to exclude —{' '}
+            <code className="font-mono bg-secondary/60 px-1 py-0.5 rounded">renewable -coal</code>{' '}
+            keeps the renewables and drops anything mentioning coal.
+          </li>
+          <li>
+            Wrap terms in <code className="font-mono bg-secondary/60 px-1 py-0.5 rounded">&quot;quotes&quot;</code> for an exact phrase —{' '}
+            <code className="font-mono bg-secondary/60 px-1 py-0.5 rounded">&quot;food security&quot;</code>{' '}
+            requires the words adjacent and in order.
+          </li>
+          <li>
+            Combine freely —{' '}
+            <code className="font-mono bg-secondary/60 px-1 py-0.5 rounded">&quot;food security&quot; OR hunger -emergency</code>.
+          </li>
+        </ul>
+        <p className="text-muted-foreground/70 italic pt-1">
+          Stemming means <code className="font-mono">renewable</code> matches <code className="font-mono">renewables</code> and <code className="font-mono">renewing</code>; common stop-words (the, of, and) are ignored.
+        </p>
       </div>
     </div>
   );

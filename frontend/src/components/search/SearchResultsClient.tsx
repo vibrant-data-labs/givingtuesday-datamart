@@ -3,13 +3,14 @@
 import { useSearch } from '@/hooks/useSearch';
 import { SearchResults } from '@/components/search/SearchResults';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import type { OrgTypeFilter } from '@/lib/utils/validation';
+import type { OrgTypeFilter, SearchMode } from '@/lib/utils/validation';
 
 interface SearchResultsClientProps {
   q: string;
   type: OrgTypeFilter;
   page: number;
   limit: number;
+  mode: SearchMode;
 }
 
 export function SearchResultsClient({
@@ -17,8 +18,9 @@ export function SearchResultsClient({
   type,
   page,
   limit,
+  mode,
 }: SearchResultsClientProps) {
-  const { data, isLoading, isError, error } = useSearch(q, type, page, limit);
+  const { data, isLoading, isError, error } = useSearch(q, type, page, limit, mode);
 
   if (isLoading) return <LoadingSpinner />;
   if (isError) {

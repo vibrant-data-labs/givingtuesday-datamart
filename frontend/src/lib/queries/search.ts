@@ -3,7 +3,7 @@ import { unstable_cache } from 'next/cache';
 import { sql } from 'kysely';
 import { getDb } from '@/lib/db';
 import type { OrgResult } from '@/types/org';
-import type { OrgTypeFilter } from '@/lib/utils/validation';
+import type { OrgTypeFilter, SearchMode } from '@/lib/utils/validation';
 
 const SEARCH_CACHE_REVALIDATE_SECONDS = 600; // 10 minutes
 
@@ -32,16 +32,22 @@ type SearchHit = {
 async function searchNonprofits(
   rawQuery: string,
   einDigits: string | null,
+  mode: SearchMode,
 ): Promise<SearchHit[]> {
   const db = getDb();
   const likeParam = `%${rawQuery}%`;
+  const useName = mode === 'name' || mode === 'both';
+  const useFts = mode === 'narrative' || mode === 'both';
+  // EIN exact-match always runs — it's a "did the user paste an EIN" path
+  // independent of name/narrative semantics.
 
   // CTE union of three signal sources, then collapse to one rank per EIN.
   // Tiers (separated by ranges so a tier always beats lower tiers): EIN-exact
   // (>=2_000_000), name/DBA match (>=1_000_000), FTS narrative (raw ts_rank_cd,
   // typically 0–~50 for long Schedule O narratives). Within a tier we order by
   // recency (latest_taxyear) at the outer query, so the absolute number inside
-  // a tier doesn't matter — only the tier separation does.
+  // a tier doesn't matter — only the tier separation does. CTEs that aren't
+  // active for the chosen mode return zero rows via WHERE FALSE.
   const result = await sql<{
     ein: string;
     name1: string | null;
@@ -54,16 +60,17 @@ async function searchNonprofits(
     WITH name_hits AS (
       SELECT ein, 1000000.0::float8 AS rank
       FROM public.nonprofit_canonical
-      WHERE name ILIKE ${likeParam}
-         OR name_secondary ILIKE ${likeParam}
-         OR dba_1 ILIKE ${likeParam}
-         OR dba_2 ILIKE ${likeParam}
+      WHERE ${useName}
+        AND (name ILIKE ${likeParam}
+          OR name_secondary ILIKE ${likeParam}
+          OR dba_1 ILIKE ${likeParam}
+          OR dba_2 ILIKE ${likeParam})
     ),
     fts_hits AS (
       SELECT nt.ein, ts_rank_cd(nt.text_tsv, q)::float8 AS rank
       FROM public.nonprofit_text nt,
            websearch_to_tsquery('english', ${rawQuery}) AS q
-      WHERE nt.text_tsv @@ q
+      WHERE ${useFts} AND nt.text_tsv @@ q
     ),
     ein_hits AS (
       SELECT ein, 2000000.0::float8 AS rank
@@ -108,9 +115,14 @@ async function searchNonprofits(
 async function searchFoundations(
   rawQuery: string,
   einDigits: string | null,
+  mode: SearchMode,
 ): Promise<SearchHit[]> {
+  // Funders have no narrative FTS surface yet (nonprofit_text is 990-only).
+  // 'narrative' mode is name-disabled here, so only an EIN-exact match can
+  // surface a foundation. That's the right semantic until funder_text exists.
   const db = getDb();
   const likeParam = `%${rawQuery}%`;
+  const useName = mode === 'name' || mode === 'both';
 
   const result = await sql<{
     ein: string;
@@ -124,8 +136,8 @@ async function searchFoundations(
     WITH name_hits AS (
       SELECT ein, 1000000.0::float8 AS rank
       FROM public.funder_canonical
-      WHERE name ILIKE ${likeParam}
-         OR name_secondary ILIKE ${likeParam}
+      WHERE ${useName}
+        AND (name ILIKE ${likeParam} OR name_secondary ILIKE ${likeParam})
     ),
     ein_hits AS (
       SELECT ein, 2000000.0::float8 AS rank
@@ -170,6 +182,7 @@ async function runSearch(
   orgType: OrgTypeFilter,
   page: number,
   limit: number,
+  mode: SearchMode,
 ): Promise<{ results: OrgResult[]; total: number }> {
   const offset = (page - 1) * limit;
   // Match old behavior: extract pure-digit EIN from input (handles "13-1234567").
@@ -177,8 +190,8 @@ async function runSearch(
   const einDigits = digitsOnly.length === 9 ? digitsOnly : null;
 
   const [nonprofits, foundations] = await Promise.all([
-    orgType === 'foundation' ? Promise.resolve([] as SearchHit[]) : searchNonprofits(rawQuery, einDigits),
-    orgType === 'nonprofit' ? Promise.resolve([] as SearchHit[]) : searchFoundations(rawQuery, einDigits),
+    orgType === 'foundation' ? Promise.resolve([] as SearchHit[]) : searchNonprofits(rawQuery, einDigits, mode),
+    orgType === 'nonprofit' ? Promise.resolve([] as SearchHit[]) : searchFoundations(rawQuery, einDigits, mode),
   ]);
 
   const tagged = [
@@ -223,6 +236,7 @@ export const searchOrgs = cache(async function searchOrgs(
   orgType: OrgTypeFilter,
   page: number,
   limit: number,
+  mode: SearchMode,
 ): Promise<{ results: OrgResult[]; total: number }> {
-  return getCachedSearch(rawQuery, orgType, page, limit);
+  return getCachedSearch(rawQuery, orgType, page, limit, mode);
 });

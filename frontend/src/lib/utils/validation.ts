@@ -23,6 +23,18 @@ export function sanitizeOrgType(type: unknown): OrgTypeFilter {
   return 'all';
 }
 
+// Search match strategy:
+//  - 'name'      → ILIKE on canonical name/secondary/DBAs + EIN exact-match
+//  - 'narrative' → FTS over public.nonprofit_text (mission/programs/Schedule O)
+//  - 'both'      → tiered hybrid (default — name matches always rank above
+//                  narrative-only matches; see queries/search.ts)
+export type SearchMode = 'name' | 'narrative' | 'both';
+
+export function sanitizeSearchMode(mode: unknown): SearchMode {
+  if (mode === 'name' || mode === 'narrative') return mode;
+  return 'both';
+}
+
 export type GrantSortColumn = 'name' | 'amount' | 'year';
 
 export function sanitizeSortColumn(col: unknown, allowed: GrantSortColumn[]): GrantSortColumn {
