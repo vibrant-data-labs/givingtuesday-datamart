@@ -219,6 +219,26 @@ def _finalize_run(
         )
 
 
+def _apply_post_ingest_indexes(spec: SourceSpec, db_config: dict) -> None:
+    """Recreate every declared index on ``spec.staging_table_name`` and ANALYZE.
+
+    Staging tables are recreated (DROP + COPY) on each refresh, so any prior
+    indexes are gone by the time we get here. We issue ``CREATE INDEX IF NOT
+    EXISTS`` for each declared index and then ``ANALYZE`` so the planner has
+    fresh stats. Best-effort: a failure here is logged but does not fail the
+    ingest — the data is loaded; a missing index is a perf regression, not a
+    correctness bug.
+    """
+    if not spec.indexes:
+        return
+    with get_session(config=db_config) as session:
+        for idx in spec.indexes:
+            sql = idx.create_sql(spec.staging_table_name)
+            logger.info("Creating index for %s: %s", spec.logical_name, sql)
+            session.execute(text(sql))
+        session.execute(text(f"ANALYZE {spec.staging_table_name}"))
+
+
 def _lineage_values(run_id: str, resolved: ResolvedVersion, ingested_at: datetime) -> dict[str, str]:
     return {
         "_source_version": resolved.version_date,
@@ -306,6 +326,20 @@ def ingest_source(
             started_at=started_at,
             finished_at=finished_at,
             error=str(err),
+        )
+
+    # Recreate declared indexes before validation so that (a) downstream
+    # readers always see an indexed staging table after a successful COPY,
+    # and (b) ANALYZE runs against fresh data so the planner doesn't pick a
+    # bad plan on the first warm query. Index failures are logged and
+    # swallowed inside the helper — they're a perf regression, not a
+    # correctness bug, and shouldn't sink an otherwise-good ingest.
+    try:
+        _apply_post_ingest_indexes(spec, db_cfg)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Failed to apply post-ingest indexes for %s (continuing)",
+            spec.logical_name,
         )
 
     # Post-ingest validation. Hard-fail checks raise ValidationError → the run

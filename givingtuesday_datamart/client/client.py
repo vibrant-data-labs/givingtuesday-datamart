@@ -135,6 +135,7 @@ class GtDatamartClient:
         self,
         keywords: list[str],
         *,
+        return_text: bool = False,
         min_rank: float | None = None,
         limit: int | None = None,
     ) -> list[NonprofitHit]:
@@ -170,7 +171,7 @@ class GtDatamartClient:
                 nc.city,
                 nc.state,
                 ts_rank(nt.text_tsv, q.tsq) AS rank,
-                nt.unique_text
+                {"nt.unique_text" if return_text else "NULL"} AS unique_text
             FROM public.nonprofit_text nt
             LEFT JOIN public.nonprofit_canonical nc USING (ein)
             CROSS JOIN q

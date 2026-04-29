@@ -20,6 +20,24 @@ class ColumnSpec:
 
 
 @dataclass(frozen=True)
+class IndexSpec:
+    """A btree index to (re)create on the staging table after COPY.
+
+    Staging tables are recreated on every refresh (DROP TABLE + COPY), so any
+    index applied out-of-band is lost on the next ingest. Declaring indexes
+    here makes them part of the refresh contract: ingestion recreates them
+    after each successful COPY.
+    """
+
+    name: str
+    columns: tuple[str, ...]
+
+    def create_sql(self, table: str) -> str:
+        col_list = ", ".join(self.columns)
+        return f"CREATE INDEX IF NOT EXISTS {self.name} ON {table} ({col_list})"
+
+
+@dataclass(frozen=True)
 class SourceSpec:
     """One logical Datamart source (a stable name for a table we ingest).
 
@@ -53,6 +71,11 @@ class SourceSpec:
     # sources from being re-ingested by accident. Lineage rows in
     # datamart_meta.ingest_runs are unaffected.
     skip_default_refresh: bool = False
+
+    # Indexes recreated on the staging table after each successful COPY.
+    # Applied + ANALYZEd inline so downstream consumers (e.g. the frontend
+    # profile page) don't regress to seq-scan latencies on re-ingest.
+    indexes: tuple[IndexSpec, ...] = ()
 
     def compiled_regex(self) -> re.Pattern[str]:
         return re.compile(self.filename_regex)

@@ -7,7 +7,7 @@ the public S3 bucket and picks the latest matching file by date, so consumers
 never hardcode a dated URL.
 """
 
-from givingtuesday_datamart.sources.spec import ColumnSpec, SourceSpec
+from givingtuesday_datamart.sources.spec import ColumnSpec, IndexSpec, SourceSpec
 from givingtuesday_datamart.sources.registry import REGISTRY, get_source
 from givingtuesday_datamart.sources.resolver import (
     BucketListing,
@@ -18,6 +18,7 @@ from givingtuesday_datamart.sources.resolver import (
 
 __all__ = [
     "ColumnSpec",
+    "IndexSpec",
     "SourceSpec",
     "REGISTRY",
     "get_source",

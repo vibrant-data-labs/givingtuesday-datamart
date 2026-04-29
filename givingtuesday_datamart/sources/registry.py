@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from givingtuesday_datamart.sources.spec import FormType, SourceSpec
+from givingtuesday_datamart.sources.spec import FormType, IndexSpec, SourceSpec
 
 
 S3_BUCKET = "gt990datalake-analytics-and-datamarts"
@@ -19,6 +19,7 @@ def _spec(
     primary_key: tuple[str, ...] | None = None,
     required_columns: tuple[str, ...] = (),
     skip_default_refresh: bool = False,
+    indexes: tuple[IndexSpec, ...] = (),
 ) -> SourceSpec:
     return SourceSpec(
         logical_name=logical_name,
@@ -31,10 +32,16 @@ def _spec(
         primary_key=primary_key,
         required_columns=required_columns,
         skip_default_refresh=skip_default_refresh,
+        indexes=indexes,
     )
 
 
 REGISTRY: tuple[SourceSpec, ...] = (
+    # The four `filerein` indexes below feed the frontend profile page, which
+    # does ~5 parallel `WHERE filerein = $1` lookups across these tables. Cold
+    # seq scans against basic_fields (~3 GB) take ~6s each → in parallel they
+    # blow past Kysely's 30s statement_timeout. With the indexes, profile p95
+    # is ~165ms cold / ~10ms warm.
     _spec(
         logical_name="irs_990_basic_fields",
         staging_table_name="public.basic_fields",
@@ -42,6 +49,7 @@ REGISTRY: tuple[SourceSpec, ...] = (
         description="Form 990 standard header + financial summary fields, one row per filing.",
         filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_990StandardFields\.csv$",
         required_columns=("filerein", "taxyear"),
+        indexes=(IndexSpec("ix_basic_fields_filerein", ("filerein",)),),
     ),
     _spec(
         logical_name="irs_990pf_basic_fields",
@@ -50,6 +58,7 @@ REGISTRY: tuple[SourceSpec, ...] = (
         description="Form 990-PF standard header + financial summary fields, one row per filing.",
         filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_990PFStandardFields\.csv$",
         required_columns=("filerein", "taxyear"),
+        indexes=(IndexSpec("ix_basic_fields_pf_filerein", ("filerein",)),),
     ),
     _spec(
         logical_name="irs_990_missions",
@@ -58,6 +67,7 @@ REGISTRY: tuple[SourceSpec, ...] = (
         description="Form 990 Part I mission statement narrative, one row per filing.",
         filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_990Part1Missions\.csv$",
         required_columns=("filerein",),
+        indexes=(IndexSpec("ix_mission_statements_filerein", ("filerein",)),),
     ),
     _spec(
         logical_name="irs_990_programs",
@@ -66,6 +76,7 @@ REGISTRY: tuple[SourceSpec, ...] = (
         description="Form 990 Part III program accomplishment narratives (activities 1/2/3).",
         filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_990Part3Programs\.csv$",
         required_columns=("filerein",),
+        indexes=(IndexSpec("ix_programs_filerein", ("filerein",)),),
     ),
     _spec(
         logical_name="irs_schedule_o",
