@@ -27,13 +27,14 @@ All work to date lives on `zein/raw_notes`, not yet merged to main.
 
 **Matching result at sources (`pg_2025_10_28`, `bf_2025_10_18`):** 648M candidate ZIP-blocked pairs → 1,993,316 post-stage-1 matches → 1,098,084 unique privategrants → recipient mappings after multi-match resolution. **Quantitative diff vs. the old `irs_filings.unioned_grants` cleared on 2026-04-29** — port produces equivalent matches.
 
-**Active priorities** (verification gate cleared; two parallel tracks unblocked):
-1. **Pre-track decision** — merge `zein/raw_notes` → main, or branch both upcoming tracks off it directly. Recommendation: merge first (verification passed; ~20 commits accumulated; both tracks want a clean base).
-2. **Track A — vdl-tools client module** (`givingtuesday_datamart/client/`). Python API: `search_nonprofits`, `get_nonprofit`, `get_grants`. Hides SQL from consumers; cuts `vdl_tools/scrape_enrich/givingtuesday/query_prepare_givingtuesday.py` over to FTS. Touches only `givingtuesday_datamart/client/*` + the vdl-tools cutover.
-3. **Track B — frontend organization profile expansion** against the new canonical surfaces. Identity / mission+programs / multi-year financials / grants given+received / lineage footer; all fed by a single `get_nonprofit_profile(ein)` API route. Touches only `frontend/*`. Person section deferred until `person_canonical` returns.
-4. Drop `public.schedule_o` raw staging once consumers are confirmed off it (~17 GB recovery; opportunistic).
+**Merge gate: full parity.** `zein/raw_notes` does NOT merge to main on the strength of the matching diff alone. Every downstream consumer of the old VDL DB (vdl-tools' `query_prepare_givingtuesday.py`, the frontend) must be cut over to `gt_datamart` and verified to produce equivalent results. Both tracks below are part of that gate. Both branch directly off `zein/raw_notes`.
 
-Tracks A and B touch disjoint paths and read from the same canonical SQL surface — they can run in parallel sessions without conflicting.
+**Active priorities** (two parallel tracks; sessions are independent):
+1. **Track A — vdl-tools client module** (`givingtuesday_datamart/client/`). Python API: `search_nonprofits`, `get_nonprofit`, `get_grants`. Hides SQL from consumers; cuts `vdl_tools/scrape_enrich/givingtuesday/query_prepare_givingtuesday.py` over from the old VDL DB to `gt_datamart` via FTS. Parity check: equivalent EIN sets before/after cutover on a representative keyword run. Touches only `givingtuesday_datamart/client/*` + the vdl-tools cutover.
+2. **Track B — frontend organization profile expansion** against the new canonical surfaces. Identity / mission+programs / multi-year financials / grants given+received / lineage footer; all fed by a single `get_nonprofit_profile(ein)` API route reading from `gt_datamart`. Parity check: post-cutover page surfaces at least what the pre-cutover page did. Person section deferred until `person_canonical` returns. Touches only `frontend/*`.
+3. Drop `public.schedule_o` raw staging once consumers are confirmed off it (~17 GB recovery; opportunistic).
+
+Tracks A and B touch disjoint paths and read from the same canonical SQL surface — they can run in parallel sessions without conflicting. Whichever track lands second rebases on `zein/raw_notes` to pick up the first.
 
 ## Strategic framing
 
@@ -178,7 +179,8 @@ Still pending:
 
 **Phase 3 — ongoing, measured per capability.**
 - ✅ Grant matching pipeline ported, lineage-stamped, resumable. End-to-end run on EC2 confirmed 2026-04-29 (resume = 27s for 12,972 chunks; produced 1,098,084 unique privategrants → recipient mappings).
-- ✅ Quantitative correctness diff of `public.unioned_grants` vs. the prior `irs_filings.unioned_grants` — cleared 2026-04-29. Port produces equivalent matches; verification gate for merging `zein/raw_notes` → main is open.
+- ✅ Quantitative correctness diff of `public.unioned_grants` vs. the prior `irs_filings.unioned_grants` — cleared 2026-04-29. Port produces equivalent matches.
+- 🟡 **Full-parity merge gate** — open until the vdl-tools consumer (`query_prepare_givingtuesday.py`) and the frontend profile page are cut over from the old VDL DB to `gt_datamart` and verified to produce equivalent results. The matching diff alone does NOT clear the merge gate.
 - ❌ Matching threshold regression harness — pending.
 - ❌ Matching memory footprint — still requires r7a.4xlarge.
 - ❌ Funder classification, attachment-grant extraction, cross-org person dedup, address sanitization — pending (cross-org person dedup blocked on `person_canonical` returning).
@@ -187,4 +189,4 @@ Still pending:
 
 1. **Refresh cadence.** Quarterly? Aligned to a specific IRS drop? Needs a conversation with Giving Tuesday before we commit. The plan works for any cadence but ops details (cron schedule, notification surface, EC2 sizing) depend on it.
 2. **Dedicated `gt_datamart` RDS vs. shared.** The current "drop staging that isn't strictly needed" approach buys runway but doesn't solve the underlying problem. Eventually `person_canonical` or another large derived table will need to come back, and we hit the wall again. Needs a sizing + cost conversation before the next big build.
-3. **Branch strategy.** `zein/raw_notes` accumulating significant work. Merge to main once grant matching verification clears and at least one downstream consumer (vdl-tools client module) starts cutting over.
+3. **Branch strategy.** `zein/raw_notes` will not merge to main until full parity (vdl-tools + frontend consumer cutovers verified). Both new tracks (client module, frontend profile) branch from `zein/raw_notes` directly.
