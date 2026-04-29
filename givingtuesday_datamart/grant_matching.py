@@ -1,11 +1,14 @@
 import concurrent.futures as cf
+import io
 import json
 import re
 import uuid
 from datetime import datetime, timezone
 
 import boto3
+import botocore.config
 import pandas as pd
+import pyarrow.parquet as pq
 import recordlinkage
 from sqlalchemy import text
 from tqdm import tqdm
@@ -14,6 +17,7 @@ from vdl_tools.shared_tools.tools.logger import logger
 from vdl_tools.shared_tools.database_cache.database_utils import get_session
 from vdl_tools.shared_tools.tools.address_cleaning import create_clean_address
 from vdl_tools.shared_tools import parquet_cache as pqc
+from vdl_tools.shared_tools.parquet_cache import _decode_json as _pqc_decode_json
 
 from givingtuesday_datamart.ingestion import datamart_config
 from givingtuesday_datamart.canonical.build import (
@@ -382,8 +386,48 @@ def _list_existing_chunk_indices(s3_bucket: str, s3_prefix: str) -> set[int]:
     return found
 
 
+# vdl-tools' parquet_cache writer stamps this metadata key with a JSON
+# array of column names that were JSON-encoded on write (because they held
+# dict/list/tuple values). The reader decodes them back on read. We keep
+# the key in sync with upstream so the fast read path below preserves the
+# same observable contract as ``pqc.read_dataframe``.
+_VDL_JSON_COLS_KEY = b"vdl_json_columns"
+
+
+def _fast_read_chunk(s3_client, bucket: str, key: str) -> pd.DataFrame:
+    """Direct boto3 → BytesIO → pyarrow.
+
+    Bypasses fsspec/s3fs (which is what ``pqc.read_dataframe`` uses). The
+    fsspec layer is fine for occasional reads but its per-call session
+    overhead dominates at 32+ workers — measured ~7s/chunk in parallel vs
+    ~80ms/chunk serially. Direct boto3 with a sized connection pool is
+    ~10× faster on the resume hot path.
+
+    Preserves the JSON-column decoding contract from
+    ``vdl_tools.shared_tools.parquet_cache.read_dataframe``: read the
+    ``vdl_json_columns`` schema metadata, decode each marked column back
+    to dict/list/tuple. For grant_matching's chunks today the metadata
+    is empty, so the decode loop is a no-op — but the contract is kept
+    in case future writes start using JSON columns.
+
+    TODO: push this back into ``vdl_tools.shared_tools.parquet_cache``
+    as a ``read_dataframe(..., s3_client=None)`` option so other VDL
+    pipelines benefit from the same speedup. Local copy here for now to
+    avoid blocking on a vdl-tools PR.
+    """
+    body = s3_client.get_object(Bucket=bucket, Key=key)["Body"].read()
+    table = pq.read_table(io.BytesIO(body))
+    meta = table.schema.metadata or {}
+    json_cols = set(json.loads(meta.get(_VDL_JSON_COLS_KEY) or b"[]"))
+    df = table.to_pandas()
+    for col in json_cols & set(df.columns):
+        df[col] = df[col].map(_pqc_decode_json)
+    return df
+
+
 def _read_chunks_parallel(
-    indexed_uris: list[tuple[int, str]],
+    s3_bucket: str,
+    indexed_keys: list[tuple[int, str]],
     max_workers: int,
 ) -> dict[int, pd.DataFrame]:
     """Parallel S3 GETs via ThreadPoolExecutor — pure I/O, GIL-friendly.
@@ -392,10 +436,19 @@ def _read_chunks_parallel(
     Reads happen out-of-order; reordering is the caller's job.
     """
     out: dict[int, pd.DataFrame] = {}
-    if not indexed_uris:
+    if not indexed_keys:
         return out
+    # Pool is sized to comfortably hold all worker connections in flight.
+    # boto3's default is 10 — far below the worker count we want for resume.
+    s3 = boto3.client(
+        "s3",
+        config=botocore.config.Config(max_pool_connections=max_workers + 16),
+    )
     with cf.ThreadPoolExecutor(max_workers=max_workers) as ex:
-        futures = {ex.submit(pqc.read_dataframe, uri): idx for idx, uri in indexed_uris}
+        futures = {
+            ex.submit(_fast_read_chunk, s3, s3_bucket, key): idx
+            for idx, key in indexed_keys
+        }
         for fut in tqdm(cf.as_completed(futures), total=len(futures), desc="Resuming"):
             idx = futures[fut]
             out[idx] = fut.result()
@@ -668,8 +721,10 @@ def _do_match_records(
             f"Found {len(in_range)}/{total_chunks} chunks already computed. "
             f"Reading in parallel ({resume_workers} workers)..."
         )
+        list_prefix = s3_prefix.rstrip("/") + "/"
         resumed = _read_chunks_parallel(
-            [(idx, f"{checkpoint_uri_base}/chunk_{idx:05d}.parquet") for idx in in_range],
+            s3_bucket,
+            [(idx, f"{list_prefix}chunk_{idx:05d}.parquet") for idx in in_range],
             max_workers=resume_workers,
         )
         # Detect chunks that predate the index-preservation fix (no index
