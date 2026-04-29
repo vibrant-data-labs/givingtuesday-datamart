@@ -6,12 +6,12 @@ import type { OrgProfile, RevenueDetail } from '@/types/org';
 
 // basic_fields uses totrevcuryea; basic_fields_pf uses areterexpnss
 const REVENUE_COL = {
-  'irs_filings.basic_fields': 'totrevcuryea',
-  'irs_filings.basic_fields_pf': 'areterexpnss',
+  'public.basic_fields': 'totrevcuryea',
+  'public.basic_fields_pf': 'areterexpnss',
 } as const;
 
 async function fetchOrgFromTable(
-  table: 'irs_filings.basic_fields' | 'irs_filings.basic_fields_pf',
+  table: 'public.basic_fields' | 'public.basic_fields_pf',
   ein: string
 ) {
   const db = getDb();
@@ -39,7 +39,7 @@ async function fetchOrgFromTable(
 }
 
 async function fetchRevenueHistory(
-  table: 'irs_filings.basic_fields' | 'irs_filings.basic_fields_pf',
+  table: 'public.basic_fields' | 'public.basic_fields_pf',
   ein: string
 ) {
   const db = getDb();
@@ -67,11 +67,11 @@ function toInt(val: string | null | undefined): number | null {
 }
 
 async function fetchRevenueDetails(
-  table: 'irs_filings.basic_fields' | 'irs_filings.basic_fields_pf',
+  table: 'public.basic_fields' | 'public.basic_fields_pf',
   ein: string
 ): Promise<RevenueDetail[]> {
   const db = getDb();
-  const isNonprofit = table === 'irs_filings.basic_fields';
+  const isNonprofit = table === 'public.basic_fields';
 
   if (isNonprofit) {
     const rows = await db
@@ -140,15 +140,15 @@ const ORG_CACHE_REVALIDATE_SECONDS = 600; // 10 minutes
 
 async function getOrgProfileUncached(ein: string): Promise<OrgProfile | null> {
   const [nonprofitRow, foundationRow] = await Promise.all([
-    fetchOrgFromTable('irs_filings.basic_fields', ein),
-    fetchOrgFromTable('irs_filings.basic_fields_pf', ein),
+    fetchOrgFromTable('public.basic_fields', ein),
+    fetchOrgFromTable('public.basic_fields_pf', ein),
   ]);
 
   const row = nonprofitRow ?? foundationRow;
   if (!row) return null;
 
   const orgType = nonprofitRow ? 'nonprofit' : 'foundation';
-  const table = nonprofitRow ? 'irs_filings.basic_fields' : 'irs_filings.basic_fields_pf';
+  const table = nonprofitRow ? 'public.basic_fields' : 'public.basic_fields_pf';
 
   const [revenueByYear, revenueDetails] = await Promise.all([
     fetchRevenueHistory(table, ein),
