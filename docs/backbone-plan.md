@@ -21,10 +21,14 @@ All work to date lives on `zein/raw_notes`, not yet merged to main.
 
 **Phase 2 — partially complete.** Canonical surfaces live: `schedule_o_part_iii` (964K rows), `nonprofit_canonical` (465K), `nonprofit_text` with GIN-indexed `tsvector` (511K), `funder_canonical` (157K). FTS measured at sub-second on multi-token queries with stemming. Lineage table `datamart_meta.canonical_builds` records every build with the upstream `ingest_run_id`s that fed it. **Person canonical layer (`person_canonical`, `org_person_role`) indefinitely deferred** — see RDS storage section below. Two Phase 2 items still active: vdl-tools client module, and the expanded frontend organization profile.
 
-**Grant matching pipeline — ported.** `matching_records_experiment.py` → `grant_matching.py`, on `gt_datamart` + `public.*`, with lineage-keyed S3 checkpoint prefixes (`grant_matching_checkpoints/pg_<v>/bf_<v>/`), deterministic input ordering, parquet-index-preserving chunk writes, and parallel chunk resume via direct boto3 (bypasses the fsspec layer that was capping throughput). Each run stamps `datamart_meta.canonical_builds` with `build_kind='grant_matching'` plus output rowcounts and source-run IDs. End-to-end run on EC2 still pending final verification at the time of writing.
+**Grant matching pipeline — ported and resumable.** `matching_records_experiment.py` → `grant_matching.py`, on `gt_datamart` + `public.*`, with lineage-keyed S3 checkpoint prefixes (`grant_matching_checkpoints/pg_<v>/bf_<v>/`), deterministic input ordering, parquet-index-preserving chunk writes, and parallel chunk resume via direct boto3 (bypasses the fsspec layer that was capping throughput). Each run stamps `datamart_meta.canonical_builds` with `build_kind='grant_matching'` plus output rowcounts and source-run IDs.
+
+**Resume perf measured on EC2 (2026-04-29):** 12,972 chunks listed + read in **27 seconds** at 472 it/s with 31 workers — direct boto3 + sized connection pool. Compare to the prior fsspec path which was clocked at 4.35 it/s (would have been ~50 minutes for the same workload). Direct round-trip per chunk on EC2: ~2ms effective with 31-way parallelism.
+
+**Matching result at sources (`pg_2025_10_28`, `bf_2025_10_18`):** 648M candidate ZIP-blocked pairs → 1,993,316 post-stage-1 matches → 1,098,084 unique privategrants → recipient mappings after multi-match resolution. End-to-end correctness check vs. the old `irs_filings` outputs is still pending — the next step before merging this work is a quantitative diff against the prior run to make sure the port produced equivalent matches.
 
 **Active priorities** (in order):
-1. End-to-end verification of grant matching on `gt_datamart` (in flight).
+1. Quantitative diff of new vs. old grant matching outputs (correctness verification of the port).
 2. Drop `public.schedule_o` raw staging once consumers are confirmed off it (recovers ~17 GB).
 3. vdl-tools client module so consumer queries don't go via raw SQL.
 4. Frontend organization profile expansion against the new canonical surfaces.
@@ -134,6 +138,7 @@ These run as a rolling backlog once Phases 1–2 make iteration safe.
 | Column typing | All-TEXT staging, consumer-side casts | Pragmatic deviation from original plan. Typed schemas deferred until the typing effort justifies itself. |
 | Schema evolution | Overwrite-on-success + validation (no versioned snapshots) | Pragmatic deviation. Validation has been sufficient as a safety net; revisit if rollback becomes needed. |
 | Matching checkpoints | Lineage-keyed S3 prefix `pg_<v>/bf_<v>/` | Re-ingesting either source rotates the prefix; old chunks can't be silently reused against new data. |
+| Resume reader | Direct boto3 → BytesIO → pyarrow (not fsspec) | Measured 472 chunks/sec on EC2 with 31 workers vs. 4.35/sec via the fsspec path; pool size tuned to `max_workers + 16` so connections don't bottleneck. JSON-column decode preserved per the pqc contract. |
 | Build lineage | `datamart_meta.canonical_builds` (build_kind discriminator) | Records which source `ingest_run_id`s fed each canonical/matching build. Consumers can detect staleness without re-deriving. |
 
 ## Critical files
@@ -170,7 +175,8 @@ Still pending:
 - 🟡 Profile query speedup — measurable once the client + frontend cut over.
 
 **Phase 3 — ongoing, measured per capability.**
-- ✅ Grant matching pipeline ported, lineage-stamped, resumable. End-to-end run on EC2: pending final verification at the time of writing.
+- ✅ Grant matching pipeline ported, lineage-stamped, resumable. End-to-end run on EC2 confirmed 2026-04-29 (resume = 27s for 12,972 chunks; produced 1,098,084 unique privategrants → recipient mappings).
+- 🟡 Quantitative correctness diff of `public.unioned_grants` vs. the prior `irs_filings.unioned_grants` — pending. Done when the new and old tables agree on key aggregates (granter/grantee EIN counts, total dollars by year, sample of high-volume granter EINs) within an acceptable tolerance, or any divergence is explained.
 - ❌ Matching threshold regression harness — pending.
 - ❌ Matching memory footprint — still requires r7a.4xlarge.
 - ❌ Funder classification, attachment-grant extraction, cross-org person dedup, address sanitization — pending (cross-org person dedup blocked on `person_canonical` returning).
