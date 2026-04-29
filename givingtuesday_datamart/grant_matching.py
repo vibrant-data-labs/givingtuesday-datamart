@@ -1,7 +1,10 @@
+import concurrent.futures as cf
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 
+import boto3
 import pandas as pd
 import recordlinkage
 from sqlalchemy import text
@@ -10,7 +13,6 @@ from tqdm import tqdm
 from vdl_tools.shared_tools.tools.logger import logger
 from vdl_tools.shared_tools.database_cache.database_utils import get_session
 from vdl_tools.shared_tools.tools.address_cleaning import create_clean_address
-from vdl_tools.shared_tools.s3_tools import key_exists
 from vdl_tools.shared_tools import parquet_cache as pqc
 
 from givingtuesday_datamart.ingestion import datamart_config
@@ -351,6 +353,55 @@ def _resolve_checkpoint_prefix(
     )
 
 
+# Filenames the chunk loop writes/reads. Used by the resume listing to
+# distinguish chunk parquets from any other objects that might land at the
+# same S3 prefix (none today, but cheap insurance).
+_CHUNK_FILENAME_RE = re.compile(r"chunk_(\d+)\.parquet$")
+
+
+def _list_existing_chunk_indices(s3_bucket: str, s3_prefix: str) -> set[int]:
+    """One paginated S3 LIST replaces N per-chunk HEAD requests.
+
+    Returns the set of chunk indices for which ``chunk_<idx>.parquet`` already
+    exists at ``s3://<bucket>/<prefix>/``. At chunk_size=50K with ~13K chunks
+    that's a 13K → ~13 round-trip reduction.
+
+    ``Delimiter='/'`` scopes the listing to the immediate level, so chunks
+    inside ``_test_limit_<N>/`` subdirectories don't accidentally show up
+    when running without --limit.
+    """
+    s3 = boto3.client("s3")
+    paginator = s3.get_paginator("list_objects_v2")
+    list_prefix = s3_prefix.rstrip("/") + "/"
+    found: set[int] = set()
+    for page in paginator.paginate(Bucket=s3_bucket, Prefix=list_prefix, Delimiter="/"):
+        for obj in page.get("Contents", ()):
+            m = _CHUNK_FILENAME_RE.search(obj["Key"])
+            if m:
+                found.add(int(m.group(1)))
+    return found
+
+
+def _read_chunks_parallel(
+    indexed_uris: list[tuple[int, str]],
+    max_workers: int,
+) -> dict[int, pd.DataFrame]:
+    """Parallel S3 GETs via ThreadPoolExecutor — pure I/O, GIL-friendly.
+
+    Returns ``{chunk_idx: df}`` so the caller can preserve order downstream.
+    Reads happen out-of-order; reordering is the caller's job.
+    """
+    out: dict[int, pd.DataFrame] = {}
+    if not indexed_uris:
+        return out
+    with cf.ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {ex.submit(pqc.read_dataframe, uri): idx for idx, uri in indexed_uris}
+        for fut in tqdm(cf.as_completed(futures), total=len(futures), desc="Resuming"):
+            idx = futures[fut]
+            out[idx] = fut.result()
+    return out
+
+
 # --- 2. CLEANING FUNCTIONS ---
 
 def clean_year(series):
@@ -416,6 +467,7 @@ def match_records(
     s3_bucket: str = "givingtuesday-datamart",
     s3_prefix: str | None = None,
     resume_from_checkpoints: bool = True,
+    resume_workers: int = 32,
     limit: int | None = None,
 ):
     """Run the recordlinkage grant-matching pipeline against gt_datamart.
@@ -457,6 +509,7 @@ def match_records(
             s3_bucket=s3_bucket,
             s3_prefix=s3_prefix,
             resume_from_checkpoints=resume_from_checkpoints,
+            resume_workers=resume_workers,
             limit=limit,
         )
     except BaseException as err:
@@ -479,6 +532,7 @@ def _do_match_records(
     s3_bucket: str,
     s3_prefix: str | None,
     resume_from_checkpoints: bool,
+    resume_workers: int = 32,
     limit: int | None = None,
 ):
     """Inner pipeline body. Returns ``(full_data_df, pg_rows, ug_rows)``.
@@ -592,11 +646,6 @@ def _do_match_records(
     checkpoint_uri_base = f"s3://{s3_bucket}/{s3_prefix}"
     logger.info(f"Using checkpoint directory: {checkpoint_uri_base}")
 
-    logger.info("Computing matches...")
-    results = []
-    loaded_from_checkpoint = 0
-    computed_chunks = 0
-
     # The candidate_links MultiIndex's level positions ARE the row positions
     # in basic_fields_df / private_foundations_df we need to merge back to
     # later. vdl_tools.parquet_cache.write_dataframe calls
@@ -608,28 +657,44 @@ def _do_match_records(
     # directly in post-processing — no reset_index / rename gymnastics.
     INDEX_COLS = ['basic_fields_df_index', 'private_foundations_df_index']
 
-    for chunk_idx in tqdm(range(total_chunks), desc="Matching"):
-        filename = f"chunk_{chunk_idx:05d}.parquet"
-        full_key = f"{s3_prefix}/{filename}"
-        checkpoint_uri = f"{checkpoint_uri_base}/{filename}"
+    # --- Resume path: one S3 LIST + parallel GETs ---
+    # Replaces the previous N HEAD + N serial GET pattern. At chunk_size=50K
+    # with 13K chunks, this drops resume from ~30 minutes to ~1 minute.
+    if resume_from_checkpoints:
+        logger.info(f"Listing existing chunks under s3://{s3_bucket}/{s3_prefix}/ ...")
+        existing = _list_existing_chunk_indices(s3_bucket, s3_prefix)
+        in_range = sorted(idx for idx in existing if idx < total_chunks)
+        logger.info(
+            f"Found {len(in_range)}/{total_chunks} chunks already computed. "
+            f"Reading in parallel ({resume_workers} workers)..."
+        )
+        resumed = _read_chunks_parallel(
+            [(idx, f"{checkpoint_uri_base}/chunk_{idx:05d}.parquet") for idx in in_range],
+            max_workers=resume_workers,
+        )
+        # Detect chunks that predate the index-preservation fix (no index
+        # columns on disk). Their row positions are unrecoverable; recompute.
+        bad_idxs = [idx for idx, df in resumed.items() if not set(INDEX_COLS).issubset(df.columns)]
+        if bad_idxs:
+            logger.warning(
+                f"{len(bad_idxs)} resumed chunks predate the index-preservation "
+                f"fix (missing {INDEX_COLS}); recomputing those."
+            )
+            for idx in bad_idxs:
+                del resumed[idx]
+    else:
+        resumed = {}
 
-        if resume_from_checkpoints and key_exists(bucket_name=s3_bucket, key=full_key):
-            features = pqc.read_dataframe(checkpoint_uri)
-            # Old chunks (pre-fix) lack the index columns — the parquet
-            # silently dropped the MultiIndex on write, so the row positions
-            # are unrecoverable. Detect and force a recompute (the new write
-            # path overwrites cleanly).
-            if not set(INDEX_COLS).issubset(features.columns):
-                logger.warning(
-                    f"Chunk {full_key} predates index-preservation fix "
-                    f"(missing {set(INDEX_COLS) - set(features.columns)}); "
-                    "recomputing."
-                )
-            else:
-                loaded_from_checkpoint += 1
-                results.append(features)
-                continue
+    results: dict[int, pd.DataFrame] = dict(resumed)
+    to_compute = [idx for idx in range(total_chunks) if idx not in results]
 
+    # --- Compute path: serial (recordlinkage compute() is single-threaded
+    # internally; parallelizing chunks here would compete for memory without
+    # buying speed). Keeping it serial also keeps the post-crash resume story
+    # simple — every written chunk is fully computed and filtered.
+    if to_compute:
+        logger.info(f"Computing {len(to_compute)} new chunks...")
+    for chunk_idx in tqdm(to_compute, desc="Computing"):
         start_idx = chunk_idx * chunk_size
         end_idx = min(start_idx + chunk_size, total_pairs)
         chunk = candidate_links[start_idx:end_idx]
@@ -650,14 +715,12 @@ def _do_match_records(
         features.index = features.index.set_names(INDEX_COLS)
         features = features.reset_index()
 
-        pqc.write_dataframe(features, checkpoint_uri)
-
-        computed_chunks += 1
-        results.append(features)
+        pqc.write_dataframe(features, f"{checkpoint_uri_base}/chunk_{chunk_idx:05d}.parquet")
+        results[chunk_idx] = features
 
     logger.info(
-        f"Chunk processing complete: loaded {loaded_from_checkpoint} from checkpoints, "
-        f"computed {computed_chunks} new chunks."
+        f"Chunk processing complete: loaded {len(resumed)} from checkpoints, "
+        f"computed {len(to_compute)} new chunks."
     )
 
     if not results:
@@ -665,7 +728,11 @@ def _do_match_records(
             columns=INDEX_COLS + ['zip_score', 'name_score', 'addr_score']
         )
     else:
-        final_features = pd.concat(results, ignore_index=True)
+        # Concat in chunk_idx order. Order doesn't strictly matter for
+        # correctness (the index columns carry row positions), but preserves
+        # determinism vs. the previous serial-loop behavior.
+        ordered = [results[idx] for idx in sorted(results.keys())]
+        final_features = pd.concat(ordered, ignore_index=True)
     logger.info(f"Finished matching")
 
     # --- 7. FILTER ---
@@ -811,6 +878,33 @@ if __name__ == "__main__":
             "Useful if you suspect the chunks are corrupt or stale."
         ),
     )
+    parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=50000,
+        help=(
+            "Candidate pairs per chunk (default: 50000). Larger values mean "
+            "fewer S3 round-trips on resume but more memory per "
+            "compare.compute() call and more lost work if a single chunk "
+            "fails. Note: changing this invalidates any existing chunks at "
+            "the same prefix — they map to different pair ranges."
+        ),
+    )
+    parser.add_argument(
+        "--resume-workers",
+        type=int,
+        default=32,
+        help=(
+            "Concurrent S3 GETs when reading existing chunks during resume "
+            "(default: 32). Pure I/O — increase on a fat pipe, decrease if "
+            "you hit S3 throttling."
+        ),
+    )
     args = parser.parse_args()
 
-    match_records(limit=args.limit, resume_from_checkpoints=not args.no_resume)
+    match_records(
+        limit=args.limit,
+        resume_from_checkpoints=not args.no_resume,
+        chunk_size=args.chunk_size,
+        resume_workers=args.resume_workers,
+    )
