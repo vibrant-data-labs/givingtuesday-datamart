@@ -8,14 +8,17 @@ version = "0.1.0"
 description = "Internal data backbone for the Giving Tuesday Datamart — staging, canonical surfaces, grant matching, and a read-only Python client."
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.10"
 authors = [
     {name = "Vibrant Data Labs"},
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 # Required at every install — these are what the read-only client needs.
 # Consumers like vdl-tools that only use ``givingtuesday_datamart.client``
