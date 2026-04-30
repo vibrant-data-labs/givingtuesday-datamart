@@ -7,6 +7,7 @@ import {
   sanitizePage,
   sanitizeLimit,
   sanitizeOrgType,
+  sanitizeSearchMode,
 } from '@/lib/utils/validation';
 
 export async function GET(request: NextRequest) {
@@ -15,13 +16,14 @@ export async function GET(request: NextRequest) {
   const type = sanitizeOrgType(searchParams.get('type'));
   const page = sanitizePage(searchParams.get('page'));
   const limit = sanitizeLimit(searchParams.get('limit'), 50);
+  const mode = sanitizeSearchMode(searchParams.get('mode'));
 
   if (!q) {
     return NextResponse.json({ results: [], total: 0, page: 1, limit });
   }
 
   try {
-    const { results, total } = await searchOrgs(q, type, page, limit);
+    const { results, total } = await searchOrgs(q, type, page, limit, mode);
     return NextResponse.json(
       { results, total, page, limit },
       { headers: { 'Cache-Control': 's-maxage=3600, stale-while-revalidate=86400' } }

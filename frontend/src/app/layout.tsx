@@ -24,8 +24,9 @@ const mono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "990 Explorer — IRS Filing Data",
-  description: "Search and explore IRS Form 990 data for nonprofits and private foundations.",
+  title: "peerlo",
+  description:
+    "Search millions of IRS Form 990 filings by name, EIN, or mission, and explore the grants that connect US nonprofits and foundations.",
 };
 
 export default function RootLayout({
@@ -42,9 +43,18 @@ export default function RootLayout({
             {children}
           </main>
           <footer className="border-t border-border mt-16">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-2">
               <p className="text-xs text-muted-foreground text-center tracking-wide">
-                IRS 990 data sourced from public filings. Data may be delayed or incomplete.
+                IRS 990 data sourced from public filings via{' '}
+                <a
+                  href="https://nonprofitecosystem.givingtuesday.org/datamarts/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-foreground/80 hover:text-primary transition-colors underline-offset-2 hover:underline"
+                >
+                  GivingTuesday&rsquo;s Data Commons
+                </a>
+                . Data may be delayed or incomplete.
               </p>
             </div>
           </footer>

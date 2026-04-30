@@ -1,7 +1,10 @@
 import { Kysely, PostgresDialect } from 'kysely';
 import { Pool } from 'pg';
 
-// Database schema types matching irs_filings tables
+// Schema types model the gt_datamart public.* surface (Phase 2 canonical layer
+// + the all-TEXT staging tables it's built from). Lineage columns are present
+// on every staging row but only the few we read are typed here.
+
 interface BasicFieldsTable {
   filerein: string;
   filername1: string;
@@ -23,6 +26,10 @@ interface BasicFieldsTable {
   alloothecont: string | null;
   noncascontri: string | null;
   totacashcont: string | null;
+  // 990-PF aggregate columns used by the foundation revenue branch
+  anreextoreex: string | null;
+  arecrrexpnss: string | null;
+  areterexpnss: string | null;
 }
 
 interface UnionedGrantsTable {
@@ -49,10 +56,84 @@ interface UnionedGrantsTable {
   grant_relationship: string | null;
 }
 
+interface NonprofitCanonicalTable {
+  ein: string;
+  name: string | null;
+  name_secondary: string | null;
+  dba_1: string | null;
+  dba_2: string | null;
+  care_of: string | null;
+  addr_line_1: string | null;
+  addr_line_2: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  addr_country: string | null;
+  website: string | null;
+  formation_year: string | null;
+  latest_taxyear: string | null;
+  latest_taxperend: string | null;
+  source_run_id: string;
+  source_version: string;
+  _built_at: Date;
+}
+
+interface FunderCanonicalTable {
+  ein: string;
+  name: string | null;
+  name_secondary: string | null;
+  addr_line_1: string | null;
+  addr_line_2: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  addr_country: string | null;
+  phone: string | null;
+  latest_taxyear: string | null;
+  latest_taxperend: string | null;
+  source_run_id: string;
+  source_version: string;
+  _built_at: Date;
+}
+
+interface NonprofitTextTable {
+  ein: string;
+  n_source_rows: number;
+  unique_text: string | null;
+  // text_tsv (tsvector) is queried via raw SQL; not surfaced as a typed column.
+  _built_at: Date;
+}
+
+interface MissionStatementsTable {
+  filerein: string;
+  mission: string | null;
+  taxyear: string | null;
+}
+
+interface ProgramsTable {
+  filerein: string;
+  actividescri1: string | null;
+  actividescri2: string | null;
+  actividescri3: string | null;
+  taxyear: string | null;
+}
+
+interface ScheduleOPartIIITable {
+  filerein: string;
+  supinfdetexp: string | null;
+  taxyear: string | null;
+}
+
 export interface Database {
-  'irs_filings.basic_fields': BasicFieldsTable;
-  'irs_filings.basic_fields_pf': BasicFieldsTable;
-  'irs_filings.unioned_grants': UnionedGrantsTable;
+  'public.basic_fields': BasicFieldsTable;
+  'public.basic_fields_pf': BasicFieldsTable;
+  'public.unioned_grants': UnionedGrantsTable;
+  'public.nonprofit_canonical': NonprofitCanonicalTable;
+  'public.funder_canonical': FunderCanonicalTable;
+  'public.nonprofit_text': NonprofitTextTable;
+  'public.mission_statements': MissionStatementsTable;
+  'public.programs': ProgramsTable;
+  'public.schedule_o_part_iii': ScheduleOPartIIITable;
 }
 
 let db: Kysely<Database> | null = null;

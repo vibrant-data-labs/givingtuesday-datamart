@@ -4,7 +4,10 @@ import { useEffect } from 'react';
 import { useParams, notFound } from 'next/navigation';
 import { useOrg } from '@/hooks/useOrg';
 import { OrgHeader } from '@/components/org/OrgHeader';
+import { OrgIdentityCard } from '@/components/org/OrgIdentityCard';
 import { OrgMetadata } from '@/components/org/OrgMetadata';
+import { OrgNarrative } from '@/components/org/OrgNarrative';
+import { LineageFooter } from '@/components/org/LineageFooter';
 import { GrantsGivenTable } from '@/components/org/GrantsGivenTable';
 import { GrantsReceivedTable } from '@/components/org/GrantsReceivedTable';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
@@ -53,8 +56,14 @@ export function OrgPageClient() {
       <div className="mb-8">
         <OrgHeader org={org!} />
       </div>
+      <div className="mb-6">
+        <OrgIdentityCard org={org!} />
+      </div>
       <div className="mb-10">
         <OrgMetadata org={org!} />
+      </div>
+      <div className="mb-10">
+        <OrgNarrative bundle={org!.narrative} />
       </div>
       <div className="space-y-10">
         {org!.orgType === 'foundation' ? (
@@ -68,6 +77,9 @@ export function OrgPageClient() {
             <GrantsGivenTable ein={org!.ein} />
           </>
         )}
+      </div>
+      <div className="mt-12">
+        <LineageFooter lineage={org!.lineage} orgType={org!.orgType} />
       </div>
     </div>
   );
