@@ -32,7 +32,7 @@ All work to date lives on `zein/raw_notes`, not yet merged to main.
 **Active priorities:**
 1. **Track A — vdl-tools client module** (`givingtuesday_datamart/client/`). Python API: `search_nonprofits`, `get_nonprofit`, `get_grants`. Hides SQL from consumers; cuts `vdl_tools/scrape_enrich/givingtuesday/query_prepare_givingtuesday.py` over from the old VDL DB to `gt_datamart` via FTS. Parity check: equivalent EIN sets before/after cutover on a representative keyword run. Touches only `givingtuesday_datamart/client/*` + the vdl-tools cutover. Branches off `zein/raw_notes`.
 2. ✅ **Track B — frontend cutover + profile expansion** *(complete, on `zein/raw_notes` head)*. Profile API and the search route now read from `gt_datamart`. Identity (DBAs / formation year / website / country) sourced from `nonprofit_canonical`; three-section narrative (Mission / Program activities / Schedule O Part III) sourced from staging tables on EIN-indexed lookups; lineage footer shows `_source_version` and 8-char `source_run_id` prefix. New `mode` query param (name / narrative / both) with a segmented control on the home page; instructions describe the FTS boolean syntax (AND default, `OR`, leading `-` for negation, `"phrase quotes"`, plus stemming and stop-word semantics). Profile p95 ~165ms cold / ~10ms warm.
-3. **Plumb staging-table indexes into Python ingestion.** Track B applied four `CREATE INDEX … (filerein)` statements directly to `gt_datamart` (on `basic_fields`, `basic_fields_pf`, `programs`, `mission_statements`) to meet the 30s statement-timeout. Without these, profile p95 goes from ~10ms to >30s timeouts. They are NOT yet captured in `givingtuesday_datamart/sources/`, so a future re-ingest will drop them. Cleanest plumbing: add an `indexes: tuple[str, ...] = ()` field to `SourceSpec` in `givingtuesday_datamart/sources/registry.py` and emit `CREATE INDEX IF NOT EXISTS` after the COPY in `givingtuesday_datamart/sources/ingestion.py`. **This must land before merging `zein/raw_notes` to main** or the frontend silently regresses on the next refresh.
+3. ✅ **Staging-table indexes plumbed into Python ingestion** *(done 2026-04-29)*. `IndexSpec` added to `givingtuesday_datamart/sources/spec.py`; `SourceSpec.indexes: tuple[IndexSpec, ...]` populated for the four `filerein`-indexed sources (`irs_990_basic_fields`, `irs_990pf_basic_fields`, `irs_990_programs`, `irs_990_missions`); `ingestion._apply_post_ingest_indexes` issues `CREATE INDEX IF NOT EXISTS` + `ANALYZE` after each successful COPY (errors logged, not fatal — perf regression, not correctness). Verified by re-ingesting `irs_990_missions` with `--force` and confirming `ix_mission_statements_filerein` appears on the recreated table. Profile p95 stays at ~10ms warm across re-ingests.
 4. Drop `public.schedule_o` raw staging once consumers are confirmed off it (~17 GB recovery; opportunistic).
 
 ## Strategic framing
@@ -64,7 +64,7 @@ Key work:
 **Goal:** Kill in-memory keyword search. Make the web app fast. Give vdl-tools a fast, indexed surface to call.
 
 Key work:
-- 🟡 **Real indexes + keys.** PKs on EIN exist on `nonprofit_canonical` and `funder_canonical`. GIN index on `nonprofit_text.text_tsv`. Broader BTrees across staging tables not yet added systematically — fold into the next round once query patterns from the client module surface what's actually slow.
+- ✅ **Real indexes + keys.** PKs on EIN exist on `nonprofit_canonical` and `funder_canonical`. GIN index on `nonprofit_text.text_tsv`. Btree indexes on `filerein` for the four staging tables that feed the profile page (`basic_fields`, `basic_fields_pf`, `programs`, `mission_statements`) declared via `SourceSpec.indexes` and recreated by ingestion after every COPY. Additional staging btrees folded in opportunistically once new query patterns surface.
 - **Canonical entity views.**
   - ✅ `nonprofit_canonical(ein, name, address, ...)` — DISTINCT ON (ein) from `basic_fields`, ordered by taxyear → taxperend → ingested_at. PK on ein. 465K rows.
   - ✅ `funder_canonical(ein, name, ...)` — same shape from `basic_fields_pf`. 157K rows. Funder type/classification deferred to Phase 3 (needs Candid data).
@@ -91,7 +91,7 @@ Key work:
 
   Implementation: `getOrgProfile(ein)` is one server-side call that fans out into ~6 parallel queries (canonical identity, basic_fields aggregation, revenue history, revenue details, mission, programs, schedule_o) via `Promise.all`. p95 ~165ms cold, ~10ms warm against `gt_datamart`. Frontend types and hook unchanged for callers — `OrgProfile` extended with `dba1`, `dba2`, `careOf`, `country`, `website`, `formationYear`, `narrative`, `lineage` fields.
 
-- 🟡 **Staging-table indexes on `gt_datamart` are out-of-band.** Track B ran four `CREATE INDEX … (filerein)` statements directly against the DB to meet the profile p95 target (`basic_fields`, `basic_fields_pf`, `programs`, `mission_statements`). Without them, profile loads sequential-scan 3 GB tables and time out at 30s. The DDL is **not yet captured in `givingtuesday_datamart/sources/`** — a future re-ingest will drop the indexes and silently regress the profile page. **Plumb before merging `zein/raw_notes` to main.** Cleanest target: extend `SourceSpec` in `givingtuesday_datamart/sources/registry.py` with an `indexes: tuple[str, ...] = ()` field; emit `CREATE INDEX IF NOT EXISTS` (and `ANALYZE`) after the COPY in `givingtuesday_datamart/sources/ingestion.py`. Four sources need entries: `irs_990_basic_fields`, `irs_990pf_basic_fields`, `irs_990_programs`, `irs_990_missions`.
+- ✅ **Staging-table indexes plumbed into ingestion** *(landed 2026-04-29 on `zein/raw_notes`)*. The four `filerein` btrees the profile page depends on (`basic_fields`, `basic_fields_pf`, `programs`, `mission_statements`) are declared on `SourceSpec.indexes` via the new `IndexSpec` dataclass in `givingtuesday_datamart/sources/spec.py`. `ingestion._apply_post_ingest_indexes` recreates them with `CREATE INDEX IF NOT EXISTS` and runs `ANALYZE` after every successful COPY, before validation. Index errors are logged but don't fail the ingest (perf regression vs. correctness). Verified by `--force` re-ingest of `irs_990_missions`. The merge-gate concern (silent profile regression on next refresh) is closed.
 
 ### Phase 3 — Ongoing capability upgrades
 
@@ -175,7 +175,6 @@ What landed for Track B (frontend cutover + profile expansion):
 
 Still pending:
 - `givingtuesday_datamart/client/` — Python client consumed by vdl-tools (the remaining active priority).
-- `SourceSpec.indexes` plumbing — see Active Priorities item 3 above.
 
 ## Verification
 
@@ -192,12 +191,12 @@ Still pending:
 - ✅ `nonprofit_canonical`, `funder_canonical`, `nonprofit_text` exist with the expected shape and rowcounts; lineage in `datamart_meta.canonical_builds`.
 - ✅ Frontend organization profile page expanded — identity card, three-section narrative (Mission / Programs / Schedule O Part III), lineage footer. Shipped 2026-04-29 (commits `0baa2fd`, `3b3f958`, `26fb8c7`).
 - ✅ Frontend search rewritten as tiered hybrid (ILIKE + EIN-exact + FTS), with `mode` toggle (name / narrative / both) and FTS boolean syntax instructions.
-- ✅ Profile query speedup measured: ~165ms cold / ~10ms warm after staging-table indexes. **Index DDL not yet plumbed into Python — see Active Priorities item 3.**
+- ✅ Profile query speedup measured: ~165ms cold / ~10ms warm after staging-table indexes. Index DDL now declared on `SourceSpec.indexes` and recreated by ingestion after every COPY.
 
 **Phase 3 — ongoing, measured per capability.**
 - ✅ Grant matching pipeline ported, lineage-stamped, resumable. End-to-end run on EC2 confirmed 2026-04-29 (resume = 27s for 12,972 chunks; produced 1,098,084 unique privategrants → recipient mappings).
 - ✅ Quantitative correctness diff of `public.unioned_grants` vs. the prior `irs_filings.unioned_grants` — cleared 2026-04-29. Port produces equivalent matches.
-- 🟡 **Full-parity merge gate** — frontend leg ✅ cleared 2026-04-29; vdl-tools consumer (`query_prepare_givingtuesday.py`) still pending. **Also blocked on plumbing the four staging-table indexes into `SourceSpec`** (see Active Priorities item 3) — the frontend perf depends on them and the next re-ingest will silently drop them.
+- 🟡 **Full-parity merge gate** — frontend leg ✅ cleared 2026-04-29; staging-table index plumbing ✅ landed 2026-04-29; vdl-tools consumer (`query_prepare_givingtuesday.py`) still the only open leg.
 - ❌ Matching threshold regression harness — pending.
 - ❌ Matching memory footprint — still requires r7a.4xlarge.
 - ❌ Funder classification, attachment-grant extraction, cross-org person dedup, address sanitization — pending (cross-org person dedup blocked on `person_canonical` returning).
@@ -206,4 +205,4 @@ Still pending:
 
 1. **Refresh cadence.** Quarterly? Aligned to a specific IRS drop? Needs a conversation with Giving Tuesday before we commit. The plan works for any cadence but ops details (cron schedule, notification surface, EC2 sizing) depend on it.
 2. **Dedicated `gt_datamart` RDS vs. shared.** The current "drop staging that isn't strictly needed" approach buys runway but doesn't solve the underlying problem. Eventually `person_canonical` or another large derived table will need to come back, and we hit the wall again. Needs a sizing + cost conversation before the next big build.
-3. **Branch strategy.** `zein/raw_notes` will not merge to main until (a) vdl-tools `query_prepare_givingtuesday.py` is cut over to `gt_datamart`, and (b) the staging-table index DDL is plumbed into `SourceSpec`. Frontend cutover ✅ shipped to `zein/raw_notes` head (three commits, 2026-04-29). Track A (client module) branches from `zein/raw_notes` directly.
+3. **Branch strategy.** `zein/raw_notes` will not merge to main until vdl-tools `query_prepare_givingtuesday.py` is cut over to `gt_datamart`. Frontend cutover ✅ shipped to `zein/raw_notes` head (three commits, 2026-04-29); staging-table index DDL ✅ plumbed into `SourceSpec` (2026-04-29). Track A (client module) branches from `zein/raw_notes` directly.

@@ -214,7 +214,7 @@ and it'll come out as all-`TEXT`.
 ```
 givingtuesday_datamart/
   sources/
-    spec.py          # SourceSpec / ColumnSpec dataclasses
+    spec.py          # SourceSpec / ColumnSpec / IndexSpec dataclasses
     registry.py      # One SourceSpec per ingested table
     resolver.py      # Picks the latest matching file from S3 (boto3 unsigned)
     __main__.py      # CLI: status, refresh
