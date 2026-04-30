@@ -135,7 +135,7 @@ function SearchInstructions() {
       <summary className="cursor-pointer list-none px-4 py-2.5 flex items-center justify-between gap-2 hover:text-foreground/80 transition-colors">
         <span>
           <span className="font-semibold text-foreground/80">Search syntax & tips</span>
-          <span className="text-muted-foreground/70"> — match modes, boolean operators, exact phrases</span>
+          <span className="text-muted-foreground/70"> — match modes, supported operators, what doesn&rsquo;t work</span>
         </span>
         <span className="text-muted-foreground/60 transition-transform group-open:rotate-90" aria-hidden>
           ›
@@ -163,7 +163,7 @@ function SearchInstructions() {
 
       <div className="space-y-1.5 pt-2 border-t border-border/40">
         <p>
-          <span className="font-semibold text-foreground/80">Boolean syntax</span> (applies to narrative matching — the name path is a plain substring search):
+          <span className="font-semibold text-foreground/80">Search syntax</span> (applies to narrative matching — the name path is a plain substring search):
         </p>
         <ul className="list-disc pl-5 space-y-0.5">
           <li>
@@ -185,11 +185,26 @@ function SearchInstructions() {
             <code className="font-mono bg-secondary/60 px-1 py-0.5 rounded">&quot;food security&quot;</code>{' '}
             requires the words adjacent and in order.
           </li>
-          <li>
-            Combine freely —{' '}
-            <code className="font-mono bg-secondary/60 px-1 py-0.5 rounded">&quot;food security&quot; OR hunger -emergency</code>.
-          </li>
         </ul>
+
+        <p className="text-foreground/80 pt-2">
+          <span className="font-semibold">This isn&rsquo;t full Boolean search.</span>{' '}
+          Parentheses are ignored, the literal word <code className="font-mono">AND</code> is ignored,
+          and the symbols <code className="font-mono">&amp;</code> <code className="font-mono">|</code> <code className="font-mono">!</code> aren&rsquo;t operators here —
+          only <code className="font-mono">OR</code>, <code className="font-mono">-</code>, and <code className="font-mono">&quot;…&quot;</code> are.
+          <code className="font-mono"> OR</code> also binds looser than the implicit AND, so{' '}
+          <code className="font-mono bg-secondary/60 px-1 py-0.5 rounded">solar OR wind clean</code>{' '}
+          means <code className="font-mono">solar</code> OR (<code className="font-mono">wind</code> AND <code className="font-mono">clean</code>).
+        </p>
+
+        <p className="text-foreground/80">
+          <span className="font-semibold">To group an OR with an AND,</span> distribute it yourself —{' '}
+          <code className="font-mono bg-secondary/60 px-1 py-0.5 rounded">(climate OR environment) AND asthma</code>{' '}
+          doesn&rsquo;t work, but{' '}
+          <code className="font-mono bg-secondary/60 px-1 py-0.5 rounded">climate asthma OR environment asthma</code>{' '}
+          does.
+        </p>
+
         <p className="text-muted-foreground/70 italic pt-1">
           Stemming means <code className="font-mono">renewable</code> matches <code className="font-mono">renewables</code> and <code className="font-mono">renewing</code>; common stop-words (the, of, and) are ignored.
         </p>

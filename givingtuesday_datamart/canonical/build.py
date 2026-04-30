@@ -287,47 +287,50 @@ def _build_nonprofit_canonical(session) -> int:
 def _build_nonprofit_text(session) -> int:
     """DROP + CREATE + populate public.nonprofit_text with a GIN-indexed tsvector.
 
-    The UNION across every (ein, source, text) triple provides field-level
-    dedup: identical text across years or across activity slots collapses
-    to one row, so the string_agg result contains each distinct non-empty
-    snippet exactly once per EIN.
+    Text is deduped per EIN, regardless of which source field it came from,
+    so the string_agg result contains each distinct non-empty snippet exactly
+    once per EIN.
     """
     logger.info("Building %s…", NONPROFIT_TEXT_TABLE)
     session.execute(text(f"DROP TABLE IF EXISTS {NONPROFIT_TEXT_TABLE}"))
     # Every text field gets an equivalent SELECT … WHERE COALESCE(col,'') <> ''
-    # stanza. UNION (not UNION ALL) deduplicates the (src, text) tuples for
-    # us, so a mission statement copy-pasted for 15 years contributes one row.
+    # stanza. The second CTE deduplicates on (ein, txt), so source labels do
+    # not make identical text count more than once for the same nonprofit.
     session.execute(
         text(
             f"""
             CREATE TABLE {NONPROFIT_TEXT_TABLE} AS
             WITH all_text AS (
-                SELECT filerein AS ein, 'mission'::text AS src, mission AS txt
+                SELECT filerein AS ein, mission AS txt
                 FROM public.mission_statements
                 WHERE COALESCE(mission, '') <> ''
-                UNION
-                SELECT filerein, 'programs_1', actividescri1
+                UNION ALL
+                SELECT filerein, actividescri1
                 FROM public.programs
                 WHERE COALESCE(actividescri1, '') <> ''
-                UNION
-                SELECT filerein, 'programs_2', actividescri2
+                UNION ALL
+                SELECT filerein, actividescri2
                 FROM public.programs
                 WHERE COALESCE(actividescri2, '') <> ''
-                UNION
-                SELECT filerein, 'programs_3', actividescri3
+                UNION ALL
+                SELECT filerein, actividescri3
                 FROM public.programs
                 WHERE COALESCE(actividescri3, '') <> ''
-                UNION
-                SELECT filerein, 'schedule_o_part_iii', supinfdetexp
+                UNION ALL
+                SELECT filerein, supinfdetexp
                 FROM {SCHEDULE_O_PART_III_TABLE}
                 WHERE COALESCE(supinfdetexp, '') <> ''
+            ),
+            unique_snippets AS (
+                SELECT DISTINCT ein, txt
+                FROM all_text
             ),
             per_ein AS (
                 SELECT
                     ein,
                     COUNT(*)                                   AS n_source_rows,
-                    string_agg(txt, E'\\n\\n' ORDER BY src, txt) AS unique_text
-                FROM all_text
+                    string_agg(txt, E'\\n\\n' ORDER BY txt)      AS unique_text
+                FROM unique_snippets
                 GROUP BY ein
             )
             SELECT
