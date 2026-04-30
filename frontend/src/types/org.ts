@@ -26,21 +26,48 @@ export interface RevenueDetail {
   nonCashContributions: number | null;
 }
 
+export interface NarrativeEntry {
+  taxyear: number | null;
+  text: string;
+}
+
+export interface OrgNarrativeBundle {
+  mission: NarrativeEntry[];
+  programs: NarrativeEntry[];
+  scheduleO: NarrativeEntry[];
+}
+
+export interface OrgLineage {
+  sourceVersion: string | null;
+  sourceRunId: string | null;
+  builtAt: string | null;
+}
+
 export interface OrgProfile {
   ein: string;
   name1: string;
   name2: string | null;
+  // Extended identity (from nonprofit_canonical / funder_canonical). Falls back
+  // to null on cutover EINs that don't have a canonical row yet.
+  dba1: string | null;
+  dba2: string | null;
+  careOf: string | null;
   address1: string | null;
   address2: string | null;
   city: string | null;
   state: string | null;
   zip: string | null;
+  country: string | null;
+  website: string | null;
+  formationYear: string | null;
   totalRevenue: number | null;
   firstYear: number;
   lastYear: number;
   orgType: OrgType;
   revenueByYear: { year: number; revenue: number | null }[];
   revenueDetails: RevenueDetail[];
+  narrative: OrgNarrativeBundle;
+  lineage: OrgLineage;
 }
 
 export interface SearchResponse {

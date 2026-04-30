@@ -124,12 +124,12 @@ export async function getGrantsGiven(
   const primaryCol = GIVEN_SORT_COL[sortCol];
 
   let rowsQuery = db
-    .selectFrom('irs_filings.unioned_grants')
+    .selectFrom('public.unioned_grants')
     .select(GRANT_COLUMNS)
     .where('granter_ein', '=', ein);
 
   let aggQuery = db
-    .selectFrom('irs_filings.unioned_grants')
+    .selectFrom('public.unioned_grants')
     .select([
       sql<number>`COUNT(*)::int`.as('total'),
       sql<number>`COALESCE(SUM(grant_amount::bigint), 0)`.as('total_amount'),
@@ -178,12 +178,12 @@ export async function getGrantsReceived(
   const primaryCol = RECEIVED_SORT_COL[sortCol];
 
   let rowsQuery = db
-    .selectFrom('irs_filings.unioned_grants')
+    .selectFrom('public.unioned_grants')
     .select(GRANT_COLUMNS)
     .where('grantee_ein', '=', ein);
 
   let aggQuery = db
-    .selectFrom('irs_filings.unioned_grants')
+    .selectFrom('public.unioned_grants')
     .select([
       sql<number>`COUNT(*)::int`.as('total'),
       sql<number>`COALESCE(SUM(grant_amount::bigint), 0)`.as('total_amount'),
@@ -247,7 +247,7 @@ export async function getGrantsGivenGrouped(
     : sql<string | null>`grantee_ein`;
 
   let groupQuery = db
-    .selectFrom('irs_filings.unioned_grants')
+    .selectFrom('public.unioned_grants')
     .select([
       groupExpr.as('group_key'),
       groupEinExpr.as('group_key_ein'),
@@ -272,7 +272,7 @@ export async function getGrantsGivenGrouped(
     : sql<number>`COUNT(DISTINCT COALESCE(grantee_organization_name1, grantee_person_name, 'Unknown'))`;
 
   let overallQuery = db
-    .selectFrom('irs_filings.unioned_grants')
+    .selectFrom('public.unioned_grants')
     .select([
       sql<number>`COUNT(*)::int`.as('total'),
       sql<number>`COALESCE(SUM(grant_amount::bigint), 0)`.as('total_amount'),
@@ -326,7 +326,7 @@ export async function getGrantsReceivedGrouped(
     : sql<string | null>`granter_ein`;
 
   let groupQuery = db
-    .selectFrom('irs_filings.unioned_grants')
+    .selectFrom('public.unioned_grants')
     .select([
       groupExpr.as('group_key'),
       groupEinExpr.as('group_key_ein'),
@@ -351,7 +351,7 @@ export async function getGrantsReceivedGrouped(
     : sql<number>`COUNT(DISTINCT COALESCE(granter_name, 'Unknown'))`;
 
   let overallQuery = db
-    .selectFrom('irs_filings.unioned_grants')
+    .selectFrom('public.unioned_grants')
     .select([
       sql<number>`COUNT(*)::int`.as('total'),
       sql<number>`COALESCE(SUM(grant_amount::bigint), 0)`.as('total_amount'),
