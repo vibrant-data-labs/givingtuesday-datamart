@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { LogoMark } from './Logo';
 
 export function Header() {
   return (
@@ -6,19 +7,14 @@ export function Header() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <Link href="/" className="flex items-center gap-2.5 group">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <span className="text-primary-foreground font-serif text-lg leading-none">9</span>
-            </div>
-            <span className="font-serif text-xl text-foreground group-hover:text-primary transition-colors">
-              990 Explorer
+            <LogoMark className="w-9 h-5 text-primary group-hover:text-primary/80 transition-colors" />
+            <span className="font-serif text-2xl text-foreground group-hover:text-primary transition-colors tracking-tight">
+              peerlo
             </span>
           </Link>
           <nav className="flex items-center gap-6">
-            <Link href="/?type=nonprofit" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              Nonprofits
-            </Link>
-            <Link href="/?type=foundation" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              Foundations
+            <Link href="/about" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+              About
             </Link>
           </nav>
         </div>
