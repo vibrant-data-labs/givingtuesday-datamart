@@ -35,6 +35,7 @@ from givingtuesday_datamart.client.models import (
 logger = logging.getLogger(__name__)
 
 GranteeOrGranter = Literal["grantee", "granter"]
+NonprofitSearchMode = Literal["stemmed", "exact"]
 
 DEFAULT_DATABASE = "gt_datamart"
 DEFAULT_PORT = 5432
@@ -48,6 +49,11 @@ ENV_PORT = "GT_DATAMART_PG_PORT"
 ENV_USER = "GT_DATAMART_PG_USER"
 ENV_PASSWORD = "GT_DATAMART_PG_PASSWORD"
 ENV_DATABASE = "GT_DATAMART_PG_DATABASE"
+
+
+def _escape_like(value: str) -> str:
+    """Escape user input for a parameterized LIKE/ILIKE pattern."""
+    return value.replace("!", "!!").replace("%", "!%").replace("_", "!_")
 
 
 def _engine_from_components(
@@ -135,6 +141,7 @@ class GtDatamartClient:
         self,
         keywords: list[str],
         *,
+        search_mode: NonprofitSearchMode = "stemmed",
         return_text: bool = False,
         min_rank: float | None = None,
         limit: int | None = None,
@@ -142,9 +149,10 @@ class GtDatamartClient:
         """Postgres FTS over ``public.nonprofit_text.text_tsv``.
 
         Each keyword is bound as a separate parameter and run through
-        ``plainto_tsquery('english', :kw)``; the per-keyword tsqueries are
-        OR-ed together with ``||``. ``plainto_tsquery`` handles multi-word
-        phrases and special characters cleanly without manual escaping.
+        ``phraseto_tsquery('english', :kw)`` in ``stemmed`` mode; the
+        per-keyword tsqueries are OR-ed together with ``||``. In ``exact``
+        mode, each keyword is matched as a case-insensitive raw phrase against
+        ``unique_text`` without stemming.
 
         ``LEFT JOIN nonprofit_canonical`` because ~46K 990-EZ filers live in
         ``nonprofit_text`` but are missing from ``nonprofit_canonical``
@@ -154,31 +162,47 @@ class GtDatamartClient:
         cleaned = [kw.strip() for kw in keywords if kw and kw.strip()]
         if not cleaned:
             raise ValueError("search_nonprofits requires at least one non-empty keyword")
+        if search_mode not in ("stemmed", "exact"):
+            raise ValueError("search_mode must be 'stemmed' or 'exact'")
 
-        # Build the tsquery as a chain of plainto_tsquery(:kwN) || …
-        # parameterized — never interpolate user input into SQL text.
-        tsquery_terms = " || ".join(
-            f"plainto_tsquery('english', :kw{i})" for i in range(len(cleaned))
-        )
-        params: dict[str, object] = {f"kw{i}": kw for i, kw in enumerate(cleaned)}
+        if search_mode == "stemmed":
+            # Build the tsquery as a chain of phraseto_tsquery(:kwN) || ...
+            # parameterized — never interpolate user input into SQL text.
+            query_expr = " || ".join(
+                f"phraseto_tsquery('english', :kw{i})" for i in range(len(cleaned))
+            )
+            params: dict[str, object] = {f"kw{i}": kw for i, kw in enumerate(cleaned)}
+            rank_expr = "ts_rank(nt.text_tsv, q.query)"
+            match_expr = "nt.text_tsv @@ q.query"
+            with_clause = f"WITH q AS (SELECT {query_expr} AS query)"
+            cross_join = "CROSS JOIN q"
+        else:
+            match_expr = " OR ".join(
+                f"nt.unique_text ILIKE :kw{i} ESCAPE '!'" for i in range(len(cleaned))
+            )
+            params = {f"kw{i}": f"%{_escape_like(kw)}%" for i, kw in enumerate(cleaned)}
+            rank_expr = "1.0::float8"
+            match_expr = f"({match_expr})"
+            with_clause = ""
+            cross_join = ""
 
         sql = f"""
-            WITH q AS (SELECT {tsquery_terms} AS tsq)
+            {with_clause}
             SELECT
                 nt.ein,
                 nc.name,
                 nc.name_secondary,
                 nc.city,
                 nc.state,
-                ts_rank(nt.text_tsv, q.tsq) AS rank,
+                {rank_expr} AS rank,
                 {"nt.unique_text" if return_text else "NULL"} AS unique_text
             FROM public.nonprofit_text nt
             LEFT JOIN public.nonprofit_canonical nc USING (ein)
-            CROSS JOIN q
-            WHERE nt.text_tsv @@ q.tsq
+            {cross_join}
+            WHERE {match_expr}
         """
         if min_rank is not None:
-            sql += " AND ts_rank(nt.text_tsv, q.tsq) >= :min_rank"
+            sql += f" AND {rank_expr} >= :min_rank"
             params["min_rank"] = min_rank
         sql += " ORDER BY rank DESC"
         if limit is not None:
@@ -186,8 +210,9 @@ class GtDatamartClient:
             params["limit"] = limit
 
         logger.info(
-            "search_nonprofits: %d keyword(s), min_rank=%s, limit=%s",
+            "search_nonprofits: %d keyword(s), search_mode=%s, min_rank=%s, limit=%s",
             len(cleaned),
+            search_mode,
             min_rank,
             limit,
         )
