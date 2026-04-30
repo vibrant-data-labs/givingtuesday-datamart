@@ -283,6 +283,7 @@ phrase_hits = client.search_nonprofits(
     search_mode="exact",  # or "stemmed" for English FTS phrase matching
     limit=20,
 )
+
 profile = client.get_nonprofit(ein="123456789")
 years = client.get_basic_fields(eins=["123456789"], min_taxyear=2018)
 grants_received = client.get_grants(eins=["123456789"], role="grantee")
