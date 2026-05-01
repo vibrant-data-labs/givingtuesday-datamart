@@ -98,9 +98,12 @@ interface FunderCanonicalTable {
 
 interface NonprofitTextTable {
   ein: string;
-  n_source_rows: number;
-  unique_text: string | null;
-  // text_tsv (tsvector) is queried via raw SQL; not surfaced as a typed column.
+  unique_text_compact: string | null;
+  n_compact_snippets: number;
+  n_raw_snippets: number;
+  // text_tsv_compact (english config, stemmed) and text_tsv_compact_simple
+  // (simple config, exact-token) are tsvectors queried via raw SQL — not
+  // surfaced as typed columns.
   _built_at: Date;
 }
 

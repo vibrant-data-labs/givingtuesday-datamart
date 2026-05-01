@@ -285,61 +285,151 @@ def _build_nonprofit_canonical(session) -> int:
 
 
 def _build_nonprofit_text(session) -> int:
-    """DROP + CREATE + populate public.nonprofit_text with a GIN-indexed tsvector.
+    """DROP + CREATE + populate public.nonprofit_text with FTS surfaces.
 
-    The UNION across every (ein, source, text) triple provides field-level
-    dedup: identical text across years or across activity slots collapses
-    to one row, so the string_agg result contains each distinct non-empty
-    snippet exactly once per EIN.
+    One row per EIN with a near-duplicate-collapsed narrative and two GIN-
+    indexed tsvectors:
+
+    * ``unique_text_compact`` — display text. Each (ein, txt) snippet is
+      normalized (lowercase + strip 4-digit years, dollar amounts,
+      percentages, comma-numbers, punctuation, whitespace; bare digits are
+      intentionally preserved so "5 victims" ≠ "50 victims"), then md5-
+      hashed into a ``norm_key``. Snippets sharing a ``norm_key`` cluster,
+      and the most-recent (longest, then deterministic) original becomes
+      the representative. Both tsvectors are built from the **token-union**
+      of every cluster member's original text — not just representatives —
+      so tokens that only appeared in older filings (e.g. "tutoring"
+      before a 2024 rewrite to "after-school programs") survive in the
+      FTS index.
+
+    * ``text_tsv_compact`` — ``english`` config (Snowball stemming +
+      stopword removal). Best for relevance ranking and stem-tolerant
+      matching ("tutoring" matches "tutor").
+    * ``text_tsv_compact_simple`` — ``simple`` config (lowercase +
+      tokenize, no stemming, no stopwords). Best for exact-term matching
+      ("tutoring" matches only "tutoring").
+
+    Single GROUP BY pass: a ROW_NUMBER over (ein, norm_key) marks each
+    cluster's representative; ``string_agg ... FILTER (WHERE rn = 1)``
+    builds ``unique_text_compact`` while ``string_agg(DISTINCT txt)``
+    over the full group builds the FTS recall_text. Saves the 3-way join
+    and two extra sorts the v1 design needed.
     """
     logger.info("Building %s…", NONPROFIT_TEXT_TABLE)
+
+    logger.info("Dropping %s…", NONPROFIT_TEXT_TABLE)
     session.execute(text(f"DROP TABLE IF EXISTS {NONPROFIT_TEXT_TABLE}"))
-    # Every text field gets an equivalent SELECT … WHERE COALESCE(col,'') <> ''
-    # stanza. UNION (not UNION ALL) deduplicates the (src, text) tuples for
-    # us, so a mission statement copy-pasted for 15 years contributes one row.
+
+    # Encourage parallel scan/regex execution. Per-statement only; doesn't
+    # leak into the rest of the build's session.
+    logger.info("Setting local max_parallel_workers_per_gather = 4")
+    session.execute(text("SET LOCAL max_parallel_workers_per_gather = 4"))
+
+    # Two-pass normalization. PASS 1 strips year/$/percentage/comma-number
+    # tokens to empty. PASS 2 collapses any run of punctuation + whitespace
+    # into a single space (combined class so a comma between two spaces
+    # collapses with them, instead of breaking the run into 3 separate
+    # matches and producing inconsistent whitespace counts).
+    #
+    # Conservative: 4-digit years (1900s/2000s, anchored at both word
+    # boundaries so we don't strip `1998` out of `21998`), dollar amounts,
+    # percentages, and comma-grouped numbers go to empty. Bare digits are
+    # deliberately retained — "5 victims" vs "50 victims" stay distinct.
+    # ``\m``/``\M`` are PG ARE word-boundary anchors (``\b`` would mean
+    # backspace in PG — see SCHEDULE_O_PART_III_FILTER above for the same
+    # convention).
+    norm_strip = r"\m(19|20)\d{2}\M|\$\d[\d,.]*|\d+%|\d{1,3}(,\d{3})+"
+    norm_collapse = r"[[:punct:][:space:]]+"
+
+    logger.info("Creating %s…", NONPROFIT_TEXT_TABLE)
     session.execute(
         text(
             f"""
             CREATE TABLE {NONPROFIT_TEXT_TABLE} AS
-            WITH all_text AS (
-                SELECT filerein AS ein, 'mission'::text AS src, mission AS txt
+            WITH all_text AS MATERIALIZED (
+                -- Single materialization of every non-empty (ein, txt, taxyear)
+                -- across the five source fields. UNION ALL — dedup happens
+                -- downstream via the norm_key clustering step.
+                SELECT filerein AS ein, mission AS txt,
+                       NULLIF(taxyear, '')::INT AS taxyear
                 FROM public.mission_statements
                 WHERE COALESCE(mission, '') <> ''
-                UNION
-                SELECT filerein, 'programs_1', actividescri1
+                UNION ALL
+                SELECT filerein, actividescri1, NULLIF(taxyear, '')::INT
                 FROM public.programs
                 WHERE COALESCE(actividescri1, '') <> ''
-                UNION
-                SELECT filerein, 'programs_2', actividescri2
+                UNION ALL
+                SELECT filerein, actividescri2, NULLIF(taxyear, '')::INT
                 FROM public.programs
                 WHERE COALESCE(actividescri2, '') <> ''
-                UNION
-                SELECT filerein, 'programs_3', actividescri3
+                UNION ALL
+                SELECT filerein, actividescri3, NULLIF(taxyear, '')::INT
                 FROM public.programs
                 WHERE COALESCE(actividescri3, '') <> ''
-                UNION
-                SELECT filerein, 'schedule_o_part_iii', supinfdetexp
+                UNION ALL
+                SELECT filerein, supinfdetexp, NULLIF(taxyear, '')::INT
                 FROM {SCHEDULE_O_PART_III_TABLE}
                 WHERE COALESCE(supinfdetexp, '') <> ''
             ),
+            norm AS MATERIALIZED (
+                -- Two-pass regex (strip then collapse) runs once per
+                -- source row. ROW_NUMBER over (ein, norm_key) marks each
+                -- cluster's representative — most recent taxyear wins,
+                -- length tiebreak, txt as deterministic final tiebreak.
+                SELECT ein, txt, taxyear, norm_key,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY ein, norm_key
+                           ORDER BY taxyear DESC NULLS LAST,
+                                    length(txt) DESC,
+                                    txt
+                       ) AS rn_in_cluster
+                FROM (
+                    SELECT ein, txt, taxyear, md5(norm_clean) AS norm_key
+                    FROM (
+                        SELECT ein, txt, taxyear,
+                               trim(regexp_replace(
+                                   regexp_replace(
+                                       lower(txt), '{norm_strip}', '', 'g'
+                                   ),
+                                   '{norm_collapse}', ' ', 'g'
+                               )) AS norm_clean
+                        FROM all_text
+                    ) x
+                    WHERE length(norm_clean) > 0
+                ) y
+            ),
             per_ein AS (
+                -- Single GROUP BY ein fan-out: representatives feed
+                -- unique_text_compact, all distinct snippets feed the
+                -- FTS recall text. ``DISTINCT txt`` shrinks the input to
+                -- to_tsvector — duplicate copies of the same paragraph
+                -- across years would otherwise be re-tokenized
+                -- redundantly (tsvector dedups tokens, but we still pay
+                -- the parsing cost).
                 SELECT
                     ein,
-                    COUNT(*)                                   AS n_source_rows,
-                    string_agg(txt, E'\\n\\n' ORDER BY src, txt) AS unique_text
-                FROM all_text
+                    string_agg(txt, E'\\n\\n' ORDER BY txt)
+                        FILTER (WHERE rn_in_cluster = 1)
+                                                                AS unique_text_compact,
+                    COUNT(*) FILTER (WHERE rn_in_cluster = 1)   AS n_compact_snippets,
+                    COUNT(*)                                    AS n_raw_snippets,
+                    string_agg(DISTINCT txt, ' ')               AS recall_text
+                FROM norm
                 GROUP BY ein
             )
             SELECT
                 ein,
-                n_source_rows,
-                unique_text,
-                to_tsvector('{FTS_CONFIG}', unique_text) AS text_tsv,
-                NOW() AT TIME ZONE 'UTC' AS _built_at
+                unique_text_compact,
+                n_compact_snippets,
+                n_raw_snippets,
+                to_tsvector('{FTS_CONFIG}', recall_text) AS text_tsv_compact,
+                to_tsvector('simple',       recall_text) AS text_tsv_compact_simple,
+                NOW() AT TIME ZONE 'UTC'                 AS _built_at
             FROM per_ein
             """
         )
     )
+    logger.info("Adding primary key to %s…", NONPROFIT_TEXT_TABLE)
     session.execute(
         text(
             f"""
@@ -348,18 +438,29 @@ def _build_nonprofit_text(session) -> int:
             """
         )
     )
-    # GIN index on the tsvector is what makes FTS queries fast. Named
-    # explicitly so re-runs (which drop the parent table) re-create a
-    # consistent index name.
+    # GIN indexes named explicitly so re-runs (which drop the parent table)
+    # re-create consistent index names.
+    logger.info("Creating GIN index on %s…", NONPROFIT_TEXT_TABLE)
     session.execute(
         text(
             f"""
-            CREATE INDEX ix_nonprofit_text_tsv
+            CREATE INDEX ix_nonprofit_text_tsv_compact
             ON {NONPROFIT_TEXT_TABLE}
-            USING GIN (text_tsv)
+            USING GIN (text_tsv_compact)
             """
         )
     )
+    logger.info("Creating GIN index on %s…", NONPROFIT_TEXT_TABLE)
+    session.execute(
+        text(
+            f"""
+            CREATE INDEX ix_nonprofit_text_tsv_compact_simple
+            ON {NONPROFIT_TEXT_TABLE}
+            USING GIN (text_tsv_compact_simple)
+            """
+        )
+    )
+    logger.info("Counting rows in %s…", NONPROFIT_TEXT_TABLE)
     count = session.execute(
         text(f"SELECT COUNT(*) FROM {NONPROFIT_TEXT_TABLE}")
     ).scalar_one()

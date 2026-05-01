@@ -40,9 +40,11 @@ A dedicated Postgres database, broken into four layers:
   `_ingest_run_id`.
 - **Canonical** (`public.*`) — typed materializations rebuilt from
   staging. One row per real entity (`nonprofit_canonical`,
-  `funder_canonical`, optionally `person_canonical`); a deduped text
-  bundle with a `tsvector` GIN index for full-text search
-  (`nonprofit_text`); a filtered Schedule O Part III narrative table
+  `funder_canonical`, optionally `person_canonical`); a near-duplicate-
+  collapsed narrative per EIN with two GIN-indexed `tsvector` columns
+  for full-text search (`nonprofit_text` — `text_tsv_compact` for
+  stemmed/relevance-ranked matching, `text_tsv_compact_simple` for
+  exact-term matching); a filtered Schedule O Part III narrative table
   (`schedule_o_part_iii`).
 - **Matched grants** — `unioned_grants` is the consumer-facing grants
   table: 990-PF grants joined to their matched recipient EINs (via
@@ -163,10 +165,26 @@ Run this after a successful `refresh`. It rebuilds:
   (name, DBAs, address) and the latest filing's identifiers, picked via
   `DISTINCT ON (filerein)` ordered by tax year desc, tax-period-end
   desc, ingested_at desc as deterministic tiebreaks.
-- `public.nonprofit_text` — one row per EIN with a deduped concatenation
-  of every non-empty text field across every year (mission statement,
-  Part III program activities 1/2/3, Schedule O Part III narrative). A
-  `text_tsv` column carries a `tsvector` with a GIN index for FTS.
+- `public.nonprofit_text` — one row per EIN. Five source fields (mission
+  statement, Part III program activities 1/2/3, Schedule O Part III
+  narrative) across every filed year are collapsed into a single
+  near-duplicate-deduped narrative + two FTS surfaces. Each snippet is
+  normalized (lowercased, with 4-digit years, dollar amounts,
+  percentages, comma-grouped numbers, punctuation, and whitespace
+  stripped — bare digits intentionally preserved so "5 victims" and
+  "50 victims" remain distinct), md5-hashed into a `norm_key`, and
+  clustered cross-source. Each cluster picks one representative (most
+  recent year wins, longest text as tiebreak); representatives feed
+  `unique_text_compact` (the display surface). The token-union of
+  *every* cluster member's original text — not just representatives —
+  feeds two GIN-indexed `tsvector` columns: `text_tsv_compact`
+  (`english` config: Snowball stemming + stopword removal, for
+  relevance-ranked search) and `text_tsv_compact_simple` (`simple`
+  config: lowercase + tokenize, for exact-term search). Tokens that
+  only appeared in older filings still match — the FTS index isn't
+  shortened to the representative's vocabulary. Per-EIN
+  `n_compact_snippets` and `n_raw_snippets` columns expose the
+  compression ratio for monitoring.
 - `public.funder_canonical` — analogous to `nonprofit_canonical` but
   built from the 990-PF universe.
 - `public.schedule_o_part_iii` — Schedule O rows filtered to Form
@@ -278,11 +296,40 @@ from givingtuesday_datamart.client import GtDatamartClient
 client = GtDatamartClient()
 
 hits = client.search_nonprofits(["climate", "wildfire"], limit=20)
+exact = client.search_nonprofits(["needs based"], search_mode="exact", limit=20)
 profile = client.get_nonprofit(ein="123456789")
 years = client.get_basic_fields(eins=["123456789"], min_taxyear=2018)
 grants_received = client.get_grants(eins=["123456789"], role="grantee")
 grants_made = client.get_grants(eins=["123456789"], role="granter")
 ```
+
+### `search_nonprofits` — `search_mode` semantics
+
+`search_mode` picks both the indexed `tsvector` and the `tsquery`
+constructor used to compile each keyword. Single-word inputs behave
+identically across modes; multi-word inputs differ.
+
+| input | mode | tsquery | matches |
+|---|---|---|---|
+| `"tutoring"` | `stemmed` | `tutor` | tutor / tutored / tutoring / tutors |
+| `"tutoring"` | `exact` | `tutoring` | only `tutoring` |
+| `"needs based"` | `stemmed` | `need & base` | any doc containing both stems, anywhere |
+| `"needs based"` | `exact` | `needs <-> based` | only the adjacent phrase `"needs based"` |
+| `"climate change"` | `stemmed` | `climat & chang` | any doc containing both stems, anywhere |
+| `"climate change"` | `exact` | `climate <-> change` | only the adjacent phrase `"climate change"` |
+
+- `stemmed` (default) — `text_tsv_compact` + `english` config +
+  `plainto_tsquery`. Snowball stemming + stopword removal, tokens
+  AND-ed with no positional constraint. Best for relevance-ranked
+  discovery — over-restricting to a phrase hurts recall.
+- `exact` — `text_tsv_compact_simple` + `simple` config +
+  `phraseto_tsquery`. Lowercase + tokenize only, no stemming, no
+  stopwords; multi-word inputs match as a phrase (tokens adjacent, in
+  order via the `<->` operator). Best for precise term and phrase
+  lookups.
+
+Multiple keywords passed in one call are OR-ed together regardless of
+mode (e.g. `["climate", "wildfire"]` matches docs containing either).
 
 The methods return frozen dataclasses (`NonprofitHit`, `Nonprofit`,
 `BasicFieldsRow`, `Grant`); the client deliberately does not depend on
@@ -299,8 +346,9 @@ df = pd.DataFrame.from_records([asdict(h) for h in hits])
 A Next.js explorer that reads `gt_datamart` directly via its own pg pool
 ([`frontend/src/lib/db.ts`](frontend/src/lib/db.ts)).
 
-- **Search** — Postgres FTS over `nonprofit_text.text_tsv`, with a mode
-  toggle (search by name, by narrative, or both).
+- **Search** — Postgres FTS over `nonprofit_text.text_tsv_compact`
+  (stemmed/relevance-ranked), with a mode toggle (search by name, by
+  narrative, or both).
 - **Org profile** — canonical identity, narrative, lineage, multi-year
   basic fields, and server-side paginated grants tables on both sides
   (received and made).

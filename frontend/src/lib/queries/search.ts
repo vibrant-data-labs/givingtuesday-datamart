@@ -7,11 +7,12 @@ import type { OrgTypeFilter, SearchMode } from '@/lib/utils/validation';
 
 const SEARCH_CACHE_REVALIDATE_SECONDS = 600; // 10 minutes
 
-// Search compromise vs. old ILIKE-only behavior:
+// Search compromise vs. ILIKE-only behavior:
 //   - Nonprofit arm: ILIKE on canonical names + DBAs UNIONed with Postgres FTS
-//     over public.nonprofit_text.text_tsv (mission/programs/Schedule O Part III
-//     narratives). Name matches dominate ranking; FTS adds narrative recall via
-//     English stemming.
+//     over public.nonprofit_text.text_tsv_compact (mission/programs/Schedule O
+//     Part III narratives, near-dup-collapsed; english config = Snowball
+//     stemming + stopword removal). Name matches dominate ranking; FTS adds
+//     narrative recall via stemming.
 //   - Foundation arm: ILIKE on funder_canonical names only — funders have no
 //     narrative FTS surface yet.
 //
@@ -85,10 +86,10 @@ async function searchNonprofits(
           OR dba_2 ILIKE ${likeParam})
     ),
     fts_hits AS (
-      SELECT nt.ein, ts_rank_cd(nt.text_tsv, q)::float8 AS rank
+      SELECT nt.ein, ts_rank_cd(nt.text_tsv_compact, q)::float8 AS rank
       FROM public.nonprofit_text nt,
            websearch_to_tsquery('english', ${rawQuery}) AS q
-      WHERE ${useFts} AND nt.text_tsv @@ q
+      WHERE ${useFts} AND nt.text_tsv_compact @@ q
     ),
     ein_hits AS (
       SELECT ein, 2000000.0::float8 AS rank
