@@ -256,7 +256,7 @@ class GtDatamartClient:
                 nc.formation_year,
                 nc.latest_taxyear,
                 nc.latest_taxperend,
-                nt.unique_text,
+                nt.unique_text_compact AS unique_text,
                 nc.source_run_id,
                 nc.source_version
             FROM public.nonprofit_canonical nc

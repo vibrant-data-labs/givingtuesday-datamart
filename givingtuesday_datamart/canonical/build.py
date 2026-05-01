@@ -285,37 +285,35 @@ def _build_nonprofit_canonical(session) -> int:
 
 
 def _build_nonprofit_text(session) -> int:
-    """DROP + CREATE + populate public.nonprofit_text with two FTS surfaces.
+    """DROP + CREATE + populate public.nonprofit_text with FTS surfaces.
 
-    Two parallel views of each EIN's narrative are produced:
+    One row per EIN with a near-duplicate-collapsed narrative and two GIN-
+    indexed tsvectors:
 
-    * ``unique_text`` / ``text_tsv`` — the v1 surface. Exact-string dedup
-      across (ein, txt) tuples (cross-source: a mission paragraph copy-
-      pasted into Schedule O Part III collapses to one snippet). Preserved
-      for compatibility while the compact surface is validated.
+    * ``unique_text_compact`` — display text. Each (ein, txt) snippet is
+      normalized (lowercase + strip 4-digit years, dollar amounts,
+      percentages, comma-numbers, punctuation, whitespace; bare digits are
+      intentionally preserved so "5 victims" ≠ "50 victims"), then md5-
+      hashed into a ``norm_key``. Snippets sharing a ``norm_key`` cluster,
+      and the most-recent (longest, then deterministic) original becomes
+      the representative. Both tsvectors are built from the **token-union**
+      of every cluster member's original text — not just representatives —
+      so tokens that only appeared in older filings (e.g. "tutoring"
+      before a 2024 rewrite to "after-school programs") survive in the
+      FTS index.
 
-    * ``unique_text_compact`` / ``text_tsv_compact`` / ``text_tsv_compact_simple``
-      — near-duplicate dedup. Each snippet is normalized (lowercase + strip
-      4-digit years, dollar amounts, percentages, comma-numbers, punctuation,
-      whitespace; bare digits are intentionally preserved so "5 victims" ≠
-      "50 victims"), then md5-hashed into a ``norm_key``. Snippets sharing
-      a ``norm_key`` cluster, and the most-recent (longest, then
-      deterministic) original becomes the cluster representative.
-      Both compact tsvectors are built from the **token-union** of every
-      cluster member's original text — not just representatives — so tokens
-      that only appeared in older filings (e.g. "tutoring" before a 2024
-      rewrite to "after-school programs") survive in the FTS index.
+    * ``text_tsv_compact`` — ``english`` config (Snowball stemming +
+      stopword removal). Best for relevance ranking and stem-tolerant
+      matching ("tutoring" matches "tutor").
+    * ``text_tsv_compact_simple`` — ``simple`` config (lowercase +
+      tokenize, no stemming, no stopwords). Best for exact-term matching
+      ("tutoring" matches only "tutoring").
 
-      ``text_tsv_compact`` uses the ``english`` config (Snowball stemming
-      + stopword removal) — what you want for relevance ranking and
-      stem-tolerant matching ("tutoring" matches "tutor"). ``text_tsv_compact_simple``
-      uses the ``simple`` config (lowercase + tokenize, no stemming, no
-      stopwords) — what you want for exact-term matching ("tutoring"
-      matches only "tutoring"). Both are GIN-indexed; clients pick by
-      query intent.
-
-    The compact pass collapses near-duplicates that the v1 UNION misses
-    (year/dollar/headcount changes year-over-year, slight rewordings).
+    Single GROUP BY pass: a ROW_NUMBER over (ein, norm_key) marks each
+    cluster's representative; ``string_agg ... FILTER (WHERE rn = 1)``
+    builds ``unique_text_compact`` while ``string_agg(DISTINCT txt)``
+    over the full group builds the FTS recall_text. Saves the 3-way join
+    and two extra sorts the v1 design needed.
     """
     logger.info("Building %s…", NONPROFIT_TEXT_TABLE)
     session.execute(text(f"DROP TABLE IF EXISTS {NONPROFIT_TEXT_TABLE}"))
@@ -347,8 +345,7 @@ def _build_nonprofit_text(session) -> int:
             WITH all_text AS MATERIALIZED (
                 -- Single materialization of every non-empty (ein, txt, taxyear)
                 -- across the five source fields. UNION ALL — dedup happens
-                -- downstream so we don't pay a hash/sort to collapse rows
-                -- that the norm_key step is going to collapse anyway.
+                -- downstream via the norm_key clustering step.
                 SELECT filerein AS ein, mission AS txt,
                        NULLIF(taxyear, '')::INT AS taxyear
                 FROM public.mission_statements
@@ -370,75 +367,61 @@ def _build_nonprofit_text(session) -> int:
                 FROM {SCHEDULE_O_PART_III_TABLE}
                 WHERE COALESCE(supinfdetexp, '') <> ''
             ),
-            per_ein_old AS (
-                -- v1 surface: exact-string dedup on (ein, txt).
-                SELECT ein,
-                       COUNT(*)                                AS n_source_rows,
-                       string_agg(txt, E'\\n\\n' ORDER BY txt) AS unique_text
-                FROM (SELECT DISTINCT ein, txt FROM all_text) d
-                GROUP BY ein
-            ),
             norm AS MATERIALIZED (
-                -- Materialized so the two regex passes run once per source
-                -- row, not twice (once for `reps`, once for `per_ein_recall`).
-                SELECT ein, txt, taxyear, md5(norm_clean) AS norm_key
+                -- Two-pass regex (strip then collapse) runs once per
+                -- source row. ROW_NUMBER over (ein, norm_key) marks each
+                -- cluster's representative — most recent taxyear wins,
+                -- length tiebreak, txt as deterministic final tiebreak.
+                SELECT ein, txt, taxyear, norm_key,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY ein, norm_key
+                           ORDER BY taxyear DESC NULLS LAST,
+                                    length(txt) DESC,
+                                    txt
+                       ) AS rn_in_cluster
                 FROM (
-                    SELECT ein, txt, taxyear,
-                           trim(regexp_replace(
-                               regexp_replace(
-                                   lower(txt), '{norm_strip}', '', 'g'
-                               ),
-                               '{norm_collapse}', ' ', 'g'
-                           )) AS norm_clean
-                    FROM all_text
-                ) x
-                WHERE length(norm_clean) > 0
+                    SELECT ein, txt, taxyear, md5(norm_clean) AS norm_key
+                    FROM (
+                        SELECT ein, txt, taxyear,
+                               trim(regexp_replace(
+                                   regexp_replace(
+                                       lower(txt), '{norm_strip}', '', 'g'
+                                   ),
+                                   '{norm_collapse}', ' ', 'g'
+                               )) AS norm_clean
+                        FROM all_text
+                    ) x
+                    WHERE length(norm_clean) > 0
+                ) y
             ),
-            reps AS (
-                -- One representative per (ein, norm_key) cluster: most
-                -- recent year wins; longest txt as tiebreak; txt itself
-                -- as a deterministic final tiebreak so re-runs on the
-                -- same data produce identical output.
-                SELECT DISTINCT ON (ein, norm_key)
-                    ein, norm_key, txt AS rep_txt
-                FROM norm
-                ORDER BY ein, norm_key,
-                         taxyear DESC NULLS LAST,
-                         length(txt) DESC,
-                         txt
-            ),
-            per_ein_compact AS (
-                SELECT ein,
-                       string_agg(rep_txt, E'\\n\\n' ORDER BY rep_txt)
-                           AS unique_text_compact,
-                       COUNT(*) AS n_compact_snippets
-                FROM reps
-                GROUP BY ein
-            ),
-            per_ein_recall AS (
-                -- Token union for FTS: every cluster member's original
-                -- text contributes tokens, even if its representative was
-                -- displaced. tsvector dedups tokens, so the GIN index
-                -- stays small while preserving search recall.
-                SELECT ein, string_agg(txt, ' ') AS recall_text
+            per_ein AS (
+                -- Single GROUP BY ein fan-out: representatives feed
+                -- unique_text_compact, all distinct snippets feed the
+                -- FTS recall text. ``DISTINCT txt`` shrinks the input to
+                -- to_tsvector — duplicate copies of the same paragraph
+                -- across years would otherwise be re-tokenized
+                -- redundantly (tsvector dedups tokens, but we still pay
+                -- the parsing cost).
+                SELECT
+                    ein,
+                    string_agg(txt, E'\\n\\n' ORDER BY txt)
+                        FILTER (WHERE rn_in_cluster = 1)
+                                                                AS unique_text_compact,
+                    COUNT(*) FILTER (WHERE rn_in_cluster = 1)   AS n_compact_snippets,
+                    COUNT(*)                                    AS n_raw_snippets,
+                    string_agg(DISTINCT txt, ' ')               AS recall_text
                 FROM norm
                 GROUP BY ein
             )
             SELECT
-                o.ein,
-                o.n_source_rows,
-                o.unique_text,
-                to_tsvector('{FTS_CONFIG}', o.unique_text)         AS text_tsv,
-                c.unique_text_compact,
-                c.n_compact_snippets,
-                to_tsvector('{FTS_CONFIG}', COALESCE(r.recall_text, ''))
-                                                                   AS text_tsv_compact,
-                to_tsvector('simple', COALESCE(r.recall_text, ''))
-                                                                   AS text_tsv_compact_simple,
-                NOW() AT TIME ZONE 'UTC'                           AS _built_at
-            FROM per_ein_old o
-            LEFT JOIN per_ein_compact c ON c.ein = o.ein
-            LEFT JOIN per_ein_recall  r ON r.ein = o.ein
+                ein,
+                unique_text_compact,
+                n_compact_snippets,
+                n_raw_snippets,
+                to_tsvector('{FTS_CONFIG}', recall_text) AS text_tsv_compact,
+                to_tsvector('simple',       recall_text) AS text_tsv_compact_simple,
+                NOW() AT TIME ZONE 'UTC'                 AS _built_at
+            FROM per_ein
             """
         )
     )
@@ -452,15 +435,6 @@ def _build_nonprofit_text(session) -> int:
     )
     # GIN indexes named explicitly so re-runs (which drop the parent table)
     # re-create consistent index names.
-    session.execute(
-        text(
-            f"""
-            CREATE INDEX ix_nonprofit_text_tsv
-            ON {NONPROFIT_TEXT_TABLE}
-            USING GIN (text_tsv)
-            """
-        )
-    )
     session.execute(
         text(
             f"""
