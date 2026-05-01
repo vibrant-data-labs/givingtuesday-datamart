@@ -385,29 +385,26 @@ def _list_existing_chunk_indices(s3_bucket: str, s3_prefix: str) -> set[int]:
     return found
 
 
-# parquet_cache.write_dataframe stamps this metadata key with a JSON
-# array of column names that were JSON-encoded on write (because they
-# held dict/list/tuple values). The reader decodes them back on read.
-# Kept in sync with the writer so the fast read path below preserves the
-# same observable contract as ``pqc.read_dataframe``.
+# ``pqc.write_dataframe`` stamps this metadata key with a JSON array of
+# column names that were JSON-encoded on write (because they held
+# dict/list/tuple values). Kept in sync with the writer so the read path
+# below decodes them back on read.
 _VDL_JSON_COLS_KEY = b"vdl_json_columns"
 
 
 def _fast_read_chunk(s3_client, bucket: str, key: str) -> pd.DataFrame:
     """Direct boto3 → BytesIO → pyarrow.
 
-    Bypasses fsspec/s3fs (which is what ``pqc.read_dataframe`` uses). The
-    fsspec layer is fine for occasional reads but its per-call session
-    overhead dominates at 32+ workers — measured ~7s/chunk in parallel vs
-    ~80ms/chunk serially. Direct boto3 with a sized connection pool is
-    ~10× faster on the resume hot path.
+    The serial-write side (``pqc.write_dataframe``) goes through the same
+    path; this is the parallel read complement. Direct boto3 with a sized
+    connection pool measured ~10× faster than going through fsspec/s3fs
+    on the resume hot path (~7s/chunk in parallel vs ~80ms/chunk serially
+    via fsspec at 32+ workers).
 
-    Preserves the JSON-column decoding contract from
-    :func:`pqc.read_dataframe`: read the ``vdl_json_columns`` schema
-    metadata, decode each marked column back to dict/list/tuple. For
-    grant_matching's chunks today the metadata is empty, so the decode
-    loop is a no-op — but the contract is kept in case future writes
-    start using JSON columns.
+    Decodes JSON columns flagged in the file's ``vdl_json_columns`` schema
+    metadata back to dict/list/tuple. For grant_matching's chunks today
+    that list is empty, so the decode loop is a no-op — but the contract
+    is kept in case future writes start using JSON columns.
     """
     body = s3_client.get_object(Bucket=bucket, Key=key)["Body"].read()
     table = pq.read_table(io.BytesIO(body))

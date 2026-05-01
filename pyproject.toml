@@ -38,13 +38,11 @@ dependencies = [
 # longer a dependency in either direction.
 ingest = [
     "boto3>=1.34.0",
-    "fsspec>=2024.2.0,<2026.3.0",
     "pandas>=2.0.0,<3.0.0",
     "polars",
     "pyarrow>=15.0.0,<23.0.0",
     "recordlinkage",
     "requests",
-    "s3fs>=2024.2.0,<2026.3.0",
     "tqdm",
     "wget",
 ]

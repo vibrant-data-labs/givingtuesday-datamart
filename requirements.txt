@@ -1,12 +1,10 @@
 boto3
-fsspec
 pandas
 polars
 psycopg2-binary
 pyarrow
 recordlinkage
 requests
-s3fs
 sqlalchemy
 tqdm
 wget
