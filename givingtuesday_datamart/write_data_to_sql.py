@@ -21,8 +21,8 @@ import sys
 import requests
 from sqlalchemy import text
 
-from vdl_tools.shared_tools.database_cache.database_utils import get_session
-from vdl_tools.shared_tools.tools.logger import logger
+from givingtuesday_datamart._internal.db import get_session
+from givingtuesday_datamart._internal.logger import logger
 
 
 # Bump the csv module's per-field size limit up front. The stdlib default is
@@ -176,8 +176,8 @@ def stream_csv_url_to_table(
         extra_columns: Optional mapping of column_name -> constant value. Each
             entry adds a TEXT column to the created table and stamps the
             constant on every row at COPY time.
-        db_config: Optional vdl-tools config dict override (targets a
-            non-default database).
+        db_config: Optional config dict override (targets a non-default
+            database). Same shape as :func:`ingestion.datamart_config`.
 
     Returns:
         Number of rows written.

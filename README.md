@@ -86,10 +86,10 @@ psql -h <host> -U <user> -d postgres -c "CREATE DATABASE gt_datamart;"
 
 Configure connection details in either:
 
-- A `config.ini` file with a `[postgres]` section pointing at your host
-  — read by [`vdl-tools`](https://github.com/vibrant-data-labs/vdl-tools)
-  (a separate library, pulled in as a dependency of the `[ingest]`
-  install profile).
+- A `config.ini` file with a `[postgres]` section pointing at your host —
+  used by the ingest pipeline. Path resolved via
+  `GT_DATAMART_CONFIG_PATH` (or legacy `VDL_GLOBAL_CONFIG_PATH`), falling
+  back to `./config.ini`.
 - Or the `GT_DATAMART_PG_*` environment variables, used by the
   read-only client. See [Read-only Python client](#read-only-python-client).
 

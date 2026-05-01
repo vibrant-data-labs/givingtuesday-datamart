@@ -13,12 +13,11 @@ import recordlinkage
 from sqlalchemy import text
 from tqdm import tqdm
 
-from vdl_tools.shared_tools.tools.logger import logger
-from vdl_tools.shared_tools.database_cache.database_utils import get_session
-from vdl_tools.shared_tools.tools.address_cleaning import create_clean_address
-from vdl_tools.shared_tools import parquet_cache as pqc
-from vdl_tools.shared_tools.parquet_cache import _decode_json as _pqc_decode_json
-
+from givingtuesday_datamart._internal import parquet_cache as pqc
+from givingtuesday_datamart._internal.address_cleaning import create_clean_address
+from givingtuesday_datamart._internal.db import get_session
+from givingtuesday_datamart._internal.logger import logger
+from givingtuesday_datamart._internal.parquet_cache import _decode_json as _pqc_decode_json
 from givingtuesday_datamart.ingestion import datamart_config
 from givingtuesday_datamart.canonical.build import (
     CANONICAL_BUILDS_TABLE,
@@ -386,34 +385,26 @@ def _list_existing_chunk_indices(s3_bucket: str, s3_prefix: str) -> set[int]:
     return found
 
 
-# vdl-tools' parquet_cache writer stamps this metadata key with a JSON
-# array of column names that were JSON-encoded on write (because they held
-# dict/list/tuple values). The reader decodes them back on read. We keep
-# the key in sync with upstream so the fast read path below preserves the
-# same observable contract as ``pqc.read_dataframe``.
+# ``pqc.write_dataframe`` stamps this metadata key with a JSON array of
+# column names that were JSON-encoded on write (because they held
+# dict/list/tuple values). Kept in sync with the writer so the read path
+# below decodes them back on read.
 _VDL_JSON_COLS_KEY = b"vdl_json_columns"
 
 
 def _fast_read_chunk(s3_client, bucket: str, key: str) -> pd.DataFrame:
     """Direct boto3 → BytesIO → pyarrow.
 
-    Bypasses fsspec/s3fs (which is what ``pqc.read_dataframe`` uses). The
-    fsspec layer is fine for occasional reads but its per-call session
-    overhead dominates at 32+ workers — measured ~7s/chunk in parallel vs
-    ~80ms/chunk serially. Direct boto3 with a sized connection pool is
-    ~10× faster on the resume hot path.
+    The serial-write side (``pqc.write_dataframe``) goes through the same
+    path; this is the parallel read complement. Direct boto3 with a sized
+    connection pool measured ~10× faster than going through fsspec/s3fs
+    on the resume hot path (~7s/chunk in parallel vs ~80ms/chunk serially
+    via fsspec at 32+ workers).
 
-    Preserves the JSON-column decoding contract from
-    ``vdl_tools.shared_tools.parquet_cache.read_dataframe``: read the
-    ``vdl_json_columns`` schema metadata, decode each marked column back
-    to dict/list/tuple. For grant_matching's chunks today the metadata
-    is empty, so the decode loop is a no-op — but the contract is kept
-    in case future writes start using JSON columns.
-
-    TODO: push this back into ``vdl_tools.shared_tools.parquet_cache``
-    as a ``read_dataframe(..., s3_client=None)`` option so other VDL
-    pipelines benefit from the same speedup. Local copy here for now to
-    avoid blocking on a vdl-tools PR.
+    Decodes JSON columns flagged in the file's ``vdl_json_columns`` schema
+    metadata back to dict/list/tuple. For grant_matching's chunks today
+    that list is empty, so the decode loop is a no-op — but the contract
+    is kept in case future writes start using JSON columns.
     """
     body = s3_client.get_object(Bucket=bucket, Key=key)["Body"].read()
     table = pq.read_table(io.BytesIO(body))
@@ -701,8 +692,8 @@ def _do_match_records(
 
     # The candidate_links MultiIndex's level positions ARE the row positions
     # in basic_fields_df / private_foundations_df we need to merge back to
-    # later. vdl_tools.parquet_cache.write_dataframe calls
-    # `pa.Table.from_pandas(df, preserve_index=False)` — i.e. it silently
+    # later. ``pqc.write_dataframe`` calls
+    # ``pa.Table.from_pandas(df, preserve_index=False)`` — i.e. it silently
     # drops any index on write. So if we wrote chunks with the MultiIndex
     # intact, the row-position info would be permanently lost on a resumed
     # run (chunks come back with a meaningless RangeIndex). Materialize the

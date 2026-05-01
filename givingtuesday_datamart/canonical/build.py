@@ -13,7 +13,7 @@ tables, and we want query-time cost to be zero):
   of every non-empty text field across every year (mission, programs
   activities 1/2/3, Schedule O narrative + supplemental detail), plus a
   ``tsvector`` column with a GIN index. This is the FTS surface that
-  replaces vdl-tools' in-memory keyword search.
+  replaces the previous in-memory keyword search.
 
 Builds are idempotent: DROP + CREATE inside a transaction. Each build
 records a row in ``datamart_meta.canonical_builds`` with the ``ingest_run_id``
@@ -35,9 +35,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from sqlalchemy import text
-from vdl_tools.shared_tools.database_cache.database_utils import get_session
-from vdl_tools.shared_tools.tools.logger import logger
 
+from givingtuesday_datamart._internal.db import get_session
+from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart.ingestion import (
     INGEST_RUNS_TABLE,
     META_SCHEMA,
