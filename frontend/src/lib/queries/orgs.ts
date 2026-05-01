@@ -3,6 +3,8 @@ import { unstable_cache } from 'next/cache';
 import { sql } from 'kysely';
 import { getDb } from '@/lib/db';
 import type {
+  ActivitySlot,
+  FoundationActivitiesYear,
   NarrativeEntry,
   OrgLineage,
   OrgNarrativeBundle,
@@ -237,6 +239,75 @@ async function fetchPrograms(ein: string): Promise<NarrativeEntry[]> {
   return entries;
 }
 
+function buildSlot(desc: string | null, amount: string | null): ActivitySlot | null {
+  const description = (desc ?? '').trim();
+  const value = toInt(amount);
+  if (description === '' && (value == null || value === 0)) return null;
+  return { description, amount: value };
+}
+
+async function fetchFoundationActivities(ein: string): Promise<FoundationActivitiesYear[]> {
+  const db = getDb();
+  const rows = await db
+    .selectFrom('public.basic_fields_pf')
+    .select([
+      sql<number>`taxyear::int`.as('year'),
+      sql<string>`url::text`.as('url'),
+      sql<string>`sudichacdees1`.as('ca_d1'),
+      sql<string>`sudichacexxp1::text`.as('ca_a1'),
+      sql<string>`sudichacdees2`.as('ca_d2'),
+      sql<string>`sudichacexxp2::text`.as('ca_a2'),
+      sql<string>`sudichacdees3`.as('ca_d3'),
+      sql<string>`sudichacexxp3::text`.as('ca_a3'),
+      sql<string>`sudichacdees4`.as('ca_d4'),
+      sql<string>`sudichacexxp4::text`.as('ca_a4'),
+      sql<string>`suprreindees1`.as('pri_d1'),
+      sql<string>`suprreinammo1::text`.as('pri_a1'),
+      sql<string>`suprreindees2`.as('pri_d2'),
+      sql<string>`suprreinammo2::text`.as('pri_a2'),
+      sql<string>`spriaopritot::text`.as('pri_other_total'),
+      sql<string>`suprreintoot::text`.as('pri_total'),
+    ])
+    .where(sql`filerein::text`, '=', ein)
+    .orderBy(sql`taxyear::int`, 'desc')
+    .execute();
+
+  const out: FoundationActivitiesYear[] = [];
+  for (const r of rows) {
+    const charitableActivities = [
+      buildSlot(r.ca_d1, r.ca_a1),
+      buildSlot(r.ca_d2, r.ca_a2),
+      buildSlot(r.ca_d3, r.ca_a3),
+      buildSlot(r.ca_d4, r.ca_a4),
+    ].filter((s): s is ActivitySlot => s !== null);
+
+    const programRelatedInvestments = [
+      buildSlot(r.pri_d1, r.pri_a1),
+      buildSlot(r.pri_d2, r.pri_a2),
+    ].filter((s): s is ActivitySlot => s !== null);
+
+    const otherProgramRelatedInvestmentsTotal = toInt(r.pri_other_total);
+    const totalProgramRelatedInvestments = toInt(r.pri_total);
+
+    const hasContent =
+      charitableActivities.length > 0 ||
+      programRelatedInvestments.length > 0 ||
+      otherProgramRelatedInvestmentsTotal != null ||
+      totalProgramRelatedInvestments != null;
+    if (!hasContent) continue;
+
+    out.push({
+      year: r.year,
+      url: r.url ?? null,
+      charitableActivities,
+      programRelatedInvestments,
+      otherProgramRelatedInvestmentsTotal,
+      totalProgramRelatedInvestments,
+    });
+  }
+  return out;
+}
+
 async function fetchScheduleO(ein: string): Promise<NarrativeEntry[]> {
   const db = getDb();
   const rows = await db
@@ -271,7 +342,7 @@ async function getOrgProfileUncached(ein: string): Promise<OrgProfile | null> {
 
   const table = orgType === 'nonprofit' ? 'public.basic_fields' : 'public.basic_fields_pf';
 
-  const [revenueByYear, revenueDetails, missions, programs, scheduleO] = await Promise.all([
+  const [revenueByYear, revenueDetails, missions, programs, scheduleO, foundationActivities] = await Promise.all([
     fetchRevenueHistory(table, ein),
     fetchRevenueDetails(table, ein),
     // Narrative tables are 990-only — funders have no FTS surface today, so
@@ -279,6 +350,7 @@ async function getOrgProfileUncached(ein: string): Promise<OrgProfile | null> {
     orgType === 'nonprofit' ? fetchMissionStatements(ein) : Promise.resolve([]),
     orgType === 'nonprofit' ? fetchPrograms(ein) : Promise.resolve([]),
     orgType === 'nonprofit' ? fetchScheduleO(ein) : Promise.resolve([]),
+    orgType === 'foundation' ? fetchFoundationActivities(ein) : Promise.resolve<FoundationActivitiesYear[]>([]),
   ]);
 
   const narrative: OrgNarrativeBundle = {
@@ -317,6 +389,7 @@ async function getOrgProfileUncached(ein: string): Promise<OrgProfile | null> {
     revenueByYear,
     revenueDetails,
     narrative,
+    foundationActivities,
     lineage,
   };
 }

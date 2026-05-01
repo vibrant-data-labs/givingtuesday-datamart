@@ -37,6 +37,20 @@ export interface OrgNarrativeBundle {
   scheduleO: NarrativeEntry[];
 }
 
+export interface ActivitySlot {
+  description: string;
+  amount: number | null;
+}
+
+export interface FoundationActivitiesYear {
+  year: number;
+  url: string | null;
+  charitableActivities: ActivitySlot[];
+  programRelatedInvestments: ActivitySlot[];
+  otherProgramRelatedInvestmentsTotal: number | null;
+  totalProgramRelatedInvestments: number | null;
+}
+
 export interface OrgLineage {
   sourceVersion: string | null;
   sourceRunId: string | null;
@@ -67,6 +81,7 @@ export interface OrgProfile {
   revenueByYear: { year: number; revenue: number | null }[];
   revenueDetails: RevenueDetail[];
   narrative: OrgNarrativeBundle;
+  foundationActivities: FoundationActivitiesYear[];
   lineage: OrgLineage;
 }
 
