@@ -1,7 +1,6 @@
-"""Read the VDL ``config.ini`` from disk.
+"""Read ``config.ini`` from disk.
 
-Mirrors the historical ``vdl_tools.shared_tools.tools.config_utils`` shape
-so existing operator config files keep working unchanged. Lookup order:
+Lookup order:
 
 1. Explicit ``configpath=`` argument.
 2. ``GT_DATAMART_CONFIG_PATH`` env var (preferred for new deployments).
@@ -9,10 +8,9 @@ so existing operator config files keep working unchanged. Lookup order:
 4. ``./config.ini`` in the current working directory.
 
 Returns the parsed ``configparser.ConfigParser`` (which behaves like a
-nested dict for reads — ``cfg["postgres"]["host"]`` works the same way as
-the old vdl-tools dict). Returns an empty dict when no file is found, so
-callers that only need env-var-driven behavior aren't forced to ship an
-ini file.
+nested dict for reads — ``cfg["postgres"]["host"]`` works). Returns an
+empty dict when no file is found, so callers that only need env-var-
+driven behavior aren't forced to ship an ini file.
 """
 
 from __future__ import annotations

@@ -45,9 +45,8 @@ def get_session(
 ) -> Iterator[Session]:
     """Yield a transactional session against the postgres in ``config``.
 
-    Builds a fresh engine + session per call (matches the historical
-    vdl-tools behavior the rest of the pipeline relies on). Commits on
-    clean exit, rolls back + re-raises on exception, always closes.
+    Builds a fresh engine + session per call. Commits on clean exit,
+    rolls back + re-raises on exception, always closes.
     """
     if session is None:
         engine = _engine_from_config(config)

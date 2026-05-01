@@ -1,20 +1,19 @@
 """Parquet I/O for Datamart pipeline checkpoints.
 
-Pared-down replacement for ``vdl_tools.shared_tools.parquet_cache``. The
-only live caller is ``grant_matching`` writing chunk checkpoints to S3;
-the read path uses direct boto3 in ``grant_matching._fast_read_chunk`` to
-avoid fsspec's per-call session overhead. To keep the dependency surface
-small, this module is symmetric with that read path: writes go through
+The only live caller is ``grant_matching`` writing chunk checkpoints to
+S3; the read path uses direct boto3 in ``grant_matching._fast_read_chunk``.
+This module is symmetric with that read path: writes go through
 ``boto3.put_object`` on an in-memory pyarrow buffer.
 
-Same on-disk metadata contract as the original so existing checkpoint
-files round-trip cleanly: the ``vdl_json_columns`` schema metadata key
-lists JSON-encoded columns, decoded back to dict/list/tuple on read.
+The ``vdl_json_columns`` schema metadata key lists JSON-encoded columns,
+decoded back to dict/list/tuple on read; the ``vdl_lineage`` key carries
+caller-supplied provenance plus a ``created_at`` timestamp. Both keys
+match the format already on disk, so older checkpoint files round-trip.
 
 AWS credentials come from boto3's default chain (env vars, ``~/.aws/
-credentials``, instance profile). The historical ``[aws]`` section of
-``config.ini`` is no longer read here; operators relying on it should
-export the keys or move them to ``~/.aws/credentials``.
+credentials``, instance profile). The ``[aws]`` section of ``config.ini``
+is not read here; operators relying on it should export the keys or move
+them to ``~/.aws/credentials``.
 """
 
 from __future__ import annotations

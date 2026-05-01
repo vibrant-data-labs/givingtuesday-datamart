@@ -1,8 +1,7 @@
 """USPS Publication 28 address normalization.
 
-Vendored from ``vdl_tools.shared_tools.tools.address_cleaning``. Used by
-the grant-matching pipeline to build a single normalized ``compare_addr``
-field for record-linkage scoring.
+Used by the grant-matching pipeline to build a single normalized
+``compare_addr`` field for record-linkage scoring.
 """
 
 import re

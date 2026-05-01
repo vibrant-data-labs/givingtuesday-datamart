@@ -21,9 +21,9 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 # Required at every install — these are what the read-only client needs.
-# Consumers like vdl-tools that only use ``givingtuesday_datamart.client``
-# get a clean, dependency-light install. Heavier modules (ingestion,
-# canonical, grant_matching) require the ``ingest`` extra below.
+# Consumers that only use ``givingtuesday_datamart.client`` get a clean,
+# dependency-light install. Heavier modules (ingestion, canonical,
+# grant_matching) require the ``ingest`` extra below.
 dependencies = [
     "sqlalchemy>=2.0.0,<3.0.0",
     "psycopg2-binary",
@@ -31,11 +31,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Everything needed to run the ingestion + canonical + grant-matching paths.
-# Pulled in via ``pip install 'givingtuesday-datamart[ingest]'``. The
-# pipeline modules vendor the small slice of vdl-tools they used to import
-# (logger, config loader, sqlalchemy session, parquet_cache, address
-# cleaning) into ``givingtuesday_datamart._internal``, so vdl-tools is no
-# longer a dependency in either direction.
+# Pulled in via ``pip install 'givingtuesday-datamart[ingest]'``.
 ingest = [
     "boto3>=1.34.0",
     "pandas>=2.0.0,<3.0.0",
