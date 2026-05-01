@@ -7,6 +7,7 @@ import { OrgHeader } from '@/components/org/OrgHeader';
 import { OrgIdentityCard } from '@/components/org/OrgIdentityCard';
 import { OrgMetadata } from '@/components/org/OrgMetadata';
 import { OrgNarrative } from '@/components/org/OrgNarrative';
+import { FoundationActivities } from '@/components/org/FoundationActivities';
 import { LineageFooter } from '@/components/org/LineageFooter';
 import { GrantsGivenTable } from '@/components/org/GrantsGivenTable';
 import { GrantsReceivedTable } from '@/components/org/GrantsReceivedTable';
@@ -62,6 +63,11 @@ export function OrgPageClient() {
       <div className="mb-10">
         <OrgMetadata org={org!} />
       </div>
+      {org!.orgType === 'foundation' && org!.foundationActivities.length > 0 && (
+        <div className="mb-10">
+          <FoundationActivities years={org!.foundationActivities} />
+        </div>
+      )}
       <div className="mb-10">
         <OrgNarrative bundle={org!.narrative} />
       </div>

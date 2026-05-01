@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useSearch } from '@/hooks/useSearch';
 import { SearchResults } from '@/components/search/SearchResults';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
@@ -21,6 +22,10 @@ export function SearchResultsClient({
   mode,
 }: SearchResultsClientProps) {
   const { data, isLoading, isError, error } = useSearch(q, type, page, limit, mode);
+
+  useEffect(() => {
+    if (q) sessionStorage.setItem('lastSearchUrl', window.location.pathname + window.location.search);
+  }, [q, type, page, limit, mode]);
 
   if (isLoading) return <LoadingSpinner />;
   if (isError) {

@@ -30,6 +30,23 @@ interface BasicFieldsTable {
   anreextoreex: string | null;
   arecrrexpnss: string | null;
   areterexpnss: string | null;
+  // 990-PF Part VIII-a: Direct Charitable Activities (description + expense, slots 1-4)
+  sudichacdees1: string | null;
+  sudichacexxp1: string | null;
+  sudichacdees2: string | null;
+  sudichacexxp2: string | null;
+  sudichacdees3: string | null;
+  sudichacexxp3: string | null;
+  sudichacdees4: string | null;
+  sudichacexxp4: string | null;
+  // 990-PF Part VIII-b: Program-Related Investments (description + amount, slots 1-2)
+  suprreindees1: string | null;
+  suprreinammo1: string | null;
+  suprreindees2: string | null;
+  suprreinammo2: string | null;
+  // Part VIII-b totals
+  spriaopritot: string | null;
+  suprreintoot: string | null;
 }
 
 interface UnionedGrantsTable {

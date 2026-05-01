@@ -1,6 +1,6 @@
-import Link from 'next/link';
 import type { OrgProfile } from '@/types/org';
 import { Badge } from '@/components/ui/Badge';
+import { BackToSearchLink } from '@/components/org/BackToSearchLink';
 import { formatEIN, formatOrgName } from '@/lib/utils/formatters';
 
 interface OrgHeaderProps {
@@ -11,15 +11,7 @@ export function OrgHeader({ org }: OrgHeaderProps) {
   return (
     <div>
       <div className="mb-4">
-        <Link
-          href="/"
-          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-          </svg>
-          Back to Search
-        </Link>
+        <BackToSearchLink />
       </div>
 
       <div className="flex items-start justify-between flex-wrap gap-3">
