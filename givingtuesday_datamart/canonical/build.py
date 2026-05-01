@@ -316,10 +316,13 @@ def _build_nonprofit_text(session) -> int:
     and two extra sorts the v1 design needed.
     """
     logger.info("Building %s…", NONPROFIT_TEXT_TABLE)
+
+    logger.info("Dropping %s…", NONPROFIT_TEXT_TABLE)
     session.execute(text(f"DROP TABLE IF EXISTS {NONPROFIT_TEXT_TABLE}"))
 
     # Encourage parallel scan/regex execution. Per-statement only; doesn't
     # leak into the rest of the build's session.
+    logger.info("Setting local max_parallel_workers_per_gather = 4")
     session.execute(text("SET LOCAL max_parallel_workers_per_gather = 4"))
 
     # Two-pass normalization. PASS 1 strips year/$/percentage/comma-number
@@ -338,6 +341,7 @@ def _build_nonprofit_text(session) -> int:
     norm_strip = r"\m(19|20)\d{2}\M|\$\d[\d,.]*|\d+%|\d{1,3}(,\d{3})+"
     norm_collapse = r"[[:punct:][:space:]]+"
 
+    logger.info("Creating %s…", NONPROFIT_TEXT_TABLE)
     session.execute(
         text(
             f"""
@@ -425,6 +429,7 @@ def _build_nonprofit_text(session) -> int:
             """
         )
     )
+    logger.info("Adding primary key to %s…", NONPROFIT_TEXT_TABLE)
     session.execute(
         text(
             f"""
@@ -435,6 +440,7 @@ def _build_nonprofit_text(session) -> int:
     )
     # GIN indexes named explicitly so re-runs (which drop the parent table)
     # re-create consistent index names.
+    logger.info("Creating GIN index on %s…", NONPROFIT_TEXT_TABLE)
     session.execute(
         text(
             f"""
@@ -444,6 +450,7 @@ def _build_nonprofit_text(session) -> int:
             """
         )
     )
+    logger.info("Creating GIN index on %s…", NONPROFIT_TEXT_TABLE)
     session.execute(
         text(
             f"""
@@ -453,6 +460,7 @@ def _build_nonprofit_text(session) -> int:
             """
         )
     )
+    logger.info("Counting rows in %s…", NONPROFIT_TEXT_TABLE)
     count = session.execute(
         text(f"SELECT COUNT(*) FROM {NONPROFIT_TEXT_TABLE}")
     ).scalar_one()
