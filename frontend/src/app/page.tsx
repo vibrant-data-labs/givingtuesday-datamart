@@ -102,7 +102,7 @@ export default function HomePage({ searchParams }: HomeProps) {
 }
 
 const EXAMPLE_QUERIES: { label: string; q: string; mode?: 'name' | 'narrative' | 'both' }[] = [
-  { label: 'Ford Foundation', q: 'Ford Foundation', mode: 'name' },
+  { label: 'Ford Foundation', q: 'The Ford Foundation', mode: 'name' },
   { label: 'Sierra Club', q: 'Sierra Club', mode: 'name' },
   { label: 'climate adaptation', q: 'climate adaptation', mode: 'narrative' },
   { label: 'food security', q: 'food security', mode: 'narrative' },
