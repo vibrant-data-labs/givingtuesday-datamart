@@ -16,10 +16,10 @@ from datetime import datetime, timezone
 from typing import Literal
 
 from sqlalchemy import text
-from vdl_tools.shared_tools.database_cache.database_utils import get_session
-from vdl_tools.shared_tools.tools.config_utils import get_configuration
-from vdl_tools.shared_tools.tools.logger import logger
 
+from givingtuesday_datamart._internal.config import get_configuration
+from givingtuesday_datamart._internal.db import get_session
+from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart.sources.resolver import ResolvedVersion, resolve_latest
 from givingtuesday_datamart.sources.spec import SourceSpec
 from givingtuesday_datamart.validation import ValidationError, validate_ingest
@@ -38,11 +38,12 @@ INGEST_RUNS_TABLE = f"{META_SCHEMA}.ingest_runs"
 
 
 def datamart_config() -> dict:
-    """Return a vdl-tools config dict pointing at the datamart database.
+    """Return a config dict pointing at the datamart database.
 
-    Clones the default configuration and swaps ``postgres.database`` to
-    ``DATAMART_DATABASE``. Passed as ``config=`` to ``get_session`` and as
-    ``db_config=`` to the ``write_data_to_sql`` helpers.
+    Reads the operator's ``config.ini`` (via :func:`get_configuration`) and
+    swaps ``postgres.database`` to ``DATAMART_DATABASE``. Passed as
+    ``config=`` to ``get_session`` and as ``db_config=`` to the
+    ``write_data_to_sql`` helpers.
     """
     cfg = get_configuration()
     return {**cfg, "postgres": {**cfg["postgres"], "database": DATAMART_DATABASE}}

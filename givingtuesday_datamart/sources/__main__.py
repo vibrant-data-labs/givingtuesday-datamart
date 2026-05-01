@@ -24,8 +24,8 @@ import argparse
 import sys
 
 from botocore.exceptions import BotoCoreError, ClientError
-from vdl_tools.shared_tools.tools.logger import logger
 
+from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart.sources.registry import REGISTRY, S3_BUCKET, S3_PREFIX, get_source
 from givingtuesday_datamart.sources.resolver import list_bucket, resolve_latest
 from givingtuesday_datamart.sources.spec import SourceSpec
@@ -124,12 +124,12 @@ def cmd_loaded() -> int:
 
     from sqlalchemy import text
 
+    from givingtuesday_datamart._internal.db import get_session
     from givingtuesday_datamart.ingestion import (
         INGEST_RUNS_TABLE,
         datamart_config,
         ensure_meta_schema,
     )
-    from vdl_tools.shared_tools.database_cache.database_utils import get_session
 
     # Make sure the meta table exists so the query below doesn't 42P01 when the
     # database exists but no refresh has run yet.
@@ -275,7 +275,7 @@ def cmd_build_canonical(*, include_people: bool = False) -> int:
 
 
 def cmd_refresh(source_names: list[str] | None, *, force: bool) -> int:
-    # Import here so `status` does not pay for the SQLAlchemy / vdl-tools init cost.
+    # Import here so `status` does not pay for the SQLAlchemy init cost.
     from givingtuesday_datamart.ingestion import ingest_source
 
     try:

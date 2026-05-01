@@ -1,11 +1,9 @@
 """
 Read-only Python client over the ``gt_datamart`` canonical surface.
 
-Hides the SQL layer from consumers so future schema changes are bounded to
-this module. Owns its own SQLAlchemy engine and session factory — does
-**not** import vdl-tools, so this sub-module is shippable as a standalone
-library and consumers (e.g. vdl-tools) can depend on it without creating
-a circular package dependency.
+Hides the SQL layer from consumers so future schema changes are bounded
+to this module. Owns its own SQLAlchemy engine and session factory; this
+sub-package is shippable as a standalone, dependency-light library.
 
 Returns frozen dataclasses (see ``models.py``); consumers that want a
 DataFrame call ``pd.DataFrame.from_records([asdict(x) ...])`` themselves
@@ -40,10 +38,9 @@ SearchMode = Literal["stemmed", "exact"]
 DEFAULT_DATABASE = "gt_datamart"
 DEFAULT_PORT = 5432
 
-# Env var names checked when no explicit connection components are passed
-# to the constructor. Mirrors the shape of vdl-tools' postgres config but
-# under a GT_DATAMART_ namespace so the client never collides with — or
-# depends on — vdl-tools' configuration system.
+# Env var names checked when no explicit connection components are
+# passed to the constructor. Namespaced under ``GT_DATAMART_`` so the
+# client doesn't collide with any other postgres config in the env.
 ENV_HOST = "GT_DATAMART_PG_HOST"
 ENV_PORT = "GT_DATAMART_PG_PORT"
 ENV_USER = "GT_DATAMART_PG_USER"

@@ -20,9 +20,9 @@ from dataclasses import asdict, dataclass
 from typing import Literal
 
 from sqlalchemy import text
-from vdl_tools.shared_tools.database_cache.database_utils import get_session
-from vdl_tools.shared_tools.tools.logger import logger
 
+from givingtuesday_datamart._internal.db import get_session
+from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart.sources.spec import SourceSpec
 
 
