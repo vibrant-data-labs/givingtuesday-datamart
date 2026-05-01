@@ -294,17 +294,25 @@ def _build_nonprofit_text(session) -> int:
       pasted into Schedule O Part III collapses to one snippet). Preserved
       for compatibility while the compact surface is validated.
 
-    * ``unique_text_compact`` / ``text_tsv_compact`` — near-duplicate dedup.
-      Each snippet is normalized (lowercase + strip 4-digit years, dollar
-      amounts, percentages, comma-numbers, punctuation, whitespace; bare
-      digits are intentionally preserved so "5 victims" ≠ "50 victims"),
-      then md5-hashed into a ``norm_key``. Snippets sharing a ``norm_key``
-      cluster, and the most-recent (longest, then deterministic) original
-      becomes the cluster representative. ``text_tsv_compact`` is built
-      from the **token-union** of every cluster member's original text —
-      not just representatives — so tokens that only appeared in older
-      filings (e.g. "tutoring" before a 2024 rewrite to "after-school
-      programs") survive in the FTS index.
+    * ``unique_text_compact`` / ``text_tsv_compact`` / ``text_tsv_compact_simple``
+      — near-duplicate dedup. Each snippet is normalized (lowercase + strip
+      4-digit years, dollar amounts, percentages, comma-numbers, punctuation,
+      whitespace; bare digits are intentionally preserved so "5 victims" ≠
+      "50 victims"), then md5-hashed into a ``norm_key``. Snippets sharing
+      a ``norm_key`` cluster, and the most-recent (longest, then
+      deterministic) original becomes the cluster representative.
+      Both compact tsvectors are built from the **token-union** of every
+      cluster member's original text — not just representatives — so tokens
+      that only appeared in older filings (e.g. "tutoring" before a 2024
+      rewrite to "after-school programs") survive in the FTS index.
+
+      ``text_tsv_compact`` uses the ``english`` config (Snowball stemming
+      + stopword removal) — what you want for relevance ranking and
+      stem-tolerant matching ("tutoring" matches "tutor"). ``text_tsv_compact_simple``
+      uses the ``simple`` config (lowercase + tokenize, no stemming, no
+      stopwords) — what you want for exact-term matching ("tutoring"
+      matches only "tutoring"). Both are GIN-indexed; clients pick by
+      query intent.
 
     The compact pass collapses near-duplicates that the v1 UNION misses
     (year/dollar/headcount changes year-over-year, slight rewordings).
@@ -425,6 +433,8 @@ def _build_nonprofit_text(session) -> int:
                 c.n_compact_snippets,
                 to_tsvector('{FTS_CONFIG}', COALESCE(r.recall_text, ''))
                                                                    AS text_tsv_compact,
+                to_tsvector('simple', COALESCE(r.recall_text, ''))
+                                                                   AS text_tsv_compact_simple,
                 NOW() AT TIME ZONE 'UTC'                           AS _built_at
             FROM per_ein_old o
             LEFT JOIN per_ein_compact c ON c.ein = o.ein
@@ -457,6 +467,15 @@ def _build_nonprofit_text(session) -> int:
             CREATE INDEX ix_nonprofit_text_tsv_compact
             ON {NONPROFIT_TEXT_TABLE}
             USING GIN (text_tsv_compact)
+            """
+        )
+    )
+    session.execute(
+        text(
+            f"""
+            CREATE INDEX ix_nonprofit_text_tsv_compact_simple
+            ON {NONPROFIT_TEXT_TABLE}
+            USING GIN (text_tsv_compact_simple)
             """
         )
     )
