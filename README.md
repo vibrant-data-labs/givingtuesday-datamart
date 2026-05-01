@@ -296,15 +296,40 @@ from givingtuesday_datamart.client import GtDatamartClient
 client = GtDatamartClient()
 
 hits = client.search_nonprofits(["climate", "wildfire"], limit=20)
-# Exact-term + phrase match (no stemming, tokens adjacent in order):
-#   "tutoring"     matches only "tutoring" (not "tutor" / "tutored")
-#   "needs based"  matches the literal phrase, NOT "meet your needs ... based here"
 exact = client.search_nonprofits(["needs based"], search_mode="exact", limit=20)
 profile = client.get_nonprofit(ein="123456789")
 years = client.get_basic_fields(eins=["123456789"], min_taxyear=2018)
 grants_received = client.get_grants(eins=["123456789"], role="grantee")
 grants_made = client.get_grants(eins=["123456789"], role="granter")
 ```
+
+### `search_nonprofits` — `search_mode` semantics
+
+`search_mode` picks both the indexed `tsvector` and the `tsquery`
+constructor used to compile each keyword. Single-word inputs behave
+identically across modes; multi-word inputs differ.
+
+| input | mode | tsquery | matches |
+|---|---|---|---|
+| `"tutoring"` | `stemmed` | `tutor` | tutor / tutored / tutoring / tutors |
+| `"tutoring"` | `exact` | `tutoring` | only `tutoring` |
+| `"needs based"` | `stemmed` | `need & base` | any doc containing both stems, anywhere |
+| `"needs based"` | `exact` | `needs <-> based` | only the adjacent phrase `"needs based"` |
+| `"climate change"` | `stemmed` | `climat & chang` | any doc containing both stems, anywhere |
+| `"climate change"` | `exact` | `climate <-> change` | only the adjacent phrase `"climate change"` |
+
+- `stemmed` (default) — `text_tsv_compact` + `english` config +
+  `plainto_tsquery`. Snowball stemming + stopword removal, tokens
+  AND-ed with no positional constraint. Best for relevance-ranked
+  discovery — over-restricting to a phrase hurts recall.
+- `exact` — `text_tsv_compact_simple` + `simple` config +
+  `phraseto_tsquery`. Lowercase + tokenize only, no stemming, no
+  stopwords; multi-word inputs match as a phrase (tokens adjacent, in
+  order via the `<->` operator). Best for precise term and phrase
+  lookups.
+
+Multiple keywords passed in one call are OR-ed together regardless of
+mode (e.g. `["climate", "wildfire"]` matches docs containing either).
 
 The methods return frozen dataclasses (`NonprofitHit`, `Nonprofit`,
 `BasicFieldsRow`, `Grant`); the client deliberately does not depend on
