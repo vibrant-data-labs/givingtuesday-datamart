@@ -35,6 +35,7 @@ from givingtuesday_datamart.client.models import (
 logger = logging.getLogger(__name__)
 
 GranteeOrGranter = Literal["grantee", "granter"]
+SearchMode = Literal["stemmed", "exact"]
 
 DEFAULT_DATABASE = "gt_datamart"
 DEFAULT_PORT = 5432
@@ -135,16 +136,33 @@ class GtDatamartClient:
         self,
         keywords: list[str],
         *,
+        search_mode: SearchMode = "stemmed",
         return_text: bool = False,
         min_rank: float | None = None,
         limit: int | None = None,
     ) -> list[NonprofitHit]:
-        """Postgres FTS over ``public.nonprofit_text.text_tsv``.
+        """Postgres FTS over ``public.nonprofit_text``.
 
-        Each keyword is bound as a separate parameter and run through
-        ``plainto_tsquery('english', :kw)``; the per-keyword tsqueries are
-        OR-ed together with ``||``. ``plainto_tsquery`` handles multi-word
-        phrases and special characters cleanly without manual escaping.
+        ``search_mode``:
+
+        * ``"stemmed"`` (default) — queries ``text_tsv_compact`` with the
+          ``english`` config via ``plainto_tsquery``. Snowball stemming +
+          stopword removal, tokens AND-ed with no positional constraint.
+          ``"tutoring"`` matches ``tutor``, ``tutored``, ``tutors``;
+          ``"climate change"`` matches docs containing both stems anywhere.
+          Best for relevance-ranked discovery.
+        * ``"exact"`` — queries ``text_tsv_compact_simple`` with the
+          ``simple`` config via ``phraseto_tsquery``. Lowercase + tokenize
+          only, no stemming, no stopwords; multi-word inputs match as a
+          phrase (tokens adjacent, in order). ``"tutoring"`` matches only
+          ``tutoring``; ``"needs based"`` matches the literal phrase
+          ``"needs based"`` and not ``"meet your needs ... based here"``.
+          Best for precise term and phrase lookups.
+
+        Each keyword is bound as a separate parameter; per-keyword tsqueries
+        are OR-ed with ``||``. Both ``plainto_tsquery`` and ``phraseto_tsquery``
+        handle multi-word inputs and special characters cleanly without
+        manual escaping.
 
         ``LEFT JOIN nonprofit_canonical`` because ~46K 990-EZ filers live in
         ``nonprofit_text`` but are missing from ``nonprofit_canonical``
@@ -155,10 +173,29 @@ class GtDatamartClient:
         if not cleaned:
             raise ValueError("search_nonprofits requires at least one non-empty keyword")
 
-        # Build the tsquery as a chain of plainto_tsquery(:kwN) || …
-        # parameterized — never interpolate user input into SQL text.
+        # Mode picks the indexed tsvector, the tsquery config, and the
+        # tsquery constructor. text_tsv_compact pairs with 'english' +
+        # plainto_tsquery (token-AND, with stemming); text_tsv_compact_simple
+        # pairs with 'simple' + phraseto_tsquery (adjacent-token phrase
+        # match, no stemming).
+        if search_mode == "stemmed":
+            tsv_col = "text_tsv_compact"
+            ts_config = "english"
+            ts_fn = "plainto_tsquery"
+        elif search_mode == "exact":
+            tsv_col = "text_tsv_compact_simple"
+            ts_config = "simple"
+            ts_fn = "phraseto_tsquery"
+        else:
+            raise ValueError(
+                f"search_mode must be 'stemmed' or 'exact', got {search_mode!r}"
+            )
+
+        # Parameterize every keyword — never interpolate user input. The
+        # config name and tsquery function are whitelisted above, so it's
+        # safe to embed them.
         tsquery_terms = " || ".join(
-            f"plainto_tsquery('english', :kw{i})" for i in range(len(cleaned))
+            f"{ts_fn}('{ts_config}', :kw{i})" for i in range(len(cleaned))
         )
         params: dict[str, object] = {f"kw{i}": kw for i, kw in enumerate(cleaned)}
 
@@ -170,15 +207,15 @@ class GtDatamartClient:
                 nc.name_secondary,
                 nc.city,
                 nc.state,
-                ts_rank(nt.text_tsv, q.tsq) AS rank,
-                {"nt.unique_text" if return_text else "NULL"} AS unique_text
+                ts_rank(nt.{tsv_col}, q.tsq) AS rank,
+                {"nt.unique_text_compact" if return_text else "NULL"} AS unique_text
             FROM public.nonprofit_text nt
             LEFT JOIN public.nonprofit_canonical nc USING (ein)
             CROSS JOIN q
-            WHERE nt.text_tsv @@ q.tsq
+            WHERE nt.{tsv_col} @@ q.tsq
         """
         if min_rank is not None:
-            sql += " AND ts_rank(nt.text_tsv, q.tsq) >= :min_rank"
+            sql += f" AND ts_rank(nt.{tsv_col}, q.tsq) >= :min_rank"
             params["min_rank"] = min_rank
         sql += " ORDER BY rank DESC"
         if limit is not None:
@@ -186,8 +223,9 @@ class GtDatamartClient:
             params["limit"] = limit
 
         logger.info(
-            "search_nonprofits: %d keyword(s), min_rank=%s, limit=%s",
+            "search_nonprofits: %d keyword(s), mode=%s, min_rank=%s, limit=%s",
             len(cleaned),
+            search_mode,
             min_rank,
             limit,
         )
@@ -228,7 +266,7 @@ class GtDatamartClient:
                 nc.formation_year,
                 nc.latest_taxyear,
                 nc.latest_taxperend,
-                nt.unique_text,
+                nt.unique_text_compact AS unique_text,
                 nc.source_run_id,
                 nc.source_version
             FROM public.nonprofit_canonical nc
