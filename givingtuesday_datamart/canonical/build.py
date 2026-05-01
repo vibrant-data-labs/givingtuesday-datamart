@@ -35,9 +35,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from sqlalchemy import text
-from vdl_tools.shared_tools.database_cache.database_utils import get_session
-from vdl_tools.shared_tools.tools.logger import logger
 
+from givingtuesday_datamart._internal.db import get_session
+from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart.ingestion import (
     INGEST_RUNS_TABLE,
     META_SCHEMA,

@@ -2,8 +2,7 @@
 Resolve the latest version of a Datamart source from the public S3 bucket.
 
 Uses boto3 with anonymous (unsigned) credentials — the bucket is public-read
-and public-list, so no AWS credentials are required. boto3 is pulled in via
-`vdl-tools`, so no new declared dependency.
+and public-list, so no AWS credentials are required.
 """
 
 from __future__ import annotations

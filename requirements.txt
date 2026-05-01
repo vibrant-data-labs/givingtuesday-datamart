@@ -1,6 +1,12 @@
-vdl-tools
-wget
-polars
+boto3
+fsspec
 pandas
-sqlalchemy
+polars
 psycopg2-binary
+pyarrow
+recordlinkage
+requests
+s3fs
+sqlalchemy
+tqdm
+wget
