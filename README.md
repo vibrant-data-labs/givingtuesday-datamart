@@ -296,8 +296,10 @@ from givingtuesday_datamart.client import GtDatamartClient
 client = GtDatamartClient()
 
 hits = client.search_nonprofits(["climate", "wildfire"], limit=20)
-# Exact-term match (no stemming): "tutoring" matches only "tutoring".
-exact = client.search_nonprofits(["tutoring"], search_mode="exact", limit=20)
+# Exact-term + phrase match (no stemming, tokens adjacent in order):
+#   "tutoring"     matches only "tutoring" (not "tutor" / "tutored")
+#   "needs based"  matches the literal phrase, NOT "meet your needs ... based here"
+exact = client.search_nonprofits(["needs based"], search_mode="exact", limit=20)
 profile = client.get_nonprofit(ein="123456789")
 years = client.get_basic_fields(eins=["123456789"], min_taxyear=2018)
 grants_received = client.get_grants(eins=["123456789"], role="grantee")

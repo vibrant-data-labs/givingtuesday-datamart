@@ -146,18 +146,23 @@ class GtDatamartClient:
         ``search_mode``:
 
         * ``"stemmed"`` (default) — queries ``text_tsv_compact`` with the
-          ``english`` config. Snowball stemming + stopword removal, so
-          ``"tutoring"`` matches ``tutor``, ``tutored``, ``tutors``. Best
-          for relevance-ranked discovery.
+          ``english`` config via ``plainto_tsquery``. Snowball stemming +
+          stopword removal, tokens AND-ed with no positional constraint.
+          ``"tutoring"`` matches ``tutor``, ``tutored``, ``tutors``;
+          ``"climate change"`` matches docs containing both stems anywhere.
+          Best for relevance-ranked discovery.
         * ``"exact"`` — queries ``text_tsv_compact_simple`` with the
-          ``simple`` config. Lowercase + tokenize only, no stemming, no
-          stopwords. ``"tutoring"`` matches only ``tutoring`` (case-
-          insensitive). Best for precise term lookups.
+          ``simple`` config via ``phraseto_tsquery``. Lowercase + tokenize
+          only, no stemming, no stopwords; multi-word inputs match as a
+          phrase (tokens adjacent, in order). ``"tutoring"`` matches only
+          ``tutoring``; ``"needs based"`` matches the literal phrase
+          ``"needs based"`` and not ``"meet your needs ... based here"``.
+          Best for precise term and phrase lookups.
 
-        Each keyword is bound as a separate parameter and run through
-        ``plainto_tsquery(<config>, :kw)``; per-keyword tsqueries are
-        OR-ed with ``||``. ``plainto_tsquery`` handles multi-word phrases
-        and special characters cleanly without manual escaping.
+        Each keyword is bound as a separate parameter; per-keyword tsqueries
+        are OR-ed with ``||``. Both ``plainto_tsquery`` and ``phraseto_tsquery``
+        handle multi-word inputs and special characters cleanly without
+        manual escaping.
 
         ``LEFT JOIN nonprofit_canonical`` because ~46K 990-EZ filers live in
         ``nonprofit_text`` but are missing from ``nonprofit_canonical``
@@ -168,24 +173,29 @@ class GtDatamartClient:
         if not cleaned:
             raise ValueError("search_nonprofits requires at least one non-empty keyword")
 
-        # Mode picks both the indexed tsvector and the matching tsquery
-        # config. text_tsv_compact pairs with 'english' (stemmed);
-        # text_tsv_compact_simple pairs with 'simple' (exact tokens).
+        # Mode picks the indexed tsvector, the tsquery config, and the
+        # tsquery constructor. text_tsv_compact pairs with 'english' +
+        # plainto_tsquery (token-AND, with stemming); text_tsv_compact_simple
+        # pairs with 'simple' + phraseto_tsquery (adjacent-token phrase
+        # match, no stemming).
         if search_mode == "stemmed":
             tsv_col = "text_tsv_compact"
             ts_config = "english"
+            ts_fn = "plainto_tsquery"
         elif search_mode == "exact":
             tsv_col = "text_tsv_compact_simple"
             ts_config = "simple"
+            ts_fn = "phraseto_tsquery"
         else:
             raise ValueError(
                 f"search_mode must be 'stemmed' or 'exact', got {search_mode!r}"
             )
 
         # Parameterize every keyword — never interpolate user input. The
-        # config name is whitelisted above, so it's safe to embed.
+        # config name and tsquery function are whitelisted above, so it's
+        # safe to embed them.
         tsquery_terms = " || ".join(
-            f"plainto_tsquery('{ts_config}', :kw{i})" for i in range(len(cleaned))
+            f"{ts_fn}('{ts_config}', :kw{i})" for i in range(len(cleaned))
         )
         params: dict[str, object] = {f"kw{i}": kw for i, kw in enumerate(cleaned)}
 
