@@ -239,9 +239,19 @@ export async function getGrantsGivenGrouped(
   const offset = (page - 1) * limit;
 
   const isYear = groupBy === 'year';
-  const groupExpr = isYear
-    ? sql`taxyear::int`
-    : sql`COALESCE(grantee_organization_name1, grantee_person_name, 'Unknown')`;
+  // EIN-when-present, name-when-null. Same EIN under different name castings
+  // collapses into one group; rows without an EIN still group by name.
+  const entityGroupExpr = sql`COALESCE(grantee_ein, '__name:' || COALESCE(grantee_organization_name1, grantee_person_name, 'Unknown'))`;
+  // Display label: prefer canonical names from the org tables; fall back to
+  // the most-common variant on the grant rows themselves for EINs not in
+  // either canonical table.
+  const entityNameExpr = sql`COALESCE(
+    (SELECT name FROM public.nonprofit_canonical WHERE ein = unioned_grants.grantee_ein),
+    (SELECT name FROM public.funder_canonical WHERE ein = unioned_grants.grantee_ein),
+    mode() WITHIN GROUP (ORDER BY COALESCE(grantee_organization_name1, grantee_person_name, 'Unknown')),
+    'Unknown'
+  )`;
+  const groupExpr = isYear ? sql`taxyear::int` : entityNameExpr;
   const groupEinExpr = isYear
     ? sql<string | null>`NULL`
     : sql<string | null>`grantee_ein`;
@@ -262,14 +272,12 @@ export async function getGrantsGivenGrouped(
   if (isYear) {
     groupQuery = groupQuery.groupBy(sql`taxyear::int`);
   } else {
-    groupQuery = groupQuery
-      .groupBy(sql`COALESCE(grantee_organization_name1, grantee_person_name, 'Unknown')`)
-      .groupBy('grantee_ein');
+    groupQuery = groupQuery.groupBy(entityGroupExpr).groupBy('grantee_ein');
   }
 
   const countDistinctExpr = isYear
     ? sql<number>`COUNT(DISTINCT taxyear::int)`
-    : sql<number>`COUNT(DISTINCT COALESCE(grantee_organization_name1, grantee_person_name, 'Unknown'))`;
+    : sql<number>`COUNT(DISTINCT COALESCE(grantee_ein, '__name:' || COALESCE(grantee_organization_name1, grantee_person_name, 'Unknown')))`;
 
   let overallQuery = db
     .selectFrom('public.unioned_grants')
@@ -318,9 +326,14 @@ export async function getGrantsReceivedGrouped(
   const offset = (page - 1) * limit;
 
   const isYear = groupBy === 'year';
-  const groupExpr = isYear
-    ? sql`taxyear::int`
-    : sql`COALESCE(granter_name, 'Unknown')`;
+  const entityGroupExpr = sql`COALESCE(granter_ein, '__name:' || COALESCE(granter_name, 'Unknown'))`;
+  const entityNameExpr = sql`COALESCE(
+    (SELECT name FROM public.nonprofit_canonical WHERE ein = unioned_grants.granter_ein),
+    (SELECT name FROM public.funder_canonical WHERE ein = unioned_grants.granter_ein),
+    mode() WITHIN GROUP (ORDER BY COALESCE(granter_name, 'Unknown')),
+    'Unknown'
+  )`;
+  const groupExpr = isYear ? sql`taxyear::int` : entityNameExpr;
   const groupEinExpr = isYear
     ? sql<string | null>`NULL`
     : sql<string | null>`granter_ein`;
@@ -341,14 +354,12 @@ export async function getGrantsReceivedGrouped(
   if (isYear) {
     groupQuery = groupQuery.groupBy(sql`taxyear::int`);
   } else {
-    groupQuery = groupQuery
-      .groupBy(sql`COALESCE(granter_name, 'Unknown')`)
-      .groupBy('granter_ein');
+    groupQuery = groupQuery.groupBy(entityGroupExpr).groupBy('granter_ein');
   }
 
   const countDistinctExpr = isYear
     ? sql<number>`COUNT(DISTINCT taxyear::int)`
-    : sql<number>`COUNT(DISTINCT COALESCE(granter_name, 'Unknown'))`;
+    : sql<number>`COUNT(DISTINCT COALESCE(granter_ein, '__name:' || COALESCE(granter_name, 'Unknown')))`;
 
   let overallQuery = db
     .selectFrom('public.unioned_grants')
