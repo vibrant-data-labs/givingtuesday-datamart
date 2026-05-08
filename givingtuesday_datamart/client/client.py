@@ -333,8 +333,11 @@ class GtDatamartClient:
         """Reads from ``public.unioned_grants`` (typed at table-build time).
 
         ``role`` chooses which side of the relationship the EIN list filters
-        on. Indexes ``idx_unioned_grants_grantee_ein`` and
-        ``idx_unioned_grants_granter_ein`` keep both lookups cheap.
+        on. Composite indexes ``idx_unioned_grants_grantee_ein_taxyear`` and
+        ``idx_unioned_grants_granter_ein_taxyear`` keep both lookups cheap
+        and make ``min_taxyear`` an Index Cond rather than a post-index
+        Filter — important when the EIN list is large (the filter would
+        otherwise force a heap fetch for every grant in every year).
         """
         if not eins:
             return []
