@@ -40,10 +40,10 @@ A dedicated Postgres database, broken into four layers:
   `_ingest_run_id`.
 - **Canonical** (`public.*`) — typed materializations rebuilt from
   staging. One row per real entity (`nonprofit_canonical`,
-  `funder_canonical`, optionally `person_canonical`); a near-duplicate-
-  collapsed narrative per EIN with two GIN-indexed `tsvector` columns
-  for full-text search (`nonprofit_text` — `text_tsv_compact` for
-  stemmed/relevance-ranked matching, `text_tsv_compact_simple` for
+  `funder_canonical`, optionally `person_canonical`); a per-EIN narrative
+  built from the latest filing only with two GIN-indexed `tsvector`
+  columns for full-text search (`nonprofit_text` — `text_tsv_compact`
+  for stemmed/relevance-ranked matching, `text_tsv_compact_simple` for
   exact-term matching); a filtered Schedule O Part III narrative table
   (`schedule_o_part_iii`).
 - **Matched grants** — `unioned_grants` is the consumer-facing grants
@@ -165,26 +165,20 @@ Run this after a successful `refresh`. It rebuilds:
   (name, DBAs, address) and the latest filing's identifiers, picked via
   `DISTINCT ON (filerein)` ordered by tax year desc, tax-period-end
   desc, ingested_at desc as deterministic tiebreaks.
-- `public.nonprofit_text` — one row per EIN. Five source fields (mission
-  statement, Part III program activities 1/2/3, Schedule O Part III
-  narrative) across every filed year are collapsed into a single
-  near-duplicate-deduped narrative + two FTS surfaces. Each snippet is
-  normalized (lowercased, with 4-digit years, dollar amounts,
-  percentages, comma-grouped numbers, punctuation, and whitespace
-  stripped — bare digits intentionally preserved so "5 victims" and
-  "50 victims" remain distinct), md5-hashed into a `norm_key`, and
-  clustered cross-source. Each cluster picks one representative (most
-  recent year wins, longest text as tiebreak); representatives feed
-  `unique_text_compact` (the display surface). The token-union of
-  *every* cluster member's original text — not just representatives —
-  feeds two GIN-indexed `tsvector` columns: `text_tsv_compact`
+- `public.nonprofit_text` — one row per EIN, built from the **latest
+  taxyear only** across five source fields (mission statement, Part III
+  program activities 1/2/3, Schedule O Part III narrative). `DENSE_RANK`
+  over `(ein ORDER BY taxyear DESC NULLS LAST)` picks the latest year's
+  rows; plain `DISTINCT` collapses byte-identical snippets within that
+  filing (e.g. mission pasted verbatim into Schedule O). The deduped
+  snippets are concatenated into `unique_text_compact` (the display
+  surface) and feed two GIN-indexed `tsvector` columns: `text_tsv_compact`
   (`english` config: Snowball stemming + stopword removal, for
   relevance-ranked search) and `text_tsv_compact_simple` (`simple`
-  config: lowercase + tokenize, for exact-term search). Tokens that
-  only appeared in older filings still match — the FTS index isn't
-  shortened to the representative's vocabulary. Per-EIN
-  `n_compact_snippets` and `n_raw_snippets` columns expose the
-  compression ratio for monitoring.
+  config: lowercase + tokenize, for exact-term search). Trade-off:
+  tokens that appeared only in older filings (e.g. a renamed program)
+  are not in the FTS index. A per-EIN `n_snippets` column exposes the
+  count of distinct snippets for monitoring.
 - `public.funder_canonical` — analogous to `nonprofit_canonical` but
   built from the 990-PF universe.
 - `public.schedule_o_part_iii` — Schedule O rows filtered to Form

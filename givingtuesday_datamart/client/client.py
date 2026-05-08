@@ -333,8 +333,20 @@ class GtDatamartClient:
         """Reads from ``public.unioned_grants`` (typed at table-build time).
 
         ``role`` chooses which side of the relationship the EIN list filters
-        on. Indexes ``idx_unioned_grants_grantee_ein`` and
-        ``idx_unioned_grants_granter_ein`` keep both lookups cheap.
+        on. Composite indexes ``idx_unioned_grants_grantee_ein_taxyear`` and
+        ``idx_unioned_grants_granter_ein_taxyear`` keep both lookups cheap
+        and make ``min_taxyear`` an Index Cond rather than a post-index
+        Filter — important when the EIN list is large (the filter would
+        otherwise force a heap fetch for every grant in every year).
+
+        ``granter_name`` and ``granter_name2`` are resolved at query time
+        from the canonical identity tables (``nonprofit_canonical`` for 990
+        filers, ``funder_canonical`` for 990-PF filers) so consumers see one
+        stable spelling per granter EIN regardless of which year's filing
+        produced the row. ``filesha256 IS NOT NULL`` discriminates PF rows
+        (always set in the union) from 990 rows (always NULL). The COALESCE
+        falls back to the other canonical, then to the per-year value on
+        ``unioned_grants``, so we never blank out a name that was present.
         """
         if not eins:
             return []
@@ -347,32 +359,42 @@ class GtDatamartClient:
         params: dict[str, object] = {"eins": list(eins)}
         sql = f"""
             SELECT
-                granter_ein,
-                granter_name,
-                granter_name2,
-                filesha256,
-                url,
-                taxyear,
-                taxperbegin,
-                taxperend,
-                grantee_ein,
-                grantee_person_name,
-                grantee_organization_name1,
-                grantee_organization_name2,
-                grantee_address1,
-                grantee_address2,
-                grantee_city,
-                grantee_state,
-                grantee_zip,
-                grant_amount,
-                grant_purpose,
-                grant_status,
-                grant_relationship
-            FROM public.unioned_grants
-            WHERE {ein_col} = ANY(:eins)
+                ug.granter_ein,
+                COALESCE(
+                    CASE WHEN ug.filesha256 IS NOT NULL THEN fc.name ELSE nc.name END,
+                    CASE WHEN ug.filesha256 IS NOT NULL THEN nc.name ELSE fc.name END,
+                    ug.granter_name
+                ) AS granter_name,
+                COALESCE(
+                    CASE WHEN ug.filesha256 IS NOT NULL THEN fc.name_secondary ELSE nc.name_secondary END,
+                    CASE WHEN ug.filesha256 IS NOT NULL THEN nc.name_secondary ELSE fc.name_secondary END,
+                    ug.granter_name2
+                ) AS granter_name2,
+                ug.filesha256,
+                ug.url,
+                ug.taxyear,
+                ug.taxperbegin,
+                ug.taxperend,
+                ug.grantee_ein,
+                ug.grantee_person_name,
+                ug.grantee_organization_name1,
+                ug.grantee_organization_name2,
+                ug.grantee_address1,
+                ug.grantee_address2,
+                ug.grantee_city,
+                ug.grantee_state,
+                ug.grantee_zip,
+                ug.grant_amount,
+                ug.grant_purpose,
+                ug.grant_status,
+                ug.grant_relationship
+            FROM public.unioned_grants ug
+            LEFT JOIN public.nonprofit_canonical nc ON nc.ein = ug.granter_ein
+            LEFT JOIN public.funder_canonical fc ON fc.ein = ug.granter_ein
+            WHERE ug.{ein_col} = ANY(:eins)
         """
         if min_taxyear is not None:
-            sql += " AND taxyear >= :min_taxyear"
+            sql += " AND ug.taxyear >= :min_taxyear"
             params["min_taxyear"] = min_taxyear
 
         with self._session() as session:

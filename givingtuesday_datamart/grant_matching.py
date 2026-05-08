@@ -203,11 +203,17 @@ FROM (
 """
 
 _UNIONED_GRANTS_INDEXES = [
+    # Composite (ein, taxyear) so taxyear is an Index Cond rather than a
+    # post-index Filter on the very common "grants for EIN list since year Y"
+    # access pattern. A btree on (a, b) also serves WHERE a = X queries, so
+    # the single-column ein indexes are redundant — drop them on rebuild.
     "DROP INDEX IF EXISTS idx_unioned_grants_granter_ein",
     "DROP INDEX IF EXISTS idx_unioned_grants_grantee_ein",
+    "DROP INDEX IF EXISTS idx_unioned_grants_granter_ein_taxyear",
+    "DROP INDEX IF EXISTS idx_unioned_grants_grantee_ein_taxyear",
     "DROP INDEX IF EXISTS idx_unioned_grants_taxyear",
-    "CREATE INDEX IF NOT EXISTS idx_unioned_grants_granter_ein ON public.unioned_grants (granter_ein)",
-    "CREATE INDEX IF NOT EXISTS idx_unioned_grants_grantee_ein ON public.unioned_grants (grantee_ein)",
+    "CREATE INDEX IF NOT EXISTS idx_unioned_grants_granter_ein_taxyear ON public.unioned_grants (granter_ein, taxyear)",
+    "CREATE INDEX IF NOT EXISTS idx_unioned_grants_grantee_ein_taxyear ON public.unioned_grants (grantee_ein, taxyear)",
     "CREATE INDEX IF NOT EXISTS idx_unioned_grants_taxyear ON public.unioned_grants (taxyear)",
 ]
 
