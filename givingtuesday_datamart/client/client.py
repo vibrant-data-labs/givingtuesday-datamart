@@ -431,37 +431,49 @@ class GtDatamartClient:
         ein_col = "grantee_ein" if role == "grantee" else "granter_ein"
 
         params: dict[str, object] = {"eins": list(eins)}
-        # COALESCE(SUM(...), 0) so an EIN with grants but all-NULL amounts
+        # Resolve the canonical granter name once in the inner SELECT, then
+        # aggregate over it in the outer query. ``ARRAY_AGG ... FILTER (WHERE
+        # granter_name IS NOT NULL)`` reads cleanly; doing it inline would
+        # mean duplicating the three-way COALESCE in both the aggregate and
+        # the filter clause.
+        #
+        # ``COALESCE(SUM(...), 0)`` so an EIN with grants but all-NULL amounts
         # comes back as 0 rather than NULL — pandas-side groupby/mean callers
         # expect a numeric here (NULL → NaN → would silently drop the EIN
         # from any ``mean() >= threshold`` filter).
+        where_taxyear = "AND ug.taxyear >= :min_taxyear" if min_taxyear is not None else ""
+        if min_taxyear is not None:
+            params["min_taxyear"] = min_taxyear
         sql = f"""
-            SELECT
-                ug.{ein_col}                                            AS ein,
-                ug.taxyear                                              AS taxyear,
-                COALESCE(SUM(ug.grant_amount), 0)::double precision     AS total_grant_amount,
-                COUNT(*)                                                AS grant_count,
-                ARRAY_AGG(DISTINCT ug.granter_ein)
-                    FILTER (WHERE ug.granter_ein IS NOT NULL) AS granter_eins,
-                ARRAY_AGG(DISTINCT COALESCE(
-                    CASE WHEN ug.filesha256 IS NOT NULL THEN fc.name ELSE nc.name END,
-                    CASE WHEN ug.filesha256 IS NOT NULL THEN nc.name ELSE fc.name END,
-                    ug.granter_name
-                ))
-                    FILTER (WHERE COALESCE(
+            WITH resolved AS (
+                SELECT
+                    ug.{ein_col}        AS ein,
+                    ug.taxyear          AS taxyear,
+                    ug.grant_amount     AS grant_amount,
+                    ug.granter_ein      AS granter_ein,
+                    COALESCE(
                         CASE WHEN ug.filesha256 IS NOT NULL THEN fc.name ELSE nc.name END,
                         CASE WHEN ug.filesha256 IS NOT NULL THEN nc.name ELSE fc.name END,
                         ug.granter_name
-                    ) IS NOT NULL)                          AS granter_names
-            FROM public.unioned_grants ug
-            LEFT JOIN public.nonprofit_canonical nc ON nc.ein = ug.granter_ein
-            LEFT JOIN public.funder_canonical    fc ON fc.ein = ug.granter_ein
-            WHERE ug.{ein_col} = ANY(:eins)
+                    )                   AS granter_name
+                FROM public.unioned_grants ug
+                LEFT JOIN public.nonprofit_canonical nc ON nc.ein = ug.granter_ein
+                LEFT JOIN public.funder_canonical    fc ON fc.ein = ug.granter_ein
+                WHERE ug.{ein_col} = ANY(:eins)
+                  {where_taxyear}
+            )
+            SELECT
+                ein,
+                taxyear,
+                COALESCE(SUM(grant_amount), 0)::double precision    AS total_grant_amount,
+                COUNT(*)                                            AS grant_count,
+                ARRAY_AGG(DISTINCT granter_ein)
+                    FILTER (WHERE granter_ein IS NOT NULL)          AS granter_eins,
+                ARRAY_AGG(DISTINCT granter_name)
+                    FILTER (WHERE granter_name IS NOT NULL)         AS granter_names
+            FROM resolved
+            GROUP BY ein, taxyear
         """
-        if min_taxyear is not None:
-            sql += " AND ug.taxyear >= :min_taxyear"
-            params["min_taxyear"] = min_taxyear
-        sql += f" GROUP BY ug.{ein_col}, ug.taxyear"
 
         logger.info(
             "get_grant_summaries: role=%s, %d EIN(s), min_taxyear=%s",
