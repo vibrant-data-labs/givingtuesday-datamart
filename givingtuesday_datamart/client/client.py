@@ -348,6 +348,10 @@ class GtDatamartClient:
         (always set in the union) from 990 rows (always NULL). The COALESCE
         falls back to the other canonical, then to the per-year value on
         ``unioned_grants``, so we never blank out a name that was present.
+
+        TODO: collapse to a single ``LEFT JOIN canonical_organizations`` once
+        the unified canonical table lands — see
+        https://github.com/vibrant-data-labs/givingtuesday-datamart/issues/22.
         """
         if not eins:
             return []
@@ -436,6 +440,11 @@ class GtDatamartClient:
         # granter_name IS NOT NULL)`` reads cleanly; doing it inline would
         # mean duplicating the three-way COALESCE in both the aggregate and
         # the filter clause.
+        #
+        # TODO: collapse the inner SELECT to a single LEFT JOIN +
+        # ``COALESCE(co.name, ug.granter_name)`` once the unified canonical
+        # table lands — see
+        # https://github.com/vibrant-data-labs/givingtuesday-datamart/issues/22.
         #
         # ``COALESCE(SUM(...), 0)`` so an EIN with grants but all-NULL amounts
         # comes back as 0 rather than NULL — pandas-side groupby/mean callers
