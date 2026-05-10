@@ -4,6 +4,7 @@ from givingtuesday_datamart.client.client import GtDatamartClient
 from givingtuesday_datamart.client.models import (
     BasicFieldsRow,
     Grant,
+    GrantSummary,
     Nonprofit,
     NonprofitHit,
 )
@@ -14,4 +15,5 @@ __all__ = [
     "Nonprofit",
     "BasicFieldsRow",
     "Grant",
+    "GrantSummary",
 ]
