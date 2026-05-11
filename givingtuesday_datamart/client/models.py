@@ -111,3 +111,21 @@ class Grant:
     grant_purpose: str | None
     grant_status: str | None
     grant_relationship: str | None
+
+
+@dataclass(frozen=True)
+class GrantSummary:
+    """Per-(EIN, taxyear) aggregate over ``public.unioned_grants``.
+
+    Returned by ``GtDatamartClient.get_grant_summaries``. The granter sets are
+    deduped server-side via ``ARRAY_AGG(DISTINCT ...)`` and resolved through
+    the same canonical-name fallback as ``Grant.granter_name``, so consumers
+    that just need yearly totals + funder rollups can skip the per-row pull.
+    """
+
+    ein: str
+    taxyear: int | None
+    total_grant_amount: float | None
+    grant_count: int
+    granter_eins: list[str]
+    granter_names: list[str]

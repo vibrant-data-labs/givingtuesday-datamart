@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from givingtuesday_datamart.client.models import (
     BasicFieldsRow,
     Grant,
+    GrantSummary,
     Nonprofit,
     NonprofitHit,
 )
@@ -287,9 +288,9 @@ class GtDatamartClient:
         Staging is all-TEXT, so every numeric column is cast at query time
         via ``NULLIF(col, '')::bigint``. ``governgrants`` is COALESCEd to 0
         when computing ``total_cash_contributions_no_gov`` because empty
-        string is much more common than NULL in the staging data — this
-        differs from the OLD VDL DB's numeric-typed subtraction (where empty
-        was already NULL and NULL - NULL = NULL).
+        string is much more common than NULL in the staging data, and we
+        want a missing governgrants value to subtract zero (not produce
+        NULL) so the no-gov contribution stays a real number.
         """
         if not eins:
             return []
@@ -347,6 +348,10 @@ class GtDatamartClient:
         (always set in the union) from 990 rows (always NULL). The COALESCE
         falls back to the other canonical, then to the per-year value on
         ``unioned_grants``, so we never blank out a name that was present.
+
+        TODO: collapse to a single ``LEFT JOIN canonical_organizations`` once
+        the unified canonical table lands — see
+        https://github.com/vibrant-data-labs/givingtuesday-datamart/issues/22.
         """
         if not eins:
             return []
@@ -400,3 +405,164 @@ class GtDatamartClient:
         with self._session() as session:
             rows = session.execute(text(sql), params).mappings().all()
         return [Grant(**dict(r)) for r in rows]
+
+    def get_grant_summaries(
+        self,
+        eins: list[str],
+        *,
+        role: GranteeOrGranter = "grantee",
+        min_taxyear: int | None = None,
+    ) -> list[GrantSummary]:
+        """Per-(EIN, taxyear) aggregate over ``public.unioned_grants``.
+
+        Same row-set as ``get_grants`` for the same args, but rolled up to one
+        row per ``(ein, taxyear)`` with ``SUM(grant_amount)`` and the deduped
+        granter EIN / name arrays. The granter-name COALESCE matches
+        ``get_grants`` exactly so consumers see the same canonical names —
+        this is the "I just need yearly totals + funder rollups" path that
+        avoids transferring 4M+ raw grant rows for queries that immediately
+        group them.
+
+        ``role`` whitelisted to the same composite-index columns as
+        ``get_grants`` (``grantee_ein`` / ``granter_ein``); ``min_taxyear``
+        stays an Index Cond on the composite index.
+        """
+        if not eins:
+            return []
+        if role not in ("grantee", "granter"):
+            raise ValueError(f"role must be 'grantee' or 'granter', got {role!r}")
+
+        ein_col = "grantee_ein" if role == "grantee" else "granter_ein"
+
+        params: dict[str, object] = {"eins": list(eins)}
+        # Resolve the canonical granter name once in the inner SELECT, then
+        # aggregate over it in the outer query. ``ARRAY_AGG ... FILTER (WHERE
+        # granter_name IS NOT NULL)`` reads cleanly; doing it inline would
+        # mean duplicating the three-way COALESCE in both the aggregate and
+        # the filter clause.
+        #
+        # TODO: collapse the inner SELECT to a single LEFT JOIN +
+        # ``COALESCE(co.name, ug.granter_name)`` once the unified canonical
+        # table lands — see
+        # https://github.com/vibrant-data-labs/givingtuesday-datamart/issues/22.
+        #
+        # ``COALESCE(SUM(...), 0)`` keeps the total numeric even when an
+        # EIN has grants but every grant_amount is NULL — otherwise NaN
+        # propagates through downstream mean/threshold filters and silently
+        # drops the EIN.
+        where_taxyear = "AND ug.taxyear >= :min_taxyear" if min_taxyear is not None else ""
+        if min_taxyear is not None:
+            params["min_taxyear"] = min_taxyear
+        sql = f"""
+            WITH resolved AS (
+                SELECT
+                    ug.{ein_col}        AS ein,
+                    ug.taxyear          AS taxyear,
+                    ug.grant_amount     AS grant_amount,
+                    ug.granter_ein      AS granter_ein,
+                    COALESCE(
+                        CASE WHEN ug.filesha256 IS NOT NULL THEN fc.name ELSE nc.name END,
+                        CASE WHEN ug.filesha256 IS NOT NULL THEN nc.name ELSE fc.name END,
+                        ug.granter_name
+                    )                   AS granter_name
+                FROM public.unioned_grants ug
+                LEFT JOIN public.nonprofit_canonical nc ON nc.ein = ug.granter_ein
+                LEFT JOIN public.funder_canonical    fc ON fc.ein = ug.granter_ein
+                WHERE ug.{ein_col} = ANY(:eins)
+                  {where_taxyear}
+            )
+            SELECT
+                ein,
+                taxyear,
+                COALESCE(SUM(grant_amount), 0)::double precision    AS total_grant_amount,
+                COUNT(*)                                            AS grant_count,
+                ARRAY_AGG(DISTINCT granter_ein)
+                    FILTER (WHERE granter_ein IS NOT NULL)          AS granter_eins,
+                ARRAY_AGG(DISTINCT granter_name)
+                    FILTER (WHERE granter_name IS NOT NULL)         AS granter_names
+            FROM resolved
+            GROUP BY ein, taxyear
+        """
+
+        logger.info(
+            "get_grant_summaries: role=%s, %d EIN(s), min_taxyear=%s",
+            role,
+            len(eins),
+            min_taxyear,
+        )
+        with self._session() as session:
+            rows = session.execute(text(sql), params).mappings().all()
+        logger.info("get_grant_summaries: %d (ein, taxyear) rows", len(rows))
+        return [
+            GrantSummary(
+                ein=r["ein"],
+                taxyear=r["taxyear"],
+                total_grant_amount=(
+                    float(r["total_grant_amount"]) if r["total_grant_amount"] is not None else None
+                ),
+                grant_count=int(r["grant_count"]),
+                granter_eins=list(r["granter_eins"] or []),
+                granter_names=list(r["granter_names"] or []),
+            )
+            for r in rows
+        ]
+
+    def find_eins_with_min_avg_contributions(
+        self,
+        eins: list[str],
+        *,
+        min_taxyear: int,
+        min_avg: float,
+        column: Literal["totacashcont", "totrevcuryea"] = "totacashcont",
+    ) -> list[str]:
+        """Return EINs whose avg yearly value of ``column`` is ``>= min_avg``.
+
+        Pushes the avg-contributions filter into Postgres so the caller
+        doesn't pull all per-year staging rows just to compute a Python
+        groupby/mean. Mirrors the all-TEXT casting used by ``get_basic_fields``.
+
+        Restricted to the two cash-flow columns the existing pipeline filters
+        on; whitelisted (not interpolated user input) so it's safe to embed.
+        """
+        if not eins:
+            return []
+        if column not in ("totacashcont", "totrevcuryea"):
+            raise ValueError(
+                f"column must be 'totacashcont' or 'totrevcuryea', got {column!r}"
+            )
+
+        params: dict[str, object] = {
+            "eins": list(eins),
+            "min_taxyear": min_taxyear,
+            "min_avg": min_avg,
+        }
+        # ``basic_fields`` can have multiple rows for the same (filerein,
+        # taxyear), so sum the duplicates within each year first and then
+        # average across years. ``AVG(col)`` directly over all rows would
+        # weight by row count and quietly drop EINs whose duplicates pulled
+        # the all-rows mean below the threshold.
+        sql = f"""
+            SELECT filerein AS ein
+            FROM (
+                SELECT filerein, taxyear,
+                       SUM(NULLIF({column}, '')::bigint) AS yr_sum
+                FROM public.basic_fields
+                WHERE filerein = ANY(:eins)
+                  AND NULLIF(taxyear, '')::int >= :min_taxyear
+                GROUP BY filerein, taxyear
+            ) yearly
+            GROUP BY filerein
+            HAVING AVG(yr_sum) >= :min_avg
+        """
+        logger.info(
+            "find_eins_with_min_avg_contributions: %d EIN(s), column=%s, min_taxyear=%s, min_avg=%s",
+            len(eins),
+            column,
+            min_taxyear,
+            min_avg,
+        )
+        with self._session() as session:
+            rows = session.execute(text(sql), params).mappings().all()
+        result = [r["ein"] for r in rows]
+        logger.info("find_eins_with_min_avg_contributions: %d EIN(s) pass", len(result))
+        return result
