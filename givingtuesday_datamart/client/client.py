@@ -288,9 +288,9 @@ class GtDatamartClient:
         Staging is all-TEXT, so every numeric column is cast at query time
         via ``NULLIF(col, '')::bigint``. ``governgrants`` is COALESCEd to 0
         when computing ``total_cash_contributions_no_gov`` because empty
-        string is much more common than NULL in the staging data — this
-        differs from the OLD VDL DB's numeric-typed subtraction (where empty
-        was already NULL and NULL - NULL = NULL).
+        string is much more common than NULL in the staging data, and we
+        want a missing governgrants value to subtract zero (not produce
+        NULL) so the no-gov contribution stays a real number.
         """
         if not eins:
             return []
@@ -446,10 +446,10 @@ class GtDatamartClient:
         # table lands — see
         # https://github.com/vibrant-data-labs/givingtuesday-datamart/issues/22.
         #
-        # ``COALESCE(SUM(...), 0)`` so an EIN with grants but all-NULL amounts
-        # comes back as 0 rather than NULL — pandas-side groupby/mean callers
-        # expect a numeric here (NULL → NaN → would silently drop the EIN
-        # from any ``mean() >= threshold`` filter).
+        # ``COALESCE(SUM(...), 0)`` keeps the total numeric even when an
+        # EIN has grants but every grant_amount is NULL — otherwise NaN
+        # propagates through downstream mean/threshold filters and silently
+        # drops the EIN.
         where_taxyear = "AND ug.taxyear >= :min_taxyear" if min_taxyear is not None else ""
         if min_taxyear is not None:
             params["min_taxyear"] = min_taxyear
@@ -537,11 +537,10 @@ class GtDatamartClient:
             "min_avg": min_avg,
         }
         # ``basic_fields`` can have multiple rows for the same (filerein,
-        # taxyear). The legacy pipeline sums those duplicates within-year
-        # before averaging across years (``groupby(['filerein','taxyear'])
-        # [col].sum().groupby('filerein').mean()``); ``AVG(col)`` directly
-        # over all rows would weight by row count and silently drop EINs
-        # whose duplicates pulled the all-rows mean below the threshold.
+        # taxyear), so sum the duplicates within each year first and then
+        # average across years. ``AVG(col)`` directly over all rows would
+        # weight by row count and quietly drop EINs whose duplicates pulled
+        # the all-rows mean below the threshold.
         sql = f"""
             SELECT filerein AS ein
             FROM (
