@@ -138,6 +138,10 @@ class GtDatamartClient:
         return_text: bool = False,
         min_rank: float | None = None,
         limit: int | None = None,
+        min_avg_contributions: float | None = None,
+        min_avg_grants: float | None = None,
+        min_num_grants: int | None = None,
+        min_taxyear: int | None = None,
     ) -> list[NonprofitHit]:
         """Postgres FTS over ``public.nonprofit_text``.
 
@@ -166,10 +170,35 @@ class GtDatamartClient:
         ``nonprofit_text`` but are missing from ``nonprofit_canonical``
         (they file 990-EZ, which doesn't feed basic_fields). Hits for those
         EINs come back with NULL identity columns.
+
+        Eligibility filters (all optional, all server-side via CTEs):
+
+        * ``min_avg_contributions`` — keep only EINs whose average yearly
+          ``totacashcont`` since ``min_taxyear`` is ``>= min_avg_contributions``.
+          Same aggregation as ``find_eins_with_min_avg_contributions``
+          (sum per (ein, taxyear), then mean across years).
+        * ``min_avg_grants`` — keep only EINs whose average yearly
+          ``grant_amount`` (as grantee) since ``min_taxyear`` is
+          ``>= min_avg_grants``. Same per-year-sum-then-mean semantic.
+        * ``min_num_grants`` — keep only EINs that received at least
+          ``min_num_grants`` grant rows in ``unioned_grants`` since
+          ``min_taxyear``.
+
+        Any of those filters requires ``min_taxyear`` to be set; raises
+        ``ValueError`` otherwise. The CTEs are emitted only when their
+        param is set, so the un-filtered query is unchanged.
         """
         cleaned = [kw.strip() for kw in keywords if kw and kw.strip()]
         if not cleaned:
             raise ValueError("search_nonprofits requires at least one non-empty keyword")
+
+        needs_basic = min_avg_contributions is not None
+        needs_grants = min_avg_grants is not None or min_num_grants is not None
+        if (needs_basic or needs_grants) and min_taxyear is None:
+            raise ValueError(
+                "min_taxyear is required when any eligibility filter "
+                "(min_avg_contributions / min_avg_grants / min_num_grants) is set"
+            )
 
         # Mode picks the indexed tsvector, the tsquery config, and the
         # tsquery constructor. text_tsv_compact pairs with 'english' +
@@ -197,35 +226,117 @@ class GtDatamartClient:
         )
         params: dict[str, object] = {f"kw{i}": kw for i, kw in enumerate(cleaned)}
 
+        fts_where = f"nt.{tsv_col} @@ q.tsq"
+        if min_rank is not None:
+            fts_where += f" AND ts_rank(nt.{tsv_col}, q.tsq) >= :min_rank"
+            params["min_rank"] = min_rank
+
+        # Always build the FTS hit set as its own CTE so the eligibility
+        # joins below have a stable name. When no eligibility filter is set
+        # this is equivalent to the original single-statement query.
+        ctes: list[str] = [
+            f"q AS (SELECT {tsquery_terms} AS tsq)",
+            f"""fts AS (
+                SELECT
+                    nt.ein,
+                    ts_rank(nt.{tsv_col}, q.tsq) AS rank,
+                    {"nt.unique_text_compact" if return_text else "NULL"} AS unique_text
+                FROM public.nonprofit_text nt
+                CROSS JOIN q
+                WHERE {fts_where}
+            )""",
+        ]
+        joins: list[str] = []
+
+        if needs_basic:
+            # Sum per (filerein, taxyear) first, then mean — mirrors
+            # find_eins_with_min_avg_contributions. ``basic_fields`` is
+            # all-TEXT, so cast at query time.
+            ctes.append(
+                """contrib_eligible AS (
+                    SELECT filerein AS ein
+                    FROM (
+                        SELECT filerein, taxyear,
+                               SUM(NULLIF(totacashcont, '')::bigint) AS yr_sum
+                        FROM public.basic_fields
+                        WHERE NULLIF(taxyear, '')::int >= :min_taxyear
+                        GROUP BY filerein, taxyear
+                    ) yearly
+                    GROUP BY filerein
+                    HAVING AVG(yr_sum) >= :min_avg_contributions
+                )"""
+            )
+            joins.append("JOIN contrib_eligible USING (ein)")
+            params["min_avg_contributions"] = min_avg_contributions
+
+        if needs_grants:
+            # Aggregate per (grantee_ein, taxyear) so min_avg_grants matches
+            # the existing post-pivot semantic (mean of per-year grant
+            # totals). min_num_grants is the simple row count across the
+            # window — what require_one_grant historically meant.
+            having_clauses: list[str] = []
+            if min_num_grants is not None:
+                having_clauses.append("SUM(yr_count) >= :min_num_grants")
+                params["min_num_grants"] = min_num_grants
+            if min_avg_grants is not None:
+                having_clauses.append("AVG(yr_sum) >= :min_avg_grants")
+                params["min_avg_grants"] = min_avg_grants
+            having_sql = " AND ".join(having_clauses)
+            # COALESCE(..., 0) on the inner sum mirrors get_grant_summaries.
+            # Some unioned_grants rows have NULL grant_amount (e.g. amount
+            # not parsed off the 990); without the COALESCE those rows would
+            # propagate NULLs through the AVG and silently drop the EIN
+            # from grant_eligible even when its mean-grant-flow is fine.
+            ctes.append(
+                f"""grant_eligible AS (
+                    SELECT grantee_ein AS ein
+                    FROM (
+                        SELECT grantee_ein, taxyear,
+                               COALESCE(SUM(grant_amount), 0) AS yr_sum,
+                               COUNT(*) AS yr_count
+                        FROM public.unioned_grants
+                        WHERE taxyear >= :min_taxyear
+                        GROUP BY grantee_ein, taxyear
+                    ) yearly
+                    GROUP BY grantee_ein
+                    HAVING {having_sql}
+                )"""
+            )
+            joins.append("JOIN grant_eligible USING (ein)")
+
+        if needs_basic or needs_grants:
+            params["min_taxyear"] = min_taxyear
+
+        joins_sql = ("\n            " + "\n            ".join(joins)) if joins else ""
         sql = f"""
-            WITH q AS (SELECT {tsquery_terms} AS tsq)
+            WITH {",".join(ctes)}
             SELECT
-                nt.ein,
+                fts.ein,
                 nc.name,
                 nc.name_secondary,
                 nc.city,
                 nc.state,
-                ts_rank(nt.{tsv_col}, q.tsq) AS rank,
-                {"nt.unique_text_compact" if return_text else "NULL"} AS unique_text
-            FROM public.nonprofit_text nt
-            LEFT JOIN public.nonprofit_canonical nc USING (ein)
-            CROSS JOIN q
-            WHERE nt.{tsv_col} @@ q.tsq
+                fts.rank,
+                fts.unique_text
+            FROM fts
+            LEFT JOIN public.nonprofit_canonical nc USING (ein){joins_sql}
+            ORDER BY fts.rank DESC
         """
-        if min_rank is not None:
-            sql += f" AND ts_rank(nt.{tsv_col}, q.tsq) >= :min_rank"
-            params["min_rank"] = min_rank
-        sql += " ORDER BY rank DESC"
         if limit is not None:
             sql += " LIMIT :limit"
             params["limit"] = limit
 
         logger.info(
-            "search_nonprofits: %d keyword(s), mode=%s, min_rank=%s, limit=%s",
+            "search_nonprofits: %d keyword(s), mode=%s, min_rank=%s, limit=%s, "
+            "min_avg_contributions=%s, min_avg_grants=%s, min_num_grants=%s, min_taxyear=%s",
             len(cleaned),
             search_mode,
             min_rank,
             limit,
+            min_avg_contributions,
+            min_avg_grants,
+            min_num_grants,
+            min_taxyear,
         )
         with self._session() as session:
             rows = session.execute(text(sql), params).mappings().all()
