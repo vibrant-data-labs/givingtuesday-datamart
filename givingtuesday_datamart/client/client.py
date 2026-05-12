@@ -173,20 +173,16 @@ class GtDatamartClient:
 
         Eligibility filters (all optional, all server-side via CTEs):
 
-        * ``min_avg_contributions`` — keep only EINs whose average yearly
-          ``totacashcont`` since ``min_taxyear`` is ``>= min_avg_contributions``.
-          Same aggregation as ``find_eins_with_min_avg_contributions``
-          (sum per (ein, taxyear), then mean across years).
-        * ``min_avg_grants`` — keep only EINs whose average yearly
-          ``grant_amount`` (as grantee) since ``min_taxyear`` is
-          ``>= min_avg_grants``. Same per-year-sum-then-mean semantic.
-        * ``min_num_grants`` — keep only EINs that received at least
-          ``min_num_grants`` grant rows in ``unioned_grants`` since
-          ``min_taxyear``.
+        * ``min_avg_contributions`` — keep only EINs whose mean yearly
+          ``totacashcont`` since ``min_taxyear`` is at least the threshold.
+          Sums per (ein, taxyear) first, then averages across years.
+        * ``min_avg_grants`` — same per-year-sum-then-mean shape over
+          grants received from ``unioned_grants``.
+        * ``min_num_grants`` — total grant-row count across the
+          ``min_taxyear`` window must be at least this many.
 
         Any of those filters requires ``min_taxyear`` to be set; raises
-        ``ValueError`` otherwise. The CTEs are emitted only when their
-        param is set, so the un-filtered query is unchanged.
+        ``ValueError`` otherwise.
         """
         cleaned = [kw.strip() for kw in keywords if kw and kw.strip()]
         if not cleaned:
@@ -231,9 +227,8 @@ class GtDatamartClient:
             fts_where += f" AND ts_rank(nt.{tsv_col}, q.tsq) >= :min_rank"
             params["min_rank"] = min_rank
 
-        # Always build the FTS hit set as its own CTE so the eligibility
-        # joins below have a stable name. When no eligibility filter is set
-        # this is equivalent to the original single-statement query.
+        # Hoist the FTS match into its own CTE so the eligibility CTEs
+        # below have a stable name to join against.
         ctes: list[str] = [
             f"q AS (SELECT {tsquery_terms} AS tsq)",
             f"""fts AS (
@@ -249,9 +244,10 @@ class GtDatamartClient:
         joins: list[str] = []
 
         if needs_basic:
-            # Sum per (filerein, taxyear) first, then mean — mirrors
-            # find_eins_with_min_avg_contributions. ``basic_fields`` is
-            # all-TEXT, so cast at query time.
+            # ``basic_fields`` can have multiple rows per (filerein, taxyear),
+            # so sum within each year first and then take the mean across
+            # years — averaging the raw rows would weight by row count.
+            # The staging columns are all-TEXT; cast at query time.
             ctes.append(
                 """contrib_eligible AS (
                     SELECT filerein AS ein
@@ -270,10 +266,10 @@ class GtDatamartClient:
             params["min_avg_contributions"] = min_avg_contributions
 
         if needs_grants:
-            # Aggregate per (grantee_ein, taxyear) so min_avg_grants matches
-            # the existing post-pivot semantic (mean of per-year grant
-            # totals). min_num_grants is the simple row count across the
-            # window — what require_one_grant historically meant.
+            # Aggregate per (grantee_ein, taxyear) so min_avg_grants is the
+            # mean of per-year grant totals (not the mean of raw grant rows),
+            # and min_num_grants is the total grant-row count across the
+            # window.
             having_clauses: list[str] = []
             if min_num_grants is not None:
                 having_clauses.append("SUM(yr_count) >= :min_num_grants")
@@ -282,11 +278,10 @@ class GtDatamartClient:
                 having_clauses.append("AVG(yr_sum) >= :min_avg_grants")
                 params["min_avg_grants"] = min_avg_grants
             having_sql = " AND ".join(having_clauses)
-            # COALESCE(..., 0) on the inner sum mirrors get_grant_summaries.
             # Some unioned_grants rows have NULL grant_amount (e.g. amount
-            # not parsed off the 990); without the COALESCE those rows would
-            # propagate NULLs through the AVG and silently drop the EIN
-            # from grant_eligible even when its mean-grant-flow is fine.
+            # not parsed off the 990). COALESCE the inner sum to 0 so those
+            # years count as $0 grant flow instead of letting NULL propagate
+            # through the outer AVG and drop the EIN from grant_eligible.
             ctes.append(
                 f"""grant_eligible AS (
                     SELECT grantee_ein AS ein
