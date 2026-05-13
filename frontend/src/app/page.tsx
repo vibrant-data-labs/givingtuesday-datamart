@@ -5,6 +5,7 @@ import { Suspense } from 'react';
 import { SearchBar } from '@/components/search/SearchBar';
 import { SearchTabs } from '@/components/search/SearchTabs';
 import { SearchModeToggle } from '@/components/search/SearchModeToggle';
+import { DafFilterToggle } from '@/components/search/DafFilterToggle';
 import { SearchResultsClient } from '@/components/search/SearchResultsClient';
 import {
   sanitizeSearchQuery,
@@ -12,6 +13,7 @@ import {
   sanitizeLimit,
   sanitizeOrgType,
   sanitizeSearchMode,
+  sanitizeDafOnly,
 } from '@/lib/utils/validation';
 
 interface HomeProps {
@@ -21,6 +23,7 @@ interface HomeProps {
     page?: string;
     limit?: string;
     mode?: string;
+    daf?: string;
   };
 }
 
@@ -30,6 +33,7 @@ export default function HomePage({ searchParams }: HomeProps) {
   const page = sanitizePage(searchParams.page);
   const limit = sanitizeLimit(searchParams.limit, 25);
   const mode = sanitizeSearchMode(searchParams.mode);
+  const dafOnly = sanitizeDafOnly(searchParams.daf);
 
   const hasQuery = q.length > 0;
 
@@ -65,9 +69,14 @@ export default function HomePage({ searchParams }: HomeProps) {
           {!hasQuery && <ExampleQueryChips />}
 
           <div className="flex items-center justify-between flex-wrap gap-3">
-            <Suspense fallback={null}>
-              <SearchTabs currentType={type} />
-            </Suspense>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Suspense fallback={null}>
+                <SearchTabs currentType={type} />
+              </Suspense>
+              <Suspense fallback={null}>
+                <DafFilterToggle currentValue={dafOnly} />
+              </Suspense>
+            </div>
             <Suspense fallback={null}>
               <SearchModeToggle currentMode={mode} />
             </Suspense>
@@ -93,7 +102,7 @@ export default function HomePage({ searchParams }: HomeProps) {
         {/* Results */}
         {hasQuery && (
           <div className="mt-8">
-            <SearchResultsClient q={q} type={type} page={page} limit={limit} mode={mode} />
+            <SearchResultsClient q={q} type={type} page={page} limit={limit} mode={mode} dafOnly={dafOnly} />
           </div>
         )}
       </div>

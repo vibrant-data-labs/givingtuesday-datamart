@@ -175,6 +175,18 @@ export function OrgMetadata({ org }: OrgMetadataProps) {
           {selectedDetail ? (
             <>
               <FundingDetail detail={selectedDetail} orgType={org.orgType} />
+              {org.dafByYear.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-border/50">
+                  <div className="flex items-baseline justify-between py-1.5">
+                    <span className="text-sm text-muted-foreground">
+                      Donor-Advised Funds (Part IV, Line 6)
+                    </span>
+                    <span className="text-sm font-medium text-foreground">
+                      {org.dafByYear.find((d) => d.year === selectedYear)?.isDaf ? 'Yes' : 'No'}
+                    </span>
+                  </div>
+                </div>
+              )}
               {selectedDetail.url && (
                 <div className="mt-3 pt-3 border-t border-border/50">
                   <a

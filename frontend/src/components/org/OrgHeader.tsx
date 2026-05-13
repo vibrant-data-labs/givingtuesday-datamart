@@ -23,6 +23,13 @@ export function OrgHeader({ org }: OrgHeaderProps) {
             <Badge variant={org.orgType === 'foundation' ? 'indigo' : 'green'} className="text-sm px-2.5 py-1">
               {org.orgType === 'foundation' ? 'Private Foundation (990-PF)' : 'Nonprofit (990)'}
             </Badge>
+            {org.isDafEver && (
+              <span title="Reported maintaining donor-advised funds on at least one Form 990 (Part IV line 6)">
+                <Badge variant="amber" className="text-sm px-2.5 py-1">
+                  DAF Sponsor
+                </Badge>
+              </span>
+            )}
           </div>
           <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
             <span className="font-mono text-foreground/70">{formatEIN(org.ein)}</span>
