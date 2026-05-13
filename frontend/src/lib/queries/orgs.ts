@@ -415,9 +415,6 @@ async function getOrgProfileUncached(ein: string): Promise<OrgProfile | null> {
     revenueByYear,
     revenueDetails,
     isDafEver: !!agg.is_daf_ever,
-    // dafByYear is ordered ASC by year, so the last element is the most recent
-    // filing. Falls back to false for foundations (empty array).
-    isDafLatest: dafByYear.length > 0 ? dafByYear[dafByYear.length - 1].isDaf : false,
     dafByYear,
     narrative,
     foundationActivities,

@@ -82,12 +82,10 @@ export interface OrgProfile {
   revenueDetails: RevenueDetail[];
   // Donor-Advised Fund sponsorship (Form 990 Part IV line 6 / Schedule D Part I).
   // 990-only; foundations get `false` / empty list.
-  //   isDafEver   — true if any filing year was Yes (used by search filter)
-  //   isDafLatest — true if the most recent filing year was Yes (drives header
-  //                 badge so we don't mis-label orgs that ticked Yes once by
-  //                 mistake and No every year since)
+  //   isDafEver  — true if any filing year was Yes (drives header badge +
+  //                search filter; hovering the badge highlights the DAF-Yes
+  //                years in the funding bar chart so it's clear which years)
   isDafEver: boolean;
-  isDafLatest: boolean;
   dafByYear: { year: number; isDaf: boolean }[];
   narrative: OrgNarrativeBundle;
   foundationActivities: FoundationActivitiesYear[];
