@@ -10,6 +10,7 @@ async function fetchSearch(
   page: number,
   limit: number,
   mode: SearchMode,
+  dafOnly: boolean,
 ): Promise<SearchResponse> {
   const params = new URLSearchParams({
     q,
@@ -18,6 +19,7 @@ async function fetchSearch(
     limit: String(limit),
     mode,
   });
+  if (dafOnly) params.set('daf', 'true');
   const res = await fetch(`/api/search?${params.toString()}`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -32,11 +34,12 @@ export function useSearch(
   page: number,
   limit: number,
   mode: SearchMode,
+  dafOnly: boolean,
 ) {
   const hasQuery = q.length > 0;
   return useQuery({
-    queryKey: ['search', q, type, page, limit, mode],
-    queryFn: () => fetchSearch(q, type, page, limit, mode),
+    queryKey: ['search', q, type, page, limit, mode, dafOnly],
+    queryFn: () => fetchSearch(q, type, page, limit, mode, dafOnly),
     enabled: hasQuery,
   });
 }

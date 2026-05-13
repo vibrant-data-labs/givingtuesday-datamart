@@ -7,6 +7,10 @@ import { formatCurrency, formatCurrencyFull } from '@/lib/utils/formatters';
 
 interface OrgMetadataProps {
   org: OrgProfile;
+  // When true (driven by the DAF Sponsor badge in OrgHeader), bars for years
+  // where the org reported DAF-Yes get an amber tint so the user can see at
+  // a glance which years were DAF.
+  dafHighlight?: boolean;
 }
 
 function FundingRow({ label, value }: { label: string; value: number | null }) {
@@ -56,7 +60,7 @@ function FundingDetail({ detail, orgType }: { detail: RevenueDetail; orgType: Or
   );
 }
 
-export function OrgMetadata({ org }: OrgMetadataProps) {
+export function OrgMetadata({ org, dafHighlight = false }: OrgMetadataProps) {
   const address = [org.address1, org.address2].filter(Boolean).join(', ');
   const cityStateZip = [org.city, org.state && org.zip ? `${org.state} ${org.zip}` : (org.state ?? org.zip)].filter(Boolean).join(', ');
 
@@ -65,6 +69,9 @@ export function OrgMetadata({ org }: OrgMetadataProps) {
     details.length > 0 ? details[details.length - 1].year : null
   );
   const selectedDetail = details.find((d) => d.year === selectedYear) ?? null;
+
+  // Fast year→isDaf lookup so the bar chart can color individual bars.
+  const dafYesYears = new Set(org.dafByYear.filter((d) => d.isDaf).map((d) => d.year));
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -126,6 +133,16 @@ export function OrgMetadata({ org }: OrgMetadataProps) {
                   return org.revenueByYear.map(({ year, revenue }) => {
                     const height = maxRev > 0 && revenue != null ? Math.max(4, (revenue / maxRev) * 56) : 4;
                     const isSelected = year === selectedYear;
+                    const isDafYes = dafYesYears.has(year);
+                    const highlightDaf = dafHighlight && isDafYes;
+                    // Bar color precedence: DAF highlight (amber) > selected
+                    // (primary) > default (muted primary). When DAF highlight
+                    // is on we still indicate selection via a ring.
+                    const barClass = highlightDaf
+                      ? 'bg-amber-500'
+                      : isSelected
+                        ? 'bg-primary'
+                        : 'bg-primary/20 hover:bg-primary/35';
                     return (
                       <button
                         key={year}
@@ -134,13 +151,25 @@ export function OrgMetadata({ org }: OrgMetadataProps) {
                         onClick={() => setSelectedYear(year)}
                       >
                         <div
-                          className={`w-8 rounded-t transition-colors ${
-                            isSelected ? 'bg-primary' : 'bg-primary/20 hover:bg-primary/35'
+                          className={`w-8 rounded-t transition-colors ${barClass} ${
+                            highlightDaf && isSelected ? 'ring-2 ring-primary ring-offset-1 ring-offset-card' : ''
                           }`}
                           style={{ height: `${height}px` }}
-                          title={`${year}: ${formatCurrencyFull(revenue)}`}
+                          title={
+                            isDafYes
+                              ? `${year}: ${formatCurrencyFull(revenue)} — DAF-Yes`
+                              : `${year}: ${formatCurrencyFull(revenue)}`
+                          }
                         />
-                        <span className={`text-xs ${isSelected ? 'text-primary font-semibold' : 'text-muted-foreground'}`}>
+                        <span
+                          className={`text-xs ${
+                            highlightDaf
+                              ? 'text-amber-700 font-semibold'
+                              : isSelected
+                                ? 'text-primary font-semibold'
+                                : 'text-muted-foreground'
+                          }`}
+                        >
                           {year}
                         </span>
                       </button>
@@ -175,6 +204,39 @@ export function OrgMetadata({ org }: OrgMetadataProps) {
           {selectedDetail ? (
             <>
               <FundingDetail detail={selectedDetail} orgType={org.orgType} />
+              {org.dafByYear.length > 0 && (() => {
+                const isDafThisYear = org.dafByYear.find((d) => d.year === selectedYear)?.isDaf ?? false;
+                return (
+                  <div className="mt-2 pt-2 border-t border-border/50">
+                    <div className="flex items-center justify-between py-1.5">
+                      <span className="text-sm text-muted-foreground">
+                        Donor-Advised Funds (Part IV, Line 6)
+                      </span>
+                      <span
+                        className={
+                          isDafThisYear
+                            ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-700/20'
+                            : 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-secondary text-muted-foreground ring-1 ring-inset ring-border'
+                        }
+                      >
+                        {isDafThisYear ? (
+                          <>
+                            <svg viewBox="0 0 12 12" className="h-3 w-3 stroke-current" fill="none" strokeWidth="2.2" aria-hidden>
+                              <path d="M2 6.5L5 9.5L10 3" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                            Yes
+                          </>
+                        ) : (
+                          <>
+                            <span className="inline-block h-0.5 w-2.5 bg-current rounded" aria-hidden />
+                            No
+                          </>
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
               {selectedDetail.url && (
                 <div className="mt-3 pt-3 border-t border-border/50">
                   <a

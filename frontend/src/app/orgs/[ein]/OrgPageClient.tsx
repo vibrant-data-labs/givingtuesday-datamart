@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, notFound } from 'next/navigation';
 import { useOrg } from '@/hooks/useOrg';
 import { OrgHeader } from '@/components/org/OrgHeader';
@@ -21,6 +21,10 @@ export function OrgPageClient() {
   const ein = sanitizeEIN(rawEin) ?? '';
 
   const { data: org, isLoading, isError, error, isFetched } = useOrg(ein);
+
+  // Lifted so the DAF badge in OrgHeader can highlight the DAF-Yes bars in the
+  // OrgMetadata funding chart on hover/focus.
+  const [dafHighlight, setDafHighlight] = useState(false);
 
   useEffect(() => {
     if (org) {
@@ -55,13 +59,13 @@ export function OrgPageClient() {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-8">
-        <OrgHeader org={org!} />
+        <OrgHeader org={org!} onDafHighlightChange={setDafHighlight} />
       </div>
       <div className="mb-6">
         <OrgIdentityCard org={org!} />
       </div>
       <div className="mb-10">
-        <OrgMetadata org={org!} />
+        <OrgMetadata org={org!} dafHighlight={dafHighlight} />
       </div>
       {org!.orgType === 'foundation' && org!.foundationActivities.length > 0 && (
         <div className="mb-10">
