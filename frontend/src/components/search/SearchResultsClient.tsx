@@ -12,6 +12,7 @@ interface SearchResultsClientProps {
   page: number;
   limit: number;
   mode: SearchMode;
+  dafOnly: boolean;
 }
 
 export function SearchResultsClient({
@@ -20,12 +21,13 @@ export function SearchResultsClient({
   page,
   limit,
   mode,
+  dafOnly,
 }: SearchResultsClientProps) {
-  const { data, isLoading, isError, error } = useSearch(q, type, page, limit, mode);
+  const { data, isLoading, isError, error } = useSearch(q, type, page, limit, mode, dafOnly);
 
   useEffect(() => {
     if (q) sessionStorage.setItem('lastSearchUrl', window.location.pathname + window.location.search);
-  }, [q, type, page, limit, mode]);
+  }, [q, type, page, limit, mode, dafOnly]);
 
   if (isLoading) return <LoadingSpinner />;
   if (isError) {

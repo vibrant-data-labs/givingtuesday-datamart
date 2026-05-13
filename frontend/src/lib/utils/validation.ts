@@ -35,6 +35,10 @@ export function sanitizeSearchMode(mode: unknown): SearchMode {
   return 'both';
 }
 
+export function sanitizeDafOnly(v: unknown): boolean {
+  return v === 'true' || v === '1';
+}
+
 export type GrantSortColumn = 'name' | 'amount' | 'year';
 
 export function sanitizeSortColumn(col: unknown, allowed: GrantSortColumn[]): GrantSortColumn {

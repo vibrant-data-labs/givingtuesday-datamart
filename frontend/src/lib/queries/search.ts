@@ -57,6 +57,7 @@ async function searchNonprofits(
   einDigits: string | null,
   mode: SearchMode,
   fetchLimit: number,
+  dafOnly: boolean,
 ): Promise<ArmResult> {
   const db = getDb();
   const likeParam = `%${rawQuery}%`;
@@ -106,6 +107,13 @@ async function searchNonprofits(
         SELECT ein, rank FROM ein_hits
       ) u
       GROUP BY ein
+    ),
+    daf_eligible AS (
+      -- Only materialized when dafOnly=true (gated by WHERE FALSE otherwise).
+      -- donoadvifund encoding: '1'/'true'=Yes, '0'/'false'/empty/NULL=No.
+      SELECT DISTINCT filerein::text AS ein
+      FROM public.basic_fields
+      WHERE ${dafOnly} AND donoadvifund IN ('1', 'true')
     )
     SELECT
       m.ein,
@@ -118,6 +126,7 @@ async function searchNonprofits(
       COUNT(*) OVER () AS total_count
     FROM matched m
     JOIN public.nonprofit_canonical nc USING (ein)
+    ${dafOnly ? sql`JOIN daf_eligible de USING (ein)` : sql``}
     ORDER BY m.rank DESC,
              NULLIF(nc.latest_taxyear, '')::int DESC NULLS LAST,
              nc.name ASC,
@@ -234,6 +243,7 @@ async function runSearch(
   page: number,
   limit: number,
   mode: SearchMode,
+  dafOnly: boolean,
 ): Promise<{ results: OrgResult[]; total: number }> {
   const offset = (page - 1) * limit;
   // Each arm fetches at most (offset + limit) rows so the cross-arm merge
@@ -246,11 +256,13 @@ async function runSearch(
   const einDigits = digitsOnly.length === 9 ? digitsOnly : null;
 
   const emptyArm: ArmResult = { hits: [], total: 0 };
+  // DAF is a 990-only concept — foundations answer no such question, so when
+  // dafOnly is set, the foundation arm is always empty regardless of orgType.
   const [nonprofitResult, foundationResult] = await Promise.all([
     orgType === 'foundation'
       ? Promise.resolve(emptyArm)
-      : searchNonprofits(rawQuery, einDigits, mode, fetchLimit),
-    orgType === 'nonprofit'
+      : searchNonprofits(rawQuery, einDigits, mode, fetchLimit, dafOnly),
+    orgType === 'nonprofit' || dafOnly
       ? Promise.resolve(emptyArm)
       : searchFoundations(rawQuery, einDigits, mode, fetchLimit),
   ]);
@@ -315,6 +327,7 @@ export const searchOrgs = cache(async function searchOrgs(
   page: number,
   limit: number,
   mode: SearchMode,
+  dafOnly: boolean,
 ): Promise<{ results: OrgResult[]; total: number }> {
-  return getCachedSearch(rawQuery, orgType, page, limit, mode);
+  return getCachedSearch(rawQuery, orgType, page, limit, mode, dafOnly);
 });

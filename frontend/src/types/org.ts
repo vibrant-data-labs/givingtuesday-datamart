@@ -80,6 +80,13 @@ export interface OrgProfile {
   orgType: OrgType;
   revenueByYear: { year: number; revenue: number | null }[];
   revenueDetails: RevenueDetail[];
+  // Donor-Advised Fund sponsorship (Form 990 Part IV line 6 / Schedule D Part I).
+  // 990-only; foundations get `false` / empty list.
+  //   isDafEver  — true if any filing year was Yes (drives header badge +
+  //                search filter; hovering the badge highlights the DAF-Yes
+  //                years in the funding bar chart so it's clear which years)
+  isDafEver: boolean;
+  dafByYear: { year: number; isDaf: boolean }[];
   narrative: OrgNarrativeBundle;
   foundationActivities: FoundationActivitiesYear[];
   lineage: OrgLineage;

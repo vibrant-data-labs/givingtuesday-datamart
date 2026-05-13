@@ -19,12 +19,17 @@ const REVENUE_COL = {
   'public.basic_fields_pf': 'areterexpnss',
 } as const;
 
+// donoadvifund encoding in basic_fields: 'true'/'1' = Yes, 'false'/'0'/''/NULL = No.
+// Both encodings appear because the column's source CSV format shifts by tax year.
+const DAF_YES_SQL = sql<boolean>`donoadvifund IN ('1', 'true')`;
+
 async function fetchOrgFromTable(
   table: 'public.basic_fields' | 'public.basic_fields_pf',
   ein: string
 ) {
   const db = getDb();
   const revenueCol = REVENUE_COL[table];
+  const isNonprofit = table === 'public.basic_fields';
   const rows = await db
     .selectFrom(table)
     .select([
@@ -39,12 +44,32 @@ async function fetchOrgFromTable(
       sql<number>`MIN(taxyear::int)`.as('first_year'),
       sql<number>`MAX(taxyear::int)`.as('last_year'),
       sql<string>`SUM(${sql.ref(revenueCol)}::bigint)`.as('total_revenue'),
+      isNonprofit
+        ? sql<boolean>`BOOL_OR(${DAF_YES_SQL})`.as('is_daf_ever')
+        : sql<boolean>`FALSE`.as('is_daf_ever'),
     ])
     .where(sql`filerein::text`, '=', ein)
     .groupBy(sql`filerein::text`)
     .execute();
 
   return rows[0] ?? null;
+}
+
+// Per-year DAF flag for 990 filers. One row per (filerein, taxyear); when the
+// same year has multiple filings (amendments) we collapse with BOOL_OR.
+async function fetchDafByYear(ein: string): Promise<{ year: number; isDaf: boolean }[]> {
+  const db = getDb();
+  const rows = await db
+    .selectFrom('public.basic_fields')
+    .select([
+      sql<number>`taxyear::int`.as('year'),
+      sql<boolean>`BOOL_OR(${DAF_YES_SQL})`.as('is_daf'),
+    ])
+    .where(sql`filerein::text`, '=', ein)
+    .groupBy(sql`taxyear::int`)
+    .orderBy(sql`taxyear::int`, 'asc')
+    .execute();
+  return rows.map((r) => ({ year: r.year, isDaf: r.is_daf }));
 }
 
 async function fetchRevenueHistory(
@@ -342,7 +367,7 @@ async function getOrgProfileUncached(ein: string): Promise<OrgProfile | null> {
 
   const table = orgType === 'nonprofit' ? 'public.basic_fields' : 'public.basic_fields_pf';
 
-  const [revenueByYear, revenueDetails, missions, programs, scheduleO, foundationActivities] = await Promise.all([
+  const [revenueByYear, revenueDetails, missions, programs, scheduleO, foundationActivities, dafByYear] = await Promise.all([
     fetchRevenueHistory(table, ein),
     fetchRevenueDetails(table, ein),
     // Narrative tables are 990-only — funders have no FTS surface today, so
@@ -351,6 +376,7 @@ async function getOrgProfileUncached(ein: string): Promise<OrgProfile | null> {
     orgType === 'nonprofit' ? fetchPrograms(ein) : Promise.resolve([]),
     orgType === 'nonprofit' ? fetchScheduleO(ein) : Promise.resolve([]),
     orgType === 'foundation' ? fetchFoundationActivities(ein) : Promise.resolve<FoundationActivitiesYear[]>([]),
+    orgType === 'nonprofit' ? fetchDafByYear(ein) : Promise.resolve<{ year: number; isDaf: boolean }[]>([]),
   ]);
 
   const narrative: OrgNarrativeBundle = {
@@ -388,6 +414,8 @@ async function getOrgProfileUncached(ein: string): Promise<OrgProfile | null> {
     orgType,
     revenueByYear,
     revenueDetails,
+    isDafEver: !!agg.is_daf_ever,
+    dafByYear,
     narrative,
     foundationActivities,
     lineage,
