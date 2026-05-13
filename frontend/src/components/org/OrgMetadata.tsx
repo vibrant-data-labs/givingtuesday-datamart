@@ -175,18 +175,39 @@ export function OrgMetadata({ org }: OrgMetadataProps) {
           {selectedDetail ? (
             <>
               <FundingDetail detail={selectedDetail} orgType={org.orgType} />
-              {org.dafByYear.length > 0 && (
-                <div className="mt-2 pt-2 border-t border-border/50">
-                  <div className="flex items-baseline justify-between py-1.5">
-                    <span className="text-sm text-muted-foreground">
-                      Donor-Advised Funds (Part IV, Line 6)
-                    </span>
-                    <span className="text-sm font-medium text-foreground">
-                      {org.dafByYear.find((d) => d.year === selectedYear)?.isDaf ? 'Yes' : 'No'}
-                    </span>
+              {org.dafByYear.length > 0 && (() => {
+                const isDafThisYear = org.dafByYear.find((d) => d.year === selectedYear)?.isDaf ?? false;
+                return (
+                  <div className="mt-2 pt-2 border-t border-border/50">
+                    <div className="flex items-center justify-between py-1.5">
+                      <span className="text-sm text-muted-foreground">
+                        Donor-Advised Funds (Part IV, Line 6)
+                      </span>
+                      <span
+                        className={
+                          isDafThisYear
+                            ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-700/20'
+                            : 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-secondary text-muted-foreground ring-1 ring-inset ring-border'
+                        }
+                      >
+                        {isDafThisYear ? (
+                          <>
+                            <svg viewBox="0 0 12 12" className="h-3 w-3 stroke-current" fill="none" strokeWidth="2.2" aria-hidden>
+                              <path d="M2 6.5L5 9.5L10 3" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                            Yes
+                          </>
+                        ) : (
+                          <>
+                            <span className="inline-block h-0.5 w-2.5 bg-current rounded" aria-hidden />
+                            No
+                          </>
+                        )}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
               {selectedDetail.url && (
                 <div className="mt-3 pt-3 border-t border-border/50">
                   <a
