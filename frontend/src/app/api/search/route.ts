@@ -9,6 +9,7 @@ import {
   sanitizeOrgType,
   sanitizeSearchMode,
   sanitizeDafOnly,
+  sanitizeEligibilityFilters,
 } from '@/lib/utils/validation';
 
 export async function GET(request: NextRequest) {
@@ -19,13 +20,19 @@ export async function GET(request: NextRequest) {
   const limit = sanitizeLimit(searchParams.get('limit'), 50);
   const mode = sanitizeSearchMode(searchParams.get('mode'));
   const dafOnly = sanitizeDafOnly(searchParams.get('daf'));
+  const eligibility = sanitizeEligibilityFilters({
+    minContrib: searchParams.get('minContrib'),
+    minGrants: searchParams.get('minGrants'),
+    minGrantCount: searchParams.get('minGrantCount'),
+    since: searchParams.get('since'),
+  });
 
   if (!q) {
     return NextResponse.json({ results: [], total: 0, page: 1, limit });
   }
 
   try {
-    const { results, total } = await searchOrgs(q, type, page, limit, mode, dafOnly);
+    const { results, total } = await searchOrgs(q, type, page, limit, mode, dafOnly, eligibility);
     return NextResponse.json(
       { results, total, page, limit },
       { headers: { 'Cache-Control': 's-maxage=3600, stale-while-revalidate=86400' } }

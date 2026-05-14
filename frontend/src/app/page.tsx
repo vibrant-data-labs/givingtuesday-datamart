@@ -6,6 +6,7 @@ import { SearchBar } from '@/components/search/SearchBar';
 import { SearchTabs } from '@/components/search/SearchTabs';
 import { SearchModeToggle } from '@/components/search/SearchModeToggle';
 import { DafFilterToggle } from '@/components/search/DafFilterToggle';
+import { EligibilityFilters } from '@/components/search/EligibilityFilters';
 import { SearchResultsClient } from '@/components/search/SearchResultsClient';
 import {
   sanitizeSearchQuery,
@@ -14,6 +15,7 @@ import {
   sanitizeOrgType,
   sanitizeSearchMode,
   sanitizeDafOnly,
+  sanitizeEligibilityFilters,
 } from '@/lib/utils/validation';
 
 interface HomeProps {
@@ -24,6 +26,10 @@ interface HomeProps {
     limit?: string;
     mode?: string;
     daf?: string;
+    minContrib?: string;
+    minGrants?: string;
+    minGrantCount?: string;
+    since?: string;
   };
 }
 
@@ -34,6 +40,12 @@ export default function HomePage({ searchParams }: HomeProps) {
   const limit = sanitizeLimit(searchParams.limit, 25);
   const mode = sanitizeSearchMode(searchParams.mode);
   const dafOnly = sanitizeDafOnly(searchParams.daf);
+  const eligibility = sanitizeEligibilityFilters({
+    minContrib: searchParams.minContrib,
+    minGrants: searchParams.minGrants,
+    minGrantCount: searchParams.minGrantCount,
+    since: searchParams.since,
+  });
 
   const hasQuery = q.length > 0;
 
@@ -82,6 +94,15 @@ export default function HomePage({ searchParams }: HomeProps) {
             </Suspense>
           </div>
 
+          <Suspense fallback={null}>
+            <EligibilityFilters
+              minContrib={eligibility.minContrib}
+              minGrants={eligibility.minGrants}
+              minGrantCount={eligibility.minGrantCount}
+              sinceYear={eligibility.sinceYear}
+            />
+          </Suspense>
+
           {hasQuery && (
             <p className="text-xs text-muted-foreground">
               Searching{' '}
@@ -102,7 +123,15 @@ export default function HomePage({ searchParams }: HomeProps) {
         {/* Results */}
         {hasQuery && (
           <div className="mt-8">
-            <SearchResultsClient q={q} type={type} page={page} limit={limit} mode={mode} dafOnly={dafOnly} />
+            <SearchResultsClient
+              q={q}
+              type={type}
+              page={page}
+              limit={limit}
+              mode={mode}
+              dafOnly={dafOnly}
+              eligibility={eligibility}
+            />
           </div>
         )}
       </div>
