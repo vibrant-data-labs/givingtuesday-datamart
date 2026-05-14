@@ -4,7 +4,11 @@ import { useEffect } from 'react';
 import { useSearch } from '@/hooks/useSearch';
 import { SearchResults } from '@/components/search/SearchResults';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import type { OrgTypeFilter, SearchMode } from '@/lib/utils/validation';
+import type {
+  EligibilityFilters,
+  OrgTypeFilter,
+  SearchMode,
+} from '@/lib/utils/validation';
 
 interface SearchResultsClientProps {
   q: string;
@@ -13,6 +17,7 @@ interface SearchResultsClientProps {
   limit: number;
   mode: SearchMode;
   dafOnly: boolean;
+  eligibility: EligibilityFilters;
 }
 
 export function SearchResultsClient({
@@ -22,12 +27,21 @@ export function SearchResultsClient({
   limit,
   mode,
   dafOnly,
+  eligibility,
 }: SearchResultsClientProps) {
-  const { data, isLoading, isError, error } = useSearch(q, type, page, limit, mode, dafOnly);
+  const { data, isLoading, isError, error } = useSearch(
+    q,
+    type,
+    page,
+    limit,
+    mode,
+    dafOnly,
+    eligibility,
+  );
 
   useEffect(() => {
     if (q) sessionStorage.setItem('lastSearchUrl', window.location.pathname + window.location.search);
-  }, [q, type, page, limit, mode, dafOnly]);
+  }, [q, type, page, limit, mode, dafOnly, eligibility]);
 
   if (isLoading) return <LoadingSpinner />;
   if (isError) {

@@ -3,7 +3,12 @@ import { unstable_cache } from 'next/cache';
 import { sql } from 'kysely';
 import { getDb } from '@/lib/db';
 import type { OrgResult } from '@/types/org';
-import type { OrgTypeFilter, SearchMode } from '@/lib/utils/validation';
+import type {
+  EligibilityFilters,
+  OrgTypeFilter,
+  SearchMode,
+} from '@/lib/utils/validation';
+import { hasEligibilityFilters } from '@/lib/utils/validation';
 
 const SEARCH_CACHE_REVALIDATE_SECONDS = 600; // 10 minutes
 
@@ -58,6 +63,7 @@ async function searchNonprofits(
   mode: SearchMode,
   fetchLimit: number,
   dafOnly: boolean,
+  eligibility: EligibilityFilters,
 ): Promise<ArmResult> {
   const db = getDb();
   const likeParam = `%${rawQuery}%`;
@@ -65,6 +71,24 @@ async function searchNonprofits(
   const useFts = mode === 'narrative' || mode === 'both';
   // EIN exact-match always runs — it's a "did the user paste an EIN" path
   // independent of name/narrative semantics.
+
+  // Eligibility filters mirror the Python client's `search_nonprofits` CTEs:
+  // sum-per-year-then-average across years (not a flat average over raw rows,
+  // which would weight by row count). All three filters share a window-start
+  // year (`sinceYear`); `sanitizeEligibilityFilters` already enforces that
+  // requirement upstream — by this point if any numeric filter is set,
+  // `sinceYear` is guaranteed non-null.
+  const needsContrib = eligibility.minContrib !== null && eligibility.sinceYear !== null;
+  const needsGrants =
+    (eligibility.minGrants !== null || eligibility.minGrantCount !== null) &&
+    eligibility.sinceYear !== null;
+  // Default placeholders keep parameter types stable for Kysely when a filter
+  // is inactive; the CTE's `WHERE FALSE` gate ensures the placeholder values
+  // are never compared.
+  const sinceYear = eligibility.sinceYear ?? 0;
+  const minContrib = eligibility.minContrib ?? 0;
+  const minGrants = eligibility.minGrants ?? 0;
+  const minGrantCount = eligibility.minGrantCount ?? 0;
 
   // CTE union of three signal sources, then collapse to one rank per EIN.
   // Tiers (separated by ranges so a tier always beats lower tiers): EIN-exact
@@ -111,9 +135,57 @@ async function searchNonprofits(
     daf_eligible AS (
       -- Only materialized when dafOnly=true (gated by WHERE FALSE otherwise).
       -- donoadvifund encoding: '1'/'true'=Yes, '0'/'false'/empty/NULL=No.
+      -- The matched-EIN semi-join restricts the basic_fields scan to the
+      -- keyword hits (typically hundreds of EINs) instead of the full table;
+      -- semantics are unchanged because the outer query already JOINs on ein.
       SELECT DISTINCT filerein::text AS ein
       FROM public.basic_fields
-      WHERE ${dafOnly} AND donoadvifund IN ('1', 'true')
+      WHERE ${dafOnly}
+        AND donoadvifund IN ('1', 'true')
+        AND filerein IN (SELECT ein FROM matched)
+    ),
+    contrib_eligible AS (
+      -- Mirrors GtDatamartClient.search_nonprofits.contrib_eligible CTE.
+      -- basic_fields can have multiple rows per (filerein, taxyear); sum
+      -- per-year first, then AVG across years so the threshold is on the
+      -- yearly mean, not the per-row mean. The matched-EIN semi-join keeps
+      -- this query bounded to the keyword hits — the Python client doesn't
+      -- need this guard, but the frontend has a hard pg read timeout.
+      SELECT filerein::text AS ein
+      FROM (
+        SELECT filerein,
+               taxyear,
+               SUM(NULLIF(totacashcont, '')::bigint) AS yr_sum
+        FROM public.basic_fields
+        WHERE ${needsContrib}
+          AND NULLIF(taxyear, '')::int >= ${sinceYear}
+          AND filerein IN (SELECT ein FROM matched)
+        GROUP BY filerein, taxyear
+      ) yearly
+      GROUP BY filerein
+      HAVING AVG(yr_sum) >= ${minContrib}
+    ),
+    grant_eligible AS (
+      -- Mirrors GtDatamartClient.search_nonprofits.grant_eligible CTE.
+      -- COALESCE(SUM(grant_amount), 0) treats unparsed grant amounts as $0
+      -- rather than dropping the EIN via NULL propagation. The HAVING
+      -- thresholds short-circuit (>= 0) when a given filter is unset.
+      -- Pre-filter by matched.ein for the same reason as contrib_eligible.
+      SELECT grantee_ein AS ein
+      FROM (
+        SELECT grantee_ein,
+               taxyear,
+               COALESCE(SUM(grant_amount), 0) AS yr_sum,
+               COUNT(*) AS yr_count
+        FROM public.unioned_grants
+        WHERE ${needsGrants}
+          AND taxyear >= ${sinceYear}
+          AND grantee_ein IN (SELECT ein FROM matched)
+        GROUP BY grantee_ein, taxyear
+      ) yearly
+      GROUP BY grantee_ein
+      HAVING SUM(yr_count) >= ${minGrantCount}
+         AND AVG(yr_sum) >= ${minGrants}
     )
     SELECT
       m.ein,
@@ -127,6 +199,8 @@ async function searchNonprofits(
     FROM matched m
     JOIN public.nonprofit_canonical nc USING (ein)
     ${dafOnly ? sql`JOIN daf_eligible de USING (ein)` : sql``}
+    ${needsContrib ? sql`JOIN contrib_eligible ce USING (ein)` : sql``}
+    ${needsGrants ? sql`JOIN grant_eligible ge USING (ein)` : sql``}
     ORDER BY m.rank DESC,
              NULLIF(nc.latest_taxyear, '')::int DESC NULLS LAST,
              nc.name ASC,
@@ -244,6 +318,7 @@ async function runSearch(
   limit: number,
   mode: SearchMode,
   dafOnly: boolean,
+  eligibility: EligibilityFilters,
 ): Promise<{ results: OrgResult[]; total: number }> {
   const offset = (page - 1) * limit;
   // Each arm fetches at most (offset + limit) rows so the cross-arm merge
@@ -256,13 +331,15 @@ async function runSearch(
   const einDigits = digitsOnly.length === 9 ? digitsOnly : null;
 
   const emptyArm: ArmResult = { hits: [], total: 0 };
-  // DAF is a 990-only concept — foundations answer no such question, so when
-  // dafOnly is set, the foundation arm is always empty regardless of orgType.
+  const hasElig = hasEligibilityFilters(eligibility);
+  // DAF is a 990-only concept and the contrib/grants filters all run against
+  // 990-only tables (basic_fields, unioned_grants on grantee_ein). When any
+  // of these is set, the foundation arm is always empty regardless of orgType.
   const [nonprofitResult, foundationResult] = await Promise.all([
     orgType === 'foundation'
       ? Promise.resolve(emptyArm)
-      : searchNonprofits(rawQuery, einDigits, mode, fetchLimit, dafOnly),
-    orgType === 'nonprofit' || dafOnly
+      : searchNonprofits(rawQuery, einDigits, mode, fetchLimit, dafOnly, eligibility),
+    orgType === 'nonprofit' || dafOnly || hasElig
       ? Promise.resolve(emptyArm)
       : searchFoundations(rawQuery, einDigits, mode, fetchLimit),
   ]);
@@ -328,6 +405,7 @@ export const searchOrgs = cache(async function searchOrgs(
   limit: number,
   mode: SearchMode,
   dafOnly: boolean,
+  eligibility: EligibilityFilters,
 ): Promise<{ results: OrgResult[]; total: number }> {
-  return getCachedSearch(rawQuery, orgType, page, limit, mode, dafOnly);
+  return getCachedSearch(rawQuery, orgType, page, limit, mode, dafOnly, eligibility);
 });

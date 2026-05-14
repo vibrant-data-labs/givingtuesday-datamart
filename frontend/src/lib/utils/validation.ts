@@ -61,6 +61,39 @@ export function sanitizeYear(v: unknown): number | null {
   return isNaN(n) || n < 1900 || n > 2100 ? null : n;
 }
 
+// Eligibility filters mirror the Python client's `search_nonprofits` kwargs.
+// All three numeric thresholds require a window-start year; without one the
+// Python client raises ValueError. The frontend coerces invalid combinations
+// to "no filter" rather than returning a 500.
+export type EligibilityFilters = {
+  minContrib: number | null;
+  minGrants: number | null;
+  minGrantCount: number | null;
+  sinceYear: number | null;
+};
+
+export function sanitizeEligibilityFilters(params: {
+  minContrib: unknown;
+  minGrants: unknown;
+  minGrantCount: unknown;
+  since: unknown;
+}): EligibilityFilters {
+  const sinceYear = sanitizeYear(params.since);
+  if (sinceYear === null) {
+    return { minContrib: null, minGrants: null, minGrantCount: null, sinceYear: null };
+  }
+  return {
+    minContrib: sanitizeAmount(params.minContrib),
+    minGrants: sanitizeAmount(params.minGrants),
+    minGrantCount: sanitizeAmount(params.minGrantCount),
+    sinceYear,
+  };
+}
+
+export function hasEligibilityFilters(f: EligibilityFilters): boolean {
+  return f.minContrib !== null || f.minGrants !== null || f.minGrantCount !== null;
+}
+
 export type GrantGroupByColumn = 'year' | 'entity';
 
 export function sanitizeGroupBy(value: unknown): GrantGroupByColumn | null {
