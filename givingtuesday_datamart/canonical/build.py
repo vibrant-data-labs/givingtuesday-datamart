@@ -274,6 +274,43 @@ def _build_nonprofit_canonical(session) -> int:
             """
         )
     )
+    # Normalized domain derived from the raw ``website`` column for URL search.
+    # GENERATED ALWAYS AS … STORED so it stays in sync with website without
+    # explicit backfill; rebuilt automatically because the canonical table is
+    # DROP+CREATE on every refresh. v1 normalization is intentionally narrow
+    # (regex only — no public-suffix awareness, no IDN punycoding); upgrading
+    # to a Python normalizer with tldextract is tracked as a follow-up.
+    session.execute(
+        text(
+            f"""
+            ALTER TABLE {NONPROFIT_CANONICAL_TABLE}
+            ADD COLUMN domain TEXT GENERATED ALWAYS AS (
+                lower(
+                    regexp_replace(
+                        regexp_replace(
+                            regexp_replace(
+                                coalesce(website, ''),
+                                '^\\s*(https?:)?//', '', 'i'
+                            ),
+                            '^www\\.', '', 'i'
+                        ),
+                        '[/?#].*$', ''
+                    )
+                )
+            ) STORED
+            """
+        )
+    )
+    # Partial index: orgs with no website contribute nothing to URL search.
+    session.execute(
+        text(
+            f"""
+            CREATE INDEX ix_nonprofit_canonical_domain
+            ON {NONPROFIT_CANONICAL_TABLE} (domain)
+            WHERE domain <> ''
+            """
+        )
+    )
     count = session.execute(
         text(f"SELECT COUNT(*) FROM {NONPROFIT_CANONICAL_TABLE}")
     ).scalar_one()
