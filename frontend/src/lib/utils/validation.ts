@@ -23,16 +23,83 @@ export function sanitizeOrgType(type: unknown): OrgTypeFilter {
   return 'all';
 }
 
-// Search match strategy:
-//  - 'name'      → ILIKE on canonical name/secondary/DBAs + EIN exact-match
-//  - 'narrative' → FTS over public.nonprofit_text (mission/programs/Schedule O)
-//  - 'both'      → tiered hybrid (default — name matches always rank above
-//                  narrative-only matches; see queries/search.ts)
-export type SearchMode = 'name' | 'narrative' | 'both';
+// Search match signals — any subset can be active simultaneously. Each
+// independently gates a CTE in queries/search.ts:
+//  - name      → ILIKE on canonical name/secondary/DBAs (EIN exact always runs)
+//  - narrative → FTS over public.nonprofit_text (mission/programs/Schedule O)
+//  - url       → exact + prefix match on normalized nonprofit_canonical.domain
+//                (nonprofits only — funder_canonical has no website yet)
+export type SearchSignal = 'name' | 'narrative' | 'url';
+export type SearchSignals = { name: boolean; narrative: boolean; url: boolean };
 
-export function sanitizeSearchMode(mode: unknown): SearchMode {
-  if (mode === 'name' || mode === 'narrative') return mode;
-  return 'both';
+export const ALL_SIGNALS: SearchSignals = { name: true, narrative: true, url: true };
+export const NO_SIGNALS: SearchSignals = { name: false, narrative: false, url: false };
+
+// Parses ?signals=name,url into a SearchSignals object. Missing param (null
+// or undefined) defaults to all-true; an explicit empty string (?signals=)
+// is honored as all-false. Backwards-compat fallback for ?mode= is in the
+// callers — if mode is present and signals is missing, map mode to signals.
+export function sanitizeSearchSignals(raw: unknown): SearchSignals {
+  if (raw == null) return { ...ALL_SIGNALS };
+  if (typeof raw !== 'string') return { ...ALL_SIGNALS };
+  // Distinguish missing (handled above) from explicit empty: empty string
+  // means the user unchecked everything.
+  const tokens = raw.split(',').map((t) => t.trim()).filter(Boolean);
+  const out: SearchSignals = { ...NO_SIGNALS };
+  for (const t of tokens) {
+    if (t === 'name' || t === 'narrative' || t === 'url') out[t] = true;
+  }
+  return out;
+}
+
+// Inverse of sanitizeSearchSignals: returns the canonical query-string
+// fragment. Returns '' when all signals are on (default — clean URL).
+export function signalsToParam(s: SearchSignals): string {
+  const on = (['name', 'narrative', 'url'] as const).filter((k) => s[k]);
+  if (on.length === 3) return '';
+  return on.join(',');
+}
+
+export function anySignalActive(s: SearchSignals): boolean {
+  return s.name || s.narrative || s.url;
+}
+
+// Backwards-compat shim: maps the legacy ?mode= value to the new signals
+// shape. Old bookmarks still work.
+export function legacyModeToSignals(mode: unknown): SearchSignals | null {
+  if (mode === 'name') return { name: true, narrative: false, url: false };
+  if (mode === 'narrative') return { name: false, narrative: true, url: false };
+  if (mode === 'url') return { name: false, narrative: false, url: true };
+  if (mode === 'both') return { ...ALL_SIGNALS };
+  return null;
+}
+
+// Mirrors the SQL `GENERATED ALWAYS AS` expression on
+// public.nonprofit_canonical.domain so query-side and column-side
+// normalization agree byte-for-byte. Returns '' for inputs that can't be a
+// domain at all, which lets the SQL CTE short-circuit.
+//
+// Rules (kept narrow on purpose — see follow-up to upgrade to tldextract):
+//  - lowercase
+//  - strip leading http://, https://, or protocol-relative //
+//  - strip leading www.
+//  - strip everything from the first /, ?, or #
+//  - reject inputs containing whitespace or shorter than 3 chars
+//
+// Note: we deliberately do NOT require a '.' — `redcross` is a valid
+// prefix-match query for `redcross.org`. The downstream SQL only matches
+// against the indexed `domain` column, so non-domain-shaped queries
+// surface no results regardless.
+export function normalizeDomainForQuery(raw: string): string {
+  const stripped = raw
+    .trim()
+    .toLowerCase()
+    .replace(/^(https?:)?\/\//, '')
+    .replace(/^www\./, '')
+    .replace(/[/?#].*$/, '');
+  if (/\s/.test(stripped)) return '';
+  if (stripped.length < 3) return '';
+  return stripped;
 }
 
 export function sanitizeDafOnly(v: unknown): boolean {
