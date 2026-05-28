@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { Suspense } from 'react';
 import { SearchBar } from '@/components/search/SearchBar';
 import { SearchTabs } from '@/components/search/SearchTabs';
-import { SearchModeToggle } from '@/components/search/SearchModeToggle';
+import { SearchSignalsToggle } from '@/components/search/SearchSignalsToggle';
 import { DafFilterToggle } from '@/components/search/DafFilterToggle';
 import { EligibilityFilters } from '@/components/search/EligibilityFilters';
 import { SearchResultsClient } from '@/components/search/SearchResultsClient';
@@ -13,7 +13,9 @@ import {
   sanitizePage,
   sanitizeLimit,
   sanitizeOrgType,
-  sanitizeSearchMode,
+  sanitizeSearchSignals,
+  legacyModeToSignals,
+  anySignalActive,
   sanitizeDafOnly,
   sanitizeEligibilityFilters,
 } from '@/lib/utils/validation';
@@ -24,7 +26,8 @@ interface HomeProps {
     type?: string;
     page?: string;
     limit?: string;
-    mode?: string;
+    signals?: string;
+    mode?: string; // legacy
     daf?: string;
     minContrib?: string;
     minGrants?: string;
@@ -38,7 +41,12 @@ export default function HomePage({ searchParams }: HomeProps) {
   const type = sanitizeOrgType(searchParams.type);
   const page = sanitizePage(searchParams.page);
   const limit = sanitizeLimit(searchParams.limit, 25);
-  const mode = sanitizeSearchMode(searchParams.mode);
+  // Prefer new ?signals=; fall back to legacy ?mode= so old bookmarks still
+  // resolve. Treat property-present (even empty string) as user intent.
+  const signals =
+    searchParams.signals !== undefined
+      ? sanitizeSearchSignals(searchParams.signals)
+      : legacyModeToSignals(searchParams.mode) ?? sanitizeSearchSignals(null);
   const dafOnly = sanitizeDafOnly(searchParams.daf);
   const eligibility = sanitizeEligibilityFilters({
     minContrib: searchParams.minContrib,
@@ -48,6 +56,7 @@ export default function HomePage({ searchParams }: HomeProps) {
   });
 
   const hasQuery = q.length > 0;
+  const signalsActive = anySignalActive(signals);
 
   return (
     <div className="relative">
@@ -90,7 +99,7 @@ export default function HomePage({ searchParams }: HomeProps) {
               </Suspense>
             </div>
             <Suspense fallback={null}>
-              <SearchModeToggle currentMode={mode} />
+              <SearchSignalsToggle currentSignals={signals} />
             </Suspense>
           </div>
 
@@ -106,12 +115,14 @@ export default function HomePage({ searchParams }: HomeProps) {
           {hasQuery && (
             <p className="text-xs text-muted-foreground">
               Searching{' '}
-              {mode === 'name'
-                ? 'organization names + DBAs'
-                : mode === 'narrative'
-                  ? 'Form 990 mission, programs, and Schedule O Part III narratives'
-                  : 'organization names, DBAs, and Form 990 narratives'}
+              {describeSignals(signals)}
               {' '}for <span className="font-medium text-foreground">&ldquo;{q}&rdquo;</span>.
+            </p>
+          )}
+
+          {hasQuery && !signalsActive && (
+            <p className="text-xs text-rose-600">
+              Select at least one match mode below to see results.
             </p>
           )}
 
@@ -121,7 +132,7 @@ export default function HomePage({ searchParams }: HomeProps) {
         </div>
 
         {/* Results */}
-        {hasQuery && (
+        {hasQuery && signalsActive && (
           <div className="mt-8">
             <SearchResultsClient
               q={q}
@@ -139,20 +150,21 @@ export default function HomePage({ searchParams }: HomeProps) {
   );
 }
 
-const EXAMPLE_QUERIES: { label: string; q: string; mode?: 'name' | 'narrative' | 'both' }[] = [
-  { label: 'Ford Foundation', q: 'The Ford Foundation', mode: 'name' },
-  { label: 'Sierra Club', q: 'Sierra Club', mode: 'name' },
-  { label: 'climate adaptation', q: 'climate adaptation', mode: 'narrative' },
-  { label: 'food security', q: 'food security', mode: 'narrative' },
+type ExampleSignalsKey = 'name' | 'narrative' | 'url';
+const EXAMPLE_QUERIES: { label: string; q: string; signals?: ExampleSignalsKey }[] = [
+  { label: 'Ford Foundation', q: 'The Ford Foundation', signals: 'name' },
+  { label: 'Sierra Club', q: 'Sierra Club', signals: 'name' },
+  { label: 'climate adaptation', q: 'climate adaptation', signals: 'narrative' },
+  { label: 'food security', q: 'food security', signals: 'narrative' },
 ];
 
 function ExampleQueryChips() {
   return (
     <div className="flex items-center flex-wrap gap-2 text-xs">
       <span className="text-muted-foreground/80 mr-1">Try</span>
-      {EXAMPLE_QUERIES.map(({ label, q, mode }) => {
+      {EXAMPLE_QUERIES.map(({ label, q, signals }) => {
         const params = new URLSearchParams({ q });
-        if (mode) params.set('mode', mode);
+        if (signals) params.set('signals', signals);
         return (
           <Link
             key={label}
@@ -165,6 +177,17 @@ function ExampleQueryChips() {
       })}
     </div>
   );
+}
+
+function describeSignals(s: { name: boolean; narrative: boolean; url: boolean }): string {
+  const parts: string[] = [];
+  if (s.name) parts.push('organization names + DBAs');
+  if (s.narrative) parts.push('Form 990 narratives');
+  if (s.url) parts.push('website domains');
+  if (parts.length === 0) return '';
+  if (parts.length === 1) return parts[0];
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return `${parts[0]}, ${parts[1]}, and ${parts[2]}`;
 }
 
 function SearchInstructions() {
@@ -183,20 +206,23 @@ function SearchInstructions() {
       <div className="space-y-1.5 pt-3">
         <p>
           <span className="font-semibold text-foreground/80">Tip:</span>{' '}
-          Type an organization name, an EIN (with or without the dash), or words that describe what the org does.
-          Use the <span className="font-medium text-foreground/80">Match on</span> toggle to control where matching runs:
+          Type an organization name, an EIN (with or without the dash), a website domain, or words that describe what the org does.
+          Use the <span className="font-medium text-foreground/80">Match on</span> checkboxes to pick which signals to search — any combination works:
         </p>
         <ul className="list-disc pl-5 space-y-0.5">
           <li>
-            <span className="font-medium text-foreground/80">Name only</span> — matches the canonical org name, secondary name, and DBAs as a plain substring (no boolean operators). Best when you know the organization.
+            <span className="font-medium text-foreground/80">Name</span> — matches the canonical org name, secondary name, and DBAs as a plain substring (no boolean operators). Best when you know the organization.
           </li>
           <li>
-            <span className="font-medium text-foreground/80">Narrative only</span> — full-text search over Form 990 mission, program activities, and Schedule O Part III, with English stemming. Best for &ldquo;what nonprofits do X.&rdquo; 990 nonprofits only.
+            <span className="font-medium text-foreground/80">Narrative</span> — full-text search over Form 990 mission, program activities, and Schedule O Part III, with English stemming. Best for &ldquo;what nonprofits do X.&rdquo; 990 nonprofits only.
           </li>
           <li>
-            <span className="font-medium text-foreground/80">Name + narrative</span> (default) — both signals; name matches always rank above narrative-only matches.
+            <span className="font-medium text-foreground/80">URL</span> — exact + prefix match on the org&rsquo;s website domain. Paste a URL or type the domain. Nonprofits only.
           </li>
         </ul>
+        <p className="text-muted-foreground/70 pt-1">
+          Default: all three on. Ranking when multiple are on: EIN exact &gt; URL exact &gt; URL prefix &gt; name &gt; narrative.
+        </p>
       </div>
 
       <div className="space-y-1.5 pt-2 border-t border-border/40">

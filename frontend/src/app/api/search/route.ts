@@ -7,7 +7,9 @@ import {
   sanitizePage,
   sanitizeLimit,
   sanitizeOrgType,
-  sanitizeSearchMode,
+  sanitizeSearchSignals,
+  legacyModeToSignals,
+  anySignalActive,
   sanitizeDafOnly,
   sanitizeEligibilityFilters,
 } from '@/lib/utils/validation';
@@ -18,7 +20,13 @@ export async function GET(request: NextRequest) {
   const type = sanitizeOrgType(searchParams.get('type'));
   const page = sanitizePage(searchParams.get('page'));
   const limit = sanitizeLimit(searchParams.get('limit'), 50);
-  const mode = sanitizeSearchMode(searchParams.get('mode'));
+  // Prefer new ?signals=; fall back to legacy ?mode= so old bookmarks still
+  // resolve. has() distinguishes missing-param from explicit-empty for the
+  // ?signals= case (empty string = user unchecked everything).
+  const rawSignals = searchParams.get('signals');
+  const signals = searchParams.has('signals')
+    ? sanitizeSearchSignals(rawSignals)
+    : legacyModeToSignals(searchParams.get('mode')) ?? sanitizeSearchSignals(null);
   const dafOnly = sanitizeDafOnly(searchParams.get('daf'));
   const eligibility = sanitizeEligibilityFilters({
     minContrib: searchParams.get('minContrib'),
@@ -27,7 +35,7 @@ export async function GET(request: NextRequest) {
     since: searchParams.get('since'),
   });
 
-  if (!q) {
+  if (!q || !anySignalActive(signals)) {
     return NextResponse.json({ results: [], total: 0, page: 1, limit });
   }
 

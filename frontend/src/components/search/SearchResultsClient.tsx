@@ -15,7 +15,7 @@ interface SearchResultsClientProps {
   type: OrgTypeFilter;
   page: number;
   limit: number;
-  mode: SearchMode;
+  signals: SearchSignals;
   dafOnly: boolean;
   eligibility: EligibilityFilters;
 }
@@ -25,7 +25,7 @@ export function SearchResultsClient({
   type,
   page,
   limit,
-  mode,
+  signals,
   dafOnly,
   eligibility,
 }: SearchResultsClientProps) {

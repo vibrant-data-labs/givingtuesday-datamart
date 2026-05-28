@@ -60,17 +60,44 @@ type RawSearchRow = {
 async function searchNonprofits(
   rawQuery: string,
   einDigits: string | null,
-  mode: SearchMode,
+  signals: SearchSignals,
   fetchLimit: number,
   dafOnly: boolean,
   eligibility: EligibilityFilters,
 ): Promise<ArmResult> {
   const db = getDb();
   const likeParam = `%${rawQuery}%`;
-  const useName = mode === 'name' || mode === 'both';
-  const useFts = mode === 'narrative' || mode === 'both';
+  const useName = signals.name;
+  const useFts = signals.narrative;
+  const useUrl = signals.url;
   // EIN exact-match always runs — it's a "did the user paste an EIN" path
   // independent of name/narrative semantics.
+  // URL search runs only when the query is domain-shaped AND the requested
+  // mode includes URL. The CTE is emitted conditionally so the `domain`
+  // column is only referenced when we actually want to use it — Postgres
+  // parses column references in inactive CTEs regardless of WHERE
+  // short-circuiting, and `domain` may not exist on older canonical builds.
+  const domainNorm = normalizeDomainForQuery(rawQuery);
+  const includeUrlHits = useUrl && domainNorm !== '';
+  const domainPrefix = `${domainNorm}%`;
+  const urlHitsCte = includeUrlHits
+    ? sql`,
+    url_hits AS (
+      -- Both URL tiers sit between EIN-exact and name-ILIKE: exact-domain
+      -- (1_500_000) > prefix-domain (1_200_000) > name (1_000_000). Uses the
+      -- ix_nonprofit_canonical_domain partial btree (LIKE 'foo%' is
+      -- index-eligible on a btree).
+      SELECT ein,
+             CASE WHEN domain = ${domainNorm} THEN 1500000.0::float8
+                  ELSE 1200000.0::float8 END AS rank
+      FROM public.nonprofit_canonical
+      WHERE domain = ${domainNorm} OR domain LIKE ${domainPrefix}
+    )`
+    : sql``;
+  const urlHitsUnion = includeUrlHits
+    ? sql`UNION ALL
+        SELECT ein, rank FROM url_hits`
+    : sql``;
 
   // Eligibility filters mirror the Python client's `search_nonprofits` CTEs:
   // sum-per-year-then-average across years (not a flat average over raw rows,
@@ -120,7 +147,7 @@ async function searchNonprofits(
       SELECT ein, 2000000.0::float8 AS rank
       FROM public.nonprofit_canonical
       WHERE ${einDigits ?? ''} <> '' AND ein = ${einDigits ?? ''}
-    ),
+    )${urlHitsCte},
     matched AS (
       SELECT ein, MAX(rank) AS rank
       FROM (
@@ -129,6 +156,7 @@ async function searchNonprofits(
         SELECT ein, rank FROM fts_hits
         UNION ALL
         SELECT ein, rank FROM ein_hits
+        ${urlHitsUnion}
       ) u
       GROUP BY ein
     ),
@@ -224,15 +252,15 @@ async function searchNonprofits(
 async function searchFoundations(
   rawQuery: string,
   einDigits: string | null,
-  mode: SearchMode,
+  signals: SearchSignals,
   fetchLimit: number,
 ): Promise<ArmResult> {
-  // Funders have no narrative FTS surface yet (nonprofit_text is 990-only).
-  // 'narrative' mode is name-disabled here, so only an EIN-exact match can
-  // surface a foundation. That's the right semantic until funder_text exists.
+  // Funders have no narrative FTS or URL surface yet (nonprofit_text is
+  // 990-only; funder_canonical has no website). Only the name signal
+  // surfaces foundations; EIN-exact still always runs.
   const db = getDb();
   const likeParam = `%${rawQuery}%`;
-  const useName = mode === 'name' || mode === 'both';
+  const useName = signals.name;
 
   const result = await sql<RawSearchRow>`
     WITH name_hits AS (
@@ -316,7 +344,7 @@ async function runSearch(
   orgType: OrgTypeFilter,
   page: number,
   limit: number,
-  mode: SearchMode,
+  signals: SearchSignals,
   dafOnly: boolean,
   eligibility: EligibilityFilters,
 ): Promise<{ results: OrgResult[]; total: number }> {
@@ -341,7 +369,7 @@ async function runSearch(
       : searchNonprofits(rawQuery, einDigits, mode, fetchLimit, dafOnly, eligibility),
     orgType === 'nonprofit' || dafOnly || hasElig
       ? Promise.resolve(emptyArm)
-      : searchFoundations(rawQuery, einDigits, mode, fetchLimit),
+      : searchFoundations(rawQuery, einDigits, signals, fetchLimit),
   ]);
 
   const tagged = [
@@ -403,7 +431,7 @@ export const searchOrgs = cache(async function searchOrgs(
   orgType: OrgTypeFilter,
   page: number,
   limit: number,
-  mode: SearchMode,
+  signals: SearchSignals,
   dafOnly: boolean,
   eligibility: EligibilityFilters,
 ): Promise<{ results: OrgResult[]; total: number }> {

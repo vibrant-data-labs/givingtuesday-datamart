@@ -13,7 +13,7 @@ async function fetchSearch(
   type: OrgTypeFilter,
   page: number,
   limit: number,
-  mode: SearchMode,
+  signals: SearchSignals,
   dafOnly: boolean,
   eligibility: EligibilityFilters,
 ): Promise<SearchResponse> {
@@ -22,8 +22,14 @@ async function fetchSearch(
     type,
     page: String(page),
     limit: String(limit),
-    mode,
   });
+  // Always serialize signals — even the empty case — so the API can tell
+  // "default (all)" apart from "user unchecked everything". signalsToParam
+  // returns '' for all-on (clean URL); we omit the param in that case.
+  const signalsParam = signalsToParam(signals);
+  if (signalsParam !== '' || !anySignalActive(signals)) {
+    params.set('signals', signalsParam);
+  }
   if (dafOnly) params.set('daf', 'true');
   if (eligibility.sinceYear !== null) {
     params.set('since', String(eligibility.sinceYear));
@@ -50,7 +56,7 @@ export function useSearch(
   type: OrgTypeFilter,
   page: number,
   limit: number,
-  mode: SearchMode,
+  signals: SearchSignals,
   dafOnly: boolean,
   eligibility: EligibilityFilters,
 ) {
