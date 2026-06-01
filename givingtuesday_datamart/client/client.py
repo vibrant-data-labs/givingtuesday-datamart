@@ -182,14 +182,26 @@ class GtDatamartClient:
           ``min_taxyear`` window must be at least this many.
 
         Any of those filters requires ``min_taxyear`` to be set; raises
-        ``ValueError`` otherwise.
+        ``ValueError`` otherwise. ``None`` and ``0`` are both treated as
+        "filter off"; pass a positive value to apply the threshold.
+        ``min_taxyear`` is only required when at least one threshold is
+        positive.
         """
         cleaned = [kw.strip() for kw in keywords if kw and kw.strip()]
         if not cleaned:
             raise ValueError("search_nonprofits requires at least one non-empty keyword")
 
-        needs_basic = min_avg_contributions is not None
-        needs_grants = min_avg_grants is not None or min_num_grants is not None
+        # Treat both ``None`` and ``0`` as "filter off". ``0`` reads as
+        # "no minimum" to callers, but gating on ``is not None`` alone
+        # would still attach the eligibility CTE + INNER JOIN, which
+        # silently restricts results to EINs present in basic_fields /
+        # unioned_grants for the window — the opposite of the natural
+        # reading. Only a positive threshold actually filters.
+        needs_basic = min_avg_contributions is not None and min_avg_contributions > 0
+        needs_grants = (
+            (min_avg_grants is not None and min_avg_grants > 0)
+            or (min_num_grants is not None and min_num_grants > 0)
+        )
         if (needs_basic or needs_grants) and min_taxyear is None:
             raise ValueError(
                 "min_taxyear is required when any eligibility filter "
@@ -271,10 +283,10 @@ class GtDatamartClient:
             # and min_num_grants is the total grant-row count across the
             # window.
             having_clauses: list[str] = []
-            if min_num_grants is not None:
+            if min_num_grants is not None and min_num_grants > 0:
                 having_clauses.append("SUM(yr_count) >= :min_num_grants")
                 params["min_num_grants"] = min_num_grants
-            if min_avg_grants is not None:
+            if min_avg_grants is not None and min_avg_grants > 0:
                 having_clauses.append("AVG(yr_sum) >= :min_avg_grants")
                 params["min_avg_grants"] = min_avg_grants
             having_sql = " AND ".join(having_clauses)
