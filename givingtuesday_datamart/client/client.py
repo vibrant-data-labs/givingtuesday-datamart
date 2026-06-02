@@ -363,6 +363,71 @@ class GtDatamartClient:
         logger.info("search_nonprofits: %d hits", len(hits))
         return hits
 
+    def get_nonprofits_by_ein(
+        self,
+        eins: list[str],
+        *,
+        return_text: bool = True,
+    ) -> list[NonprofitHit]:
+        """Bulk lookup of ``NonprofitHit`` rows by EIN — no FTS, no eligibility.
+
+        Sibling to ``search_nonprofits``: same SELECT shape (and same hit
+        dataclass), but the row set comes from the supplied EIN list rather
+        than a tsquery match, and none of the eligibility filters apply.
+        Use this to inject a hand-curated EIN set into a result alongside
+        keyword-search hits.
+
+        ``rank`` is hard-coded to ``0.0`` (forced rows have no FTS score;
+        ``NonprofitHit.rank`` is a required ``float``). EINs absent from
+        ``nonprofit_canonical`` still come back with NULL identity columns,
+        matching ``search_nonprofits`` semantics. When ``return_text`` is
+        ``False``, ``unique_text`` is NULL on every returned row.
+        """
+        if not eins:
+            return []
+
+        text_select = "nt.unique_text_compact" if return_text else "NULL"
+        text_join = (
+            "LEFT JOIN public.nonprofit_text nt USING (ein)" if return_text else ""
+        )
+        sql = f"""
+            SELECT
+                n.ein,
+                nc.name,
+                nc.name_secondary,
+                nc.city,
+                nc.state,
+                0.0::float AS rank,
+                {text_select} AS unique_text
+            FROM unnest(:eins ::text[]) AS n(ein)
+            LEFT JOIN public.nonprofit_canonical nc USING (ein)
+            {text_join}
+        """
+        params: dict[str, object] = {"eins": list(eins)}
+
+        logger.info(
+            "get_nonprofits_by_ein: %d EIN(s), return_text=%s",
+            len(eins),
+            return_text,
+        )
+        with self._session() as session:
+            rows = session.execute(text(sql), params).mappings().all()
+
+        hits = [
+            NonprofitHit(
+                ein=r["ein"],
+                name=r["name"],
+                name_secondary=r["name_secondary"],
+                city=r["city"],
+                state=r["state"],
+                rank=float(r["rank"]),
+                unique_text=r["unique_text"],
+            )
+            for r in rows
+        ]
+        logger.info("get_nonprofits_by_ein: %d hits", len(hits))
+        return hits
+
     def get_nonprofit(self, ein: str) -> Nonprofit | None:
         sql = """
             SELECT
