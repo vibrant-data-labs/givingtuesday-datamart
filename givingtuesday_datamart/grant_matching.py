@@ -547,8 +547,28 @@ def clean_zip(address_zip):
         return zero_padded_zip[:5]
     return None
 
+def normalize_org_name(name: str) -> str:
+    """Normalize an org name for blocking and comparison.
+
+    Grant rows and filings disagree on leading articles and punctuation for
+    the same org (Stanford files as "THE BOARD OF TRUSTEES OF THE LELAND
+    STANFORD" + "JUNIOR UNIVERSITY"; grant rows say "BOARD OF TRUSTEES OF
+    THE LELAND STANFORD JUNIOR UNIVERSITY" — Jaro-Winkler 0.83 raw, 1.0
+    normalized). Strips apostrophes/periods/commas/quotes, collapses
+    whitespace, and drops one leading "the ". Falls back to the un-stripped
+    form if normalization would empty the name (a bare "the") so blocking
+    never keys on ''.
+    """
+    name = re.sub(r"[',\.\"]", "", name)
+    name = re.sub(r"\s+", " ", name).strip()
+    if name.startswith("the ") and len(name) > 4:
+        name = name[4:]
+    return name
+
+
 def create_full_name(row):
-    return " ".join([p.strip() for p in [row['name1_key'], row['name2_key']] if p.strip()])
+    joined = " ".join([p.strip() for p in [row['name1_key'], row['name2_key']] if p.strip()])
+    return normalize_org_name(joined)
 
 
 def filter_match_rules(
