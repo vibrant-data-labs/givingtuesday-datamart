@@ -93,6 +93,7 @@ REGISTRY: tuple[SourceSpec, ...] = (
         description="Schedule I Part II — grants and other assistance to domestic organizations.",
         filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_ScheduleIPart2Grants\.csv$",
         required_columns=("filerein",),
+        indexes=(IndexSpec("ix_grants_to_domestic_organizations_filerein", ("filerein",)),),
     ),
     _spec(
         logical_name="irs_990pf_grants",
@@ -101,6 +102,7 @@ REGISTRY: tuple[SourceSpec, ...] = (
         description="Form 990-PF Part XIV Grants/Contributions Paid (3A) — grant line items from private foundations.",
         filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_990PFPart14Grants3A\.csv$",
         required_columns=("filerein",),
+        indexes=(IndexSpec("ix_privategrants_filerein", ("filerein",)),),
     ),
     # Officers staging tables are skipped from default refresh (2026-04-27).
     # The raw officers CSV is ~18 GB hot, ~2 GB for the PF side; together they

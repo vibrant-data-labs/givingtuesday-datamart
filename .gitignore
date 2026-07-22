@@ -174,3 +174,8 @@ config.ini
 
 # Claude Code
 .claude/
+
+# Exploratory capture-analysis outputs — regenerable via
+# givingtuesday_datamart/exploratory/build_capture_priority.py
+data/exploratory/*.csv
+givingtuesday_datamart/exploratory/__marimo__/
