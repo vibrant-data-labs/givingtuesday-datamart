@@ -18,7 +18,7 @@ We measured that gap for every grantmaker in the datamart, 2020–2024, by
 comparing each filer's self-declared totals against what actually appears
 in the extracted grant tables. Headline findings:
 
-- **$174B** of 990-filer grants (donor-advised-fund sponsors like
+- **$174B** of 990-filer grants (donor-advised-fund (DAF) sponsors like
   Fidelity and Schwab, hospital systems, intermediaries) have **zero
   itemized rows** — mostly
   filings whose grant lists live in "Additional Data" attachments that
@@ -167,7 +167,7 @@ only get *worse* for more recent years. So:
   with genuine processing lag, and this table alone can't separate the
   two. Treat 15.9% / 79.1% as upper bounds, not verdicts.
 
-The steady-state "genuinely missing" floor is the 2020 level: ~1.5% of
+The long-run "genuinely missing" floor is the 2020 level: ~1.5% of
 filers — but **$13.9B**, because the missing set is dominated by the
 largest DAF sponsors.
 
@@ -225,7 +225,7 @@ Combining both: for every required funder-year,
 That single number is the full declared amount for Fidelity (no rows)
 *and* for Dollar General (rows, no EINs), and ~0 for healthy filers.
 Full query: [`data/exploratory/sched_i_capture_priority.sql`](../data/exploratory/sched_i_capture_priority.sql).
-Decomposition 2020–2024:
+The breakdown, 2020–2024:
 
 | issue | funder-years | declared | mapped by EIN | unmapped | % unmapped |
 |---|---|---|---|---|---|
@@ -246,7 +246,7 @@ currently be mapped to a recipient by EIN.**
 
 ## Part 2: Private foundations (990-PF)
 
-The PF side needed different detectors, because of three things we
+The PF side needed different checks, because of three things we
 learned the hard way.
 
 ### Lesson 1: placeholder rows carry the full dollar amount
@@ -282,8 +282,8 @@ red herrings:
 - **Foreign recipients and non-filers.** The World Health Organization
   (Geneva, zip `1211`) and Pfizer Inc (`NC: NON-EXEMPT` in the filing's
   own recipient-status column) cannot appear in IRS 990 data. Detected
-  via US-zip shape and the Part XV column (c) status codes. (**$32.7B**
-  unmapped, 2020–24.)
+  by zip-code format and the recipient-type codes the filing itself
+  provides. (**$27.7B** unmapped, 2020–24.)
 
 This produces the fair yardstick, **matchable dollars**: grants that
 name an organization, at a US address, where the recipient's own type
@@ -300,7 +300,7 @@ almost entirely foreign grants nobody can map to a 990.
 ### Lesson 3: when matching does fail, the causes are systematic
 
 Full query: [`data/exploratory/pf_capture_priority.sql`](../data/exploratory/pf_capture_priority.sql).
-Final decomposition (2020–2024, all PFs with declared grants, **after**
+The full breakdown (2020–2024, all PFs with declared grants, **after**
 the July 2026 matcher fixes — before them, `unmatched_recipients` held
 $132.4B recoverable and `ok` covered only $59.7B declared):
 
@@ -414,7 +414,7 @@ the same matcher failures quantified in Part 2, seen one pair at a time.
 This validation ran before and after the matcher fixes, which is the
 cleanest measure of what they accomplished: PF pair coverage climbed
 from 57.3% to 61.8%, and the row-present-but-unmatched pool shrank by a
-third (46,842 → 31,237). The ~31k that remain are the harder residue —
+third (46,842 → 31,237). The ~31k that remain are the harder cases —
 missing addresses, name variants below the thresholds — and further
 matcher work can be measured the same way.
 
