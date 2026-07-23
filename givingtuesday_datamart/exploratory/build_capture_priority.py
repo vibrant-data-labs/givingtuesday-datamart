@@ -142,6 +142,16 @@ def build_gt() -> None:
     si = pd.read_csv(DATA_DIR / "sched_i_capture_priority.csv", dtype=CSV_DTYPES)
     pf = pd.read_csv(DATA_DIR / "pf_capture_priority.csv", dtype=CSV_DTYPES)
 
+    # Funders present in the Candid labeled set — pairs there give GT
+    # independent ground truth for what the missing itemization contains.
+    with get_session(config=_config()) as session:
+        labeled_eins = set(
+            pd.read_sql_query(
+                text("SELECT DISTINCT funder_ein FROM grantor_recipient_labeled_set"),
+                session.connection(),
+            )["funder_ein"]
+        )
+
     si_gt = si[si["primary_issue"].isin(GT_CLASSES)].copy()
     si_gt["form_type"] = "990"
     si_gt["dollars_at_issue"] = (si_gt["declared_amt"] - si_gt["itemized_dollars"]).clip(lower=0)
@@ -160,6 +170,7 @@ def build_gt() -> None:
 
     patterns = _classify_990_patterns(si).rename("funder_pattern")
     gt = gt.merge(patterns, left_on="filerein", right_index=True, how="left")
+    gt["in_labeled_set"] = gt["filerein"].isin(labeled_eins)
     gt["lag_risk"] = (
         (gt["form_type"] == "990")
         & (gt["taxyear"] >= "2023")
@@ -181,6 +192,7 @@ def build_gt() -> None:
             years=("taxyear", lambda y: " ".join(sorted(y))),
             issues=("primary_issue", lambda i: ", ".join(sorted(set(i)))),
             funder_pattern=("funder_pattern", "first"),
+            in_labeled_set=("in_labeled_set", "first"),
             total_at_issue=("dollars_at_issue", "sum"),
         )
         .reset_index()

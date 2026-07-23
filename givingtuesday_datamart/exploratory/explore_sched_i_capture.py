@@ -715,7 +715,7 @@ def _(DOLLARS, form_gt, gt_funders, gt_rows, include_lag_gt, issue_gt, min_gt,
     funder_picker_gt = mo.ui.table(
         funders_view[
             ["form_type", "filerein", "name", "years", "issues",
-             "funder_pattern", "total_at_issue"]
+             "funder_pattern", "in_labeled_set", "total_at_issue"]
         ],
         selection="single",
         page_size=15,

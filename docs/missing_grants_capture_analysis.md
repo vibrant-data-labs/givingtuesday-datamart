@@ -1,7 +1,8 @@
 # Missing Grants: How Much Grant Money Is Invisible in the Datamart, and Why
 
 *Vibrant Data Labs — July 2026. Based on the April 24, 2026 refresh of
-the Giving Tuesday (GT) 990 datamart.*
+the Giving Tuesday (GT) 990 datamart; matching numbers reflect the
+matcher fixes deployed in the July 23, 2026 matching rerun.*
 
 ---
 
@@ -31,13 +32,14 @@ in the extracted grant tables. Headline findings:
   the filer left that column blank — so they can't be connected to
   recipients by ID.
 - On the private-foundation side, roughly **$132B** of itemized,
-  US-based, nameable grants failed VDL's recipient-matching step — our
-  problem, not the data's. Two systematic causes were identified: the
-  matcher only compares organizations that share a zip code, and it only
-  searches among regular 990 filers, so private foundations and small
-  organizations that file the short-form 990-EZ can never be found as
-  recipients.
-- A further **~$87B** is *structurally* unmapped no matter what anyone
+  US-based, nameable grants had failed VDL's recipient-matching step —
+  our problem, not the data's. Two systematic causes were identified
+  **and fixed during this work**: the matcher only compared
+  organizations sharing a zip code, and its search list omitted private
+  foundations and small organizations that file the short-form 990-EZ.
+  The July 2026 matching rerun recovered **~$51B** of it; **~$81B**
+  remains for further matcher improvement.
+- A further **~$82B** is *structurally* unmapped no matter what anyone
   does: grants to individuals (scholarships, patient assistance), foreign
   organizations (WHO), and non-filers (Pfizer, government units).
 
@@ -92,7 +94,7 @@ we compute:
 > recipient)
 
 and classify the gap. The filer's own numbers are the ground truth — no
-labels needed. The labeled dataset then becomes a *validator*: 94% of
+labels needed. The labeled dataset then becomes a *validator*: 91% of
 labeled private-foundation funders with 2020+ grants get flagged by at
 least one of the checks below, confirming the approach catches what the
 labels catch (and much more).
@@ -290,63 +292,79 @@ foreign organization, or company), and that aren't placeholder rows.
 Everything downstream is judged against that, and
 **recoverable dollars = matchable − matched** is what matching work can
 actually win back. Gates Foundation 2022 illustrates why this matters:
-$5.75B declared shrinks to $2.2B matchable, of which $1.9B already
-matched — the matcher is at ~86% for Gates, and the "missing $3.85B" is
+$5.75B declared shrinks to $2.2B matchable — and after the matcher fixes
+below, $2.37B actually matched (slightly above our deliberately
+conservative matchable estimate) — so the remaining "missing" ~$3.4B is
 almost entirely foreign grants nobody can map to a 990.
 
 ### Lesson 3: when matching does fail, the causes are systematic
 
 Full query: [`data/exploratory/pf_capture_priority.sql`](../data/exploratory/pf_capture_priority.sql).
-Final decomposition (2020–2024, all PFs with declared grants):
+Final decomposition (2020–2024, all PFs with declared grants, **after**
+the July 2026 matcher fixes — before them, `unmatched_recipients` held
+$132.4B recoverable and `ok` covered only $59.7B declared):
 
 | issue | funder-years | declared | unmapped | recoverable |
 |---|---|---|---|---|
-| `unmatched_recipients` — matchable but unmatched | 218,914 | $231.6B | $141.6B | **$132.4B** |
-| `individual_grants` | 70,550 | $54.7B | $54.5B | ~0 |
-| `aggregate_placeholder` | 9,872 | $43.2B | $42.9B | ~0 |
-| `foreign_or_nonfiler` | 42,778 | $56.1B | $32.7B | $2.5B |
+| `unmatched_recipients` — matchable but unmatched | 202,343 | $159.7B | $86.7B | **$81.3B** |
+| `individual_grants` | 70,550 | $54.7B | $54.5B | $0.1B |
+| `aggregate_placeholder` | 9,872 | $43.2B | $42.7B | ~0 |
+| `foreign_or_nonfiler` | 42,778 | $56.1B | $27.7B | $0.6B |
 | `no_rows` — nothing itemized | 3,183 | $0.5B | $0.5B | $0.0B |
-| `partial_rows` — itemized < 90% of declared | 2,313 | $1.2B | $0.9B | $0.2B |
-| `ok` — matched essentially completely | 50,536 | $59.7B | $8.4B | $1.7B |
-| **total** | **398,146** | **$447.0B** | **$281.5B** | **$137.0B** |
+| `partial_rows` — itemized < 90% of declared | 2,313 | $1.2B | $0.9B | $0.1B |
+| `ok` — matched essentially completely | 67,107 | $131.6B | $13.0B | $2.3B |
+| **total** | **398,146** | **$447.0B** | **$226.0B** | **$84.4B** |
 
 Reading note: the issue class labels each funder-year by its *dominant*
 problem (over 50% of dollars), while the dollar columns are added up
 grant by grant — so a funder-year with mixed giving contributes dollars
-outside its label. That's why `foreign_or_nonfiler` shows $2.5B
+outside its label. That's why `foreign_or_nonfiler` shows $0.6B
 recoverable: funders like Gates are labeled foreign-dominant, but the
-minority of their grants that go to matchable US organizations and
-failed to match still count as recoverable. The recoverable column is
-exact regardless of label; the label says where to look first.
+minority of their grants that go to matchable US organizations count
+toward matched and recoverable independently of the label. The
+recoverable column is exact regardless of label; the label says where to
+look first.
 
 Note the contrast with the 990 side: PF **extraction** is nearly complete
 ($0.5B in `no_rows` vs. $174B for 990s); the PF losses are in
-**matching**. Drilling into the $132B identified two systematic causes in
-VDL's own pipeline (`givingtuesday_datamart/grant_matching.py`):
+**matching**. Drilling into the matcher gap (originally $132B) identified
+two systematic causes in VDL's own pipeline
+(`givingtuesday_datamart/grant_matching.py`):
 
 1. **The zip-code shortcut misses multi-campus organizations.** To keep
    the search fast, the matcher only compares funder-listed recipients
    against organizations *in the same 5-digit zip code*. The Bloomberg
    Family Foundation's grants to Johns Hopkins list the campus address
    (3400 N Charles St, zip 21218); JHU's 990 lists its headquarters
-   (3910 Keswick Rd, zip 21211). Different zip codes, so the pair is
+   (3910 Keswick Rd, zip 21211). Different zip codes, so the pair was
    never even considered, despite a perfect name. Bloomberg's ~$140M/yr
-   of misses are essentially all this.
+   of misses were essentially all this.
 2. **The matcher's search list leaves out private foundations and small
    filers.** Recipients are only looked up among regular 990 filers
    (`basic_fields`). But foundation-to-foundation grants are legal and
    common — at least **$37B** of 2020+ grants go to recipients whose own
    status column says they are private foundations. The single largest:
    the Gates Foundation **Trust** transfers ~$6.7B/yr to the Gates
-   Foundation (perfect name, perfect address, US zip) and matches
-   nothing, because the Foundation files a 990-PF and is therefore not
+   Foundation (perfect name, perfect address, US zip) and matched
+   nothing, because the Foundation files a 990-PF and was therefore not
    on the search list. Small organizations that file the short-form
    990-EZ are a third gap — GT publishes a 990-EZ extract we don't
    currently load.
 
-Both have clear fixes (compare candidates on more than just zip code;
-add private foundations to the search list) and are VDL backlog items —
-**not** data problems.
+Both are VDL-side issues — **not** data problems — and both were fixed
+**on branch `match-pf-recipients`** (commit `af4354b`: private
+foundations added to the search list, plus a second comparison pass that
+pairs records with identical normalized names across different zips,
+gated on same state; commit `12857f7`: name normalization for leading
+"The" and punctuation). The matching rerun with these fixes completed
+July 23, 2026, and **every matching number in this document now reflects
+it**: matched rows grew from 5.40M to 6.04M (+11.9%), the Gates Trust
+transfer and Bloomberg→Johns Hopkins now match, and recoverable dollars
+fell from $132.4B to $81.3B. Known gaps remaining after these fixes:
+990-EZ recipients (extract not loaded), out-of-state lockbox addresses
+(the cross-zip pass requires same state), non-identical name variants at
+non-matching zips, and missing/placeholder addresses (Cigna's
+"AVAILABLE UPON REQUEST" rows still mostly fail).
 
 ---
 
@@ -358,17 +376,20 @@ grant relationship we know existed. How many appear in `unioned_grants`?
 
 | funder type | labeled pairs | covered | % covered |
 |---|---|---|---|
-| 990-PF | 366,398 | 209,988 | 57.3% |
+| 990-PF | 366,398 | 226,253 | 61.8% |
 | 990 | 270,365 | 228,916 | 84.7% |
 | not in e-file | 9,404 | 0 | 0% |
-| **total** | **646,167** | **438,904** | **67.9%** |
+| **total** | **646,167** | **455,169** | **70.4%** |
+
+(Before the July 2026 matcher fixes, PF coverage was 57.3% and the total
+67.9% — the rerun recovered 16,265 known pairs in one shot.)
 
 The 990-vs-PF split independently confirms the whole analysis: 990
 coverage is high because extraction losses concentrate in a few huge
 funders, while PF coverage is low because matching losses spread across
 tens of thousands of funders.
 
-Each of the 207,263 missing pairs was then classified by **direct
+Each of the 190,998 still-missing pairs was then classified by **direct
 evidence** — does the funder itemize rows at all, and if so, does a row
 naming *this specific recipient* exist? (Each recipient's official name
 comes from its own tax filing; names are simplified — lowercased,
@@ -377,31 +398,33 @@ one contains the other.)
 
 | cause | pairs | reading |
 |---|---|---|
-| No row found for the recipient (PF + 990) | 102,935 | Ambiguous mix: partial capture, grants predating e-file coverage (the labeled pairs carry no dates), and limits of the name test |
-| Recipient's row **present, match failed** (PF) | 46,842 | Hard evidence of matcher failures — the row is sitting in `privategrants` with the recipient's name on it |
+| No row found for the recipient (PF + 990) | 102,303 | Ambiguous mix: partial capture, grants predating e-file coverage (the labeled pairs carry no dates), and limits of the name test |
+| Recipient's row **present, match failed** (PF) | 31,237 | Hard evidence of matcher failures — the row is sitting in `privategrants` with the recipient's name on it. Was 46,842 before the July 2026 fixes |
 | Funder has only placeholder rows (PF) | 17,789 | "SEE ATTACHMENT" filings |
 | Funder has zero itemized rows | 15,262 | Fidelity-style attachment filings + the 2021–22 gaps |
 | Funder not in e-file | 9,404 | Paper filers, government entities |
-| Row present but recipient EIN blank/mismatched (990) | 8,706 | Dollar-General-style filer omissions and EIN typos |
+| Row present but recipient EIN blank/mismatched (990) | 8,678 | Dollar-General-style filer omissions and EIN typos |
 | Recipient name unknown (no e-file header) | 6,325 | Couldn't test — recipient never filed |
 
 Two sanity checks worth noting: the classification found **zero** pairs
 where a Schedule I row carries the correct recipient EIN yet the pair is
 missing (if the EIN were there, the pair would be covered — the classes
-are internally consistent), and the 46,842 row-present-but-unmatched
-pairs are the same matcher failures quantified in Part 2, seen one pair
-at a time. Rerunning this validation after the matcher fixes gives a
-direct before/after benchmark: PF
-coverage should climb from 57.3% as those 46,842 pairs (and a share of
-the ambiguous bucket) resolve.
+are internally consistent), and the row-present-but-unmatched pairs are
+the same matcher failures quantified in Part 2, seen one pair at a time.
+This validation ran before and after the matcher fixes, which is the
+cleanest measure of what they accomplished: PF pair coverage climbed
+from 57.3% to 61.8%, and the row-present-but-unmatched pool shrank by a
+third (46,842 → 31,237). The ~31k that remain are the harder residue —
+missing addresses, name variants below the thresholds — and further
+matcher work can be measured the same way.
 
 ## What it means: three buckets, three owners
 
 | bucket | dollars (2020–24) | owner | fix |
 |---|---|---|---|
 | Data capture: attachments not extracted, placeholder rows, partial extractions, year-specific Schedule I gaps (2022 proven, 2021 probable) | **~$242B** at issue ($195B excluding probable lag) | **GT Data team** | Parse "Additional Data" attachments; investigate the 2021–2023 batches |
-| Recipient matching: the zip-code shortcut, the incomplete search list, formatting edge cases | **~$132B** recoverable | **VDL** | Matcher improvements listed above |
-| Structural: individuals, foreign orgs, non-filers, EIN-less recipients that don't file | **~$87B+** | nobody (inherent) | Report as coverage caveat, don't chase |
+| Recipient matching: formatting edge cases, missing addresses, name variants (the zip-code shortcut and incomplete search list are already fixed — $51B recovered July 2026) | **~$81B** recoverable | **VDL** | Further matcher improvements |
+| Structural: individuals, foreign orgs, non-filers, EIN-less recipients that don't file | **~$82B+** | nobody (inherent) | Report as coverage caveat, don't chase |
 
 Any funding-flow number built on `unioned_grants` undercounts by these
 amounts, non-uniformly — DAF sponsors and the largest private
@@ -429,9 +452,13 @@ our side.
 ### The files
 
 - **`data/exploratory/gt_team_priority_by_funder.csv`** — the headline
-  list: 45,544 EINs, one row per funder, with affected years, issue
-  type(s), and total dollars at issue ($195.3B). Sorted by dollars —
-  working top-down maximizes recovered dollars per filing examined.
+  list: 45,540 EINs, one row per funder, with affected years, issue
+  type(s), whether the funder appears in the Candid labeled data
+  (`in_labeled_set` — true for 15,318 EINs carrying $158.1B of the
+  dollars at issue, meaning known funder→recipient pairs exist to
+  verify a re-extraction against), and total dollars at issue ($195.3B).
+  Sorted by dollars — working top-down maximizes recovered dollars per
+  filing examined.
 - **`data/exploratory/gt_team_priority.csv`** — the same list broken out
   to one row per funder per tax year (92,106 rows), including a
   `lag_risk` flag on
@@ -547,7 +574,7 @@ by the matching pipeline).
 - **Thresholds are tunable.** "Partial" = itemized < 90% of declared;
   placeholder/individual/foreign classes trigger at 50% of declared
   dollars. Edge cases near the thresholds exist; the labeled-set check —
-  94% of known private-foundation grantmakers get flagged — says the
+  91% of known private-foundation grantmakers get flagged — says the
   defaults are reasonable.
 - **Declared totals are self-reported.** Filers make errors; the small
   leftover gap in the `ok` class ($4–8B) reflects legitimate small
