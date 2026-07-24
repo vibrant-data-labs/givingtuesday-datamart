@@ -34,11 +34,17 @@ from givingtuesday_datamart.canonical.build import (
 # in one place. The views must exist before matching reads them; unioned_grants
 # must be rebuilt after matching writes privategrants_w_recipients.
 
-# 4 views built on top of the raw `public.privategrants` and `public.basic_fields`
-# staging tables. Both `_w_column_keys_view` views normalize names/addresses
-# (lowercase, 5-digit zip) into `*_key` columns the matching pipeline blocks/joins
-# on. Both `_unique_names_view` views collapse to DISTINCT (key tuple) for orgs
-# that filed in 2015+.
+# 6 views built on top of the raw `public.privategrants`, `public.basic_fields`
+# and `public.basic_fields_pf` staging tables. The `_w_column_keys_view` views
+# normalize names/addresses (lowercase, 5-digit zip) into `*_key` columns the
+# matching pipeline blocks/joins on. The `_unique_names_view` views collapse to
+# DISTINCT (key tuple) for orgs that filed in 2015+.
+#
+# The recipient-match universe is the UNION of 990 filers (basic_fields) and
+# 990-PF filers (basic_fields_pf): PF-to-PF grants are legal and common
+# (e.g. the Gates Trust's ~$6.8B/yr transfer to the Gates Foundation), and a
+# 990-only universe makes every PF-recipient grant structurally unmatchable —
+# ~$32B of 2020+ grant dollars carry a "PF:" recipient status alone.
 _VIEW_DDL = [
     """
     CREATE OR REPLACE VIEW public.privategrants_w_column_keys_view AS (
@@ -66,6 +72,12 @@ _VIEW_DDL = [
             addresszip_key
         FROM public.privategrants_w_column_keys_view
         WHERE taxyear::int >= 2015
+          -- Rows with no business name (person-named scholarship / patient
+          -- assistance grants) cannot pass any match rule: every filter tier
+          -- requires name_score >= 0.70, and Jaro-Winkler against an empty
+          -- string is 0. Pruning them here drops ~16% of recipient tuples
+          -- (~12% of candidate pairs) with zero recall impact.
+          AND NOT (TRIM(name1_key) = '' AND TRIM(name2_key) = '')
         GROUP BY
             name1_key,
             name2_key,
@@ -100,6 +112,59 @@ _VIEW_DDL = [
             LOWER(filerusstate) addressstate_key,
             LOWER(LEFT(fileruszip::text, 5)) addresszip_key
         FROM public.basic_fields
+    )
+    """,
+    # basic_fields_pf shares the filer header column names with basic_fields,
+    # so the PF views mirror the 990 ones verbatim apart from the source table.
+    """
+    CREATE OR REPLACE VIEW public.basic_fields_pf_w_column_keys_view AS (
+        SELECT
+            *,
+            CASE WHEN filerein IS NULL THEN '' ELSE LOWER(filerein::text) END filerein_key,
+            CASE WHEN filername1 IS NULL THEN '' ELSE LOWER(filername1) END name1_key,
+            CASE WHEN filername2 IS NULL THEN '' ELSE LOWER(filername2) END name2_key,
+            CASE WHEN filerus1 IS NULL THEN '' ELSE LOWER(filerus1) END address1_key,
+            CASE WHEN filerus2 IS NULL THEN '' ELSE LOWER(filerus2) END address2_key,
+            LOWER(fileruscity) addresscity_key,
+            LOWER(filerusstate) addressstate_key,
+            LOWER(LEFT(fileruszip::text, 5)) addresszip_key
+        FROM public.basic_fields_pf
+    )
+    """,
+    """
+    CREATE OR REPLACE VIEW public.basic_fields_pf_unique_names_view AS (
+        SELECT
+            filerein_key,
+            name1_key,
+            name2_key,
+            address1_key,
+            address2_key,
+            addresscity_key,
+            addressstate_key,
+            addresszip_key
+        FROM public.basic_fields_pf_w_column_keys_view
+        WHERE taxyear::int >= 2015
+        GROUP BY
+            filerein_key,
+            name1_key,
+            name2_key,
+            address1_key,
+            address2_key,
+            addresscity_key,
+            addressstate_key,
+            addresszip_key
+        -- ORDER BY makes row order deterministic so chunk checkpoints
+        -- (which key on integer DataFrame position) stay valid across
+        -- re-runs against the same upstream data.
+        ORDER BY
+            filerein_key,
+            name1_key,
+            name2_key,
+            address1_key,
+            address2_key,
+            addresscity_key,
+            addressstate_key,
+            addresszip_key
     )
     """,
     """
@@ -219,7 +284,7 @@ _UNIONED_GRANTS_INDEXES = [
 
 
 def create_or_replace_views(connection):
-    """Idempotently (re)create the 4 views the matching pipeline reads from.
+    """Idempotently (re)create the 6 views the matching pipeline reads from.
 
     Safe to call on every run: `CREATE OR REPLACE VIEW` updates definitions
     in place without touching dependent objects.
@@ -239,10 +304,14 @@ def rebuild_unioned_grants(connection):
         connection.execute(text(stmt))
 
 
-# Logical names of the two staging tables the matching pipeline reads from.
+# Logical names of the three staging tables the matching pipeline reads from.
 # These are the only data dependencies whose freshness affects checkpoint
 # validity. Schedule-I grants feed unioned_grants but not the matching itself.
-_MATCHING_INPUT_LOGICAL_NAMES = ("irs_990pf_grants", "irs_990_basic_fields")
+_MATCHING_INPUT_LOGICAL_NAMES = (
+    "irs_990pf_grants",
+    "irs_990_basic_fields",
+    "irs_990pf_basic_fields",
+)
 
 
 def _insert_started_build(build_id: str, started_at: datetime, source_runs: dict) -> None:
@@ -327,12 +396,12 @@ def _resolve_checkpoint_prefix(
     connection,
     base_prefix: str = "grant_matching_checkpoints",
 ) -> str:
-    """Build an S3 prefix that's keyed on the source versions of both
-    upstream staging tables. A new ingest of either source produces a fresh
+    """Build an S3 prefix that's keyed on the source versions of all three
+    upstream staging tables. A new ingest of any source produces a fresh
     prefix, so old checkpoints can never silently be reused against new data.
 
     Resolves the latest successful (status='success') ingest_run per
-    logical_name from datamart_meta.ingest_runs. Raises if either source has
+    logical_name from datamart_meta.ingest_runs. Raises if any source has
     no successful run on record.
     """
     rows = connection.execute(
@@ -358,7 +427,8 @@ def _resolve_checkpoint_prefix(
     return (
         f"{base_prefix}/"
         f"pg_{versions['irs_990pf_grants']}/"
-        f"bf_{versions['irs_990_basic_fields']}"
+        f"bf_{versions['irs_990_basic_fields']}/"
+        f"bfpf_{versions['irs_990pf_basic_fields']}"
     )
 
 
@@ -477,8 +547,28 @@ def clean_zip(address_zip):
         return zero_padded_zip[:5]
     return None
 
+def normalize_org_name(name: str) -> str:
+    """Normalize an org name for blocking and comparison.
+
+    Grant rows and filings disagree on leading articles and punctuation for
+    the same org (Stanford files as "THE BOARD OF TRUSTEES OF THE LELAND
+    STANFORD" + "JUNIOR UNIVERSITY"; grant rows say "BOARD OF TRUSTEES OF
+    THE LELAND STANFORD JUNIOR UNIVERSITY" — Jaro-Winkler 0.83 raw, 1.0
+    normalized). Strips apostrophes/periods/commas/quotes, collapses
+    whitespace, and drops one leading "the ". Falls back to the un-stripped
+    form if normalization would empty the name (a bare "the") so blocking
+    never keys on ''.
+    """
+    name = re.sub(r"[',\.\"]", "", name)
+    name = re.sub(r"\s+", " ", name).strip()
+    if name.startswith("the ") and len(name) > 4:
+        name = name[4:]
+    return name
+
+
 def create_full_name(row):
-    return " ".join([p.strip() for p in [row['name1_key'], row['name2_key']] if p.strip()])
+    joined = " ".join([p.strip() for p in [row['name1_key'], row['name2_key']] if p.strip()])
+    return normalize_org_name(joined)
 
 
 def filter_match_rules(
@@ -489,6 +579,7 @@ def filter_match_rules(
     near_perfect_addr_addr_min: float,
     good_enough_name_name_min: float,
     good_enough_name_addr_min: float,
+    exact_name_name_min: float | None = None,
 ) -> pd.DataFrame:
     if features_df.empty:
         return features_df
@@ -506,9 +597,22 @@ def filter_match_rules(
         & (features_df['addr_score'] >= good_enough_name_addr_min)
     )
 
-    return features_df[
-        near_perfect_name_matches | near_perfect_addr_matches | good_enough_name_matches
-    ]
+    keep = near_perfect_name_matches | near_perfect_addr_matches | good_enough_name_matches
+
+    # Cross-zip tier: (near-)exact name + same state, no address requirement.
+    # Exists for recipients listed at a different address than the filer's
+    # 990 header (e.g. Gates Trust lists the Gates Foundation at its street
+    # address, zip 98109; the Foundation files from a PO Box in 98102).
+    # These pairs come from the full_name block, so the address columns are
+    # expected to disagree — the state equality gate is what holds precision.
+    if exact_name_name_min is not None and 'state_score' in features_df.columns:
+        exact_name_matches = (
+            (features_df['name_score'] >= exact_name_name_min)
+            & (features_df['state_score'] == 1)
+        )
+        keep = keep | exact_name_matches
+
+    return features_df[keep]
 
 
 
@@ -523,8 +627,10 @@ def match_records(
     """Run the recordlinkage grant-matching pipeline against gt_datamart.
 
     ``s3_prefix`` defaults to a lineage-keyed path derived from the latest
-    successful ingest_runs of irs_990pf_grants + irs_990_basic_fields, e.g.
-    ``grant_matching_checkpoints/pg_2026_04_15/bf_2026_04_18``. This means
+    successful ingest_runs of irs_990pf_grants + irs_990_basic_fields +
+    irs_990pf_basic_fields, e.g.
+    ``grant_matching_checkpoints/pg_2026_04_15/bf_2026_04_18/bfpf_2026_04_18``.
+    This means
     checkpoints can only be resumed against the exact source versions that
     produced them — re-ingesting either source forces a clean recompute.
     Pass an explicit string to override (e.g. for testing).
@@ -620,10 +726,22 @@ def _do_match_records(
         # chunk checkpoints reference DataFrame rows by integer position.
         # If row order shifts between runs, resumed chunks would point at
         # the wrong rows and produce silently-incorrect matches.
-        logger.info("Reading public.basic_fields_unique_names_view")
+        # The filer universe is 990 + 990-PF filers. UNION (not UNION ALL)
+        # dedupes orgs whose key tuple is identical across the two forms
+        # (e.g. an org that switched filing types at the same name/address).
+        # The outer ORDER BY keeps row order deterministic over the union —
+        # required because chunk checkpoints key on integer row position.
+        logger.info(
+            "Reading public.basic_fields_unique_names_view "
+            "UNION public.basic_fields_pf_unique_names_view"
+        )
         basic_fields_df = pd.read_sql_query(
             text(f"""
-                SELECT * FROM public.basic_fields_unique_names_view
+                SELECT * FROM (
+                    SELECT * FROM public.basic_fields_unique_names_view
+                    UNION
+                    SELECT * FROM public.basic_fields_pf_unique_names_view
+                ) filers
                 ORDER BY filerein_key, name1_key, name2_key, address1_key,
                          address2_key, addresscity_key, addressstate_key,
                          addresszip_key
@@ -670,11 +788,23 @@ def _do_match_records(
         private_foundations_df[col] = private_foundations_df[col].astype(cat_type)
 
     # --- 5. EXECUTE BLOCKING ---
+    # Two blocking passes, unioned by indexer.index():
+    #   1. exact zip — the workhorse (~1B pairs)
+    #   2. exact full_name — cross-zip candidates for recipients listed at a
+    #      different address than the filer's header (e.g. Gates Trust →
+    #      Gates Foundation, zip 98109 vs 98102). Measured at ~681K pairs
+    #      (+0.07%), but it reaches ~$25B of PF-recipient dollars that zip
+    #      blocking alone can never pair. These pairs match via the
+    #      exact-name + same-state tier in filter_match_rules.
     logger.info("Indexing...")
     indexer = recordlinkage.Index()
     indexer.block(
         left_on=['clean_zip'],
         right_on=[ 'clean_zip']
+    )
+    indexer.block(
+        left_on=['full_name'],
+        right_on=['full_name']
     )
 
     candidate_links = indexer.index(basic_fields_df, private_foundations_df)
@@ -686,6 +816,8 @@ def _do_match_records(
     compare.exact('clean_zip', 'clean_zip', label='zip_score')
     compare.string('full_name', 'full_name', method='jarowinkler', label='name_score')
     compare.string('compare_addr', 'compare_addr', method='levenshtein', label='addr_score')
+    # State equality gates the cross-zip exact-name match tier.
+    compare.exact('addressstate_key', 'addressstate_key', label='state_score')
 
     # Chunked Compute
     logger.info("Chunking candidate links...")
@@ -760,6 +892,7 @@ def _do_match_records(
             near_perfect_addr_addr_min=0.75,
             good_enough_name_name_min=0.55,
             good_enough_name_addr_min=0.85,
+            exact_name_name_min=0.95,
         )
 
         # Materialize the (basic_fields_idx, privategrants_idx) MultiIndex
@@ -777,7 +910,7 @@ def _do_match_records(
 
     if not results:
         final_features = pd.DataFrame(
-            columns=INDEX_COLS + ['zip_score', 'name_score', 'addr_score']
+            columns=INDEX_COLS + ['zip_score', 'name_score', 'addr_score', 'state_score']
         )
     else:
         # Concat in chunk_idx order. Order doesn't strictly matter for
@@ -797,6 +930,7 @@ def _do_match_records(
         near_perfect_addr_addr_min=0.85,
         good_enough_name_name_min=0.70,
         good_enough_name_addr_min=0.90,
+        exact_name_name_min=0.99,
     )
 
     logger.info(f"Found {len(matches)} matches.")
@@ -830,7 +964,7 @@ def _do_match_records(
     logger.info(basic_fields_df_matched.head())
 
     percentage_matched = basic_fields_df_matched[basic_fields_df_matched['private_foundations_df_index'].notna()]['filerein_key'].nunique() / basic_fields_df['filerein_key'].nunique()
-    logger.info(f'% of Organizations matched to a private foundation name: {percentage_matched}')
+    logger.info(f'% of filer orgs (990 + 990-PF) matched to a grant recipient name: {percentage_matched}')
 
     private_foundations_df['private_foundations_df_index'] = private_foundations_df.index
     full_data_df = basic_fields_df_matched.merge(private_foundations_df, on='private_foundations_df_index', suffixes=("_bf", ""))[[
