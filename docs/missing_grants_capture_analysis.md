@@ -522,6 +522,9 @@ list in an `<AdditionalData>` section or paper attachment (parsing gap)?
 Fidelity's and Siegel's XMLs are the fastest confirmations of the second
 pattern; One Earth 2022 vs 2023 is the fastest confirmation of the first.
 
+### In Labeled Set
+These are Grantor EINs that we've recieved data for from Candid, so we know we _should_ be able to map their grants and doing so would give us parity.
+
 ### One more heads-up (not in the priority list)
 
 ~7–9% of Schedule I rows have no recipient EIN. We verified (Dollar
