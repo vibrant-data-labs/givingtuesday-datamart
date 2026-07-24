@@ -451,7 +451,7 @@ our side.
 
 ### The files
 
-- **`data/exploratory/gt_team_priority_by_funder.csv`** — the headline
+- [**data/exploratory/gt_team_priority_by_funder.csv**](../data/exploratory/gt_team_priority_by_funder.csv) — the headline
   list: 45,540 EINs, one row per funder, with affected years, issue
   type(s), whether the funder appears in the Candid labeled data
   (`in_labeled_set` — true for 15,318 EINs carrying $158.1B of the
@@ -459,7 +459,7 @@ our side.
   verify a re-extraction against), and total dollars at issue ($195.3B).
   Sorted by dollars — working top-down maximizes recovered dollars per
   filing examined.
-- **`data/exploratory/gt_team_priority.csv`** — the same list broken out
+- [**data/exploratory/gt_team_priority.csv**](../data/exploratory/gt_team_priority.csv) — the same list broken out
   to one row per funder per tax year (92,106 rows), including a
   `lag_risk` flag on
   ~9.5k rows ($46.6B) from tax years 2023–24 that are probably just

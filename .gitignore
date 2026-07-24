@@ -177,3 +177,4 @@ config.ini
 
 data/exploratory/*.csv
 givingtuesday_datamart/exploratory/__marimo__/
+!data/exploratory/gt_*.csv
