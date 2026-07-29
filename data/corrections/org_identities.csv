@@ -1,3 +1,3 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:0f64fe8b88990d9f011005147090c4686a70973a32af32117b05bd48cf8c7775
-size 1021
+recipient_ein,name1,name2,address1,address2,city,state,zip,evidence_url,added_by,added_date,note
+134141945,MICHAEL J FOX FOUNDATION FOR PARKINSON'S RESEARCH,,111 W33RD STREET 10TH FLOOR,,NEW YORK,NY,10001,https://projects.propublica.org/nonprofits/organizations/134141945,zein,2026-07-29,"Suffix variant of MJFF's filed name (files as MICHAEL J FOX FOUNDATION), sighted verbatim in Sergey Brin Family Foundation grant rows ($211M / 8 rows) at MJFF's W 33rd St street address. The documented survivor of the exact-name+state tier: JW 0.90 normalized, cross-zip. See docs/corrections-plan.md."
+134141945,MICHAEL J FOX FOUNDATION FOR PARKINSON'S RESEARCH,,PO BOX 5014,,HAGERSTOWN,MD,21741,https://projects.propublica.org/nonprofits/organizations/134141945,zein,2026-07-29,"Same Brin sighting at MJFF's out-of-state donation lockbox in Hagerstown MD ($186M / 2 rows). Out of state relative to MJFF's NY filing, so the exact-name+state tier can never reach it; this row carries the lockbox zip so blocking pairs it directly."
