@@ -114,7 +114,19 @@ def _create_table_from_columns(engine, table_name: str, columns: list[str], over
     col_defs = ', '.join([f'"{col}" TEXT' for col in columns])
     with engine.connect() as conn:
         if overwrite:
-            conn.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
+            # CASCADE: the matching views (grant_matching._VIEW_DDL) sit on top
+            # of the staging tables and block a plain DROP once matching has
+            # run. They are rebuilt by create_or_replace_views() at the start
+            # of every matching run, so dropping them with the table is safe.
+            # Log the server NOTICEs so cascaded drops are visible in the run
+            # log rather than silent.
+            raw = conn.connection.dbapi_connection
+            notices = getattr(raw, "notices", None)
+            if notices is not None:
+                del notices[:]
+            conn.execute(text(f"DROP TABLE IF EXISTS {table_name} CASCADE"))
+            for notice in notices or []:
+                logger.info("DROP %s: %s", table_name, notice.strip())
         conn.execute(text(f"CREATE TABLE IF NOT EXISTS {table_name} ({col_defs})"))
         conn.commit()
     logger.info(f"Created table {table_name} with {len(columns)} columns")
