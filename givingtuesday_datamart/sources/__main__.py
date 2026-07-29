@@ -21,6 +21,7 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 
 from botocore.exceptions import BotoCoreError, ClientError
@@ -29,6 +30,25 @@ from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart.sources.registry import REGISTRY, S3_BUCKET, S3_PREFIX, get_source
 from givingtuesday_datamart.sources.resolver import list_bucket, resolve_latest
 from givingtuesday_datamart.sources.spec import SourceSpec
+
+
+def _configure_cli_logging() -> None:
+    """Attach a console handler so INFO progress lines are visible from the CLI.
+
+    The package logger deliberately ships without handlers (see
+    _internal/logger.py) so library consumers control their own output. But
+    with no handler anywhere, Python's last-resort handler only prints
+    WARNING and above — which silently eats all the per-source progress
+    logging (Starting ingest / Rows written / Created table) when run as a
+    command-line tool.
+    """
+    if logger.handlers:
+        return
+    handler = logging.StreamHandler()
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
+    )
+    logger.addHandler(handler)
 
 
 def _format_size(size: int) -> str:
@@ -292,7 +312,7 @@ def cmd_refresh(source_names: list[str] | None, *, force: bool) -> int:
 
     exit_code = 0
     summary_rows: list[tuple[str, str, str, str]] = []
-    for spec in specs:
+    for i, spec in enumerate(specs, start=1):
         resolved = resolve_latest(spec, listing=listing)
         if resolved is None:
             logger.error(
@@ -306,6 +326,16 @@ def cmd_refresh(source_names: list[str] | None, *, force: bool) -> int:
             exit_code = 1
             continue
 
+        logger.info(
+            "[%d/%d] %s: latest S3 version %s (%s, %s) -> %s",
+            i,
+            len(specs),
+            spec.logical_name,
+            resolved.version_date,
+            resolved.filename,
+            _format_size(resolved.size),
+            spec.staging_table_name,
+        )
         result = ingest_source(spec, resolved, force=force)
         summary_rows.append(
             (
@@ -379,6 +409,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
+    _configure_cli_logging()
     if args.command == "status":
         return cmd_status()
     if args.command == "loaded":
