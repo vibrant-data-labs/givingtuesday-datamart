@@ -1,8 +1,11 @@
 # Corrections Registry — Plan
 
-*Status: designed, not yet built. Blocked on the matcher-fixes branch
-(exact-name+state tier, PF/EZ recipient universe) landing and a full
-rerun, which determines the seed worklist. July 2026.*
+*Status: built (July 2026) — loader, normalization view, provenance-tagged
+universe union, checkpoint-hash lineage, and build stamping are in
+`grant_matching.py`; seeded with the two Brin-sighting MJFF tuples.
+End-to-end verification (Brin rows with `match_source = 'correction'`)
+rides the next full matching rebuild. The bulk seed worklist comes from
+the post-refresh unmatched residue, worked top-down by dollars.*
 
 ## Goal
 
