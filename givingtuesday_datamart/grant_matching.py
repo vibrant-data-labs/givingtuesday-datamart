@@ -818,6 +818,30 @@ def filter_match_rules(
     return features_df[keep]
 
 
+# The two threshold sets passed to filter_match_rules. Chunk-stage is
+# deliberately generous so checkpointed chunks survive a later tightening of
+# the final rules; final-stage is what actually decides matches.
+# corrections_preflight imports both — change thresholds here, never inline,
+# so the preflight can't drift from the real matcher.
+CHUNK_FILTER_RULES = dict(
+    near_perfect_name_name_min=0.95,
+    near_perfect_name_addr_min=0.35,
+    near_perfect_addr_name_min=0.75,
+    near_perfect_addr_addr_min=0.75,
+    good_enough_name_name_min=0.55,
+    good_enough_name_addr_min=0.85,
+    exact_name_name_min=0.95,
+)
+FINAL_FILTER_RULES = dict(
+    near_perfect_name_name_min=0.99,
+    near_perfect_name_addr_min=0.50,
+    near_perfect_addr_name_min=0.85,
+    near_perfect_addr_addr_min=0.85,
+    good_enough_name_name_min=0.70,
+    good_enough_name_addr_min=0.90,
+    exact_name_name_min=0.99,
+)
+
 
 def match_records(
     chunk_size: int = 50000,
@@ -1123,16 +1147,7 @@ def _do_match_records(
         chunk = candidate_links[start_idx:end_idx]
         features = compare.compute(chunk, basic_fields_df, private_foundations_df)
         # Keep chunk checkpoints generous so reruns can still tighten final rules later.
-        features = filter_match_rules(
-            features_df=features,
-            near_perfect_name_name_min=0.95,
-            near_perfect_name_addr_min=0.35,
-            near_perfect_addr_name_min=0.75,
-            near_perfect_addr_addr_min=0.75,
-            good_enough_name_name_min=0.55,
-            good_enough_name_addr_min=0.85,
-            exact_name_name_min=0.95,
-        )
+        features = filter_match_rules(features_df=features, **CHUNK_FILTER_RULES)
 
         # Materialize the (basic_fields_idx, privategrants_idx) MultiIndex
         # as regular columns so it survives the parquet round-trip.
@@ -1161,16 +1176,7 @@ def _do_match_records(
 
     # --- 7. FILTER ---
     logger.info(f"Filtering matches...")
-    matches = filter_match_rules(
-        features_df=final_features,
-        near_perfect_name_name_min=0.99,
-        near_perfect_name_addr_min=0.50,
-        near_perfect_addr_name_min=0.85,
-        near_perfect_addr_addr_min=0.85,
-        good_enough_name_name_min=0.70,
-        good_enough_name_addr_min=0.90,
-        exact_name_name_min=0.99,
-    )
+    matches = filter_match_rules(features_df=final_features, **FINAL_FILTER_RULES)
 
     logger.info(f"Found {len(matches)} matches.")
 
