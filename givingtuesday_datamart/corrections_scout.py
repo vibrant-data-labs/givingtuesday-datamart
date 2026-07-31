@@ -62,6 +62,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import sys
 from pathlib import Path
 
@@ -359,6 +360,64 @@ _LABELED_RECIP_UNIVERSE_SQL = f"""
 """
 
 
+_DEFAULT_CANDID_DIGEST_OUT = (
+    Path(__file__).resolve().parents[1]
+    / "data" / "exploratory" / "corrections_candid_digest.csv"
+)
+
+# Trailing tokens whose absence/presence alone should NOT spend a correction
+# row: per the recurrence rule these belong to a future normalize_org_name
+# change, and they dominate the high-JW band (~60% of it, ~$4.8B measured
+# 2026-07-30).
+_SUFFIX_ONLY_RE = re.compile(r"\s+(incorporated|inc|the)$")
+
+
+def _write_candid_digest(
+    report: pd.DataFrame, out_path: Path, jw_min: float = 0.95
+) -> pd.DataFrame:
+    """Distill the pair-grained candid report into the file a curator can
+    actually work: one row per recipient EIN, high-confidence tuples only
+    (name_jw >= jw_min), suffix-only variants excluded, ranked by dollars.
+
+    The raw report stays on disk as the audit trail; this is the worklist.
+    """
+    df = report.copy()
+    df["dollars"] = df["dollars"].astype(float)
+    df["name_jw"] = df["name_jw"].astype(float)
+    for col in ("name1_key", "name2_key", "recip_name"):
+        df[col] = df[col].fillna("")
+    df["tuple_name"] = [
+        create_full_name({"name1_key": a, "name2_key": b})
+        for a, b in zip(df["name1_key"], df["name2_key"])
+    ]
+    suffix_only = [
+        a != b and _SUFFIX_ONLY_RE.sub("", a) == _SUFFIX_ONLY_RE.sub("", b)
+        for a, b in zip(df["tuple_name"], df["recip_name"])
+    ]
+    kept = df[(df["name_jw"] >= jw_min) & ~pd.Series(suffix_only, index=df.index)]
+    kept = kept.sort_values("dollars", ascending=False)
+    digest = (
+        kept.groupby(["recip_ein", "recip_name"], sort=False)
+        .agg(
+            dollars=("dollars", "sum"),
+            tuples=("tuple_name", "size"),
+            funders=("funder_ein", "nunique"),
+            best_jw=("name_jw", "max"),
+            geometries=("geometry", lambda s: ",".join(sorted(set(s)))),
+            example_tuple=("tuple_name", "first"),
+            example_city=("addresscity_key", "first"),
+            example_state=("addressstate_key", "first"),
+            evidence_url=("evidence_url", "first"),
+        )
+        .reset_index()
+        .sort_values("dollars", ascending=False)
+    )
+    digest.insert(0, "rank", range(1, len(digest) + 1))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    digest.to_csv(out_path, index=False)
+    return digest
+
+
 def _lev_sim(s1: str, s2: str) -> float:
     """recordlinkage's levenshtein_similarity: 1 - dist/max(len)."""
     longest = max(len(s1), len(s2))
@@ -545,7 +604,16 @@ def run_candid_scout(out_path: Path, jw_min: float = NEAR_MISS_JW_MIN) -> int:
         print(report.head(20)[cols].to_string(index=False))
     print("\n=== top recipient clusters ===")
     print(cluster.head(15).to_string())
-    print(f"\nWorklist: {out_path}")
+
+    digest = _write_candid_digest(report, _DEFAULT_CANDID_DIGEST_OUT)
+    print(
+        f"\n=== digest: {len(digest):,} recipients at jw>=0.95, suffix-only "
+        f"variants excluded (${digest['dollars'].sum():,.0f}) ==="
+    )
+    with pd.option_context("display.width", 250, "display.max_colwidth", 40):
+        print(digest.head(15).to_string(index=False))
+    print(f"\nRaw pair report (audit trail): {out_path}")
+    print(f"Curator worklist: {_DEFAULT_CANDID_DIGEST_OUT}")
     return 0
 
 
