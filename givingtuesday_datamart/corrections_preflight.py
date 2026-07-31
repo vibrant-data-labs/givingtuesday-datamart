@@ -56,6 +56,7 @@ matching views — so the preflight verifies exactly what the run will read.
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 
 import jellyfish
@@ -182,10 +183,10 @@ def _keyed_corrections(csv_df: pd.DataFrame) -> pd.DataFrame:
     return _clean_like_run(keyed)
 
 
-def _match_slice(universe_slice: pd.DataFrame, grants_slice: pd.DataFrame) -> pd.DataFrame:
-    """match_records' blocking → Compare → two-stage filter → winner
-    resolution, on a slice. Returns one row per matched grant tuple with
-    the winning universe row's index in basic_fields_df_index.
+def _score_slice(universe_slice: pd.DataFrame, grants_slice: pd.DataFrame) -> pd.DataFrame:
+    """match_records' blocking → Compare on a slice: one row per candidate
+    pair with the four scores, unfiltered. Pair indices land in the
+    basic_fields_df_index / private_foundations_df_index columns.
 
     compare_addr and the categorical zip dtype are computed per-slice
     (row-local / speed-only respectively — per-pair scores are identical
@@ -216,7 +217,15 @@ def _match_slice(universe_slice: pd.DataFrame, grants_slice: pd.DataFrame) -> pd
     features.index = features.index.set_names(
         ["basic_fields_df_index", "private_foundations_df_index"]
     )
-    features = features.reset_index()
+    return features.reset_index()
+
+
+def _match_slice(universe_slice: pd.DataFrame, grants_slice: pd.DataFrame) -> pd.DataFrame:
+    """match_records' blocking → Compare → two-stage filter → winner
+    resolution, on a slice. Returns one row per matched grant tuple with
+    the winning universe row's index in basic_fields_df_index.
+    """
+    features = _score_slice(universe_slice, grants_slice)
     features = filter_match_rules(features_df=features, **CHUNK_FILTER_RULES)
     matches = filter_match_rules(features_df=features, **FINAL_FILTER_RULES).copy()
     matches = matches.drop_duplicates()
@@ -419,6 +428,11 @@ def run_preflight() -> int:
 
 
 def main() -> None:
+    # The package logger ships without handlers (operators attach their own);
+    # as a CLI, attach one so the multi-minute run isn't silent.
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+    )
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.parse_args()
     sys.exit(run_preflight())
