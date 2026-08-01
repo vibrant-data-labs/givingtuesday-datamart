@@ -20,6 +20,7 @@ from givingtuesday_datamart._internal.address_cleaning import create_clean_addre
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart._internal.parquet_cache import _decode_json as _pqc_decode_json
+from givingtuesday_datamart.current_grants import build_current_grants
 from givingtuesday_datamart.ingestion import datamart_config
 from givingtuesday_datamart.canonical.build import (
     CANONICAL_BUILDS_TABLE,
@@ -49,8 +50,18 @@ from givingtuesday_datamart.canonical.build import (
 # 990-only universe makes every PF-recipient grant structurally unmatchable —
 # ~$32B of 2020+ grant dollars carry a "PF:" recipient status alone.
 _VIEW_DDL = [
+    # DROP first, not CREATE OR REPLACE: this view's column set changed
+    # when it moved from raw privategrants to privategrants_current
+    # (provenance columns), and CREATE OR REPLACE VIEW cannot reorder or
+    # insert columns. The CASCADE takes privategrants_unique_names_view
+    # with it; both are recreated by the entries below.
+    "DROP VIEW IF EXISTS public.privategrants_w_column_keys_view CASCADE",
     """
     CREATE OR REPLACE VIEW public.privategrants_w_column_keys_view AS (
+        -- Reads the filing-version-deduped relation (issue #33), NOT raw
+        -- staging: raw privategrants carries every filing version's block
+        -- plus GT's 2024-batch whole-block doubles. current_grants.py
+        -- rebuilds privategrants_current at the start of every matching run.
         SELECT
             *,
             CASE WHEN sigocpyrbnbn1 IS NULL THEN '' ELSE LOWER(sigocpyrbnbn1) END name1_key,
@@ -60,7 +71,7 @@ _VIEW_DDL = [
             LOWER(sigocpyrfaci) addresscity_key,
             LOWER(sigocpyrfapo) addressstate_key,
             LOWER(LEFT(sigocpyrfapc, 5)) addresszip_key
-        FROM public.privategrants
+        FROM public.privategrants_current
     )
     """,
     """
@@ -456,7 +467,9 @@ FROM (
         -- Schedule I rows carry the filer-reported recipient EIN directly;
         -- no matching happened, so no match_source.
         NULL AS match_source
-    FROM public.grants_to_domestic_organizations
+    -- Filing-version-deduped relation (issue #33) — raw staging would
+    -- double-count amended filer-years by ~$36B.
+    FROM public.grants_to_domestic_organizations_current
 ) sub;
 """
 
@@ -509,6 +522,17 @@ _MATCHING_INPUT_LOGICAL_NAMES = (
     "irs_990_basic_fields",
     "irs_990pf_basic_fields",
 )
+
+# Version of the SHAPE of matching's inputs — bump on ANY change that can
+# shift row positions in the input views for unchanged source data: the
+# _current dedup rules (current_grants.py), the view definitions above,
+# normalize_org_name, or the blocking scheme. Chunk checkpoints key on
+# integer row positions, and the prefix otherwise hashes only source
+# versions + the corrections CSV, so without this token such a change
+# would let a resume silently stitch features onto the wrong rows.
+#   v2 (2026-07-30): matching reads privategrants_current instead of raw
+#   privategrants (issue #33 filing-version dedup). v1 = everything prior.
+MATCHING_INPUT_SHAPE_VERSION = 2
 
 
 def _insert_started_build(build_id: str, started_at: datetime, source_runs: dict) -> None:
@@ -631,7 +655,8 @@ def _resolve_checkpoint_prefix(
         f"pg_{versions['irs_990pf_grants']}/"
         f"bf_{versions['irs_990_basic_fields']}/"
         f"bfpf_{versions['irs_990pf_basic_fields']}/"
-        f"corr_{_corrections_content_hash()}"
+        f"corr_{_corrections_content_hash()}/"
+        f"shape_v{MATCHING_INPUT_SHAPE_VERSION}"
     )
 
 
@@ -938,6 +963,10 @@ def _do_match_records(
     with get_session(config=datamart_config()) as session:
         connection = session.connection()
         _load_corrections(connection)
+        # Rebuild the filing-version-deduped inputs (issue #33) BEFORE the
+        # views: the DROP ... CASCADE inside takes the dependent matching
+        # views with it, and create_or_replace_views restores them.
+        build_current_grants(connection)
         create_or_replace_views(connection)
         if s3_prefix is None:
             s3_prefix = _resolve_checkpoint_prefix(connection)
