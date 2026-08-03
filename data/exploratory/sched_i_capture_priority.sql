@@ -11,6 +11,21 @@
 --                    (e.g. Dollar General: schools/programs with no EIN reported)
 --   partial_rows   - itemized dollars < 90% of declared (partial extraction)
 --   ok             - >= 90% of declared dollars are itemized AND EIN-mapped
+--
+-- Amended-return duplication guard (confirmed 2026-07-30): GT's Schedule I
+-- extract emits line items for EVERY filing version of a filer-year, so
+-- grouping grants_to_domestic_organizations by (filerein, taxyear) alone
+-- double-counts ~$36B (2020+). Three shapes:
+--   (a) original + amended each under their own url  -> keep latest url only
+--       (MAX(url) picks the amended filing ~73% of the time; either version's
+--       totals differ negligibly — the point is picking ONE)
+--   (b) one url containing a verbatim-doubled block  -> DISTINCT on line-item
+--       tuple (costs only ~$2.4B / 0.37% of legitimately-repeated line items
+--       in clean filings; acceptable for a priority ranking)
+--   (c) RESIDUAL LIMITATION: ~76 filer-years (incl. Fidelity 110303001/2021)
+--       have original + amended blocks BOTH mislabeled with the original's
+--       url; the versions are indistinguishable by url, and only revised line
+--       items collapse under DISTINCT, leaving these ~10-13% inflated.
 
 WITH itemized AS (
     SELECT filerein, taxyear::text AS taxyear,
@@ -22,8 +37,18 @@ WITH itemized AS (
                THEN COALESCE(CASE WHEN retaamofcagr ~ '^-?[0-9]+(\.[0-9]+)?$' THEN retaamofcagr::numeric END, 0)
                   + COALESCE(CASE WHEN rtaoncassist ~ '^-?[0-9]+(\.[0-9]+)?$' THEN rtaoncassist::numeric END, 0)
                ELSE 0 END) AS ein_mapped_dollars
-    FROM grants_to_domestic_organizations
-    WHERE taxyear::text ~ '^[0-9]{4}$' AND taxyear::text >= '2020'
+    FROM (
+        -- shape (b)/(c) guard: collapse identical line items within the kept url
+        SELECT DISTINCT filerein, taxyear, rteinorecipi, rtrnbbnline11,
+               retaamofcagr, rtaoncassist, rectabaddcit, rectabaddsta, retapuofgrra
+        FROM (
+            -- shape (a) guard: keep one filing version per filer-year
+            SELECT *, MAX(url) OVER (PARTITION BY filerein, taxyear) AS latest_url
+            FROM grants_to_domestic_organizations
+            WHERE taxyear::text ~ '^[0-9]{4}$' AND taxyear::text >= '2020'
+        ) versioned
+        WHERE url = latest_url
+    ) deduped
     GROUP BY 1, 2
 ),
 declared AS (
@@ -33,7 +58,10 @@ declared AS (
            lower(grantoororga) IN ('true', '1', 'x', 'yes') AS sched_i_required
     FROM basic_fields
     WHERE taxyear::text ~ '^[0-9]{4}$' AND taxyear::text >= '2020'
-    ORDER BY filerein, taxyear, _ingested_at DESC, filesha256
+    -- url DESC prefers the same filing version as the itemized CTE's latest-url
+    -- guard (_ingested_at is constant within an ingest run, so it was an
+    -- effectively arbitrary tie-break between filing versions)
+    ORDER BY filerein, taxyear, url DESC
 )
 SELECT d.filerein,
        d.filername1 AS name,

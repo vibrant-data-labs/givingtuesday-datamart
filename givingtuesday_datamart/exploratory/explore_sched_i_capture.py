@@ -90,36 +90,36 @@ def _(mo):
     mo.accordion({
         "📖 Issue class & dollar column definitions": mo.md(
             """
-Every class compares extracted line items against the filing's **declared**
-grants-paid total — 990 Part IX line 1 (`graallpaitot`, gated on the Part IV
-Schedule I checkbox), 990-PF Part I line 25 col (d) (`arecgpdcprps`).
+    Every class compares extracted line items against the filing's **declared**
+    grants-paid total — 990 Part IX line 1 (`graallpaitot`, gated on the Part IV
+    Schedule I checkbox), 990-PF Part I line 25 col (d) (`arecgpdcprps`).
 
-| class | form | meaning | canonical example |
-|---|---|---|---|
-| `no_rows` | both | Declared grant dollars, **zero** line items extracted for that year | Fidelity: ~$10B/yr, no rows |
-| `partial_rows` | both | Line items exist but sum to **<90%** of declared | Dollar General 2021: 451 rows, $12.9M of $16.4M |
-| `aggregate_placeholder` | PF | ≥50% of declared sits in placeholder-**name** rows ("SEE ATTACHMENT") — totals fake-reconcile because the placeholder row carries the full amount | Siegel: 1 row = $26.9M |
-| `ein_missing` | 990 | Itemization complete but rows lack recipient EINs (filer omission — not GT-fixable) | Dollar General 2015–20 |
-| `individual_grants` | PF | ≥50% of declared goes to named **persons** (scholarships, patient assistance) — structurally unmappable | Disney 2022, BMS |
-| `foreign_or_nonfiler` | PF | ≥50% to recipients that can't be 990 filers: non-US zip, `NC:`/`GOV:` status, equivalency determination | Gates Fdn → WHO, Pfizer |
-| `unmatched_recipients` | PF | <90% of **matchable** dollars matched — VDL matcher gap (zip-blocking misses, PF-recipient universe gap) | Bloomberg → JHU; Gates Trust |
-| `ok` | both | ≥90% of declared (990) / matchable (PF) dollars mapped | |
+    | class | form | meaning | canonical example |
+    |---|---|---|---|
+    | `no_rows` | both | Declared grant dollars, **zero** line items extracted for that year | Fidelity: ~$10B/yr, no rows |
+    | `partial_rows` | both | Line items exist but sum to **<90%** of declared | Dollar General 2021: 451 rows, $12.9M of $16.4M |
+    | `aggregate_placeholder` | PF | ≥50% of declared sits in placeholder-**name** rows ("SEE ATTACHMENT") — totals fake-reconcile because the placeholder row carries the full amount | Siegel: 1 row = $26.9M |
+    | `ein_missing` | 990 | Itemization complete but rows lack recipient EINs (filer omission — not GT-fixable) | Dollar General 2015–20 |
+    | `individual_grants` | PF | ≥50% of declared goes to named **persons** (scholarships, patient assistance) — structurally unmappable | Disney 2022, BMS |
+    | `foreign_or_nonfiler` | PF | ≥50% to recipients that can't be 990 filers: non-US zip, `NC:`/`GOV:` status, equivalency determination | Gates Fdn → WHO, Pfizer |
+    | `unmatched_recipients` | PF | <90% of **matchable** dollars matched — VDL matcher gap (zip-blocking misses, PF-recipient universe gap) | Bloomberg → JHU; Gates Trust |
+    | `ok` | both | ≥90% of declared (990) / matchable (PF) dollars mapped | |
 
-**Dollar columns** — `unmappable_dollars` = declared − EIN-mapped (990) /
-matched (PF): the honest total gap. `matchable_dollars` (PF) = dollars in
-rows an org-matcher could hit: org recipient, US-shaped zip, filer-capable
-status, non-placeholder. `recoverable_dollars` (PF) = matchable − matched:
-what VDL matching work could actually recover. `dollars_at_issue` (GT tab) =
-declared for `no_rows`/`aggregate_placeholder`, declared − itemized for
-`partial_rows`. `lag_risk` (GT tab) = 990 tail-missing rows in 2023+ —
-probably GT processing lag, not a data error.
+    **Dollar columns** — `unmappable_dollars` = declared − EIN-mapped (990) /
+    matched (PF): the honest total gap. `matchable_dollars` (PF) = dollars in
+    rows an org-matcher could hit: org recipient, US-shaped zip, filer-capable
+    status, non-placeholder. `recoverable_dollars` (PF) = matchable − matched:
+    what VDL matching work could actually recover. `dollars_at_issue` (GT tab) =
+    declared for `no_rows`/`aggregate_placeholder`, declared − itemized for
+    `partial_rows`. `lag_risk` (GT tab) = 990 tail-missing rows in 2023+ —
+    probably GT processing lag, not a data error.
 
-**Audience split** — GT hand-off tab = data-capture classes only
-(`no_rows`, `aggregate_placeholder`, `partial_rows`). Matching
-(`unmatched_recipients`), structural (`individual_grants`,
-`foreign_or_nonfiler`), and filer-omission (`ein_missing`) classes stay
-VDL-internal.
-"""
+    **Audience split** — GT hand-off tab = data-capture classes only
+    (`no_rows`, `aggregate_placeholder`, `partial_rows`). Matching
+    (`unmatched_recipients`), structural (`individual_grants`,
+    `foreign_or_nonfiler`), and filer-omission (`ein_missing`) classes stay
+    VDL-internal.
+    """
         )
     })
     return
@@ -313,6 +313,7 @@ def _(DOLLARS, mo, run_query, sched_year_si, sel_ein_si):
                    rteinorecipi  AS recipient_ein,
                    rectabaddcit  AS city,
                    rectabaddsta  AS state,
+                   rect
                    CASE WHEN retaamofcagr ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN retaamofcagr::numeric END AS cash,
                    CASE WHEN rtaoncassist ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN rtaoncassist::numeric END AS non_cash,
                    retapuofgrra  AS purpose
@@ -587,6 +588,7 @@ def _(DOLLARS, PLACEHOLDER_NAME_REGEX, mo, pf_year, run_query, sel_ein_pf):
                    p.sigocpyrfaal1 AS address,
                    p.sigocpyrfaci  AS city,
                    p.sigocpyrfapo  AS state,
+                   p.sigocpyrfapc AS zip,
                    CASE WHEN p.sigocpyamoun ~ '^-?[0-9]+(\\.[0-9]+)?$'
                         THEN p.sigocpyamoun::numeric END AS amount,
                    p.sigocpypogoc  AS purpose,
@@ -663,11 +665,6 @@ def _(
     return
 
 
-# ---------------------------------------------------------------------------
-# GT hand-off — data-capture issues only (no matching / structural classes)
-# ---------------------------------------------------------------------------
-
-
 @app.cell
 def _(gt_rows, mo):
     form_gt = mo.ui.multiselect(
@@ -689,8 +686,17 @@ def _(gt_rows, mo):
 
 
 @app.cell
-def _(DOLLARS, form_gt, gt_funders, gt_rows, include_lag_gt, issue_gt, min_gt,
-      mo, search_gt):
+def _(
+    DOLLARS,
+    form_gt,
+    gt_funders,
+    gt_rows,
+    include_lag_gt,
+    issue_gt,
+    min_gt,
+    mo,
+    search_gt,
+):
     _rows = gt_rows[
         gt_rows["form_type"].isin(form_gt.value)
         & gt_rows["primary_issue"].isin(issue_gt.value)
@@ -763,8 +769,17 @@ def _(DOLLARS, funder_picker_gt, gt_rows, mo):
 
 
 @app.cell
-def _(form_gt, form_tab, funder_picker_gt, gt_detail, include_lag_gt,
-      issue_gt, min_gt, mo, search_gt):
+def _(
+    form_gt,
+    form_tab,
+    funder_picker_gt,
+    gt_detail,
+    include_lag_gt,
+    issue_gt,
+    min_gt,
+    mo,
+    search_gt,
+):
     (
         mo.vstack(
             [
