@@ -27,17 +27,19 @@ materialized relations consumers read instead of raw staging:
        rest are a GT batch defect concentrated in taxyear 2024). Collapse
        only where BOTH hold: (a) every line-item tuple's multiplicity in
        the filer-year is EVEN — a doubled block always is, including when
-       the underlying filing legitimately repeats a line item (2 legit
-       copies double to 4; Brin 2024 is the documented case, mults 2-4,
-       full sum exactly 2x declared) — and (b) halving moves the itemized
+       the underlying filing legitimately repeats a line item (two
+       legitimate copies double to four; confirmed on EIN 472107200 /
+       tax year 2024: multiplicities 2-4, full sum exactly 2x the
+       declared total) — and (b) halving moves the itemized
        sum toward the filer's own declared grants paid (Part I line 25
        col (d), ``arecgpdcprps``): ``|half - declared| < |full -
        declared|``. Collapsing keeps HALF of each tuple's copies (4 -> 2,
-       2 -> 1), so legit repeats swept up in a doubling survive. Spurious
-       doubles reconcile at half (to the dollar in spot-checks);
-       legitimate repeaters reconcile at full, and mixed odd
-       multiplicities (the 20-identical-checks filer) fail the even test
-       outright. Detection boundary: doubles are only caught when the
+       2 -> 1), so legitimate repeats inside a doubled block survive.
+       Spurious doubles reconcile at half (to the dollar in the verified
+       cases); legitimate repeaters reconcile at full, and mixed odd
+       multiplicities (e.g. one grant listed 20 times alongside
+       singletons) fail the even test outright. Detection boundary:
+       doubles are only caught when the
        filing itemizes >2/3 of declared — the failure mode is
        conservative (residual doubles survive among sparse itemizers; a
        legitimate filer can't be halved unless it itemizes ~2x its own
@@ -223,10 +225,10 @@ tuple_counts AS (
 fy AS (
     -- all_even, not "all exactly 2": a doubled block that already
     -- contained a legitimately repeated line item shows multiplicity 4
-    -- (2 legit copies x2), not 2. Sergey Brin Family Foundation 2024 is
-    -- the documented case: multiplicities 2-4, full sum exactly 2x the
+    -- (2 legitimate copies x2), not 2. Confirmed case: EIN 472107200 /
+    -- tax year 2024 — multiplicities 2-4, full sum exactly 2x the
     -- declared total. Halving each tuple's copies (below) preserves the
-    -- legit repeats while removing the doubling.
+    -- legitimate repeats while removing the doubling.
     SELECT filerein, taxyear,
            BOOL_AND(n_copies % 2 = 0) AS all_even,
            SUM(h_sum) AS full_sum
@@ -300,12 +302,11 @@ _TABLES = (
 def _build_one(connection, table: str, ddl: str) -> int:
     logger.info("Building public.%s (issue #33 filing-version dedup)", table)
     # RDS-default work_mem (4MB) makes the 9-17M-row hash/window passes
-    # spill to thousands of temp-file batches (observed: the build sits in
-    # IO:BufFileRead for an hour+ on the db.t4g.medium). One build runs at
-    # a time, so a fat per-operation budget is safe on the 4GB instance
-    # and cuts the build from hours toward minutes. SET (not SET LOCAL):
-    # session-scoped, so it survives the per-statement execute() calls
-    # below and dies with the connection.
+    # spill to thousands of temp-file batches (observed as sustained
+    # IO:BufFileRead waits on the db.t4g.medium). One build runs at a
+    # time, so a larger per-operation budget is safe on the 4GB instance.
+    # SET (not SET LOCAL): session-scoped, so it survives the
+    # per-statement execute() calls below and dies with the connection.
     connection.execute(text("SET work_mem = '256MB'"))
     connection.execute(text("SET maintenance_work_mem = '512MB'"))
     for stmt in [s for s in ddl.split(";") if s.strip()]:

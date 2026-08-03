@@ -10,15 +10,17 @@ data/corrections/org_identities.csv, worked top-down by dollars
 
 Two detectors:
 
-  default — top-dollar tuple sweep (unknown-unknowns, method below);
+  default — top-dollar tuple sweep over all unmatched tuples (no labeled
+      ground truth required; method below);
   --candid — ground-truth sweep over the Candid labeled set
       (grantor_recipient_labeled_set, 990PF side): for each labeled
       (funder_ein, recip_ein) pair, score the funder's grant tuples
       against the recipient EIN's universe identity rows (falling back to
       Candid's gm_name when the EIN isn't in the universe). Pairs no
       current rule can reach whose best tuple still names the recipient
-      at JW >= 0.80 become correction drafts with the TRUE EIN attached —
-      near-zero verification cost. The covered/uncovered call here is a
+      at JW >= 0.80 become correction drafts with the labeled recipient
+      EIN attached, so per-row verification reduces to confirming the
+      label. The covered/uncovered call here is a
       per-pair reachability approximation (blockable + FINAL tier logic,
       no winner competition); corrections_preflight stays the ground
       truth for authored rows.
@@ -33,11 +35,14 @@ Method:
   3. For each unmatched tuple, look for the identity a correction would
      assert, in the two geometries blocking can never pair:
        * exact_name_cross_state — a universe row with the identical
-         normalized name in another state (the MJFF Hagerstown-lockbox
-         pattern; the exact-name tier requires same state);
+         normalized name in another state; unreachable because the
+         exact-name tier requires same state (e.g. grants sent to a
+         recipient's out-of-state donation lockbox — see the
+         org_identities.csv seed rows for a worked case);
        * state_name_variant — best Jaro-Winkler >= 0.80 among same-state
-         universe rows, cross-zip (the MJFF suffix-variant pattern,
-         JW 0.90 — blocking pairs only same-zip or identical-name);
+         universe rows, cross-zip; unreachable because blocking pairs
+         only same-zip or byte-identical names (e.g. a recipient cited
+         with a name-suffix variant of its filed name, JW ~0.90);
        * zip_near_miss — a same-zip candidate that narrowly failed the
          filter tiers (best blocked pair's name/addr scores reported);
        * no_candidate — nothing plausible; manual-research bucket
@@ -46,7 +51,7 @@ Method:
   4. Write a ranked CSV of unmatched tuples with the best candidate EIN,
      scores, a ProPublica evidence URL, and the verbatim raw name/address
      values a correction row needs — verify top-down, paste accepted rows
-     into org_identities.csv, then prove them with corrections_preflight.
+     into org_identities.csv, then validate them with corrections_preflight.
 
 Caveats:
   * Dollar ranks are computed on staging as-is; the issue #33 duplication
@@ -88,9 +93,10 @@ from givingtuesday_datamart.ingestion import datamart_config
 from givingtuesday_datamart.matching_regression_checks import AMT, PLACEHOLDER_REGEX
 
 # Same-state fuzzy floor for calling a universe row a plausible identity of
-# an unmatched tuple. Deliberately below the matcher's 0.99 exact-name tier
-# (these are the pairs blocking never scores) and above its 0.70 fuzzy
-# floor: MJFF's documented variant sat at JW 0.90.
+# an unmatched tuple. Set below the matcher's 0.99 exact-name tier (these
+# are pairs blocking never scores) and above its 0.70 fuzzy floor; the
+# suffix-variant case behind the first org_identities.csv seed row scored
+# JW 0.90.
 NEAR_MISS_JW_MIN = 0.80
 
 _US_STATES = {
@@ -375,11 +381,11 @@ _SUFFIX_ONLY_RE = re.compile(r"\s+(incorporated|inc|the)$")
 def _write_candid_digest(
     report: pd.DataFrame, out_path: Path, jw_min: float = 0.95
 ) -> pd.DataFrame:
-    """Distill the pair-grained candid report into the file a curator can
-    actually work: one row per recipient EIN, high-confidence tuples only
+    """Distill the pair-grained candid report into a per-recipient
+    worklist: one row per recipient EIN, high-confidence tuples only
     (name_jw >= jw_min), suffix-only variants excluded, ranked by dollars.
 
-    The raw report stays on disk as the audit trail; this is the worklist.
+    The raw report stays on disk as the audit trail.
     """
     df = report.copy()
     df["dollars"] = df["dollars"].astype(float)

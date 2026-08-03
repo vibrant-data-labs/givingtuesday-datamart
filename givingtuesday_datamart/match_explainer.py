@@ -2,13 +2,12 @@
 
 Two entry points:
 
-* ``explain_row(recipient_ein, sigocpyrbnbn1=..., ...)`` — the workhorse.
-  Takes raw ``sigocpy*`` column values exactly as they appear on a
-  privategrants row (copy-paste from the table or the capture explorer),
+* ``explain_row(recipient_ein, sigocpyrbnbn1=..., ...)`` — takes raw
+  ``sigocpy*`` column values as they appear on a privategrants row,
   finds that row's normalized key tuple via
-  ``privategrants_w_column_keys_view`` (so normalization is byte-identical
-  to what the matcher sees — nothing is re-implemented here), and scores
-  it against every identity row the EIN has in the filer universe.
+  ``privategrants_w_column_keys_view`` (the view supplies the
+  normalization, so it cannot drift from the matcher's), and scores it
+  against every identity row the EIN has in the filer universe.
 * ``explain_family(recipient_ein, grant_name)`` — same, but for every
   grant tuple whose name matches an ILIKE fragment; useful to see how one
   fix generalizes across a recipient's misspelling family.
@@ -41,7 +40,7 @@ Usage:
 Scope: pairs against the target EIN only. A pair that matches here can
 still lose the final best-match-per-recipient resolution to a
 better-scoring row of a *different* EIN (name_score weighted 2x) — the
-``current_match_ein`` column shows who actually won in the last completed
+``current_match_ein`` column shows which EIN won in the last completed
 matching run.
 """
 
@@ -269,13 +268,12 @@ def explain_row(
     """Explain one privategrants row (or the set of rows matching the raw
     values you provide) against ``recipient_ein``.
 
-    ``raw_cols``: any subset of RAW_GRANT_COLS with the values exactly as
-    they appear on the row (case/whitespace-insensitive). Provided columns
-    must match; omitted columns are wildcards. The row's normalized key
-    tuple comes from ``privategrants_w_column_keys_view``, so this only
-    works for rows that actually exist in privategrants — which is the
-    point: you're diagnosing a real row, with the matcher's real
-    normalization.
+    ``raw_cols``: any subset of RAW_GRANT_COLS with the values as they
+    appear on the row (case/whitespace-insensitive). Provided columns
+    must match; omitted columns are wildcards. The normalized key tuple
+    comes from ``privategrants_w_column_keys_view``, so only rows present
+    in privategrants can be diagnosed — the view supplies the matcher's
+    normalization rather than this module re-implementing it.
     """
     hypothetical_correction = _parse_hypothetical(hypothetical_correction)
     unknown = set(raw_cols) - set(RAW_GRANT_COLS)

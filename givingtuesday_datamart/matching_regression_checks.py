@@ -9,8 +9,8 @@ trusting or merging its output:
     python -m givingtuesday_datamart.matching_regression_checks --fast   # skip the labeled-pair
                                                                          # coverage check (~3 min)
 
-Exit code 0 = all checks pass; 1 = at least one FAIL. WARNs don't fail
-the gate but deserve a look.
+Exit code 0 = all checks pass; 1 = at least one FAIL. WARNs are reported
+but do not fail the gate.
 
 Baselines are the July 23, 2026 post-fix measurements. After a matcher
 change is *accepted* (per the evaluation protocol in the proposal),

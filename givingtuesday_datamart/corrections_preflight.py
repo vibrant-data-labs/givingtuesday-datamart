@@ -1,15 +1,14 @@
 """Pre-run verification of the corrections registry (data/corrections/org_identities.csv).
 
-Answers, in minutes on a laptop, the question a multi-hour matching rerun
-would otherwise answer: does every correction row actually do the work it
-was authored to do? Run before kicking off match_records(), after any edit
-to the CSV:
+Checks that each correction row blocks, scores, and wins as intended,
+without running the full matching pipeline. Run after any edit to the CSV
+and before match_records():
 
     python -m givingtuesday_datamart.corrections_preflight
 
 Exit code 0 = all checks pass; 1 = at least one FAIL.
 
-For each CSV row it proves, using the matcher's own functions (clean_zip /
+For each CSV row it verifies, using the matcher's own functions (clean_zip /
 create_full_name / create_clean_address, the same recordlinkage blocking and
 Compare, filter_match_rules with the imported CHUNK/FINAL threshold sets,
 and the same best-per-recipient-tuple winner resolution) over the matcher's
@@ -50,7 +49,7 @@ don't change per-pair scores.
 
 Side effects: the same ones match_records() performs at start of run —
 loads the CSV into public.corrections_org_identities and refreshes the
-matching views — so the preflight verifies exactly what the run will read.
+matching views — so the preflight reads the same state a run would.
 """
 
 from __future__ import annotations
@@ -105,8 +104,8 @@ _KEY7 = [
 ]
 _KEY8 = ["filerein_key"] + _KEY7
 
-# Verbatim copies of the two reads in _do_match_records (sans LIMIT) — keep
-# in lockstep so the preflight sees exactly the universe the run sees.
+# Verbatim copies of the two reads in _do_match_records (sans LIMIT) —
+# keep in lockstep with that function.
 _UNIVERSE_SQL = """
     SELECT filerein_key, name1_key, name2_key, address1_key,
            address2_key, addresscity_key, addressstate_key,
@@ -287,8 +286,8 @@ def run_preflight() -> int:
     config = datamart_config()
     with get_session(config=config) as session:
         conn = session.connection()
-        # Same start-of-run side effects as match_records, so the preflight
-        # verifies exactly what the run will read.
+        # Same start-of-run side effects as match_records: CSV load into
+        # corrections_org_identities + view refresh.
         _load_corrections(conn)
         create_or_replace_views(conn)
         logger.info(

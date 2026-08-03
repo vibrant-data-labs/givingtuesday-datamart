@@ -647,9 +647,9 @@ def _resolve_checkpoint_prefix(
             f"No successful ingest run on record for: {sorted(missing)}. "
             "Run `python -m givingtuesday_datamart.sources refresh` first."
         )
-    # Nested rather than flat (`pg_X__bf_Y`) so `aws s3 ls` is actually
-    # browseable: each level shows progressively narrower scope, and a single
-    # source version's chunks can be `aws s3 rm --recursive`'d in one shot.
+    # Nested rather than flat (`pg_X__bf_Y`) so the prefix is browseable
+    # with `aws s3 ls`: each level narrows scope, and a single source
+    # version's chunks can be `aws s3 rm --recursive`'d in one shot.
     return (
         f"{base_prefix}/"
         f"pg_{versions['irs_990pf_grants']}/"
@@ -844,8 +844,8 @@ def filter_match_rules(
 
 
 # The two threshold sets passed to filter_match_rules. Chunk-stage is
-# deliberately generous so checkpointed chunks survive a later tightening of
-# the final rules; final-stage is what actually decides matches.
+# looser so checkpointed chunks survive a later tightening of the final
+# rules; final-stage decides matches.
 # corrections_preflight imports both — change thresholds here, never inline,
 # so the preflight can't drift from the real matcher.
 CHUNK_FILTER_RULES = dict(
@@ -1000,8 +1000,8 @@ def _do_match_records(
         # tie-break. An org whose key tuple appears in multiple arms keeps
         # one row, organic sources winning over corrections — so a
         # correction that duplicates a real filing collapses away, and
-        # match_source='correction' only ever appears where the correction
-        # actually did the work (the prunability signal in
+        # match_source='correction' only appears where the correction row
+        # itself supplied the winning identity (the prunability signal:
         # docs/corrections-plan.md). source_rank in the DISTINCT ON ORDER BY
         # keeps the winner deterministic; the outer ORDER BY keeps row order
         # deterministic over the whole universe.
@@ -1081,7 +1081,7 @@ def _do_match_records(
 
     # --- 5. EXECUTE BLOCKING ---
     # Two blocking passes, unioned by indexer.index():
-    #   1. exact zip — the workhorse (~1B pairs)
+    #   1. exact zip — the primary block (~1B pairs)
     #   2. exact full_name — cross-zip candidates for recipients listed at a
     #      different address than the filer's header (e.g. Gates Trust →
     #      Gates Foundation, zip 98109 vs 98102). Measured at ~681K pairs
