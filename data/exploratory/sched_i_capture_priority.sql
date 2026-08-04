@@ -12,20 +12,14 @@
 --   partial_rows   - itemized dollars < 90% of declared (partial extraction)
 --   ok             - >= 90% of declared dollars are itemized AND EIN-mapped
 --
--- Amended-return duplication guard (confirmed 2026-07-30): GT's Schedule I
--- extract emits line items for EVERY filing version of a filer-year, so
--- grouping grants_to_domestic_organizations by (filerein, taxyear) alone
--- double-counts ~$36B (2020+). Three shapes:
---   (a) original + amended each under their own url  -> keep latest url only
---       (MAX(url) picks the amended filing ~73% of the time; either version's
---       totals differ negligibly — the point is picking ONE)
---   (b) one url containing a verbatim-doubled block  -> DISTINCT on line-item
---       tuple (costs only ~$2.4B / 0.37% of legitimately-repeated line items
---       in clean filings; acceptable for a priority ranking)
---   (c) RESIDUAL LIMITATION: ~76 filer-years (incl. Fidelity 110303001/2021)
---       have original + amended blocks BOTH mislabeled with the original's
---       url; the versions are indistinguishable by url, and only revised line
---       items collapse under DISTINCT, leaving these ~10-13% inflated.
+-- Filing-version dedup: reads public.grants_to_domestic_organizations_current
+-- (issue #33; built by givingtuesday_datamart/current_grants.py), which keeps
+-- one filing version per filer-year and collapses amendment-linked duplicate
+-- line items. Supersedes the in-query guard this file carried 2026-07-30..08-04.
+-- Residual limitation (documented on the relation): the one confirmed
+-- provenance-mislabeled filer-year (110303001/2021) stays ~13% inflated.
+-- Rebuild the relation if staging was refreshed since the last matching run:
+--   python -m givingtuesday_datamart.current_grants
 
 WITH itemized AS (
     SELECT filerein, taxyear::text AS taxyear,
@@ -37,18 +31,8 @@ WITH itemized AS (
                THEN COALESCE(CASE WHEN retaamofcagr ~ '^-?[0-9]+(\.[0-9]+)?$' THEN retaamofcagr::numeric END, 0)
                   + COALESCE(CASE WHEN rtaoncassist ~ '^-?[0-9]+(\.[0-9]+)?$' THEN rtaoncassist::numeric END, 0)
                ELSE 0 END) AS ein_mapped_dollars
-    FROM (
-        -- shape (b)/(c) guard: collapse identical line items within the kept url
-        SELECT DISTINCT filerein, taxyear, rteinorecipi, rtrnbbnline11,
-               retaamofcagr, rtaoncassist, rectabaddcit, rectabaddsta, retapuofgrra
-        FROM (
-            -- shape (a) guard: keep one filing version per filer-year
-            SELECT *, MAX(url) OVER (PARTITION BY filerein, taxyear) AS latest_url
-            FROM grants_to_domestic_organizations
-            WHERE taxyear::text ~ '^[0-9]{4}$' AND taxyear::text >= '2020'
-        ) versioned
-        WHERE url = latest_url
-    ) deduped
+    FROM public.grants_to_domestic_organizations_current
+    WHERE taxyear::text ~ '^[0-9]{4}$' AND taxyear::text >= '2020'
     GROUP BY 1, 2
 ),
 declared AS (
