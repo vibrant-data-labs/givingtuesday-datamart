@@ -132,12 +132,11 @@ def test_url_normalized_to_domain_and_prefix():
     assert params["domain_prefix"] == "example.org%"
 
 
-def test_name_binds_ilike_and_fts_params():
+def test_name_binds_ilike_param():
     client, session = _client()
     client.search_identity(name="Michael J Fox Foundation", org_type="nonprofit")
     (_, params), = session.calls
     assert params["like"] == "%Michael J Fox Foundation%"
-    assert params["raw_name"] == "Michael J Fox Foundation"
 
 
 # ---------------------------------------------------------------------------
@@ -151,20 +150,31 @@ def test_nonprofit_arm_emits_all_signal_ctes():
         name="fox", url="example.org", ein="131234567", org_type="nonprofit"
     )
     (sql, params), = session.calls
-    for cte in ("name_hits", "fts_hits", "ein_hits", "url_hits"):
+    for cte in ("name_hits", "ein_hits", "url_hits"):
         assert cte in sql
     # Tier constants ported from the frontend.
     assert "2000000.0::float8" in sql
     assert "1500000.0::float8" in sql
     assert "1200000.0::float8" in sql
     assert "1000000.0::float8" in sql
-    # websearch_to_tsquery + ts_rank_cd (not the plainto/ts_rank pair that
-    # search_nonprofits uses).
-    assert "websearch_to_tsquery('english'" in sql
-    assert "ts_rank_cd" in sql
-    # 990-EZ contract: narrative hits outside the canonical keep their row.
     assert "LEFT JOIN public.nonprofit_canonical" in sql
     assert params["limit"] == 25
+
+
+def test_narrative_arm_is_never_emitted():
+    # A topical text match is not identity evidence, and its raw ts_rank_cd
+    # scores would land at rank 1 whenever no real signal matches. Narrative
+    # discovery belongs to search_nonprofits.
+    client, session = _client()
+    client.search_identity(
+        name="fox", url="example.org", ein="131234567", org_type="nonprofit"
+    )
+    (sql, params), = session.calls
+    assert "fts_hits" not in sql
+    assert "nonprofit_text" not in sql
+    assert "websearch_to_tsquery" not in sql
+    assert "ts_rank_cd" not in sql
+    assert "raw_name" not in params
 
 
 def test_unused_signals_are_not_emitted():
@@ -178,13 +188,12 @@ def test_unused_signals_are_not_emitted():
     assert "domain" not in sql
 
 
-def test_include_narrative_false_drops_fts():
-    client, session = _client()
-    client.search_identity(name="fox", org_type="nonprofit", include_narrative=False)
-    (sql, _), = session.calls
-    assert "name_hits" in sql
-    assert "fts_hits" not in sql
-    assert "nonprofit_text" not in sql
+def test_include_narrative_kwarg_is_gone():
+    # Removed rather than defaulted off, so nobody can re-enable a
+    # non-identity signal without editing the client.
+    client, _ = _client()
+    with pytest.raises(TypeError):
+        client.search_identity(name="fox", include_narrative=True)
 
 
 def test_funder_arm_is_name_and_ein_only():
@@ -196,9 +205,8 @@ def test_funder_arm_is_name_and_ein_only():
     assert "public.funder_canonical" in sql
     assert "name_hits" in sql
     assert "ein_hits" in sql
-    # No URL or narrative surface, and no DBA columns, on funders.
+    # No URL surface and no DBA columns on funders.
     assert "url_hits" not in sql
-    assert "fts_hits" not in sql
     assert "dba_1" not in sql
 
 
@@ -231,7 +239,8 @@ def test_limit_none_omits_sql_limit():
 def test_merge_orders_by_rank_then_taxyear_then_name_then_ein():
     nonprofit_rows = [
         _row("100000001", rank=1_000_000.0, latest_taxyear=2020, name="Alpha"),
-        _row("100000002", rank=12.5, latest_taxyear=2023, name="Narrative Hit", signal="narrative"),
+        _row("100000002", rank=1_200_000.0, latest_taxyear=2023,
+             name="Prefix Hit", signal="url_prefix"),
     ]
     funder_rows = [
         _row("200000001", rank=2_000_000.0, latest_taxyear=2019, name="EIN Winner", signal="ein"),
@@ -242,13 +251,13 @@ def test_merge_orders_by_rank_then_taxyear_then_name_then_ein():
 
     assert [h.ein for h in hits] == [
         "200000001",  # EIN tier beats everything despite oldest taxyear
-        "100000001",  # rank tie with 200000002, same year, same name → ein ASC
+        "100000002",  # url_prefix tier outranks both name-tier rows
+        "100000001",  # rank tie with 200000002, same year, same name -> ein ASC
         "200000002",
-        "100000002",  # raw FTS rank sorts below all fixed tiers
     ]
-    assert [h.org_type for h in hits] == ["funder", "nonprofit", "funder", "nonprofit"]
+    assert [h.org_type for h in hits] == ["funder", "nonprofit", "nonprofit", "funder"]
     assert hits[0].signal == "ein"
-    assert hits[3].signal == "narrative"
+    assert hits[1].signal == "url_prefix"
 
 
 def test_none_taxyear_sorts_last_within_tier():
@@ -271,7 +280,11 @@ def test_limit_applied_after_merge():
     assert [h.org_type for h in hits] == ["funder", "funder", "funder", "nonprofit"]
 
 
-def test_990ez_null_identity_columns_survive():
+def test_null_identity_columns_pass_through():
+    # With the narrative arm gone, every signal source selects from the
+    # canonical, so the LEFT JOIN can no longer actually produce NULLs. The
+    # join is kept defensively; this asserts the client still maps such a row
+    # cleanly if a future nonprofit_text-sourced signal reintroduces one.
     rows = [
         _row(
             "100000009",
@@ -280,8 +293,7 @@ def test_990ez_null_identity_columns_survive():
             city=None,
             state=None,
             latest_taxyear=None,
-            rank=3.2,
-            signal="narrative",
+            rank=1_000_000.0,
         )
     ]
     client, _ = _client([rows])
@@ -295,7 +307,7 @@ def test_990ez_null_identity_columns_survive():
             state=None,
             latest_taxyear=None,
             org_type="nonprofit",
-            rank=3.2,
-            signal="narrative",
+            rank=1_000_000.0,
+            signal="name",
         )
     ]

@@ -42,11 +42,11 @@ GranteeOrGranter = Literal["grantee", "granter"]
 SearchMode = Literal["stemmed", "exact"]
 IdentityOrgType = Literal["all", "nonprofit", "funder"]
 
-# Ranking tiers for ``search_identity``, ported verbatim from the frontend's
+# Ranking tiers for ``search_identity``, ported from the frontend's
 # ``searchOrgs`` query (frontend/src/lib/queries/search.ts). Tiers are
-# separated by wide ranges so a tier always beats every lower tier; narrative
-# FTS uses raw ``ts_rank_cd`` scores (typically 0–~50), which always sort
-# below the fixed tiers.
+# separated by wide ranges so a tier always beats every lower tier. The
+# frontend's fifth tier — narrative FTS at raw ``ts_rank_cd`` — is
+# intentionally not ported; see ``search_identity`` for why.
 IDENTITY_RANK_EIN = 2_000_000.0
 IDENTITY_RANK_URL_EXACT = 1_500_000.0
 IDENTITY_RANK_URL_PREFIX = 1_200_000.0
@@ -519,7 +519,6 @@ class GtDatamartClient:
         name: str | None,
         domain: str,
         ein_digits: str,
-        include_narrative: bool,
         limit: int | None,
     ) -> tuple[str, dict[str, object]]:
         """Assemble one arm of the ``search_identity`` query.
@@ -558,20 +557,6 @@ class GtDatamartClient:
             unions.append("SELECT ein, rank, signal FROM name_hits")
             params["like"] = f"%{name}%"
 
-        if arm == "nonprofit" and name is not None and include_narrative:
-            ctes.append(
-                """fts_hits AS (
-                    SELECT nt.ein,
-                           ts_rank_cd(nt.text_tsv_compact, q)::float8 AS rank,
-                           'narrative' AS signal
-                    FROM public.nonprofit_text nt,
-                         websearch_to_tsquery('english', :raw_name) AS q
-                    WHERE nt.text_tsv_compact @@ q
-                )"""
-            )
-            unions.append("SELECT ein, rank, signal FROM fts_hits")
-            params["raw_name"] = name
-
         if ein_digits:
             ctes.append(
                 f"""ein_hits AS (
@@ -603,11 +588,12 @@ class GtDatamartClient:
             params["domain"] = domain
             params["domain_prefix"] = f"{domain}%"
 
-        # LEFT JOIN on the nonprofit arm because narrative hits can be
-        # 990-EZ filers absent from nonprofit_canonical — they come back
-        # with NULL identity columns (same contract as search_nonprofits).
-        # The funder arm's sources are all funder_canonical itself, so its
-        # join is definitionally inner.
+        # Every remaining signal source selects from the canonical itself, so
+        # this LEFT JOIN is now provably equivalent to an inner one — it can
+        # no longer surface the 990-EZ filers (present in nonprofit_text,
+        # absent from nonprofit_canonical) that the dropped narrative arm
+        # used to reach. Kept as LEFT so adding a nonprofit_text-sourced
+        # signal later doesn't silently start dropping rows.
         join = (
             "LEFT JOIN public.nonprofit_canonical c USING (ein)"
             if arm == "nonprofit"
@@ -656,7 +642,6 @@ class GtDatamartClient:
         ein: str | None = None,
         *,
         org_type: IdentityOrgType = "all",
-        include_narrative: bool = True,
         limit: int | None = 25,
     ) -> list[IdentityHit]:
         """Multi-signal ranked identity search, ported from the frontend's
@@ -678,28 +663,32 @@ class GtDatamartClient:
           upstream, don't pass raw customer junk like ``"N/A"``.
         * ``name`` — ILIKE substring over ``name`` / ``name_secondary``
           (plus ``dba_1`` / ``dba_2`` on the nonprofit arm) at rank
-          1,000,000, UNIONed with narrative FTS over
-          ``nonprofit_text.text_tsv_compact`` via
-          ``websearch_to_tsquery('english', ...)`` ranked by raw
-          ``ts_rank_cd`` (typically 0–~50, always below the fixed tiers).
-          Set ``include_narrative=False`` to search names only.
+          1,000,000.
 
-        Two arms, mirroring the frontend: ``nonprofit_canonical`` (all
-        signals) and ``funder_canonical`` (name + EIN only — funders have no
-        URL or narrative surface yet). ``org_type`` restricts to one arm;
-        a funder-only search with just a ``url`` has nothing to match and
-        returns ``[]``. Each EIN collapses to its best rank per arm, with
+        Identity signals only. The frontend's narrative-FTS arm is
+        deliberately **not** ported: a topical match on 990 program text is
+        not evidence of identity, and mixing its raw ``ts_rank_cd`` scores
+        (~0–50) into a list topped by fixed 1,000,000+ tiers means a weak
+        topical hit lands at rank 1 whenever no real identity signal matches.
+        Measured on a live portfolio, it bought ~4 points of recall while
+        doubling the wrong-at-rank-1 rate, and on rows with no EIN it was
+        wrong nearly every time ("Freedom River Well Project" → CRAG LAW
+        CENTER). Use ``search_nonprofits`` for narrative/topical discovery —
+        that's the method built for it, and it returns FTS ranks unmixed
+        with identity tiers.
+
+        Two arms: ``nonprofit_canonical`` (all three signals) and
+        ``funder_canonical`` (name + EIN only — funders have no website, so
+        no domain column). ``org_type`` restricts to one arm; a funder-only
+        search with just a ``url`` has nothing to match and returns ``[]``.
+        Each EIN collapses to its best rank per arm, with
         ``IdentityHit.signal`` naming the winning signal.
-
-        The nonprofit arm LEFT JOINs ``nonprofit_canonical``, so ~46K 990-EZ
-        filers reachable only through the narrative signal return with NULL
-        identity columns (same contract as ``search_nonprofits``).
 
         ``limit`` is pushed into each arm's SQL, then the arms are merged
         and re-sliced here (rank DESC, latest_taxyear DESC nulls-last, name,
         ein — the frontend's exact ordering), so worst case ``2 * limit``
         rows cross the wire. ``limit=None`` returns everything; fine for
-        EIN/URL lookups, unbounded for broad name/narrative queries.
+        EIN/URL lookups, unbounded for a broad name substring.
         """
         if org_type not in ("all", "nonprofit", "funder"):
             raise ValueError(
@@ -725,13 +714,11 @@ class GtDatamartClient:
             return []
 
         logger.info(
-            "search_identity: signals(name=%s, url=%s, ein=%s), org_type=%s, "
-            "include_narrative=%s, limit=%s",
+            "search_identity: signals(name=%s, url=%s, ein=%s), org_type=%s, limit=%s",
             name is not None,
             bool(domain),
             bool(ein_digits),
             org_type,
-            include_narrative,
             limit,
         )
 
@@ -745,7 +732,6 @@ class GtDatamartClient:
                     name=name,
                     domain=domain,
                     ein_digits=ein_digits,
-                    include_narrative=include_narrative,
                     limit=limit,
                 )
                 rows = session.execute(text(sql), params).mappings().all()
@@ -781,7 +767,6 @@ class GtDatamartClient:
         has_name: bool,
         has_domain: bool,
         has_ein: bool,
-        include_narrative: bool,
         include_url_prefix: bool,
         limit_per_query: int | None,
     ) -> str:
@@ -820,23 +805,6 @@ class GtDatamartClient:
                 )"""
             )
             unions.append("SELECT key, ein, rank, signal FROM name_hits")
-
-        if arm == "nonprofit" and has_name and include_narrative:
-            # tsquery built once per input row in the subselect, then matched
-            # against the GIN index — indexed lookup per row, not a scan.
-            ctes.append(
-                """fts_hits AS (
-                    SELECT q.key, nt.ein,
-                           ts_rank_cd(nt.text_tsv_compact, q.tsq)::float8 AS rank,
-                           'narrative' AS signal
-                    FROM (
-                        SELECT key, websearch_to_tsquery('english', val) AS tsq
-                        FROM unnest(:fts_keys ::text[], :fts_vals ::text[]) AS t(key, val)
-                    ) q
-                    JOIN public.nonprofit_text nt ON nt.text_tsv_compact @@ q.tsq
-                )"""
-            )
-            unions.append("SELECT key, ein, rank, signal FROM fts_hits")
 
         if has_ein:
             ctes.append(
@@ -877,6 +845,8 @@ class GtDatamartClient:
                 )
                 unions.append("SELECT key, ein, rank, signal FROM url_prefix_hits")
 
+        # LEFT for the same defensive reason as the single-row path — every
+        # current source selects from the canonical, so it can't yield NULLs.
         join = (
             "LEFT JOIN public.nonprofit_canonical c USING (ein)"
             if arm == "nonprofit"
@@ -931,7 +901,6 @@ class GtDatamartClient:
         queries: Sequence[IdentityQuery],
         *,
         org_type: IdentityOrgType = "all",
-        include_narrative: bool = True,
         include_url_prefix: bool = False,
         limit_per_query: int | None = 25,
         chunk_size: int = 500,
@@ -960,7 +929,6 @@ class GtDatamartClient:
           still saves the round trips — roughly 30% — but not the scans).
           Budget ~0.5s per named row. Above a few hundred name-only rows,
           prefer ``iter_identity_universe`` and match in process.
-        * narrative FTS — GIN-indexed, so it stays an indexed lookup per row.
 
         ``chunk_size`` bounds both the array-parameter size and the length of
         any single transaction; progress is logged per chunk. Lower it for
@@ -975,8 +943,11 @@ class GtDatamartClient:
         use it when feeding unwashed customer data where ``"N/A"`` in a URL
         column shouldn't sink 5,000 good rows.
 
-        ``org_type``, ``include_narrative``, and the ranking tiers behave
-        exactly as in ``search_identity``.
+        ``org_type`` and the ranking tiers behave exactly as in
+        ``search_identity`` — including the deliberate absence of a narrative
+        signal, which is a topical match rather than identity evidence. See
+        that method's docstring for why, and use ``search_nonprofits`` when
+        narrative discovery is what you actually want.
         """
         if org_type not in ("all", "nonprofit", "funder"):
             raise ValueError(
@@ -1024,12 +995,11 @@ class GtDatamartClient:
         total_chunks = (len(normalized) + chunk_size - 1) // chunk_size
         logger.info(
             "search_identity_bulk: %d queries in %d chunk(s) of %d, org_type=%s, "
-            "include_narrative=%s, include_url_prefix=%s, limit_per_query=%s",
+            "include_url_prefix=%s, limit_per_query=%s",
             len(normalized),
             total_chunks,
             chunk_size,
             org_type,
-            include_narrative,
             include_url_prefix,
             limit_per_query,
         )
@@ -1063,8 +1033,6 @@ class GtDatamartClient:
                 base_params: dict[str, object] = {
                     "name_keys": name_keys,
                     "name_vals": name_vals,
-                    "fts_keys": name_keys,
-                    "fts_vals": name_vals,
                     "url_keys": url_keys,
                     "url_vals": url_vals,
                     "ein_keys": ein_keys,
@@ -1074,7 +1042,7 @@ class GtDatamartClient:
                     base_params["limit_per_query"] = limit_per_query
 
                 for arm, run in (("nonprofit", run_nonprofit), ("funder", run_funder)):
-                    # The funder arm has no URL or narrative surface, so a
+                    # The funder arm has no URL surface, so a
                     # chunk carrying only URLs gives it nothing to match.
                     if not run:
                         continue
@@ -1085,7 +1053,6 @@ class GtDatamartClient:
                         has_name=has_name,
                         has_domain=has_domain,
                         has_ein=has_ein,
-                        include_narrative=include_narrative,
                         include_url_prefix=include_url_prefix,
                         limit_per_query=limit_per_query,
                     )

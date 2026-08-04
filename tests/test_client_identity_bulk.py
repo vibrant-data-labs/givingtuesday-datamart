@@ -239,16 +239,24 @@ def test_url_prefix_tier_is_opt_in():
     assert "1200000.0::float8" in sql
 
 
-def test_narrative_can_be_disabled():
+def test_narrative_arm_is_never_emitted():
     client, session = _client([[]])
     client.search_identity_bulk(
-        [IdentityQuery(key="a", name="x")],
-        org_type="nonprofit",
-        include_narrative=False,
+        [IdentityQuery(key="a", name="x")], org_type="nonprofit"
     )
-    sql, _ = session.calls[0]
+    sql, params = session.calls[0]
     assert "fts_hits" not in sql
     assert "nonprofit_text" not in sql
+    assert "websearch_to_tsquery" not in sql
+    assert "fts_keys" not in params
+
+
+def test_include_narrative_kwarg_is_gone():
+    client, _ = _client()
+    with pytest.raises(TypeError):
+        client.search_identity_bulk(
+            [IdentityQuery(key="a", name="x")], include_narrative=True
+        )
 
 
 def test_funder_arm_skipped_when_chunk_has_only_urls():
@@ -285,7 +293,7 @@ def test_limit_none_omits_row_number_filter():
 def test_hits_grouped_by_key_and_ordered_within_key():
     nonprofit_rows = [
         _row("a", "100000001", rank=1_000_000.0, latest_taxyear=2020),
-        _row("a", "100000002", rank=12.5, signal="narrative"),
+        _row("a", "100000002", rank=1_200_000.0, signal="url_prefix"),
         _row("b", "100000003", rank=1_000_000.0),
     ]
     funder_rows = [
@@ -295,7 +303,7 @@ def test_hits_grouped_by_key_and_ordered_within_key():
     out = client.search_identity_bulk(
         [IdentityQuery(key="a", name="x", ein="131234567"), IdentityQuery(key="b", name="y")]
     )
-    assert [h.ein for h in out["a"]] == ["200000001", "100000001", "100000002"]
+    assert [h.ein for h in out["a"]] == ["200000001", "100000002", "100000001"]
     assert [h.org_type for h in out["a"]] == ["funder", "nonprofit", "nonprofit"]
     assert [h.ein for h in out["b"]] == ["100000003"]
 
@@ -315,14 +323,14 @@ def test_limit_reapplied_after_cross_arm_merge():
 
 def test_null_identity_columns_preserved():
     rows = [_row("a", "100000009", name=None, city=None, state=None,
-                 latest_taxyear=None, rank=3.2, signal="narrative")]
+                 latest_taxyear=None, rank=1_000_000.0)]
     client, _ = _client([rows])
     out = client.search_identity_bulk(
         [IdentityQuery(key="a", name="tutoring")], org_type="nonprofit"
     )
     assert out["a"][0].name is None
     assert out["a"][0].latest_taxyear is None
-    assert out["a"][0].signal == "narrative"
+    assert out["a"][0].signal == "name"
 
 
 # ---------------------------------------------------------------------------
