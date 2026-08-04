@@ -23,9 +23,9 @@ const SEARCH_CACHE_REVALIDATE_SECONDS = 600; // 10 minutes
 //     happens in JS, then the page slice is taken. Worst case data over the
 //     wire per request is 2 * (offset + limit) rows, not the entire match set.
 //   - firstYear comes from a per-page MIN(taxyear) lookup against
-//     public.basic_fields(_pf) on the filerein index (one query per arm,
-//     bounded by `limit` EINs). Real range like "2010–2023" instead of the
-//     canonical's latest year repeated.
+//     public.basic_fields(_pf)_current on the filerein index (one query per
+//     arm, bounded by `limit` EINs). Real range like "2010–2023" instead of
+//     the canonical's latest year repeated.
 
 type SearchHit = {
   ein: string;
@@ -142,7 +142,7 @@ async function searchNonprofits(
       -- Only materialized when dafOnly=true (gated by WHERE FALSE otherwise).
       -- donoadvifund encoding: '1'/'true'=Yes, '0'/'false'/empty/NULL=No.
       SELECT DISTINCT filerein::text AS ein
-      FROM public.basic_fields
+      FROM public.basic_fields_current
       WHERE ${dafOnly} AND donoadvifund IN ('1', 'true')
     )
     SELECT
@@ -247,7 +247,7 @@ async function searchFoundations(
 // EIN set (≤ page size). Returns a map ein → first_year; missing EINs (e.g.
 // canonical row exists but no basic_fields rows) just don't appear.
 async function fetchFirstYears(
-  table: 'public.basic_fields' | 'public.basic_fields_pf',
+  table: 'public.basic_fields_current' | 'public.basic_fields_pf_current',
   eins: string[],
 ): Promise<Map<string, number>> {
   if (eins.length === 0) return new Map();
@@ -324,8 +324,8 @@ async function runSearch(
   const npEins = paginated.filter((r) => r.org_type === 'nonprofit').map((r) => r.ein);
   const pfEins = paginated.filter((r) => r.org_type === 'foundation').map((r) => r.ein);
   const [npFirstYears, pfFirstYears] = await Promise.all([
-    fetchFirstYears('public.basic_fields', npEins),
-    fetchFirstYears('public.basic_fields_pf', pfEins),
+    fetchFirstYears('public.basic_fields_current', npEins),
+    fetchFirstYears('public.basic_fields_pf_current', pfEins),
   ]);
 
   return {

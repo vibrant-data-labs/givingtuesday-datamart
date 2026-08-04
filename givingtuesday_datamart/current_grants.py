@@ -1,11 +1,12 @@
-"""Filing-version dedup: canonical `_current` relations over grants staging.
+"""Filing-version dedup: canonical `_current` relations over GT staging.
 
-GT's grants extracts emit line items for every filing version of a
-filer-year (original + amended returns), and recent PF batches double
-whole blocks outright — see GitHub issue #33 for the full evidence. The
-staging tables stay byte-faithful to the source (that invariant is what
-proved the bug was upstream); correction happens here, in two
-materialized relations consumers read instead of raw staging:
+GT's extracts emit a row for every filing version of a filer-year
+(original + amended returns), and recent PF batches double whole grant
+blocks outright — see GitHub issues #33 (grants) and #34 (basic fields)
+for the full evidence. The staging tables stay byte-faithful to the
+source (that invariant is what proved the bug was upstream); correction
+happens here, in four materialized relations consumers read instead of
+raw staging:
 
 * ``public.grants_to_domestic_organizations_current`` (990 Schedule I)
     1. latest_url — where a filer-year has multiple ``url``s (original +
@@ -45,11 +46,45 @@ materialized relations consumers read instead of raw staging:
        legitimate filer can't be halved unless it itemizes ~2x its own
        declared total).
 
-Every surviving row carries provenance: ``n_urls_for_year``,
+* ``public.basic_fields_current`` (990 filer financials, issue #34)
+* ``public.basic_fields_pf_current`` (990-PF filer financials)
+    One row per ``(filerein, taxyear)``, chosen by ``DISTINCT ON``. These
+    are whole-return versions rather than line items, so there is nothing
+    to collapse — the rule is purely "which version wins":
+      1. a version that actually REPORTS the metric beats one that leaves
+         it blank (990 only, keyed on ``totacashcont``). Measured on the
+         2026_06 drops: 247 filer-years (2018+) would otherwise read NULL
+         where an earlier version carried a number — 140 amended returns
+         that restate total revenue but omit the contributions breakdown,
+         107 where two accounting periods share one taxyear label and the
+         newest url is a near-empty stub (that grain problem is issue #37,
+         which version selection cannot fix). The PF side needs no such
+         key: 0 of 26,047 multi-version PF filer-years blank either
+         ``areterexpnss`` or ``arecgpdcprps``. Add one there only if a
+         future drop changes that.
+      2. prefer ``amendereturn = 'X'`` (990 only — ``basic_fields_pf``
+         carries no amend flag).
+      3. tiebreak ``MAX(url)``, then ``filesha256`` for determinism:
+         23,365 filer-years carry multiple shas under a single url.
+    Selection is row-level, never a per-column COALESCE across versions —
+    in the split-period cases a composite would pair one period's revenue
+    with another period's contributions, producing a row that matches no
+    real filing.
+
+    NOTE: the Schedule I and PF grant rules above deliberately keep
+    reading RAW ``basic_fields``/``basic_fields_pf`` for their amendment
+    evidence and declared-total lookups. Repointing them at these
+    relations would change which version supplies ``arecgpdcprps``, hence
+    which filer-years pair_collapse fires on, hence matching inputs — a
+    gate-moving change that does not belong in a consumer-side fix.
+
+Every surviving row carries provenance: ``n_urls_for_year`` (grants),
 ``n_filings_for_year`` (distinct shas in basic_fields[_pf]), and
-``dedup_rule`` (``passthrough`` | ``latest_url`` | ``amend_distinct`` |
-``pair_collapse``, ``+``-joined when both applied) — so every kept or
-dropped row is explainable from the relation alone.
+``dedup_rule`` — ``passthrough`` | ``latest_url`` | ``amend_distinct`` |
+``pair_collapse`` (``+``-joined when both applied) on the grants side,
+``passthrough`` | ``latest_filing`` | ``duplicate_row`` on the basic
+fields side — so every kept or dropped row is explainable from the
+relation alone.
 
 Builds are DROP + CREATE TABLE AS (idempotent) with (filerein) and
 (filerein, taxyear) indexes + ANALYZE. The DROP cascades to the matching
@@ -69,6 +104,56 @@ from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart.ingestion import datamart_config
 
 _NUMERIC_RE = r"'^-?[0-9]+(\.[0-9]+)?$'"
+
+# Filer-financial relations: whole-return version selection, no line-item
+# collapsing. `b.*` rather than an explicit column list — basic_fields
+# carries 168 columns and basic_fields_pf 141, the order is whatever
+# staging has, and a hardcoded list would silently drop columns the next
+# GT drop adds. (The grants DDL below can't do this: its content-hash
+# needs every column named.)
+_BASIC_FIELDS_SELECT = """
+DROP TABLE IF EXISTS public.{table}_current CASCADE;
+CREATE TABLE public.{table}_current AS
+WITH filings AS (
+    SELECT filerein, taxyear,
+           COUNT(*)                   AS n_rows_for_year,
+           COUNT(DISTINCT filesha256) AS n_filings_for_year
+    FROM public.{table}
+    GROUP BY 1, 2
+)
+SELECT DISTINCT ON (b.filerein, b.taxyear)
+       b.*,
+       f.n_filings_for_year,
+       CASE
+           WHEN f.n_filings_for_year >= 2 THEN 'latest_filing'
+           WHEN f.n_rows_for_year > 1     THEN 'duplicate_row'
+           ELSE 'passthrough'
+       END AS dedup_rule
+FROM public.{table} b
+JOIN filings f
+  ON f.filerein = b.filerein
+ AND f.taxyear IS NOT DISTINCT FROM b.taxyear
+ORDER BY b.filerein, b.taxyear,
+{order_keys}         b.url DESC, b.filesha256;
+"""
+
+# 990: value-present outranks the amend flag, so an amended return that
+# omits the contributions breakdown can't blank a figure the filer did
+# report (issue #34).
+_BASIC_FIELDS_CURRENT_DDL = _BASIC_FIELDS_SELECT.format(
+    table="basic_fields",
+    order_keys=(
+        "         (NULLIF(b.totacashcont, '') IS NOT NULL) DESC,\n"
+        "         (b.amendereturn IS NOT DISTINCT FROM 'X') DESC,\n"
+    ),
+)
+
+# 990-PF: no amend flag exists, and no measured blank-latest cases
+# (0/26,047 multi-version filer-years), so url order alone decides.
+_BASIC_FIELDS_PF_CURRENT_DDL = _BASIC_FIELDS_SELECT.format(
+    table="basic_fields_pf",
+    order_keys="",
+)
 
 # Line-item content columns — everything except provenance (url,
 # filesha256) and ingestion metadata. Two rows are "the same line item"
@@ -280,6 +365,16 @@ SET dedup_rule = 'passthrough' WHERE dedup_rule = '';
 """
 
 _INDEX_DDL = {
+    "basic_fields_current": [
+        "CREATE INDEX ix_bf_current_filerein ON public.basic_fields_current (filerein)",
+        "CREATE UNIQUE INDEX ix_bf_current_filerein_taxyear ON public.basic_fields_current (filerein, taxyear)",
+        "ANALYZE public.basic_fields_current",
+    ],
+    "basic_fields_pf_current": [
+        "CREATE INDEX ix_bfpf_current_filerein ON public.basic_fields_pf_current (filerein)",
+        "CREATE UNIQUE INDEX ix_bfpf_current_filerein_taxyear ON public.basic_fields_pf_current (filerein, taxyear)",
+        "ANALYZE public.basic_fields_pf_current",
+    ],
     "grants_to_domestic_organizations_current": [
         "CREATE INDEX ix_gtdo_current_filerein ON public.grants_to_domestic_organizations_current (filerein)",
         "CREATE INDEX ix_gtdo_current_filerein_taxyear ON public.grants_to_domestic_organizations_current (filerein, taxyear)",
@@ -293,14 +388,21 @@ _INDEX_DDL = {
 }
 
 
-_TABLES = (
+_BASIC_FIELDS_TABLES = (
+    ("basic_fields_current", _BASIC_FIELDS_CURRENT_DDL),
+    ("basic_fields_pf_current", _BASIC_FIELDS_PF_CURRENT_DDL),
+)
+_GRANTS_TABLES = (
     ("grants_to_domestic_organizations_current", _SCHED_I_CURRENT_DDL),
     ("privategrants_current", _PF_CURRENT_DDL),
 )
+_TABLES = _BASIC_FIELDS_TABLES + _GRANTS_TABLES
 
 
 def _build_one(connection, table: str, ddl: str) -> int:
-    logger.info("Building public.%s (issue #33 filing-version dedup)", table)
+    logger.info(
+        "Building public.%s (filing-version dedup, issues #33/#34)", table
+    )
     # RDS-default work_mem (4MB) makes the 9-17M-row hash/window passes
     # spill to thousands of temp-file batches (observed as sustained
     # IO:BufFileRead waits on the db.t4g.medium). One build runs at a
@@ -320,8 +422,23 @@ def _build_one(connection, table: str, ddl: str) -> int:
     return count
 
 
-def build_current_grants(connection) -> dict[str, int]:
-    """(Re)build both `_current` relations. Returns row counts.
+def build_basic_fields_current(connection) -> dict[str, int]:
+    """(Re)build just the two filer-financial relations. Returns row counts.
+
+    Split out from the full rebuild for the canonical layer, which reads
+    ``basic_fields_current`` / ``basic_fields_pf_current`` but has no
+    interest in the grants relations — those are the expensive ones
+    (10-30 min each against 11-20 GB) and rebuilding them would triple
+    the canonical build for nothing.
+    """
+    return {
+        table: _build_one(connection, table, ddl)
+        for table, ddl in _BASIC_FIELDS_TABLES
+    }
+
+
+def build_current_relations(connection) -> dict[str, int]:
+    """(Re)build all four `_current` relations. Returns row counts.
 
     NOTE: the DROP ... CASCADE removes any views defined over
     ``privategrants_current`` (the matching keys/unique views). Callers
@@ -351,6 +468,12 @@ if __name__ == "__main__":
             UNION ALL
             SELECT 'pf', dedup_rule, COUNT(*)
             FROM public.privategrants_current GROUP BY 1, 2
+            UNION ALL
+            SELECT 'basic_fields', dedup_rule, COUNT(*)
+            FROM public.basic_fields_current GROUP BY 1, 2
+            UNION ALL
+            SELECT 'basic_fields_pf', dedup_rule, COUNT(*)
+            FROM public.basic_fields_pf_current GROUP BY 1, 2
             ORDER BY 1, 3 DESC
         """)).fetchall()
     for side, rule, n in rules:
