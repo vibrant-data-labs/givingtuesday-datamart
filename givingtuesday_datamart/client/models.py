@@ -32,6 +32,35 @@ class NonprofitHit:
 
 
 @dataclass(frozen=True)
+class IdentityHit:
+    """One ranked hit from ``GtDatamartClient.search_identity``.
+
+    ``org_type`` is ``"nonprofit"`` (990 filers, ``nonprofit_canonical``) or
+    ``"funder"`` (990-PF filers, ``funder_canonical``) depending on which
+    search arm produced the hit.
+
+    ``signal`` names the strongest signal that matched for this EIN:
+    ``"ein"`` > ``"url_exact"`` > ``"url_prefix"`` > ``"name"`` >
+    ``"narrative"``. ``rank`` is the numeric tier behind that ordering
+    (fixed constants for the first four; raw ``ts_rank_cd`` for narrative).
+
+    Identity columns are NULL for ~46K 990-EZ filers that exist in
+    ``nonprofit_text`` but not ``nonprofit_canonical`` — those can only
+    arrive via the narrative signal.
+    """
+
+    ein: str
+    name: str | None
+    name_secondary: str | None
+    city: str | None
+    state: str | None
+    latest_taxyear: int | None
+    org_type: str
+    rank: float
+    signal: str
+
+
+@dataclass(frozen=True)
 class Nonprofit:
     """One row from ``public.nonprofit_canonical`` (DISTINCT ON winner per
     EIN, latest taxyear → taxperend → ingested_at), enriched with

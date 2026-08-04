@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from contextlib import contextmanager
 from typing import Iterator, Literal
 
@@ -26,6 +27,7 @@ from givingtuesday_datamart.client.models import (
     BasicFieldsRow,
     Grant,
     GrantSummary,
+    IdentityHit,
     Nonprofit,
     NonprofitHit,
 )
@@ -35,6 +37,17 @@ logger = logging.getLogger(__name__)
 
 GranteeOrGranter = Literal["grantee", "granter"]
 SearchMode = Literal["stemmed", "exact"]
+IdentityOrgType = Literal["all", "nonprofit", "funder"]
+
+# Ranking tiers for ``search_identity``, ported verbatim from the frontend's
+# ``searchOrgs`` query (frontend/src/lib/queries/search.ts). Tiers are
+# separated by wide ranges so a tier always beats every lower tier; narrative
+# FTS uses raw ``ts_rank_cd`` scores (typically 0–~50), which always sort
+# below the fixed tiers.
+IDENTITY_RANK_EIN = 2_000_000.0
+IDENTITY_RANK_URL_EXACT = 1_500_000.0
+IDENTITY_RANK_URL_PREFIX = 1_200_000.0
+IDENTITY_RANK_NAME = 1_000_000.0
 
 DEFAULT_DATABASE = "gt_datamart"
 DEFAULT_PORT = 5432
@@ -85,6 +98,24 @@ def _engine_from_components(
         database=database,
     )
     return create_engine(url, future=True)
+
+
+def _normalize_domain(raw: str) -> str:
+    """Port of the frontend's ``normalizeDomainForQuery`` (validation.ts).
+
+    Must stay consistent with the SQL expression behind the generated
+    ``nonprofit_canonical.domain`` column (canonical/build.py): lowercase,
+    scheme + ``www.`` stripped, path/query/fragment dropped. Returns ``""``
+    when the input isn't domain-shaped (contains whitespace after stripping,
+    or is shorter than 3 chars).
+    """
+    stripped = raw.strip().lower()
+    stripped = re.sub(r"^(https?:)?//", "", stripped)
+    stripped = re.sub(r"^www\.", "", stripped)
+    stripped = re.sub(r"[/?#].*$", "", stripped)
+    if re.search(r"\s", stripped) or len(stripped) < 3:
+        return ""
+    return stripped
 
 
 class GtDatamartClient:
@@ -426,6 +457,292 @@ class GtDatamartClient:
             for r in rows
         ]
         logger.info("get_nonprofits_by_ein: %d hits", len(hits))
+        return hits
+
+    def _identity_arm_sql(
+        self,
+        *,
+        arm: Literal["nonprofit", "funder"],
+        name: str | None,
+        domain: str,
+        ein_digits: str,
+        include_narrative: bool,
+        limit: int | None,
+    ) -> tuple[str, dict[str, object]]:
+        """Assemble one arm of the ``search_identity`` query.
+
+        CTE union of the active signal sources, collapsed to one row per EIN
+        with the best rank and the signal that produced it. Signals that
+        weren't supplied are simply not emitted (the frontend gates its URL
+        CTE the same way — ``domain`` is a generated column that may not
+        exist on older canonical builds, so it must only be referenced when
+        actually searching by URL).
+        """
+        table = (
+            "public.nonprofit_canonical" if arm == "nonprofit" else "public.funder_canonical"
+        )
+        ctes: list[str] = []
+        unions: list[str] = []
+        params: dict[str, object] = {}
+
+        if name is not None:
+            # Funders carry no DBA columns; nonprofits match on all four
+            # name surfaces. ``%`` / ``_`` in the input are live ILIKE
+            # wildcards — parity with the frontend, which doesn't escape.
+            name_cols = (
+                ["name", "name_secondary", "dba_1", "dba_2"]
+                if arm == "nonprofit"
+                else ["name", "name_secondary"]
+            )
+            name_where = " OR ".join(f"{col} ILIKE :like" for col in name_cols)
+            ctes.append(
+                f"""name_hits AS (
+                    SELECT ein, {IDENTITY_RANK_NAME}::float8 AS rank, 'name' AS signal
+                    FROM {table}
+                    WHERE {name_where}
+                )"""
+            )
+            unions.append("SELECT ein, rank, signal FROM name_hits")
+            params["like"] = f"%{name}%"
+
+        if arm == "nonprofit" and name is not None and include_narrative:
+            ctes.append(
+                """fts_hits AS (
+                    SELECT nt.ein,
+                           ts_rank_cd(nt.text_tsv_compact, q)::float8 AS rank,
+                           'narrative' AS signal
+                    FROM public.nonprofit_text nt,
+                         websearch_to_tsquery('english', :raw_name) AS q
+                    WHERE nt.text_tsv_compact @@ q
+                )"""
+            )
+            unions.append("SELECT ein, rank, signal FROM fts_hits")
+            params["raw_name"] = name
+
+        if ein_digits:
+            ctes.append(
+                f"""ein_hits AS (
+                    SELECT ein, {IDENTITY_RANK_EIN}::float8 AS rank, 'ein' AS signal
+                    FROM {table}
+                    WHERE ein = :ein
+                )"""
+            )
+            unions.append("SELECT ein, rank, signal FROM ein_hits")
+            params["ein"] = ein_digits
+
+        if arm == "nonprofit" and domain:
+            # Both URL tiers sit between EIN-exact and name. Uses the
+            # ix_nonprofit_canonical_domain partial btree (LIKE 'foo%' is
+            # index-eligible on a btree).
+            ctes.append(
+                f"""url_hits AS (
+                    SELECT ein,
+                           CASE WHEN domain = :domain
+                                THEN {IDENTITY_RANK_URL_EXACT}::float8
+                                ELSE {IDENTITY_RANK_URL_PREFIX}::float8 END AS rank,
+                           CASE WHEN domain = :domain
+                                THEN 'url_exact' ELSE 'url_prefix' END AS signal
+                    FROM public.nonprofit_canonical
+                    WHERE domain = :domain OR domain LIKE :domain_prefix
+                )"""
+            )
+            unions.append("SELECT ein, rank, signal FROM url_hits")
+            params["domain"] = domain
+            params["domain_prefix"] = f"{domain}%"
+
+        # LEFT JOIN on the nonprofit arm because narrative hits can be
+        # 990-EZ filers absent from nonprofit_canonical — they come back
+        # with NULL identity columns (same contract as search_nonprofits).
+        # The funder arm's sources are all funder_canonical itself, so its
+        # join is definitionally inner.
+        join = (
+            "LEFT JOIN public.nonprofit_canonical c USING (ein)"
+            if arm == "nonprofit"
+            else "JOIN public.funder_canonical c USING (ein)"
+        )
+        cte_sql = ",\n            ".join(ctes)
+        union_sql = "\n                    UNION ALL\n                    ".join(unions)
+        # MAX(rank) picks the winning tier per EIN; ARRAY_AGG ordered by
+        # rank DESC reports which signal that winning rank came from.
+        sql = f"""
+            WITH {cte_sql},
+            matched AS (
+                SELECT ein,
+                       MAX(rank) AS rank,
+                       (ARRAY_AGG(signal ORDER BY rank DESC))[1] AS signal
+                FROM (
+                    {union_sql}
+                ) u
+                GROUP BY ein
+            )
+            SELECT
+                m.ein,
+                c.name,
+                c.name_secondary,
+                c.city,
+                c.state,
+                NULLIF(c.latest_taxyear, '')::int AS latest_taxyear,
+                m.rank,
+                m.signal
+            FROM matched m
+            {join}
+            ORDER BY m.rank DESC,
+                     NULLIF(c.latest_taxyear, '')::int DESC NULLS LAST,
+                     c.name ASC,
+                     m.ein ASC
+        """
+        if limit is not None:
+            sql += " LIMIT :limit"
+            params["limit"] = limit
+        return sql, params
+
+    def search_identity(
+        self,
+        name: str | None = None,
+        url: str | None = None,
+        ein: str | None = None,
+        *,
+        org_type: IdentityOrgType = "all",
+        include_narrative: bool = True,
+        limit: int | None = 25,
+    ) -> list[IdentityHit]:
+        """Multi-signal ranked identity search, ported from the frontend's
+        ``searchOrgs`` query (frontend/src/lib/queries/search.ts).
+
+        Built for EIN-less nonprofit resolution: pass whatever identity
+        signals a row has and get back ranked candidates. Signals are
+        inferred from the arguments — at least one of ``name`` / ``url`` /
+        ``ein`` is required:
+
+        * ``ein`` — exact match (rank 2,000,000). Separators are stripped
+          (``"13-1234567"`` works); raises ``ValueError`` unless exactly 9
+          digits remain.
+        * ``url`` — normalized to a bare domain (scheme, ``www.``, and
+          path/query/fragment stripped) and matched against the generated
+          ``nonprofit_canonical.domain`` column: exact domain (1,500,000)
+          beats prefix domain (1,200,000). Raises ``ValueError`` when the
+          input doesn't normalize to something domain-shaped — normalize
+          upstream, don't pass raw customer junk like ``"N/A"``.
+        * ``name`` — ILIKE substring over ``name`` / ``name_secondary``
+          (plus ``dba_1`` / ``dba_2`` on the nonprofit arm) at rank
+          1,000,000, UNIONed with narrative FTS over
+          ``nonprofit_text.text_tsv_compact`` via
+          ``websearch_to_tsquery('english', ...)`` ranked by raw
+          ``ts_rank_cd`` (typically 0–~50, always below the fixed tiers).
+          Set ``include_narrative=False`` to search names only.
+
+        Two arms, mirroring the frontend: ``nonprofit_canonical`` (all
+        signals) and ``funder_canonical`` (name + EIN only — funders have no
+        URL or narrative surface yet). ``org_type`` restricts to one arm;
+        a funder-only search with just a ``url`` has nothing to match and
+        returns ``[]``. Each EIN collapses to its best rank per arm, with
+        ``IdentityHit.signal`` naming the winning signal.
+
+        The nonprofit arm LEFT JOINs ``nonprofit_canonical``, so ~46K 990-EZ
+        filers reachable only through the narrative signal return with NULL
+        identity columns (same contract as ``search_nonprofits``).
+
+        ``limit`` is pushed into each arm's SQL, then the arms are merged
+        and re-sliced here (rank DESC, latest_taxyear DESC nulls-last, name,
+        ein — the frontend's exact ordering), so worst case ``2 * limit``
+        rows cross the wire. ``limit=None`` returns everything; fine for
+        EIN/URL lookups, unbounded for broad name/narrative queries.
+        """
+        if org_type not in ("all", "nonprofit", "funder"):
+            raise ValueError(
+                f"org_type must be 'all', 'nonprofit', or 'funder', got {org_type!r}"
+            )
+
+        name = name.strip() if name is not None and name.strip() else None
+
+        ein_digits = ""
+        if ein is not None:
+            ein_digits = re.sub(r"\D", "", ein)
+            if len(ein_digits) != 9:
+                raise ValueError(
+                    f"ein must contain exactly 9 digits, got {ein!r}"
+                )
+
+        domain = ""
+        if url is not None:
+            domain = _normalize_domain(url)
+            if not domain:
+                raise ValueError(
+                    f"url does not normalize to a searchable domain: {url!r}"
+                )
+
+        if name is None and not ein_digits and not domain:
+            raise ValueError(
+                "search_identity requires at least one of name, url, or ein"
+            )
+
+        run_nonprofit = org_type in ("all", "nonprofit")
+        # The funder arm can only contribute via name or EIN; skip the
+        # query entirely when neither is present (mirrors the frontend's
+        # foundationCanContribute gate).
+        run_funder = org_type in ("all", "funder") and (name is not None or bool(ein_digits))
+        if not run_nonprofit and not run_funder:
+            logger.warning(
+                "search_identity: funder arm has no URL signal; nothing to search"
+            )
+            return []
+
+        logger.info(
+            "search_identity: signals(name=%s, url=%s, ein=%s), org_type=%s, "
+            "include_narrative=%s, limit=%s",
+            name is not None,
+            bool(domain),
+            bool(ein_digits),
+            org_type,
+            include_narrative,
+            limit,
+        )
+
+        hits: list[IdentityHit] = []
+        with self._session() as session:
+            for arm, run in (("nonprofit", run_nonprofit), ("funder", run_funder)):
+                if not run:
+                    continue
+                sql, params = self._identity_arm_sql(
+                    arm=arm,
+                    name=name,
+                    domain=domain,
+                    ein_digits=ein_digits,
+                    include_narrative=include_narrative,
+                    limit=limit,
+                )
+                rows = session.execute(text(sql), params).mappings().all()
+                hits.extend(
+                    IdentityHit(
+                        ein=r["ein"],
+                        name=r["name"],
+                        name_secondary=r["name_secondary"],
+                        city=r["city"],
+                        state=r["state"],
+                        latest_taxyear=(
+                            int(r["latest_taxyear"]) if r["latest_taxyear"] is not None else None
+                        ),
+                        org_type=arm,
+                        rank=float(r["rank"]),
+                        signal=r["signal"],
+                    )
+                    for r in rows
+                )
+
+        # Cross-arm merge with the frontend's exact ordering; NULL taxyears
+        # and names sort last within their rank tier.
+        hits.sort(
+            key=lambda h: (
+                -h.rank,
+                -(h.latest_taxyear if h.latest_taxyear is not None else -1),
+                h.name is None,
+                h.name or "",
+                h.ein,
+            )
+        )
+        if limit is not None:
+            hits = hits[:limit]
+        logger.info("search_identity: %d hits", len(hits))
         return hits
 
     def get_nonprofit(self, ein: str) -> Nonprofit | None:
