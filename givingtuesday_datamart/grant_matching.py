@@ -20,7 +20,7 @@ from givingtuesday_datamart._internal.address_cleaning import create_clean_addre
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart._internal.parquet_cache import _decode_json as _pqc_decode_json
-from givingtuesday_datamart.current_grants import build_current_grants
+from givingtuesday_datamart.current_grants import build_current_relations
 from givingtuesday_datamart.ingestion import datamart_config
 from givingtuesday_datamart.canonical.build import (
     CANONICAL_BUILDS_TABLE,
@@ -963,10 +963,11 @@ def _do_match_records(
     with get_session(config=datamart_config()) as session:
         connection = session.connection()
         _load_corrections(connection)
-        # Rebuild the filing-version-deduped inputs (issue #33) BEFORE the
-        # views: the DROP ... CASCADE inside takes the dependent matching
-        # views with it, and create_or_replace_views restores them.
-        build_current_grants(connection)
+        # Rebuild the filing-version-deduped inputs (issues #33/#34)
+        # BEFORE the views: the DROP ... CASCADE inside takes the
+        # dependent matching views with it, and create_or_replace_views
+        # restores them.
+        build_current_relations(connection)
         create_or_replace_views(connection)
         if s3_prefix is None:
             s3_prefix = _resolve_checkpoint_prefix(connection)

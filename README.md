@@ -235,10 +235,10 @@ Uses [`recordlinkage`](https://recordlinkage.readthedocs.io/) to compare
 private-grant recipient names + addresses against the filer universe
 (990 filers ∪ 990-PF filers ∪ the corrections registry —
 [`data/corrections/org_identities.csv`](data/corrections/org_identities.csv)).
-At the start of every run it reloads the corrections CSV, rebuilds the
-filing-version-deduped `_current` relations
-([`current_grants.py`](givingtuesday_datamart/current_grants.py), issue
-#33), and recreates the matching views — no separate step needed.
+At the start of every run it reloads the corrections CSV, rebuilds all
+four filing-version-deduped `_current` relations
+([`current_grants.py`](givingtuesday_datamart/current_grants.py), issues
+#33 and #34), and recreates the matching views — no separate step needed.
 
 Candidate-pair chunks are written to S3 keyed on the full input lineage:
 the source versions of `irs_990pf_grants` / `irs_990_basic_fields` /
@@ -292,7 +292,9 @@ python -m givingtuesday_datamart.sources refresh
 #    'success', row counts sane, warnings inspected.
 python -m givingtuesday_datamart.sources loaded
 
-# 4. Rebuild the canonical layer (reads staging only; ~10 min).
+# 4. Rebuild the canonical layer. Rebuilds basic_fields[_pf]_current
+#    first — the identity tables read those, and a staging refresh
+#    leaves them stale until something rebuilds them.
 python -m givingtuesday_datamart.sources build-canonical
 
 # 5. Corrections preflight (~10 min, any machine). Required after any

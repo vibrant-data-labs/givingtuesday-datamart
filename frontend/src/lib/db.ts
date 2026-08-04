@@ -49,6 +49,15 @@ interface BasicFieldsTable {
   suprreintoot: string | null;
 }
 
+// The *_current relations carry every staging column plus dedup provenance
+// (current_grants.py, issues #33/#34). Same shape, one row per
+// (filerein, taxyear) instead of one per filing version.
+interface BasicFieldsCurrentTable extends BasicFieldsTable {
+  n_filings_for_year: number;
+  // 'passthrough' | 'latest_filing' | 'duplicate_row'
+  dedup_rule: string;
+}
+
 interface UnionedGrantsTable {
   granter_ein: string;
   granter_name: string | null;
@@ -145,8 +154,13 @@ interface ScheduleOPartIIITable {
 }
 
 export interface Database {
-  'public.basic_fields': BasicFieldsTable;
-  'public.basic_fields_pf': BasicFieldsTable;
+  // Only the *_current relations are registered. Raw public.basic_fields /
+  // basic_fields_pf carry one row per filing version, so aggregating them
+  // double-counts amended filer-years (#34) — leaving them off the schema
+  // makes that a type error rather than a silent wrong number. Re-add them
+  // here if some future read genuinely needs per-version rows.
+  'public.basic_fields_current': BasicFieldsCurrentTable;
+  'public.basic_fields_pf_current': BasicFieldsCurrentTable;
   'public.unioned_grants': UnionedGrantsTable;
   'public.nonprofit_canonical': NonprofitCanonicalTable;
   'public.funder_canonical': FunderCanonicalTable;
