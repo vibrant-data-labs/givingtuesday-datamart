@@ -11,6 +11,15 @@
 --                    (e.g. Dollar General: schools/programs with no EIN reported)
 --   partial_rows   - itemized dollars < 90% of declared (partial extraction)
 --   ok             - >= 90% of declared dollars are itemized AND EIN-mapped
+--
+-- Filing-version dedup: reads public.grants_to_domestic_organizations_current
+-- (issue #33; built by givingtuesday_datamart/current_grants.py), which keeps
+-- one filing version per filer-year and collapses amendment-linked duplicate
+-- line items. Supersedes the in-query guard this file carried 2026-07-30..08-04.
+-- Residual limitation (documented on the relation): the one confirmed
+-- provenance-mislabeled filer-year (110303001/2021) stays ~13% inflated.
+-- Rebuild the relation if staging was refreshed since the last matching run:
+--   python -m givingtuesday_datamart.current_grants
 
 WITH itemized AS (
     SELECT filerein, taxyear::text AS taxyear,
@@ -22,7 +31,7 @@ WITH itemized AS (
                THEN COALESCE(CASE WHEN retaamofcagr ~ '^-?[0-9]+(\.[0-9]+)?$' THEN retaamofcagr::numeric END, 0)
                   + COALESCE(CASE WHEN rtaoncassist ~ '^-?[0-9]+(\.[0-9]+)?$' THEN rtaoncassist::numeric END, 0)
                ELSE 0 END) AS ein_mapped_dollars
-    FROM grants_to_domestic_organizations
+    FROM public.grants_to_domestic_organizations_current
     WHERE taxyear::text ~ '^[0-9]{4}$' AND taxyear::text >= '2020'
     GROUP BY 1, 2
 ),
@@ -33,7 +42,10 @@ declared AS (
            lower(grantoororga) IN ('true', '1', 'x', 'yes') AS sched_i_required
     FROM basic_fields
     WHERE taxyear::text ~ '^[0-9]{4}$' AND taxyear::text >= '2020'
-    ORDER BY filerein, taxyear, _ingested_at DESC, filesha256
+    -- url DESC prefers the same filing version as the itemized CTE's latest-url
+    -- guard (_ingested_at is constant within an ingest run, so it was an
+    -- effectively arbitrary tie-break between filing versions)
+    ORDER BY filerein, taxyear, url DESC
 )
 SELECT d.filerein,
        d.filername1 AS name,

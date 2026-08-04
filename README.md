@@ -19,7 +19,8 @@ S3 (Giving Tuesday public bucket)
         │
         ▼
    Matched grants          ── public.unioned_grants
-   (private-grants ↔ recipient EIN, plus Schedule I)
+   (private-grants ↔ recipient EIN, plus Schedule I; grant inputs read
+    through filing-version-deduped *_current relations, issue #33)
         │
         ▼
    GtDatamartClient        ── read-only Python client, used by the frontend
@@ -231,10 +232,27 @@ python -m givingtuesday_datamart.grant_matching --chunk-size 50000 --resume-work
 ```
 
 Uses [`recordlinkage`](https://recordlinkage.readthedocs.io/) to compare
-private-grant recipient names + addresses against `nonprofit_canonical`.
-Candidate-pair chunks are written to S3 keyed on the source-data lineage
-(`(privategrants version, nonprofit_canonical version)`), so reruns
-against the same inputs resume from existing chunks.
+private-grant recipient names + addresses against the filer universe
+(990 filers ∪ 990-PF filers ∪ the corrections registry —
+[`data/corrections/org_identities.csv`](data/corrections/org_identities.csv)).
+At the start of every run it reloads the corrections CSV, rebuilds the
+filing-version-deduped `_current` relations
+([`current_grants.py`](givingtuesday_datamart/current_grants.py), issue
+#33), and recreates the matching views — no separate step needed.
+
+Candidate-pair chunks are written to S3 keyed on the full input lineage:
+the source versions of `irs_990pf_grants` / `irs_990_basic_fields` /
+`irs_990pf_basic_fields`, the corrections CSV content hash, and
+`MATCHING_INPUT_SHAPE_VERSION` (a hand-bumped constant in
+`grant_matching.py` — bump it whenever a code change alters the input
+views' row order: dedup rules, view definitions, name normalization,
+blocking). Reruns against identical inputs resume from existing chunks;
+any input change forces a clean recompute at a fresh prefix.
+
+**Memory:** the pair-indexing step holds ~800M+ candidate pairs in
+memory and needs an r7a.4xlarge-class host (~128 GB). A 16 GB laptop is
+killed at the indexing step. Checkpoints make interrupted runs cheap to
+resume on the same inputs.
 
 ### Recommended first run
 
@@ -254,6 +272,73 @@ python -m givingtuesday_datamart.grant_matching
 ```
 
 End-to-end this is a multi-hour job; plan for an overnight run.
+
+### Runbook: routine refresh (every new GT drop)
+
+The order of operations for a recurring refresh, with what each step
+gates. Staging → canonical and staging → matching are independent paths;
+the regression gate needs matching's output.
+
+```bash
+# 1. See what's new in S3 vs what's loaded (optional, read-only).
+python -m givingtuesday_datamart.sources status
+python -m givingtuesday_datamart.sources loaded
+
+# 2. Refresh staging. Validation (hard-fail + soft-warn) runs per
+#    source automatically; already-loaded (source, version) pairs skip.
+python -m givingtuesday_datamart.sources refresh
+
+# 3. Verify the refresh before building anything on top: every source
+#    'success', row counts sane, warnings inspected.
+python -m givingtuesday_datamart.sources loaded
+
+# 4. Rebuild the canonical layer (reads staging only; ~10 min).
+python -m givingtuesday_datamart.sources build-canonical
+
+# 5. Corrections preflight (~10 min, any machine). Required after any
+#    edit to data/corrections/org_identities.csv; cheap insurance after
+#    every refresh. Gates the expensive matching run: a FAIL here means
+#    a correction row no longer blocks/scores/wins — fix the CSV first.
+python -m givingtuesday_datamart.corrections_preflight
+
+# 6. Grant matching — on the big-memory host (see Memory note above).
+#    Rebuilds the _current dedup relations and matching views itself,
+#    then matches and rebuilds privategrants_w_recipients +
+#    unioned_grants (ANALYZE + indexes included). Full recompute on new
+#    source versions (~6 h); crash-resume on identical inputs is fast.
+python -m givingtuesday_datamart.grant_matching
+
+# 7. Regression gate — run before trusting or shipping the new match
+#    output. Compares coverage floors, sentinel filers, and precision
+#    ceilings against the last accepted baselines. On FAIL, follow
+#    docs/matching-regression-runbook.md before touching any threshold.
+python -m givingtuesday_datamart.matching_regression_checks
+```
+
+Post-run, if the numbers moved for a reason you accept (new data, an
+accepted matcher change), update the baselines in
+`matching_regression_checks.py` in the same commit as the change.
+
+Two diagnostic tools that don't belong to the sequence but help when a
+step surprises you:
+
+- `python -m givingtuesday_datamart.match_explainer <EIN> --row '...'` —
+  why a specific grant row did or didn't match a filer, with per-tier
+  score margins and a `--try-correction` dry run.
+- `python -m givingtuesday_datamart.corrections_scout` — ranked
+  candidates for new corrections rows (high-dollar unmatched tuples with
+  a plausible identity the matcher can't reach).
+
+The pipeline's own logger ships without handlers; the `sources` and
+preflight/regression CLIs configure logging themselves, but
+`grant_matching` run as a module is silent at INFO level — wrap it if
+you want progress output:
+
+```bash
+python -c "
+import logging; logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+from givingtuesday_datamart.grant_matching import match_records; match_records()"
+```
 
 ## Validation
 
@@ -503,10 +588,23 @@ givingtuesday_datamart/
     client.py           # GtDatamartClient — read-only, no extra dependencies
     models.py           # Frozen dataclasses returned by the client
   grant_matching.py     # recordlinkage pipeline + S3-checkpointed resume;
-                        # rebuilds public.unioned_grants
+                        # rebuilds privategrants_w_recipients + unioned_grants
+  current_grants.py     # Filing-version dedup: *_current relations over the
+                        # grants staging tables (issue #33)
+  corrections_preflight.py  # Pre-run gate: every corrections CSV row still
+                            # blocks/scores/wins (run after CSV edits)
+  corrections_scout.py  # Ranked candidates for new corrections rows
+  match_explainer.py    # Why did/didn't a grant row match an EIN (CLI + fns)
+  matching_regression_checks.py  # Post-matching gate: coverage floors,
+                                 # sentinel filers, precision ceilings
+data/
+  corrections/
+    org_identities.csv  # Human-verified identity rows added to the filer
+                        # universe (see docs/corrections-plan.md)
 frontend/               # Next.js peerlo app (reads gt_datamart via pg pool)
 docs/
   backbone-plan.md      # Detailed architecture + decision history
+  corrections-plan.md   # Corrections-registry design + curation workflow
 pyproject.toml          # pip-installable; [ingest] extra for the heavy path
 ```
 

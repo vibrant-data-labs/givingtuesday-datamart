@@ -79,7 +79,9 @@ WITH pg AS (
                AND concat_ws(' ', sigocpyrpnam, sigocpyrbnbn1, sigocpyrbnbn2)
                    !~* '(\y(see|refer)\w*\y[\s,–-]*(attach|addition|schedul|statement|stmt|list))|^\s*see\s*$'
                THEN sigocpyamoun::numeric ELSE 0 END) AS matchable_dollars
-    FROM privategrants
+    -- Filing-version-deduped relation (issue #33) — raw privategrants
+    -- carries every filing version plus GT's 2024-batch whole-block doubles.
+    FROM privategrants_current
     WHERE taxyear::text ~ '^[0-9]{4}$' AND taxyear::text >= '2020'
     GROUP BY 1, 2
 ),
