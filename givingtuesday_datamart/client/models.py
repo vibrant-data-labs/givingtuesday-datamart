@@ -61,6 +61,48 @@ class IdentityHit:
 
 
 @dataclass(frozen=True)
+class IdentityQuery:
+    """One row of input to ``GtDatamartClient.search_identity_bulk``.
+
+    ``key`` is the caller's own row identifier (portfolio row id, source
+    system id, whatever). It's echoed back as the result-dict key and never
+    interpreted — it exists so callers don't have to reconstruct which hit
+    belongs to which input row. Keys must be unique within a batch.
+
+    The signal fields carry the same semantics (and the same normalization
+    and validation) as the corresponding ``search_identity`` arguments.
+    """
+
+    key: str
+    name: str | None = None
+    url: str | None = None
+    ein: str | None = None
+
+
+@dataclass(frozen=True)
+class CanonicalIdentity:
+    """One identity row streamed by ``GtDatamartClient.iter_identity_universe``.
+
+    The local-matching escape hatch: name matching can't be pushed into
+    Postgres efficiently (``ILIKE '%x%'`` is unindexable, so every name is a
+    full scan), so name-heavy workloads pull the universe once and match in
+    process. Deliberately not a ``IdentityHit`` — there's no rank or signal,
+    because nothing has been matched yet.
+    """
+
+    ein: str
+    name: str | None
+    name_secondary: str | None
+    dba_1: str | None
+    dba_2: str | None
+    domain: str | None
+    city: str | None
+    state: str | None
+    latest_taxyear: int | None
+    org_type: str
+
+
+@dataclass(frozen=True)
 class Nonprofit:
     """One row from ``public.nonprofit_canonical`` (DISTINCT ON winner per
     EIN, latest taxyear → taxperend → ingested_at), enriched with
