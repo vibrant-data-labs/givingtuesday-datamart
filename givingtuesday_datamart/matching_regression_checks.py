@@ -12,6 +12,9 @@ trusting or merging its output:
 Exit code 0 = all checks pass; 1 = at least one FAIL. WARNs are reported
 but do not fail the gate.
 
+Operational guide — how to diagnose a failure and when/how to update the
+baselines below: docs/matching-regression-runbook.md.
+
 Baselines are the August 4, 2026 run (2026_06 source drops +
 filing-version dedup + expanded corrections registry; matched rows
 6.04M -> 7.58M). After a matcher change is *accepted* (per the

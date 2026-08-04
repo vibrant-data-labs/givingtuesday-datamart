@@ -310,7 +310,8 @@ python -m givingtuesday_datamart.grant_matching
 
 # 7. Regression gate — run before trusting or shipping the new match
 #    output. Compares coverage floors, sentinel filers, and precision
-#    ceilings against the last accepted baselines.
+#    ceilings against the last accepted baselines. On FAIL, follow
+#    docs/matching-regression-runbook.md before touching any threshold.
 python -m givingtuesday_datamart.matching_regression_checks
 ```
 
