@@ -127,12 +127,39 @@ def _(mo):
 
 @app.cell
 def _(mo):
+    # Drill-down source toggle. The priority CSVs are built from the
+    # filing-version-deduped *_current relations (issue #33), so the
+    # drill-downs default to the same source — every number in the notebook
+    # then agrees. "raw staging" shows the filing-version duplicates GT's
+    # extracts carry: useful for demonstrating the issue, wrong for
+    # reconciling against the priority tables.
+    drill_source = mo.ui.radio(
+        options=["deduped (_current)", "raw staging"],
+        value="deduped (_current)",
+        label="drill-down source",
+    )
+    return (drill_source,)
+
+
+@app.cell
+def _(drill_source):
+    _raw = drill_source.value == "raw staging"
+    grants_990_table = (
+        "grants_to_domestic_organizations" if _raw
+        else "grants_to_domestic_organizations_current"
+    )
+    grants_pf_table = "privategrants" if _raw else "privategrants_current"
+    return grants_990_table, grants_pf_table
+
+
+@app.cell
+def _(drill_source, mo):
     # Tab bar only — content renders conditionally below so that switching
     # tabs never re-creates (and therefore never resets) the per-tab UI state.
     form_tab = mo.ui.tabs(
         {"990 · Schedule I": mo.md(""), "990-PF": mo.md(""), "GT hand-off": mo.md("")}
     )
-    form_tab
+    mo.hstack([form_tab, drill_source], justify="space-between", align="center")
     return (form_tab,)
 
 
@@ -258,15 +285,15 @@ def _(DOLLARS, mo, priority_si, row_picker_si, run_query):
 
 
 @app.cell
-def _(mo, run_query, sel_ein_si, sel_year_si):
+def _(grants_990_table, mo, run_query, sel_ein_si, sel_year_si):
     if sel_ein_si is None:
         sched_year_si = None
         year_strip_si = None
     else:
         _counts = run_query(
-            """
+            f"""
             SELECT taxyear::text AS taxyear, COUNT(*) AS n_rows
-            FROM grants_to_domestic_organizations
+            FROM {grants_990_table}
             WHERE filerein = :ein
             GROUP BY 1 ORDER BY 1
             """,
@@ -298,7 +325,7 @@ def _(mo, run_query, sel_ein_si, sel_year_si):
 
 
 @app.cell
-def _(DOLLARS, mo, run_query, sched_year_si, sel_ein_si):
+def _(DOLLARS, grants_990_table, mo, run_query, sched_year_si, sel_ein_si):
     if sel_ein_si is None or sched_year_si is None:
         rows_si = None
     else:
@@ -313,11 +340,10 @@ def _(DOLLARS, mo, run_query, sched_year_si, sel_ein_si):
                    rteinorecipi  AS recipient_ein,
                    rectabaddcit  AS city,
                    rectabaddsta  AS state,
-                   rect
                    CASE WHEN retaamofcagr ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN retaamofcagr::numeric END AS cash,
                    CASE WHEN rtaoncassist ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN rtaoncassist::numeric END AS non_cash,
                    retapuofgrra  AS purpose
-            FROM grants_to_domestic_organizations
+            FROM {grants_990_table}
             WHERE filerein = :ein {_year_clause}
             ORDER BY taxyear, cash DESC NULLS LAST
             LIMIT 5000
@@ -326,7 +352,7 @@ def _(DOLLARS, mo, run_query, sched_year_si, sel_ein_si):
         )
         _truncated = " (showing first 5,000)" if len(_rows) == 5000 else ""
         rows_si = mo.vstack([
-            mo.md(f"**Schedule I rows — {sched_year_si.value}** · {len(_rows):,} rows{_truncated}"),
+            mo.md(f"**Schedule I rows — {sched_year_si.value}** · {len(_rows):,} rows{_truncated} · `{grants_990_table}`"),
             (
                 mo.ui.table(
                     _rows,
@@ -526,17 +552,17 @@ def _(DOLLARS, mo, priority_pf, row_picker_pf, run_query):
 
 
 @app.cell
-def _(mo, run_query, sel_ein_pf, sel_year_pf):
+def _(grants_pf_table, mo, run_query, sel_ein_pf, sel_year_pf):
     if sel_ein_pf is None:
         pf_year = None
         year_strip_pf = None
     else:
         _counts = run_query(
-            """
+            f"""
             SELECT pg.taxyear, pg.n_rows, COALESCE(w.matched_rows, 0) AS matched_rows
             FROM (
                 SELECT taxyear::text AS taxyear, COUNT(*) AS n_rows
-                FROM privategrants WHERE filerein = :ein GROUP BY 1
+                FROM {grants_pf_table} WHERE filerein = :ein GROUP BY 1
             ) pg
             LEFT JOIN (
                 SELECT taxyear::text AS taxyear, COUNT(*) AS matched_rows
@@ -572,7 +598,7 @@ def _(mo, run_query, sel_ein_pf, sel_year_pf):
 
 
 @app.cell
-def _(DOLLARS, PLACEHOLDER_NAME_REGEX, mo, pf_year, run_query, sel_ein_pf):
+def _(DOLLARS, PLACEHOLDER_NAME_REGEX, grants_pf_table, mo, pf_year, run_query, sel_ein_pf):
     if sel_ein_pf is None or pf_year is None:
         rows_pf = None
     else:
@@ -596,7 +622,7 @@ def _(DOLLARS, PLACEHOLDER_NAME_REGEX, mo, pf_year, run_query, sel_ein_pf):
                         ~* '{PLACEHOLDER_NAME_REGEX}'
                         THEN '⚑ placeholder' ELSE '' END AS placeholder,
                    COALESCE(m.recipeint_ein_key, '') AS matched_recipient_ein
-            FROM privategrants p
+            FROM {grants_pf_table} p
             LEFT JOIN LATERAL (
                 SELECT w.recipeint_ein_key
                 FROM privategrants_w_recipients w
@@ -616,7 +642,7 @@ def _(DOLLARS, PLACEHOLDER_NAME_REGEX, mo, pf_year, run_query, sel_ein_pf):
         )
         _truncated = " (showing first 5,000)" if len(_rows) == 5000 else ""
         rows_pf = mo.vstack([
-            mo.md(f"**privategrants rows — {pf_year.value}** · {len(_rows):,} rows{_truncated}"),
+            mo.md(f"**grant rows — {pf_year.value}** · {len(_rows):,} rows{_truncated} · `{grants_pf_table}`"),
             (
                 mo.ui.table(
                     _rows,
