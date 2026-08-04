@@ -12,10 +12,11 @@ trusting or merging its output:
 Exit code 0 = all checks pass; 1 = at least one FAIL. WARNs are reported
 but do not fail the gate.
 
-Baselines are the July 23, 2026 post-fix measurements. After a matcher
-change is *accepted* (per the evaluation protocol in the proposal),
-update the baselines here in the same commit — they define "no worse
-than the last accepted matcher."
+Baselines are the August 4, 2026 run (2026_06 source drops +
+filing-version dedup + expanded corrections registry; matched rows
+6.04M -> 7.58M). After a matcher change is *accepted* (per the
+evaluation protocol in the proposal), update the baselines here in the
+same commit — they define "no worse than the last accepted matcher."
 """
 
 from __future__ import annotations
@@ -29,33 +30,38 @@ from sqlalchemy import text
 from givingtuesday_datamart._internal.db import get_configuration, get_session
 from givingtuesday_datamart._internal.logger import logger
 
-# --- Baselines: July 23, 2026 rerun (match-pf-recipients fixes) -----------
+# --- Baselines: August 4, 2026 run (dedup + corrections registry) ---------
 
 # Recall floors — a matcher change must not lose previously-won coverage.
-PF_PAIR_COVERAGE_FLOOR = 61.8       # %, Candid labeled pairs, PF funders
-NP_PAIR_COVERAGE_FLOOR = 84.7       # %, 990 funders (matching doesn't touch
-                                    # this side; a drop means something else broke)
+PF_PAIR_COVERAGE_FLOOR = 63.1       # %, Candid labeled pairs, PF funders
+NP_PAIR_COVERAGE_FLOOR = 94.5       # %, 990 funders. Not moved by matching
+                                    # itself — the jump from 84.7 came from the
+                                    # 2026_06 Schedule I drop (Fidelity et al.);
+                                    # a drop below means data went missing.
 # Recipient-side sentinels: EIN as matched recipient, minimum matched rows
-# (95% of the July 23 count, so ordinary data drift doesn't trip the gate).
+# (95% of the August 4 count, so ordinary data drift doesn't trip the gate).
 RECIPIENT_SENTINEL_FLOORS = {
-    "134141945": ("Michael J. Fox Foundation", 1935),      # 2,037 rows
-    "520368135": ("Johns Hopkins (Bloomberg et al.)", 1600),  # 1,693 rows
+    "134141945": ("Michael J. Fox Foundation", 3044),      # 3,204 rows (corrections)
+    "520368135": ("Johns Hopkins (Bloomberg et al.)", 1735),  # 1,826 rows
 }
 # Funder-side sentinels: EIN as funder, minimum rows that matched anything.
 FUNDER_SENTINEL_FLOORS = {
-    "911663695": ("Gates Trust (transfer to Gates Foundation)", 7),  # 8 rows
+    "911663695": ("Gates Trust (transfer to Gates Foundation)", 9),  # 10 rows
 }
 
-# Precision ceilings — false-positive classes must not grow.
-PLACEHOLDER_ROWS_MATCHED_CEILING = 305
-CORPORATE_NAME_ROWS_MATCHED_CEILING = 13   # proxy: rows named PFIZER%
-FOREIGN_ROWS_MATCHED_CEILING = 1           # proxy: WORLD HEALTH ORGANI%
+# Precision ceilings — false-positive classes must not grow faster than the
+# matched corpus. Absolute counts from the August 4 run (matched rows +25%
+# vs July 23; every class below grew slower than that).
+PLACEHOLDER_ROWS_MATCHED_CEILING = 349     # all organic (0 correction-sourced)
+CORPORATE_NAME_ROWS_MATCHED_CEILING = 14   # proxy: rows named PFIZER%
+FOREIGN_ROWS_MATCHED_CEILING = 2           # proxy: WORLD HEALTH ORGANI%. The
+                                           # 2nd row is "WORLD HEALTH ORGANIZATION
+                                           # OF UN FDN" -> UN Foundation
+                                           # (521071570) — a defensible match the
+                                           # name proxy can't distinguish.
 PERSON_ROWS_MATCHED_CEILING = 0            # hard zero
-SELF_MATCH_CEILING = 3263                  # funder matched to itself; tracked,
+SELF_MATCH_CEILING = 3641                  # funder matched to itself; tracked,
                                            # uninvestigated — do not let it grow
-DOLLAR_SUBSET_VIOLATIONS_CEILING = 41      # funder-years with matched > itemized,
-                                           # ALL years (the capture CSV's "14" is
-                                           # the 2020+ subset of these)
 
 PLACEHOLDER_REGEX = (
     r"(\y(see|refer)\w*\y[\s,–-]*(attach|addition|schedul|statement|stmt|list))|^\s*see\s*$"
@@ -150,27 +156,35 @@ def run_checks(fast: bool) -> int:
                        "pf_grant_matching_temp_table not found — skipped", warn_only=True)
 
         logger.info("Per-funder-year subset invariants (matched <= itemized) ...")
+        # Dollar comparison uses POSITIVE amounts only: raw filings contain
+        # negative clawback/adjustment rows (e.g. 223093807/2023 carries a
+        # single -$8.1M line), and an unmatched negative row makes a raw
+        # sum smaller than its matched subset's — the pre-2026-08 "tracked,
+        # uninvestigated" 41-to-42 violation class was entirely this
+        # arithmetic artifact. Positive-only sums restore the strict subset
+        # invariant, so both checks are hard zeros.
+        POS = ("SUM(CASE WHEN {col} ~ '^[0-9]+(\\.[0-9]+)?$' "
+               "THEN {col}::numeric ELSE 0 END)")
         inv = pd.read_sql_query(text(f"""
             WITH pg AS (
                 SELECT filerein, taxyear, COUNT(*) AS n_rows,
-                       SUM({AMT.format(col='sigocpyamoun')}) AS itemized
+                       {POS.format(col='sigocpyamoun')} AS itemized_pos
                 FROM privategrants GROUP BY 1, 2
             ),
             w AS (
                 SELECT filerein, taxyear, COUNT(*) AS n_rows,
-                       SUM({AMT.format(col='sigocpyamoun')}) AS matched
+                       {POS.format(col='sigocpyamoun')} AS matched_pos
                 FROM privategrants_w_recipients GROUP BY 1, 2
             )
             SELECT
               COUNT(*) FILTER (WHERE w.n_rows > pg.n_rows) AS row_violations,
-              COUNT(*) FILTER (WHERE w.matched > pg.itemized * 1.001 + 1000) AS dollar_violations
+              COUNT(*) FILTER (WHERE w.matched_pos > pg.itemized_pos * 1.001 + 1000) AS dollar_violations
             FROM w JOIN pg USING (filerein, taxyear)
         """), conn).iloc[0]
         gate.check("funder-years with more matched rows than raw rows (must be 0)",
                    inv.row_violations == 0, f"{inv.row_violations}")
-        gate.check(f"funder-years with matched $ > itemized $ (<= {DOLLAR_SUBSET_VIOLATIONS_CEILING})",
-                   inv.dollar_violations <= DOLLAR_SUBSET_VIOLATIONS_CEILING,
-                   f"{inv.dollar_violations}")
+        gate.check("funder-years with matched positive $ > itemized positive $ (must be 0)",
+                   inv.dollar_violations == 0, f"{inv.dollar_violations}")
 
         # --- Labeled-pair coverage (recall floor; skippable) -------------
         if fast:
