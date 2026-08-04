@@ -97,6 +97,8 @@ these tables and then recreates its views at the start of every run
 
 from __future__ import annotations
 
+from typing import Iterable
+
 from sqlalchemy import text
 
 from givingtuesday_datamart._internal.db import get_session
@@ -422,19 +424,61 @@ def _build_one(connection, table: str, ddl: str) -> int:
     return count
 
 
-def build_basic_fields_current(connection) -> dict[str, int]:
-    """(Re)build just the two filer-financial relations. Returns row counts.
+def build_basic_fields_current(
+    connection, *, only: Iterable[str] | None = None
+) -> dict[str, int]:
+    """(Re)build the two filer-financial relations. Returns row counts.
 
-    Split out from the full rebuild for the canonical layer, which reads
-    ``basic_fields_current`` / ``basic_fields_pf_current`` but has no
-    interest in the grants relations — those are the expensive ones
-    (10-30 min each against 11-20 GB) and rebuilding them would triple
-    the canonical build for nothing.
+    Split out from the full rebuild because these are what the ingestion
+    path and the canonical layer care about: the grants relations are the
+    expensive ones (10-30 min each against 11-20 GB) and are read only by
+    the matching pipeline, which rebuilds them itself at the start of
+    every run.
+
+    ``only`` restricts the rebuild to the named ``_current`` relations —
+    a refresh of just ``irs_990pf_basic_fields`` has no reason to rebuild
+    the 990 side.
     """
-    return {
-        table: _build_one(connection, table, ddl)
-        for table, ddl in _BASIC_FIELDS_TABLES
-    }
+    wanted = _BASIC_FIELDS_TABLES
+    if only is not None:
+        keep = set(only)
+        wanted = tuple((t, d) for t, d in _BASIC_FIELDS_TABLES if t in keep)
+    return {table: _build_one(connection, table, ddl) for table, ddl in wanted}
+
+
+def stale_basic_fields_current(connection) -> list[str]:
+    """Which filer-financial ``_current`` relations no longer match staging.
+
+    A refresh replaces its whole staging table in a single ingest run, so
+    every staging row carries that run's ``_ingest_run_id``. A ``_current``
+    relation whose id differs was built from an older drop; one that
+    doesn't exist yet counts as stale too.
+
+    Lets consumers guard cheaply (two scalar reads per relation) instead
+    of rebuilding unconditionally — the ingestion path already rebuilds
+    these, so the usual answer is "nothing to do".
+    """
+    stale: list[str] = []
+    for table, _ddl in _BASIC_FIELDS_TABLES:
+        source = table[: -len("_current")]
+        exists = connection.execute(
+            text(f"SELECT to_regclass('public.{table}') IS NOT NULL")
+        ).scalar_one()
+        if not exists:
+            stale.append(table)
+            continue
+        mismatch = connection.execute(
+            text(
+                f"""
+                SELECT (SELECT MAX(_ingest_run_id::text) FROM public.{source})
+                       IS DISTINCT FROM
+                       (SELECT MAX(_ingest_run_id::text) FROM public.{table})
+                """
+            )
+        ).scalar_one()
+        if mismatch:
+            stale.append(table)
+    return stale
 
 
 def build_current_relations(connection) -> dict[str, int]:
