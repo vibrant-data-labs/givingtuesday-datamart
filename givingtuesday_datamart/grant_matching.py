@@ -1,9 +1,11 @@
 import concurrent.futures as cf
+import hashlib
 import io
 import json
 import re
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 import boto3
 import botocore.config
@@ -18,6 +20,7 @@ from givingtuesday_datamart._internal.address_cleaning import create_clean_addre
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart._internal.parquet_cache import _decode_json as _pqc_decode_json
+from givingtuesday_datamart.current_grants import build_current_grants
 from givingtuesday_datamart.ingestion import datamart_config
 from givingtuesday_datamart.canonical.build import (
     CANONICAL_BUILDS_TABLE,
@@ -34,11 +37,12 @@ from givingtuesday_datamart.canonical.build import (
 # in one place. The views must exist before matching reads them; unioned_grants
 # must be rebuilt after matching writes privategrants_w_recipients.
 
-# 6 views built on top of the raw `public.privategrants`, `public.basic_fields`
-# and `public.basic_fields_pf` staging tables. The `_w_column_keys_view` views
-# normalize names/addresses (lowercase, 5-digit zip) into `*_key` columns the
-# matching pipeline blocks/joins on. The `_unique_names_view` views collapse to
-# DISTINCT (key tuple) for orgs that filed in 2015+.
+# 7 views built on top of the raw `public.privategrants`, `public.basic_fields`,
+# `public.basic_fields_pf` and `public.corrections_org_identities` tables. The
+# `_w_column_keys_view` views normalize names/addresses (lowercase, 5-digit zip)
+# into `*_key` columns the matching pipeline blocks/joins on. The
+# `_unique_names_view` views collapse to DISTINCT (key tuple) for orgs that
+# filed in 2015+.
 #
 # The recipient-match universe is the UNION of 990 filers (basic_fields) and
 # 990-PF filers (basic_fields_pf): PF-to-PF grants are legal and common
@@ -46,8 +50,18 @@ from givingtuesday_datamart.canonical.build import (
 # 990-only universe makes every PF-recipient grant structurally unmatchable —
 # ~$32B of 2020+ grant dollars carry a "PF:" recipient status alone.
 _VIEW_DDL = [
+    # DROP first, not CREATE OR REPLACE: this view's column set changed
+    # when it moved from raw privategrants to privategrants_current
+    # (provenance columns), and CREATE OR REPLACE VIEW cannot reorder or
+    # insert columns. The CASCADE takes privategrants_unique_names_view
+    # with it; both are recreated by the entries below.
+    "DROP VIEW IF EXISTS public.privategrants_w_column_keys_view CASCADE",
     """
     CREATE OR REPLACE VIEW public.privategrants_w_column_keys_view AS (
+        -- Reads the filing-version-deduped relation (issue #33), NOT raw
+        -- staging: raw privategrants carries every filing version's block
+        -- plus GT's 2024-batch whole-block doubles. current_grants.py
+        -- rebuilds privategrants_current at the start of every matching run.
         SELECT
             *,
             CASE WHEN sigocpyrbnbn1 IS NULL THEN '' ELSE LOWER(sigocpyrbnbn1) END name1_key,
@@ -57,7 +71,7 @@ _VIEW_DDL = [
             LOWER(sigocpyrfaci) addresscity_key,
             LOWER(sigocpyrfapo) addressstate_key,
             LOWER(LEFT(sigocpyrfapc, 5)) addresszip_key
-        FROM public.privategrants
+        FROM public.privategrants_current
     )
     """,
     """
@@ -203,7 +217,193 @@ _VIEW_DDL = [
             addresszip_key
     )
     """,
+    # Corrections registry (docs/corrections-plan.md): human-verified identity
+    # rows ("this EIN is also known by this name at this address") UNIONed into
+    # the filer universe alongside the two unique-names views above. The CSV
+    # stores raw verbatim values; ALL normalization happens here, using the
+    # same key expressions as basic_fields_w_column_keys_view — keep the two
+    # in lockstep so curator-entered rows can't silently normalize differently
+    # from filed rows.
+    """
+    CREATE OR REPLACE VIEW public.corrections_unique_names_view AS (
+        SELECT
+            filerein_key,
+            name1_key,
+            name2_key,
+            address1_key,
+            address2_key,
+            addresscity_key,
+            addressstate_key,
+            addresszip_key
+        FROM (
+            SELECT
+                CASE WHEN recipient_ein IS NULL THEN '' ELSE LOWER(recipient_ein) END filerein_key,
+                CASE WHEN name1 IS NULL THEN '' ELSE LOWER(name1) END name1_key,
+                CASE WHEN name2 IS NULL THEN '' ELSE LOWER(name2) END name2_key,
+                CASE WHEN address1 IS NULL THEN '' ELSE LOWER(address1) END address1_key,
+                CASE WHEN address2 IS NULL THEN '' ELSE LOWER(address2) END address2_key,
+                LOWER(city) addresscity_key,
+                LOWER(state) addressstate_key,
+                LOWER(LEFT(zip, 5)) addresszip_key
+            FROM public.corrections_org_identities
+        ) keyed
+        GROUP BY
+            filerein_key,
+            name1_key,
+            name2_key,
+            address1_key,
+            address2_key,
+            addresscity_key,
+            addressstate_key,
+            addresszip_key
+        ORDER BY
+            filerein_key,
+            name1_key,
+            name2_key,
+            address1_key,
+            address2_key,
+            addresscity_key,
+            addressstate_key,
+            addresszip_key
+    )
+    """,
 ]
+
+
+# --- 1b. CORRECTIONS REGISTRY LOADER ---
+# The authoring surface is a CSV in git (PR review = audit trail); the
+# pipeline replaces public.corrections_org_identities from it at the start
+# of every matching run. See docs/corrections-plan.md.
+
+_CORRECTIONS_CSV_PATH = (
+    Path(__file__).resolve().parents[1] / "data" / "corrections" / "org_identities.csv"
+)
+
+_CORRECTIONS_COLUMNS = [
+    "recipient_ein",
+    "name1",
+    "name2",
+    "address1",
+    "address2",
+    "city",
+    "state",
+    "zip",
+    "evidence_url",
+    "added_by",
+    "added_date",
+    "note",
+]
+
+# All-TEXT, matching the staging-table convention. Created lazily (IF NOT
+# EXISTS) rather than dropped/recreated: corrections_unique_names_view
+# depends on it, and DROP TABLE would take the view down with it.
+_CORRECTIONS_TABLE_DDL = """
+CREATE TABLE IF NOT EXISTS public.corrections_org_identities (
+    recipient_ein TEXT,
+    name1 TEXT,
+    name2 TEXT,
+    address1 TEXT,
+    address2 TEXT,
+    city TEXT,
+    state TEXT,
+    zip TEXT,
+    evidence_url TEXT,
+    added_by TEXT,
+    added_date TEXT,
+    note TEXT
+)
+"""
+
+
+def _corrections_content_hash() -> str:
+    """First 8 hex chars of the SHA-256 of the corrections CSV's raw bytes.
+
+    Joins the checkpoint prefix (see _resolve_checkpoint_prefix): chunk
+    checkpoints reference dataframe rows by integer position, and correction
+    rows sort into the deterministic ORDER BY and shift positions — so ANY
+    edit to the CSV must force a clean recompute, same as a source re-ingest.
+    """
+    return hashlib.sha256(_CORRECTIONS_CSV_PATH.read_bytes()).hexdigest()[:8]
+
+
+def _read_corrections_csv() -> pd.DataFrame:
+    """Read and validate the corrections CSV. Raises on any bad row.
+
+    Values are raw and verbatim (normalization is the view's job), but
+    structural mistakes — a truncated EIN, a missing provenance field —
+    should kill the run loudly rather than author a dead or wrong row.
+    """
+    if not _CORRECTIONS_CSV_PATH.exists():
+        raise RuntimeError(
+            f"Corrections CSV not found at {_CORRECTIONS_CSV_PATH}. "
+            "It is tracked in git (data/corrections/org_identities.csv) — "
+            "a missing file means a broken checkout, not 'no corrections'."
+        )
+    # keep_default_na=False: values are curator-entered strings; an org
+    # legitimately named "NA" (or an empty note) must stay a string, not
+    # become NaN.
+    df = pd.read_csv(_CORRECTIONS_CSV_PATH, dtype=str, keep_default_na=False)
+    if list(df.columns) != _CORRECTIONS_COLUMNS:
+        raise RuntimeError(
+            f"Corrections CSV columns {list(df.columns)} != expected "
+            f"{_CORRECTIONS_COLUMNS} (order matters; see docs/corrections-plan.md)"
+        )
+
+    errors = []
+    # start=2: line numbers as seen in the file (line 1 is the header).
+    for line_no, row in enumerate(df.itertuples(index=False), start=2):
+        if not re.fullmatch(r"\d{9}", row.recipient_ein.strip()):
+            errors.append(
+                f"line {line_no}: recipient_ein {row.recipient_ein!r} is not 9 digits"
+            )
+        if not row.name1.strip():
+            errors.append(f"line {line_no}: name1 is empty")
+        if not re.fullmatch(r"[A-Za-z]{2}", row.state.strip()):
+            errors.append(
+                f"line {line_no}: state {row.state!r} is not a 2-letter code"
+            )
+        if not row.zip.strip():
+            errors.append(f"line {line_no}: zip is empty")
+        # Provenance discipline: a correction without evidence/author/date is
+        # unauditable — reject it even though the matcher wouldn't care.
+        for col in ("evidence_url", "added_by", "added_date"):
+            if not getattr(row, col).strip():
+                errors.append(f"line {line_no}: {col} is empty")
+        if row.added_date.strip() and not re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}", row.added_date.strip()
+        ):
+            errors.append(
+                f"line {line_no}: added_date {row.added_date!r} is not YYYY-MM-DD"
+            )
+    if errors:
+        raise RuntimeError(
+            "Corrections CSV failed validation:\n" + "\n".join(errors)
+        )
+    return df
+
+
+def _load_corrections(connection) -> int:
+    """Replace public.corrections_org_identities from the in-repo CSV.
+
+    TRUNCATE + append rather than to_sql(if_exists="replace"): "replace"
+    would DROP the table, which fails once corrections_unique_names_view
+    depends on it. Returns the number of correction rows loaded.
+    """
+    df = _read_corrections_csv()
+    connection.execute(text(_CORRECTIONS_TABLE_DDL))
+    connection.execute(text("TRUNCATE public.corrections_org_identities"))
+    df.to_sql(
+        "corrections_org_identities",
+        connection,
+        schema="public",
+        if_exists="append",
+        index=False,
+    )
+    logger.info(
+        f"Loaded {len(df)} correction rows into public.corrections_org_identities "
+        f"(content hash {_corrections_content_hash()})"
+    )
+    return len(df)
 
 
 # Union of (a) matched private foundation grants written to
@@ -236,7 +436,8 @@ FROM (
         sigocpyamoun::bigint AS grant_amount,
         sigocpypogoc AS grant_purpose,
         sigocpyrfsta AS grant_status,
-        sigocpyrrela AS grant_relationship
+        sigocpyrrela AS grant_relationship,
+        match_source
     FROM public.privategrants_w_recipients
 
     UNION
@@ -262,8 +463,13 @@ FROM (
         retaamofcagr::bigint AS grant_amount,
         retapuofgrra AS grant_purpose,
         NULL AS grant_status,
-        NULL AS grant_relationship
-    FROM public.grants_to_domestic_organizations
+        NULL AS grant_relationship,
+        -- Schedule I rows carry the filer-reported recipient EIN directly;
+        -- no matching happened, so no match_source.
+        NULL AS match_source
+    -- Filing-version-deduped relation (issue #33) — raw staging would
+    -- double-count amended filer-years by ~$36B.
+    FROM public.grants_to_domestic_organizations_current
 ) sub;
 """
 
@@ -284,12 +490,16 @@ _UNIONED_GRANTS_INDEXES = [
 
 
 def create_or_replace_views(connection):
-    """Idempotently (re)create the 6 views the matching pipeline reads from.
+    """Idempotently (re)create the 7 views the matching pipeline reads from.
 
     Safe to call on every run: `CREATE OR REPLACE VIEW` updates definitions
-    in place without touching dependent objects.
+    in place without touching dependent objects. The corrections table is
+    created first (IF NOT EXISTS) because corrections_unique_names_view
+    references it — without this, view creation would fail on a fresh
+    database before the loader ever runs.
     """
     logger.info("Creating/replacing grant matching views in public.*")
+    connection.execute(text(_CORRECTIONS_TABLE_DDL))
     for ddl in _VIEW_DDL:
         connection.execute(text(ddl))
 
@@ -312,6 +522,17 @@ _MATCHING_INPUT_LOGICAL_NAMES = (
     "irs_990_basic_fields",
     "irs_990pf_basic_fields",
 )
+
+# Version of the SHAPE of matching's inputs — bump on ANY change that can
+# shift row positions in the input views for unchanged source data: the
+# _current dedup rules (current_grants.py), the view definitions above,
+# normalize_org_name, or the blocking scheme. Chunk checkpoints key on
+# integer row positions, and the prefix otherwise hashes only source
+# versions + the corrections CSV, so without this token such a change
+# would let a resume silently stitch features onto the wrong rows.
+#   v2 (2026-07-30): matching reads privategrants_current instead of raw
+#   privategrants (issue #33 filing-version dedup). v1 = everything prior.
+MATCHING_INPUT_SHAPE_VERSION = 2
 
 
 def _insert_started_build(build_id: str, started_at: datetime, source_runs: dict) -> None:
@@ -397,8 +618,13 @@ def _resolve_checkpoint_prefix(
     base_prefix: str = "grant_matching_checkpoints",
 ) -> str:
     """Build an S3 prefix that's keyed on the source versions of all three
-    upstream staging tables. A new ingest of any source produces a fresh
-    prefix, so old checkpoints can never silently be reused against new data.
+    upstream staging tables plus the content hash of the corrections CSV.
+    A new ingest of any source — or any edit to the corrections file —
+    produces a fresh prefix, so old checkpoints can never silently be
+    reused against new data. (Correction rows sort into the deterministic
+    ORDER BY and shift integer row positions, which chunk checkpoints key
+    on; resuming old chunks against a shifted dataframe would silently
+    produce wrong matches.)
 
     Resolves the latest successful (status='success') ingest_run per
     logical_name from datamart_meta.ingest_runs. Raises if any source has
@@ -421,14 +647,16 @@ def _resolve_checkpoint_prefix(
             f"No successful ingest run on record for: {sorted(missing)}. "
             "Run `python -m givingtuesday_datamart.sources refresh` first."
         )
-    # Nested rather than flat (`pg_X__bf_Y`) so `aws s3 ls` is actually
-    # browseable: each level shows progressively narrower scope, and a single
-    # source version's chunks can be `aws s3 rm --recursive`'d in one shot.
+    # Nested rather than flat (`pg_X__bf_Y`) so the prefix is browseable
+    # with `aws s3 ls`: each level narrows scope, and a single source
+    # version's chunks can be `aws s3 rm --recursive`'d in one shot.
     return (
         f"{base_prefix}/"
         f"pg_{versions['irs_990pf_grants']}/"
         f"bf_{versions['irs_990_basic_fields']}/"
-        f"bfpf_{versions['irs_990pf_basic_fields']}"
+        f"bfpf_{versions['irs_990pf_basic_fields']}/"
+        f"corr_{_corrections_content_hash()}/"
+        f"shape_v{MATCHING_INPUT_SHAPE_VERSION}"
     )
 
 
@@ -615,6 +843,30 @@ def filter_match_rules(
     return features_df[keep]
 
 
+# The two threshold sets passed to filter_match_rules. Chunk-stage is
+# looser so checkpointed chunks survive a later tightening of the final
+# rules; final-stage decides matches.
+# corrections_preflight imports both — change thresholds here, never inline,
+# so the preflight can't drift from the real matcher.
+CHUNK_FILTER_RULES = dict(
+    near_perfect_name_name_min=0.95,
+    near_perfect_name_addr_min=0.35,
+    near_perfect_addr_name_min=0.75,
+    near_perfect_addr_addr_min=0.75,
+    good_enough_name_name_min=0.55,
+    good_enough_name_addr_min=0.85,
+    exact_name_name_min=0.95,
+)
+FINAL_FILTER_RULES = dict(
+    near_perfect_name_name_min=0.99,
+    near_perfect_name_addr_min=0.50,
+    near_perfect_addr_name_min=0.85,
+    near_perfect_addr_addr_min=0.85,
+    good_enough_name_name_min=0.70,
+    good_enough_name_addr_min=0.90,
+    exact_name_name_min=0.99,
+)
+
 
 def match_records(
     chunk_size: int = 50000,
@@ -628,11 +880,12 @@ def match_records(
 
     ``s3_prefix`` defaults to a lineage-keyed path derived from the latest
     successful ingest_runs of irs_990pf_grants + irs_990_basic_fields +
-    irs_990pf_basic_fields, e.g.
-    ``grant_matching_checkpoints/pg_2026_04_15/bf_2026_04_18/bfpf_2026_04_18``.
+    irs_990pf_basic_fields, plus the corrections CSV content hash, e.g.
+    ``grant_matching_checkpoints/pg_2026_04_15/bf_2026_04_18/bfpf_2026_04_18/corr_1a2b3c4d``.
     This means
-    checkpoints can only be resumed against the exact source versions that
-    produced them — re-ingesting either source forces a clean recompute.
+    checkpoints can only be resumed against the exact source versions (and
+    corrections file) that produced them — re-ingesting a source or editing
+    the corrections CSV forces a clean recompute.
     Pass an explicit string to override (e.g. for testing).
 
     ``limit`` (test-only): caps both view reads to the first N rows. Used
@@ -656,6 +909,13 @@ def match_records(
     build_id = str(uuid.uuid4())
     started_at = datetime.now(timezone.utc)
     source_runs = latest_successful_run_ids()
+    # The corrections registry is a matching input like the staging tables;
+    # stamp its content hash next to the ingest run ids. (Validates the CSV
+    # as a side effect — a malformed file fails here, before any compute.)
+    source_runs["corrections_org_identities"] = {
+        "content_hash": _corrections_content_hash(),
+        "rows": len(_read_corrections_csv()),
+    }
     _insert_started_build(build_id, started_at, source_runs)
     logger.info(f"Starting grant matching build {build_id}")
 
@@ -702,6 +962,11 @@ def _do_match_records(
     # 1. LOAD DATA
     with get_session(config=datamart_config()) as session:
         connection = session.connection()
+        _load_corrections(connection)
+        # Rebuild the filing-version-deduped inputs (issue #33) BEFORE the
+        # views: the DROP ... CASCADE inside takes the dependent matching
+        # views with it, and create_or_replace_views restores them.
+        build_current_grants(connection)
         create_or_replace_views(connection)
         if s3_prefix is None:
             s3_prefix = _resolve_checkpoint_prefix(connection)
@@ -726,21 +991,48 @@ def _do_match_records(
         # chunk checkpoints reference DataFrame rows by integer position.
         # If row order shifts between runs, resumed chunks would point at
         # the wrong rows and produce silently-incorrect matches.
-        # The filer universe is 990 + 990-PF filers. UNION (not UNION ALL)
-        # dedupes orgs whose key tuple is identical across the two forms
-        # (e.g. an org that switched filing types at the same name/address).
-        # The outer ORDER BY keeps row order deterministic over the union —
-        # required because chunk checkpoints key on integer row position.
+        # The filer universe is 990 + 990-PF filers + correction rows, each
+        # arm tagged with a `source` column that rides through matching into
+        # privategrants_w_recipients as match_source.
+        # Tagging the arms breaks plain UNION dedup (rows identical but for
+        # `source` no longer collapse), so dedup is done explicitly:
+        # UNION ALL + DISTINCT ON (key tuple), with source_rank as the
+        # tie-break. An org whose key tuple appears in multiple arms keeps
+        # one row, organic sources winning over corrections — so a
+        # correction that duplicates a real filing collapses away, and
+        # match_source='correction' only appears where the correction row
+        # itself supplied the winning identity (the prunability signal:
+        # docs/corrections-plan.md). source_rank in the DISTINCT ON ORDER BY
+        # keeps the winner deterministic; the outer ORDER BY keeps row order
+        # deterministic over the whole universe.
         logger.info(
-            "Reading public.basic_fields_unique_names_view "
-            "UNION public.basic_fields_pf_unique_names_view"
+            "Reading filer universe: basic_fields_unique_names_view "
+            "∪ basic_fields_pf_unique_names_view ∪ corrections_unique_names_view"
         )
         basic_fields_df = pd.read_sql_query(
             text(f"""
-                SELECT * FROM (
-                    SELECT * FROM public.basic_fields_unique_names_view
-                    UNION
-                    SELECT * FROM public.basic_fields_pf_unique_names_view
+                SELECT filerein_key, name1_key, name2_key, address1_key,
+                       address2_key, addresscity_key, addressstate_key,
+                       addresszip_key, source
+                FROM (
+                    SELECT DISTINCT ON (filerein_key, name1_key, name2_key,
+                                        address1_key, address2_key,
+                                        addresscity_key, addressstate_key,
+                                        addresszip_key)
+                        *
+                    FROM (
+                        SELECT *, 'basic_fields' AS source, 1 AS source_rank
+                        FROM public.basic_fields_unique_names_view
+                        UNION ALL
+                        SELECT *, 'basic_fields_pf' AS source, 2 AS source_rank
+                        FROM public.basic_fields_pf_unique_names_view
+                        UNION ALL
+                        SELECT *, 'correction' AS source, 3 AS source_rank
+                        FROM public.corrections_unique_names_view
+                    ) arms
+                    ORDER BY filerein_key, name1_key, name2_key, address1_key,
+                             address2_key, addresscity_key, addressstate_key,
+                             addresszip_key, source_rank
                 ) filers
                 ORDER BY filerein_key, name1_key, name2_key, address1_key,
                          address2_key, addresscity_key, addressstate_key,
@@ -789,7 +1081,7 @@ def _do_match_records(
 
     # --- 5. EXECUTE BLOCKING ---
     # Two blocking passes, unioned by indexer.index():
-    #   1. exact zip — the workhorse (~1B pairs)
+    #   1. exact zip — the primary block (~1B pairs)
     #   2. exact full_name — cross-zip candidates for recipients listed at a
     #      different address than the filer's header (e.g. Gates Trust →
     #      Gates Foundation, zip 98109 vs 98102). Measured at ~681K pairs
@@ -884,16 +1176,7 @@ def _do_match_records(
         chunk = candidate_links[start_idx:end_idx]
         features = compare.compute(chunk, basic_fields_df, private_foundations_df)
         # Keep chunk checkpoints generous so reruns can still tighten final rules later.
-        features = filter_match_rules(
-            features_df=features,
-            near_perfect_name_name_min=0.95,
-            near_perfect_name_addr_min=0.35,
-            near_perfect_addr_name_min=0.75,
-            near_perfect_addr_addr_min=0.75,
-            good_enough_name_name_min=0.55,
-            good_enough_name_addr_min=0.85,
-            exact_name_name_min=0.95,
-        )
+        features = filter_match_rules(features_df=features, **CHUNK_FILTER_RULES)
 
         # Materialize the (basic_fields_idx, privategrants_idx) MultiIndex
         # as regular columns so it survives the parquet round-trip.
@@ -922,16 +1205,7 @@ def _do_match_records(
 
     # --- 7. FILTER ---
     logger.info(f"Filtering matches...")
-    matches = filter_match_rules(
-        features_df=final_features,
-        near_perfect_name_name_min=0.99,
-        near_perfect_name_addr_min=0.50,
-        near_perfect_addr_name_min=0.85,
-        near_perfect_addr_addr_min=0.85,
-        good_enough_name_name_min=0.70,
-        good_enough_name_addr_min=0.90,
-        exact_name_name_min=0.99,
-    )
+    matches = filter_match_rules(features_df=final_features, **FINAL_FILTER_RULES)
 
     logger.info(f"Found {len(matches)} matches.")
 
@@ -950,7 +1224,11 @@ def _do_match_records(
     # primary identifier and address collisions (shared buildings, PO boxes) are common.
     pre_resolve_count = len(matches)
     matches = matches.assign(_combined_score=matches['name_score'] * 2 + matches['addr_score'])
-    matches = matches.sort_values('_combined_score', ascending=False)
+    # mergesort (stable) so score ties resolve deterministically by input
+    # order (which is deterministic: chunks concat in index order). Matters
+    # more now that correction rows can tie with organic universe rows for
+    # the same recipient tuple.
+    matches = matches.sort_values('_combined_score', ascending=False, kind='mergesort')
     matches = matches.drop_duplicates(subset=['private_foundations_df_index'], keep='first')
     matches = matches.drop(columns='_combined_score')
     logger.info(
@@ -967,6 +1245,8 @@ def _do_match_records(
     logger.info(f'% of filer orgs (990 + 990-PF) matched to a grant recipient name: {percentage_matched}')
 
     private_foundations_df['private_foundations_df_index'] = private_foundations_df.index
+    # `source` comes from the basic_fields (filer-universe) side of the merge:
+    # which arm of the universe union supplied the winning identity row.
     full_data_df = basic_fields_df_matched.merge(private_foundations_df, on='private_foundations_df_index', suffixes=("_bf", ""))[[
         'filerein_key',
         'name1_key',
@@ -976,10 +1256,12 @@ def _do_match_records(
         'addresscity_key',
         'addressstate_key',
         'addresszip_key',
+        'source',
     ]].drop_duplicates()
 
     full_data_df.rename(columns={
         'filerein_key': 'recipeint_ein_key',
+        'source': 'match_source',
     }, inplace=True)
 
     temp_join_table_name = "pf_grant_matching_temp_table"
@@ -1003,7 +1285,8 @@ def _do_match_records(
         connection.execute(text(f"""
             SELECT
                 pg.*,
-                pfgm.recipeint_ein_key
+                pfgm.recipeint_ein_key,
+                pfgm.match_source
             INTO public.{private_grants_w_recipient_table_name}
             FROM public.privategrants_w_column_keys_view pg
             JOIN public.{temp_join_table_name} pfgm
@@ -1024,6 +1307,19 @@ def _do_match_records(
         # session as the SELECT INTO above so a mid-pipeline failure leaves an
         # obviously-incomplete state rather than a stale unioned_grants.
         rebuild_unioned_grants(connection)
+
+        # Post-build maintenance (previously a manual post-rebuild step):
+        # SELECT INTO creates tables with no indexes and no planner stats —
+        # downstream consumers (e.g. the canonical pf build step) time out
+        # without the ANALYZE, and the filerein index doesn't survive the
+        # DROP/SELECT INTO cycle.
+        logger.info("Recreating filerein index and refreshing planner stats")
+        connection.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_privategrants_w_recipients_filerein "
+            "ON public.privategrants_w_recipients USING btree (filerein)"
+        ))
+        connection.execute(text("ANALYZE public.privategrants_w_recipients"))
+        connection.execute(text("ANALYZE public.unioned_grants"))
 
         # Row counts of the two output tables, captured in the same session
         # that wrote them so they're guaranteed-consistent with what just
