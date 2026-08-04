@@ -256,22 +256,45 @@ class GtDatamartClient:
         joins: list[str] = []
 
         if needs_basic:
-            # ``basic_fields`` can have multiple rows per (filerein, taxyear),
-            # so sum within each year first and then take the mean across
-            # years — averaging the raw rows would weight by row count.
+            # ``basic_fields`` carries one row per *filing version* — when a
+            # filer amends a return, the original and amended filings are
+            # both present for the same (filerein, taxyear). Keep only the
+            # latest version per year (amended preferred, MAX(url) tiebreak
+            # — the same rule current_grants.py applies on the grants side),
+            # then average across years; summing versions double-counts
+            # amended years (issue #34). The amend flag is NULL (not '') on
+            # non-amended filings — IS NOT DISTINCT FROM keeps the sort key
+            # boolean, where a plain = would put NULL first under DESC and
+            # prefer the original. filesha256 is a determinism tiebreak:
+            # some filer-years re-drop the same filing under one url.
+            #
+            # Contributions-present outranks the amend flag so a version
+            # that doesn't report the metric never wins: 247 filer-years
+            # (2018+) would otherwise read NULL and drop out of the AVG,
+            # from two mechanisms — 140 where the amended return keeps
+            # total revenue but omits the contributions breakdown, and 107
+            # where two accounting periods share one taxyear label and the
+            # newest url is a stub (revenue 0 or near-0). Selection stays
+            # row-level, so every value comes from one real filing rather
+            # than a per-column composite spanning two periods.
+            #
             # The staging columns are all-TEXT; cast at query time.
             ctes.append(
                 """contrib_eligible AS (
                     SELECT filerein AS ein
                     FROM (
-                        SELECT filerein, taxyear,
-                               SUM(NULLIF(totacashcont, '')::bigint) AS yr_sum
+                        SELECT DISTINCT ON (filerein, taxyear)
+                               filerein, taxyear,
+                               NULLIF(totacashcont, '')::bigint AS yr_val
                         FROM public.basic_fields
                         WHERE NULLIF(taxyear, '')::int >= :min_taxyear
-                        GROUP BY filerein, taxyear
+                        ORDER BY filerein, taxyear,
+                                 (NULLIF(totacashcont, '') IS NOT NULL) DESC,
+                                 (amendereturn IS NOT DISTINCT FROM 'X') DESC,
+                                 url DESC, filesha256
                     ) yearly
                     GROUP BY filerein
-                    HAVING AVG(yr_sum) >= :min_avg_contributions
+                    HAVING AVG(yr_val) >= :min_avg_contributions
                 )"""
             )
             joins.append("JOIN contrib_eligible USING (ein)")
@@ -468,6 +491,26 @@ class GtDatamartClient:
     ) -> list[BasicFieldsRow]:
         """Multi-year staging reads from ``public.basic_fields``.
 
+        Returns one row per (filerein, taxyear): ``basic_fields`` carries one
+        row per *filing version* (original + amended returns under the same
+        filer-year), and this method keeps only the latest version — amended
+        preferred, MAX(url) tiebreak, the same rule current_grants.py applies
+        on the grants side (issue #34). Consumers that sum or average across
+        the returned rows would otherwise double-count amended years.
+
+        Version selection prefers a filing that actually reports
+        ``totacashcont``: an amended return sometimes carries total revenue
+        without re-stating the contributions breakdown, and where two
+        accounting periods share one taxyear label the newest url can be a
+        near-empty stub. Both would otherwise blank out contributions the
+        filer did report. The whole row comes from the selected filing —
+        values are never COALESCEd across versions, which in the
+        split-period case would blend two different accounting periods into
+        a row matching no real filing. Consequence worth knowing: when the
+        amendment omits contributions, ``total_revenue_current_year`` comes
+        from the earlier version too, so it can trail an amended revenue
+        figure by a small amount.
+
         Staging is all-TEXT, so every numeric column is cast at query time
         via ``NULLIF(col, '')::bigint``. ``governgrants`` is COALESCEd to 0
         when computing ``total_cash_contributions_no_gov`` because empty
@@ -480,7 +523,7 @@ class GtDatamartClient:
 
         params: dict[str, object] = {"eins": list(eins)}
         sql = """
-            SELECT
+            SELECT DISTINCT ON (filerein, taxyear)
                 filerein                                AS ein,
                 filername1                              AS name,
                 filername2                              AS name_secondary,
@@ -502,6 +545,12 @@ class GtDatamartClient:
         if min_taxyear is not None:
             sql += " AND NULLIF(taxyear, '')::int >= :min_taxyear"
             params["min_taxyear"] = min_taxyear
+        sql += """
+            ORDER BY filerein, taxyear,
+                     (NULLIF(totacashcont, '') IS NOT NULL) DESC,
+                     (amendereturn IS NOT DISTINCT FROM 'X') DESC,
+                     url DESC, filesha256
+        """
 
         with self._session() as session:
             rows = session.execute(text(sql), params).mappings().all()
@@ -719,23 +768,30 @@ class GtDatamartClient:
             "min_taxyear": min_taxyear,
             "min_avg": min_avg,
         }
-        # ``basic_fields`` can have multiple rows for the same (filerein,
-        # taxyear), so sum the duplicates within each year first and then
-        # average across years. ``AVG(col)`` directly over all rows would
-        # weight by row count and quietly drop EINs whose duplicates pulled
-        # the all-rows mean below the threshold.
+        # ``basic_fields`` carries one row per *filing version* for the same
+        # (filerein, taxyear) — original + amended returns. Keep only the
+        # latest version per year (amended preferred, MAX(url) tiebreak,
+        # filesha256 for determinism — the current_grants.py rule), then
+        # average across years; summing versions double-counts amended years
+        # (issue #34). Presence of the thresholded column outranks the amend
+        # flag so a version that doesn't report it never wins and silently
+        # drops the year from the AVG — see the note in search_nonprofits.
         sql = f"""
             SELECT filerein AS ein
             FROM (
-                SELECT filerein, taxyear,
-                       SUM(NULLIF({column}, '')::bigint) AS yr_sum
+                SELECT DISTINCT ON (filerein, taxyear)
+                       filerein, taxyear,
+                       NULLIF({column}, '')::bigint AS yr_val
                 FROM public.basic_fields
                 WHERE filerein = ANY(:eins)
                   AND NULLIF(taxyear, '')::int >= :min_taxyear
-                GROUP BY filerein, taxyear
+                ORDER BY filerein, taxyear,
+                         (NULLIF({column}, '') IS NOT NULL) DESC,
+                         (amendereturn IS NOT DISTINCT FROM 'X') DESC,
+                         url DESC, filesha256
             ) yearly
             GROUP BY filerein
-            HAVING AVG(yr_sum) >= :min_avg
+            HAVING AVG(yr_val) >= :min_avg
         """
         logger.info(
             "find_eins_with_min_avg_contributions: %d EIN(s), column=%s, min_taxyear=%s, min_avg=%s",
