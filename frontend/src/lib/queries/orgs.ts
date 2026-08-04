@@ -13,23 +13,31 @@ import type {
   RevenueDetail,
 } from '@/types/org';
 
-// basic_fields uses totrevcuryea; basic_fields_pf uses areterexpnss
+// Every read here goes to the *_current relations: raw staging carries one
+// row per filing version, so a filer who amended a return appears twice for
+// that tax year — SUMs double, and per-year tables show the year twice
+// (issue #34). current_grants.py owns the selection rule.
+type BasicFieldsSource =
+  | 'public.basic_fields_current'
+  | 'public.basic_fields_pf_current';
+
+const NONPROFIT_TABLE = 'public.basic_fields_current' as const;
+const FOUNDATION_TABLE = 'public.basic_fields_pf_current' as const;
+
+// 990 uses totrevcuryea; 990-PF uses areterexpnss
 const REVENUE_COL = {
-  'public.basic_fields': 'totrevcuryea',
-  'public.basic_fields_pf': 'areterexpnss',
+  [NONPROFIT_TABLE]: 'totrevcuryea',
+  [FOUNDATION_TABLE]: 'areterexpnss',
 } as const;
 
 // donoadvifund encoding in basic_fields: 'true'/'1' = Yes, 'false'/'0'/''/NULL = No.
 // Both encodings appear because the column's source CSV format shifts by tax year.
 const DAF_YES_SQL = sql<boolean>`donoadvifund IN ('1', 'true')`;
 
-async function fetchOrgFromTable(
-  table: 'public.basic_fields' | 'public.basic_fields_pf',
-  ein: string
-) {
+async function fetchOrgFromTable(table: BasicFieldsSource, ein: string) {
   const db = getDb();
   const revenueCol = REVENUE_COL[table];
-  const isNonprofit = table === 'public.basic_fields';
+  const isNonprofit = table === NONPROFIT_TABLE;
   const rows = await db
     .selectFrom(table)
     .select([
@@ -55,12 +63,13 @@ async function fetchOrgFromTable(
   return rows[0] ?? null;
 }
 
-// Per-year DAF flag for 990 filers. One row per (filerein, taxyear); when the
-// same year has multiple filings (amendments) we collapse with BOOL_OR.
+// Per-year DAF flag for 990 filers. _current is already one row per
+// (filerein, taxyear); the GROUP BY + BOOL_OR is retained as a cheap
+// belt-and-braces against a rebuild that ever regressed the grain.
 async function fetchDafByYear(ein: string): Promise<{ year: number; isDaf: boolean }[]> {
   const db = getDb();
   const rows = await db
-    .selectFrom('public.basic_fields')
+    .selectFrom(NONPROFIT_TABLE)
     .select([
       sql<number>`taxyear::int`.as('year'),
       sql<boolean>`BOOL_OR(${DAF_YES_SQL})`.as('is_daf'),
@@ -72,10 +81,7 @@ async function fetchDafByYear(ein: string): Promise<{ year: number; isDaf: boole
   return rows.map((r) => ({ year: r.year, isDaf: r.is_daf }));
 }
 
-async function fetchRevenueHistory(
-  table: 'public.basic_fields' | 'public.basic_fields_pf',
-  ein: string
-) {
+async function fetchRevenueHistory(table: BasicFieldsSource, ein: string) {
   const db = getDb();
   const revenueCol = REVENUE_COL[table];
   const rows = await db
@@ -101,11 +107,11 @@ function toInt(val: string | null | undefined): number | null {
 }
 
 async function fetchRevenueDetails(
-  table: 'public.basic_fields' | 'public.basic_fields_pf',
+  table: BasicFieldsSource,
   ein: string
 ): Promise<RevenueDetail[]> {
   const db = getDb();
-  const isNonprofit = table === 'public.basic_fields';
+  const isNonprofit = table === NONPROFIT_TABLE;
 
   if (isNonprofit) {
     const rows = await db
@@ -274,7 +280,7 @@ function buildSlot(desc: string | null, amount: string | null): ActivitySlot | n
 async function fetchFoundationActivities(ein: string): Promise<FoundationActivitiesYear[]> {
   const db = getDb();
   const rows = await db
-    .selectFrom('public.basic_fields_pf')
+    .selectFrom(FOUNDATION_TABLE)
     .select([
       sql<number>`taxyear::int`.as('year'),
       sql<string>`url::text`.as('url'),
@@ -355,8 +361,8 @@ async function getOrgProfileUncached(ein: string): Promise<OrgProfile | null> {
   const [npIdentity, pfIdentity, npAgg, pfAgg] = await Promise.all([
     fetchCanonicalIdentity('public.nonprofit_canonical', ein),
     fetchCanonicalIdentity('public.funder_canonical', ein),
-    fetchOrgFromTable('public.basic_fields', ein),
-    fetchOrgFromTable('public.basic_fields_pf', ein),
+    fetchOrgFromTable(NONPROFIT_TABLE, ein),
+    fetchOrgFromTable(FOUNDATION_TABLE, ein),
   ]);
 
   // 990 takes precedence when an EIN somehow appears in both surfaces.
@@ -365,7 +371,7 @@ async function getOrgProfileUncached(ein: string): Promise<OrgProfile | null> {
   if (!agg) return null;
   const identity = orgType === 'nonprofit' ? npIdentity : pfIdentity;
 
-  const table = orgType === 'nonprofit' ? 'public.basic_fields' : 'public.basic_fields_pf';
+  const table = orgType === 'nonprofit' ? NONPROFIT_TABLE : FOUNDATION_TABLE;
 
   const [revenueByYear, revenueDetails, missions, programs, scheduleO, foundationActivities, dafByYear] = await Promise.all([
     fetchRevenueHistory(table, ein),

@@ -9,6 +9,14 @@ tables, and we want query-time cost to be zero):
   ``DISTINCT ON (filerein)`` ordered by tax year desc, then tax-period-end
   desc, then ingested_at desc as a deterministic tiebreak.
 
+  Built from ``basic_fields_current``, not raw staging: the ordering above
+  cannot separate an original filing from its amendment (same taxyear, same
+  taxperend, and ``_ingested_at`` is constant within an ingest run), so on
+  staging the identity row for 5,315 EINs was an arbitrary pick between
+  versions — 619 of them disagreeing on name or address. Reading the deduped
+  relation makes that choice the same one every other consumer sees
+  (issue #34).
+
 * ``public.nonprofit_text`` — one row per EIN built from the **latest tax
   year only** across mission, programs activities 1/2/3, and Schedule O
   Part III narrative. Plain ``DISTINCT`` collapses byte-identical snippets
@@ -35,6 +43,7 @@ from sqlalchemy import text
 
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart._internal.logger import logger
+from givingtuesday_datamart.current_grants import build_basic_fields_current
 from givingtuesday_datamart.ingestion import (
     INGEST_RUNS_TABLE,
     META_SCHEMA,
@@ -256,7 +265,7 @@ def _build_nonprofit_canonical(session) -> int:
                 _ingest_run_id                          AS source_run_id,
                 _source_version                         AS source_version,
                 NOW() AT TIME ZONE 'UTC'                AS _built_at
-            FROM public.basic_fields
+            FROM public.basic_fields_current
             ORDER BY
                 filerein,
                 CAST(NULLIF(taxyear, '') AS INT) DESC NULLS LAST,
@@ -461,11 +470,12 @@ def _build_nonprofit_text(session) -> int:
 
 
 def _build_funder_canonical(session) -> int:
-    """DROP + CREATE + populate public.funder_canonical from basic_fields_pf.
+    """DROP + CREATE + populate public.funder_canonical from basic_fields_pf_current.
 
     Private-foundation identity table — mirrors ``nonprofit_canonical``'s
     selection logic (latest taxyear, then latest taxperend, then latest
-    ingested) but built against ``basic_fields_pf``. Funder classification
+    ingested), including its read of the deduped ``_current`` relation
+    rather than raw staging. Funder classification
     (DAF / community / corporate / family) is deliberately out of scope for
     v1 — it's a Phase 3 enrichment task that needs Candid data. v1 carries
     identity + address + contact only.
@@ -498,7 +508,7 @@ def _build_funder_canonical(session) -> int:
                 _ingest_run_id                          AS source_run_id,
                 _source_version                         AS source_version,
                 NOW() AT TIME ZONE 'UTC'                AS _built_at
-            FROM public.basic_fields_pf
+            FROM public.basic_fields_pf_current
             ORDER BY
                 filerein,
                 CAST(NULLIF(taxyear, '') AS INT) DESC NULLS LAST,
@@ -789,6 +799,12 @@ def build_canonical(*, include_people: bool = False) -> BuildResult:
     )
     try:
         with get_session(config=datamart_config()) as session:
+            # Refresh the filing-version-deduped inputs FIRST. Both identity
+            # builds read basic_fields[_pf]_current, and a staging refresh
+            # leaves those stale — the matching pipeline also rebuilds them,
+            # but it runs after this step in the routine-refresh runbook, so
+            # waiting for it would build canonical from the previous drop.
+            build_basic_fields_current(session.connection())
             # schedule_o_part_iii must land before nonprofit_text because the
             # text build reads from it. All builds share one transaction so
             # downstream consumers never see a half-built canonical layer.
