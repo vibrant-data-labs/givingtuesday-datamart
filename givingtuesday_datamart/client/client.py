@@ -588,17 +588,12 @@ class GtDatamartClient:
             params["domain"] = domain
             params["domain_prefix"] = f"{domain}%"
 
-        # Every remaining signal source selects from the canonical itself, so
-        # this LEFT JOIN is now provably equivalent to an inner one — it can
-        # no longer surface the 990-EZ filers (present in nonprofit_text,
-        # absent from nonprofit_canonical) that the dropped narrative arm
-        # used to reach. Kept as LEFT so adding a nonprofit_text-sourced
-        # signal later doesn't silently start dropping rows.
-        join = (
-            "LEFT JOIN public.nonprofit_canonical c USING (ein)"
-            if arm == "nonprofit"
-            else "JOIN public.funder_canonical c USING (ein)"
-        )
+        # Inner join: every signal source above selects from this same table,
+        # so the matched EIN set is a subset of it by construction. (A LEFT
+        # JOIN would be needed only for a signal sourced from nonprofit_text,
+        # which can carry 990-EZ filers absent from the canonical — there is
+        # no such signal here.)
+        join = f"JOIN {table} c USING (ein)"
         cte_sql = ",\n            ".join(ctes)
         union_sql = "\n                    UNION ALL\n                    ".join(unions)
         # MAX(rank) picks the winning tier per EIN; ARRAY_AGG ordered by
@@ -845,13 +840,8 @@ class GtDatamartClient:
                 )
                 unions.append("SELECT key, ein, rank, signal FROM url_prefix_hits")
 
-        # LEFT for the same defensive reason as the single-row path — every
-        # current source selects from the canonical, so it can't yield NULLs.
-        join = (
-            "LEFT JOIN public.nonprofit_canonical c USING (ein)"
-            if arm == "nonprofit"
-            else "JOIN public.funder_canonical c USING (ein)"
-        )
+        # Inner, for the same reason as the single-row path.
+        join = f"JOIN {table} c USING (ein)"
         cte_sql = ",\n            ".join(ctes)
         union_sql = "\n                    UNION ALL\n                    ".join(unions)
         # ROW_NUMBER partitioned by key applies limit_per_query server-side,

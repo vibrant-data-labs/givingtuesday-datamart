@@ -157,7 +157,9 @@ def test_nonprofit_arm_emits_all_signal_ctes():
     assert "1500000.0::float8" in sql
     assert "1200000.0::float8" in sql
     assert "1000000.0::float8" in sql
-    assert "LEFT JOIN public.nonprofit_canonical" in sql
+    # Inner join — every signal source is nonprofit_canonical itself.
+    assert "JOIN public.nonprofit_canonical c USING (ein)" in sql
+    assert "LEFT JOIN" not in sql
     assert params["limit"] == 25
 
 
@@ -281,10 +283,9 @@ def test_limit_applied_after_merge():
 
 
 def test_null_identity_columns_pass_through():
-    # With the narrative arm gone, every signal source selects from the
-    # canonical, so the LEFT JOIN can no longer actually produce NULLs. The
-    # join is kept defensively; this asserts the client still maps such a row
-    # cleanly if a future nonprofit_text-sourced signal reintroduces one.
+    # The join is inner, but the canonical's own columns are nullable — real
+    # rows carry NULL name/city (e.g. ein 680475089). Those must survive as
+    # None rather than blowing up the dataclass construction.
     rows = [
         _row(
             "100000009",
