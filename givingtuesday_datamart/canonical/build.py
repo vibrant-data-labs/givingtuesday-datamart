@@ -43,7 +43,10 @@ from sqlalchemy import text
 
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart._internal.logger import logger
-from givingtuesday_datamart.current_grants import build_basic_fields_current
+from givingtuesday_datamart.current_grants import (
+    build_basic_fields_current,
+    stale_basic_fields_current,
+)
 from givingtuesday_datamart.ingestion import (
     INGEST_RUNS_TABLE,
     META_SCHEMA,
@@ -799,12 +802,21 @@ def build_canonical(*, include_people: bool = False) -> BuildResult:
     )
     try:
         with get_session(config=datamart_config()) as session:
-            # Refresh the filing-version-deduped inputs FIRST. Both identity
-            # builds read basic_fields[_pf]_current, and a staging refresh
-            # leaves those stale — the matching pipeline also rebuilds them,
-            # but it runs after this step in the routine-refresh runbook, so
-            # waiting for it would build canonical from the previous drop.
-            build_basic_fields_current(session.connection())
+            # Both identity builds read basic_fields[_pf]_current. The
+            # ingestion path rebuilds those as part of any refresh that
+            # reloads their source, so this is normally a no-op — but it
+            # is checked rather than assumed, because building identity
+            # from the previous drop is silent and would persist until
+            # someone noticed a stale name or a missing EIN. The guard is
+            # two scalar reads per relation.
+            stale = stale_basic_fields_current(session.connection())
+            if stale:
+                logger.warning(
+                    "%s stale or missing — rebuilding before identity builds. "
+                    "Expected only if staging was loaded outside `sources refresh`.",
+                    ", ".join(stale),
+                )
+                build_basic_fields_current(session.connection(), only=stale)
             # schedule_o_part_iii must land before nonprofit_text because the
             # text build reads from it. All builds share one transaction so
             # downstream consumers never see a half-built canonical layer.

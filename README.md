@@ -286,15 +286,21 @@ python -m givingtuesday_datamart.sources loaded
 
 # 2. Refresh staging. Validation (hard-fail + soft-warn) runs per
 #    source automatically; already-loaded (source, version) pairs skip.
+#    Reloading basic_fields / basic_fields_pf also rebuilds their
+#    _current relations (~11.5 min) — the client, the frontend and the
+#    canonical identity builds read those, so a reload that left them
+#    behind would serve the previous drop. The grants _current relations
+#    are NOT rebuilt here; matching owns those.
 python -m givingtuesday_datamart.sources refresh
 
 # 3. Verify the refresh before building anything on top: every source
 #    'success', row counts sane, warnings inspected.
 python -m givingtuesday_datamart.sources loaded
 
-# 4. Rebuild the canonical layer. Rebuilds basic_fields[_pf]_current
-#    first — the identity tables read those, and a staging refresh
-#    leaves them stale until something rebuilds them.
+# 4. Rebuild the canonical layer (~10 min). Checks that
+#    basic_fields[_pf]_current match staging before building identity
+#    from them, and rebuilds only if they don't — normally a no-op,
+#    since step 2 already did it.
 python -m givingtuesday_datamart.sources build-canonical
 
 # 5. Corrections preflight (~10 min, any machine). Required after any

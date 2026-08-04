@@ -294,6 +294,64 @@ def cmd_build_canonical(*, include_people: bool = False) -> int:
     return 0
 
 
+def _rebuild_dependent_current(reloaded_tables: set[str]) -> bool:
+    """Refresh the `_current` relations invalidated by this run. True on success.
+
+    A staging reload replaces the table outright, which leaves every
+    relation derived from it holding the previous drop's rows. The
+    filer-financial ones are read directly by the Python client, the
+    frontend, and the canonical identity builds, so they have to be
+    correct the moment a refresh finishes — rebuilding them anywhere
+    later means those consumers serve the old drop until that step runs
+    (issue #34).
+
+    Only the two basic-fields relations, and only the ones whose source
+    actually reloaded. The grants `_current` relations are deliberately
+    left alone: nothing reads them but the matching pipeline, which
+    rebuilds them at the start of its own run, and they cost 10-30 min
+    each — rebuilding them here would turn a routine refresh into a
+    much longer job to no one's benefit.
+
+    A failure here does NOT invalidate the ingest: the staging data is
+    loaded and its run row stays 'success'. It's loud, and it sets a
+    non-zero exit so the caller notices, but the fix is to rerun the
+    rebuild, not the refresh.
+    """
+    from givingtuesday_datamart._internal.db import get_session
+    from givingtuesday_datamart.current_grants import (
+        build_basic_fields_current,
+        stale_basic_fields_current,
+    )
+    from givingtuesday_datamart.ingestion import datamart_config
+
+    wanted = sorted(
+        f"{table}_current"
+        for table in reloaded_tables
+        if table in ("basic_fields", "basic_fields_pf")
+    )
+    if not wanted:
+        return True
+
+    logger.info("Rebuilding filing-version dedup relations: %s", ", ".join(wanted))
+    try:
+        with get_session(config=datamart_config()) as session:
+            counts = build_basic_fields_current(session.connection(), only=wanted)
+    except Exception:
+        logger.exception(
+            "Staging reloaded successfully, but rebuilding %s FAILED. The "
+            "staging tables are correct; %s still hold the previous drop's "
+            "rows, so the client, the frontend and the canonical identity "
+            "builds will read stale data until this is rerun: "
+            "python -m givingtuesday_datamart.current_grants",
+            ", ".join(wanted),
+            ", ".join(wanted),
+        )
+        return False
+    for table, count in counts.items():
+        logger.info("public.%s rebuilt: %s rows", table, f"{count:,}")
+    return True
+
+
 def cmd_refresh(source_names: list[str] | None, *, force: bool) -> int:
     # Import here so `status` does not pay for the SQLAlchemy init cost.
     from givingtuesday_datamart.ingestion import ingest_source
@@ -312,6 +370,7 @@ def cmd_refresh(source_names: list[str] | None, *, force: bool) -> int:
 
     exit_code = 0
     summary_rows: list[tuple[str, str, str, str]] = []
+    reloaded_tables: set[str] = set()
     for i, spec in enumerate(specs, start=1):
         resolved = resolve_latest(spec, listing=listing)
         if resolved is None:
@@ -347,6 +406,11 @@ def cmd_refresh(source_names: list[str] | None, *, force: bool) -> int:
         )
         if result.status == "failed":
             exit_code = 1
+        if result.status == "success":
+            reloaded_tables.add(spec.staging_table_name.split(".")[-1])
+
+    if not _rebuild_dependent_current(reloaded_tables):
+        exit_code = 1
 
     headers = ("logical_name", "version_date", "status", "row_count")
     widths = [max(len(row[i]) for row in (*summary_rows, headers)) for i in range(len(headers))]
