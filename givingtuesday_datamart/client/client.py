@@ -266,8 +266,19 @@ class GtDatamartClient:
             # non-amended filings — IS NOT DISTINCT FROM keeps the sort key
             # boolean, where a plain = would put NULL first under DESC and
             # prefer the original. filesha256 is a determinism tiebreak:
-            # some filer-years re-drop the same filing under one url. The
-            # staging columns are all-TEXT; cast at query time.
+            # some filer-years re-drop the same filing under one url.
+            #
+            # Contributions-present outranks the amend flag so a version
+            # that doesn't report the metric never wins: 247 filer-years
+            # (2018+) would otherwise read NULL and drop out of the AVG,
+            # from two mechanisms — 140 where the amended return keeps
+            # total revenue but omits the contributions breakdown, and 107
+            # where two accounting periods share one taxyear label and the
+            # newest url is a stub (revenue 0 or near-0). Selection stays
+            # row-level, so every value comes from one real filing rather
+            # than a per-column composite spanning two periods.
+            #
+            # The staging columns are all-TEXT; cast at query time.
             ctes.append(
                 """contrib_eligible AS (
                     SELECT filerein AS ein
@@ -278,6 +289,7 @@ class GtDatamartClient:
                         FROM public.basic_fields
                         WHERE NULLIF(taxyear, '')::int >= :min_taxyear
                         ORDER BY filerein, taxyear,
+                                 (NULLIF(totacashcont, '') IS NOT NULL) DESC,
                                  (amendereturn IS NOT DISTINCT FROM 'X') DESC,
                                  url DESC, filesha256
                     ) yearly
@@ -486,6 +498,19 @@ class GtDatamartClient:
         on the grants side (issue #34). Consumers that sum or average across
         the returned rows would otherwise double-count amended years.
 
+        Version selection prefers a filing that actually reports
+        ``totacashcont``: an amended return sometimes carries total revenue
+        without re-stating the contributions breakdown, and where two
+        accounting periods share one taxyear label the newest url can be a
+        near-empty stub. Both would otherwise blank out contributions the
+        filer did report. The whole row comes from the selected filing —
+        values are never COALESCEd across versions, which in the
+        split-period case would blend two different accounting periods into
+        a row matching no real filing. Consequence worth knowing: when the
+        amendment omits contributions, ``total_revenue_current_year`` comes
+        from the earlier version too, so it can trail an amended revenue
+        figure by a small amount.
+
         Staging is all-TEXT, so every numeric column is cast at query time
         via ``NULLIF(col, '')::bigint``. ``governgrants`` is COALESCEd to 0
         when computing ``total_cash_contributions_no_gov`` because empty
@@ -522,6 +547,7 @@ class GtDatamartClient:
             params["min_taxyear"] = min_taxyear
         sql += """
             ORDER BY filerein, taxyear,
+                     (NULLIF(totacashcont, '') IS NOT NULL) DESC,
                      (amendereturn IS NOT DISTINCT FROM 'X') DESC,
                      url DESC, filesha256
         """
@@ -747,7 +773,9 @@ class GtDatamartClient:
         # latest version per year (amended preferred, MAX(url) tiebreak,
         # filesha256 for determinism — the current_grants.py rule), then
         # average across years; summing versions double-counts amended years
-        # (issue #34).
+        # (issue #34). Presence of the thresholded column outranks the amend
+        # flag so a version that doesn't report it never wins and silently
+        # drops the year from the AVG — see the note in search_nonprofits.
         sql = f"""
             SELECT filerein AS ein
             FROM (
@@ -758,6 +786,7 @@ class GtDatamartClient:
                 WHERE filerein = ANY(:eins)
                   AND NULLIF(taxyear, '')::int >= :min_taxyear
                 ORDER BY filerein, taxyear,
+                         (NULLIF({column}, '') IS NOT NULL) DESC,
                          (amendereturn IS NOT DISTINCT FROM 'X') DESC,
                          url DESC, filesha256
             ) yearly
