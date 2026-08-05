@@ -235,10 +235,10 @@ Uses [`recordlinkage`](https://recordlinkage.readthedocs.io/) to compare
 private-grant recipient names + addresses against the filer universe
 (990 filers ∪ 990-PF filers ∪ the corrections registry —
 [`data/corrections/org_identities.csv`](data/corrections/org_identities.csv)).
-At the start of every run it reloads the corrections CSV, rebuilds the
-filing-version-deduped `_current` relations
-([`current_grants.py`](givingtuesday_datamart/current_grants.py), issue
-#33), and recreates the matching views — no separate step needed.
+At the start of every run it reloads the corrections CSV, rebuilds all
+four filing-version-deduped `_current` relations
+([`current_grants.py`](givingtuesday_datamart/current_grants.py), issues
+#33 and #34), and recreates the matching views — no separate step needed.
 
 Candidate-pair chunks are written to S3 keyed on the full input lineage:
 the source versions of `irs_990pf_grants` / `irs_990_basic_fields` /
@@ -286,13 +286,21 @@ python -m givingtuesday_datamart.sources loaded
 
 # 2. Refresh staging. Validation (hard-fail + soft-warn) runs per
 #    source automatically; already-loaded (source, version) pairs skip.
+#    Reloading basic_fields / basic_fields_pf also rebuilds their
+#    _current relations (~11.5 min) — the client, the frontend and the
+#    canonical identity builds read those, so a reload that left them
+#    behind would serve the previous drop. The grants _current relations
+#    are NOT rebuilt here; matching owns those.
 python -m givingtuesday_datamart.sources refresh
 
 # 3. Verify the refresh before building anything on top: every source
 #    'success', row counts sane, warnings inspected.
 python -m givingtuesday_datamart.sources loaded
 
-# 4. Rebuild the canonical layer (reads staging only; ~10 min).
+# 4. Rebuild the canonical layer (~10 min). Checks that
+#    basic_fields[_pf]_current match staging before building identity
+#    from them, and rebuilds only if they don't — normally a no-op,
+#    since step 2 already did it.
 python -m givingtuesday_datamart.sources build-canonical
 
 # 5. Corrections preflight (~10 min, any machine). Required after any
