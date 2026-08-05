@@ -157,6 +157,17 @@ _BASIC_FIELDS_PF_CURRENT_DDL = _BASIC_FIELDS_SELECT.format(
     order_keys="",
 )
 
+# 990-EZ: same shape as the 990 rule. EZ carries `amendereturn`, and its
+# contributions column is `congifgraetc` — the 990's `totacashcont` under
+# GT's own cross-form naming — so the value-present key applies here too.
+_BASIC_FIELDS_EZ_CURRENT_DDL = _BASIC_FIELDS_SELECT.format(
+    table="basic_fields_ez",
+    order_keys=(
+        "         (NULLIF(b.congifgraetc, '') IS NOT NULL) DESC,\n"
+        "         (b.amendereturn IS NOT DISTINCT FROM 'X') DESC,\n"
+    ),
+)
+
 # Line-item content columns — everything except provenance (url,
 # filesha256) and ingestion metadata. Two rows are "the same line item"
 # iff they agree on all of these; the md5 hash of this tuple drives both
@@ -253,15 +264,15 @@ ranked AS (
 )
 SELECT {", ".join(_SCHED_I_ALL_COLS)},
        n_urls_for_year, n_filings_for_year,
-       CONCAT_WS('+',
+       -- CONCAT_WS returns '' (not NULL) when every CASE is NULL, which is
+       -- the passthrough majority. Resolve it inline: a post-CTAS UPDATE
+       -- would rewrite ~95% of the tuples and double the heap.
+       COALESCE(NULLIF(CONCAT_WS('+',
            CASE WHEN n_urls_for_year > 1 THEN 'latest_url' END,
            CASE WHEN n_filings_for_year >= 2 THEN 'amend_distinct' END
-       ) AS dedup_rule
+       ), ''), 'passthrough') AS dedup_rule
 FROM ranked
 WHERE n_filings_for_year < 2 OR _copy_rank = 1;
-
-UPDATE public.grants_to_domestic_organizations_current
-SET dedup_rule = 'passthrough' WHERE dedup_rule = '';
 """
 
 _PF_CURRENT_DDL = f"""
@@ -350,10 +361,11 @@ ranked AS (
 SELECT {", ".join(f"ranked.{c}" for c in _PF_ALL_COLS)},
        n_urls_for_year,
        COALESCE(pf.n_filings_for_year, 0) AS n_filings_for_year,
-       CONCAT_WS('+',
+       -- See the Schedule I block: inline passthrough, no post-CTAS UPDATE.
+       COALESCE(NULLIF(CONCAT_WS('+',
            CASE WHEN n_urls_for_year > 1 THEN 'latest_url' END,
            CASE WHEN _collapse THEN 'pair_collapse' END
-       ) AS dedup_rule
+       ), ''), 'passthrough') AS dedup_rule
 FROM ranked
 LEFT JOIN pf_filings pf
   ON pf.filerein = ranked.filerein
@@ -361,9 +373,6 @@ LEFT JOIN pf_filings pf
 -- keep HALF of each tuple's copies (not one): multiplicity 4 -> 2 keeps
 -- a legitimately repeated grant that was swept up in the block doubling
 WHERE NOT _collapse OR _copy_rank <= _n_copies / 2;
-
-UPDATE public.privategrants_current
-SET dedup_rule = 'passthrough' WHERE dedup_rule = '';
 """
 
 _INDEX_DDL = {
@@ -376,6 +385,11 @@ _INDEX_DDL = {
         "CREATE INDEX ix_bfpf_current_filerein ON public.basic_fields_pf_current (filerein)",
         "CREATE UNIQUE INDEX ix_bfpf_current_filerein_taxyear ON public.basic_fields_pf_current (filerein, taxyear)",
         "ANALYZE public.basic_fields_pf_current",
+    ],
+    "basic_fields_ez_current": [
+        "CREATE INDEX ix_bfez_current_filerein ON public.basic_fields_ez_current (filerein)",
+        "CREATE UNIQUE INDEX ix_bfez_current_filerein_taxyear ON public.basic_fields_ez_current (filerein, taxyear)",
+        "ANALYZE public.basic_fields_ez_current",
     ],
     "grants_to_domestic_organizations_current": [
         "CREATE INDEX ix_gtdo_current_filerein ON public.grants_to_domestic_organizations_current (filerein)",
@@ -393,6 +407,7 @@ _INDEX_DDL = {
 _BASIC_FIELDS_TABLES = (
     ("basic_fields_current", _BASIC_FIELDS_CURRENT_DDL),
     ("basic_fields_pf_current", _BASIC_FIELDS_PF_CURRENT_DDL),
+    ("basic_fields_ez_current", _BASIC_FIELDS_EZ_CURRENT_DDL),
 )
 _GRANTS_TABLES = (
     ("grants_to_domestic_organizations_current", _SCHED_I_CURRENT_DDL),

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 
-FormType = Literal["990", "990-PF"]
+FormType = Literal["990", "990-EZ", "990-PF"]
 
 
 @dataclass(frozen=True)

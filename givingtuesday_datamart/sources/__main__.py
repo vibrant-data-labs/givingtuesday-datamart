@@ -305,7 +305,7 @@ def _rebuild_dependent_current(reloaded_tables: set[str]) -> bool:
     later means those consumers serve the old drop until that step runs
     (issue #34).
 
-    Only the two basic-fields relations, and only the ones whose source
+    Only the basic-fields relations, and only the ones whose source
     actually reloaded. The grants `_current` relations are deliberately
     left alone: nothing reads them but the matching pipeline, which
     rebuilds them at the start of its own run, and they cost 10-30 min
@@ -327,7 +327,7 @@ def _rebuild_dependent_current(reloaded_tables: set[str]) -> bool:
     wanted = sorted(
         f"{table}_current"
         for table in reloaded_tables
-        if table in ("basic_fields", "basic_fields_pf")
+        if table in ("basic_fields", "basic_fields_pf", "basic_fields_ez")
     )
     if not wanted:
         return True
