@@ -60,6 +60,43 @@ REGISTRY: tuple[SourceSpec, ...] = (
         required_columns=("filerein", "taxyear"),
         indexes=(IndexSpec("ix_basic_fields_pf_filerein", ("filerein",)),),
     ),
+    # 990-EZ is the short-form return for small filers (gross receipts
+    # <$200K, assets <$500K). GT ships it as its own extract with its own
+    # column names — CONGIFGRAETC/TOTALRREVENU/TOTALEEXPENS/WEBSITADDRES
+    # where the 990 says totacashcont/totrevcuryea/totexpcuryea/
+    # websitsiteit. The crosswalk lives in the canonical build, not here:
+    # staging stays byte-faithful to the source, same invariant as every
+    # other spec.
+    #
+    # Why a separate table rather than GT's Combined DataMart (which does
+    # harmonize the names): the combined extract is 48 columns against
+    # 990's 164 / 990-PF's 137, drops 24 columns we read today (the whole
+    # PF financial panel, the 990 revenue breakdown, incarenm,
+    # formationorm), and its 990N rows carry no FileSha256 or URL — which
+    # would break the filing-version dedup rule from #33/#34. It is still
+    # useful as the authoritative EZ→990 column mapping; we just don't
+    # ingest it.
+    _spec(
+        logical_name="irs_990ez_basic_fields",
+        staging_table_name="public.basic_fields_ez",
+        form_type="990-EZ",
+        description="Form 990-EZ standard header + financial summary fields, one row per filing.",
+        filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_990EZStandardFields\.csv$",
+        required_columns=("filerein", "taxyear"),
+        indexes=(IndexSpec("ix_basic_fields_ez_filerein", ("filerein",)),),
+    ),
+    # Long-shaped, unlike `public.programs`: one row per program service
+    # accomplishment (`psadpsaccom`) rather than three wide activity
+    # columns. `nonprofit_text` needs its own UNION arm for it.
+    _spec(
+        logical_name="irs_990ez_programs",
+        staging_table_name="public.programs_ez",
+        form_type="990-EZ",
+        description="Form 990-EZ Part III — primary exempt purpose + program service accomplishments.",
+        filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_990EZPart3Programs\.csv$",
+        required_columns=("filerein",),
+        indexes=(IndexSpec("ix_programs_ez_filerein", ("filerein",)),),
+    ),
     _spec(
         logical_name="irs_990_missions",
         staging_table_name="public.mission_statements",

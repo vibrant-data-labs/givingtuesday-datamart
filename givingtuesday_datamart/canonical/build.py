@@ -5,9 +5,10 @@ Two materialized tables (not views — the inputs are multi-million row staging
 tables, and we want query-time cost to be zero):
 
 * ``public.nonprofit_canonical`` — one row per EIN, identity + address + the
-  latest-filing identifiers. The "winning" row for each EIN is selected via
-  ``DISTINCT ON (filerein)`` ordered by tax year desc, then tax-period-end
-  desc, then ingested_at desc as a deterministic tiebreak.
+  latest-filing identifiers, over the UNION of 990 and 990-EZ filers. The
+  "winning" row for each EIN is selected via ``DISTINCT ON (filerein)``
+  ordered by tax year desc, then tax-period-end desc, then form (990 before
+  990-EZ), then ingested_at desc as a deterministic tiebreak.
 
   Built from ``basic_fields_current``, not raw staging: the ordering above
   cannot separate an original filing from its amendment (same taxyear, same
@@ -18,8 +19,9 @@ tables, and we want query-time cost to be zero):
   (issue #34).
 
 * ``public.nonprofit_text`` — one row per EIN built from the **latest tax
-  year only** across mission, programs activities 1/2/3, and Schedule O
-  Part III narrative. Plain ``DISTINCT`` collapses byte-identical snippets
+  year only** across mission, programs activities 1/2/3, Schedule O
+  Part III narrative, and the 990-EZ Part III accomplishments + primary
+  exempt purpose. Plain ``DISTINCT`` collapses byte-identical snippets
   within that filing. Two GIN-indexed ``tsvector`` columns
   (``text_tsv_compact`` ``english`` config, ``text_tsv_compact_simple``
   ``simple`` config) drive the FTS surface that replaces the previous
@@ -236,8 +238,24 @@ def _build_schedule_o_part_iii(session) -> int:
 def _build_nonprofit_canonical(session) -> int:
     """DROP + CREATE + populate public.nonprofit_canonical. Returns rowcount.
 
+    Built from the UNION of 990 (``basic_fields_current``) and 990-EZ
+    (``basic_fields_ez_current``) filers. EZ is the short form for small
+    organizations, and ~75% of EZ filers never appear on a 990 at all —
+    without them the canonical layer misses several hundred thousand orgs
+    that still surface in ``nonprofit_text`` via Schedule O, which is what
+    produced the NULL-identity search hits.
+
     Winner per EIN: latest tax year (numeric), then latest taxperend, then
-    most recently ingested (final deterministic tiebreak).
+    form (990 beats 990-EZ for the same period — it carries strictly more
+    identity fields), then most recently ingested as the final
+    deterministic tiebreak.
+
+    An org that dropped from 990 to 990-EZ has an EZ winner, so ``dba_1``,
+    ``dba_2``, ``care_of`` and ``formation_year`` come back NULL even
+    though an older 990 carried them. That is deliberate: the row
+    describes one real filing rather than a composite stitched across
+    forms, matching the row-level selection rule in ``current_grants``.
+    ``source_form`` says which form the winning row came from.
     """
     logger.info("Building %s…", NONPROFIT_CANONICAL_TABLE)
     session.execute(text(f"DROP TABLE IF EXISTS {NONPROFIT_CANONICAL_TABLE}"))
@@ -248,6 +266,37 @@ def _build_nonprofit_canonical(session) -> int:
         text(
             f"""
             CREATE TABLE {NONPROFIT_CANONICAL_TABLE} AS
+            WITH unified AS (
+                SELECT
+                    filerein, filername1, filername2,
+                    dbanbnline11, dbanbnline22, incarenm,
+                    filerus1, filerus2, fileruscity, filerusstate,
+                    fileruszip, filerforctry,
+                    websitsiteit                        AS website,
+                    formationorm,
+                    taxyear, taxperend,
+                    '990'::text                         AS source_form,
+                    1                                   AS source_rank,
+                    _ingest_run_id, _source_version, _ingested_at
+                FROM public.basic_fields_current
+                UNION ALL
+                -- 990-EZ under GT's own cross-form naming. The short form
+                -- has no DBA lines, no in-care-of name, and no formation
+                -- year, so those are NULL for an EZ-sourced winner; the
+                -- website column is `websitaddres` there.
+                SELECT
+                    filerein, filername1, filername2,
+                    NULL, NULL, NULL,
+                    filerus1, filerus2, fileruscity, filerusstate,
+                    fileruszip, filerforctry,
+                    websitaddres                        AS website,
+                    NULL,
+                    taxyear, taxperend,
+                    '990-EZ'::text                      AS source_form,
+                    2                                   AS source_rank,
+                    _ingest_run_id, _source_version, _ingested_at
+                FROM public.basic_fields_ez_current
+            )
             SELECT DISTINCT ON (filerein)
                 filerein                                AS ein,
                 filername1                              AS name,
@@ -261,18 +310,20 @@ def _build_nonprofit_canonical(session) -> int:
                 filerusstate                            AS state,
                 fileruszip                              AS zip,
                 filerforctry                            AS addr_country,
-                websitsiteit                            AS website,
+                website                                 AS website,
                 formationorm                            AS formation_year,
                 taxyear                                 AS latest_taxyear,
                 taxperend                               AS latest_taxperend,
+                source_form                             AS source_form,
                 _ingest_run_id                          AS source_run_id,
                 _source_version                         AS source_version,
                 NOW() AT TIME ZONE 'UTC'                AS _built_at
-            FROM public.basic_fields_current
+            FROM unified
             ORDER BY
                 filerein,
                 CAST(NULLIF(taxyear, '') AS INT) DESC NULLS LAST,
                 taxperend DESC NULLS LAST,
+                source_rank,
                 _ingested_at DESC NULLS LAST
             """
         )
@@ -334,7 +385,8 @@ def _build_nonprofit_text(session) -> int:
     """DROP + CREATE + populate public.nonprofit_text with FTS surfaces.
 
     One row per EIN, built from the latest filing's text fields only:
-    mission + program activities 1/2/3 + Schedule O Part III narrative.
+    mission + program activities 1/2/3 + Schedule O Part III narrative +
+    990-EZ Part III accomplishments and primary exempt purpose.
     Plain ``DISTINCT`` collapses byte-identical snippets within that
     filing (e.g. mission pasted verbatim into Schedule O).
 
@@ -375,7 +427,7 @@ def _build_nonprofit_text(session) -> int:
             f"""
             CREATE TABLE {NONPROFIT_TEXT_TABLE} AS
             WITH all_text AS MATERIALIZED (
-                -- Every non-empty (ein, txt, taxyear) across the five
+                -- Every non-empty (ein, txt, taxyear) across the seven
                 -- source fields. UNION ALL — DISTINCT happens downstream
                 -- after the latest-year filter.
                 SELECT filerein AS ein, mission AS txt,
@@ -398,6 +450,17 @@ def _build_nonprofit_text(session) -> int:
                 SELECT filerein, supinfdetexp, NULLIF(taxyear, '')::INT
                 FROM {SCHEDULE_O_PART_III_TABLE}
                 WHERE COALESCE(supinfdetexp, '') <> ''
+                UNION ALL
+                -- 990-EZ Part III. Long-shaped, unlike `programs`: one row
+                -- per accomplishment rather than three wide activity
+                -- columns, so a single arm covers all of them.
+                SELECT filerein, psadpsaccom, NULLIF(taxyear, '')::INT
+                FROM public.programs_ez
+                WHERE COALESCE(psadpsaccom, '') <> ''
+                UNION ALL
+                SELECT filerein, primexempurp, NULLIF(taxyear, '')::INT
+                FROM public.programs_ez
+                WHERE COALESCE(primexempurp, '') <> ''
             ),
             ranked AS (
                 SELECT ein, txt, taxyear,
@@ -802,7 +865,7 @@ def build_canonical(*, include_people: bool = False) -> BuildResult:
     )
     try:
         with get_session(config=datamart_config()) as session:
-            # Both identity builds read basic_fields[_pf]_current. The
+            # Both identity builds read basic_fields[_pf][_ez]_current. The
             # ingestion path rebuilds those as part of any refresh that
             # reloads their source, so this is normally a no-op — but it
             # is checked rather than assumed, because building identity
