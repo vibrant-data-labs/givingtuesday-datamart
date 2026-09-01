@@ -67,7 +67,7 @@ Key work:
 - ✅ **Real indexes + keys.** PKs on EIN exist on `nonprofit_canonical` and `funder_canonical`. Two GIN indexes on `nonprofit_text` (`text_tsv_compact` for stemmed search, `text_tsv_compact_simple` for exact-term match). Btree indexes on `filerein` for the four staging tables that feed the profile page (`basic_fields`, `basic_fields_pf`, `programs`, `mission_statements`) declared via `SourceSpec.indexes` and recreated by ingestion after every COPY. Additional staging btrees folded in opportunistically once new query patterns surface.
 - **Canonical entity views.**
   - ✅ `nonprofit_canonical(ein, name, address, ...)` — DISTINCT ON (ein) from `basic_fields`, ordered by taxyear → taxperend → ingested_at. PK on ein. 465K rows.
-  - ✅ `funder_canonical(ein, name, ...)` — same shape from `basic_fields_pf`. 157K rows. Funder type/classification deferred to Phase 3 (needs Candid data).
+  - ✅ `funder_canonical(ein, name, ...)` — same shape from `basic_fields_pf`. 157K rows. Funder type/classification deferred to Phase 3 (needs external funder-type data).
   - 🛑 **`person_canonical` and `org_person_role` — indefinitely deferred.** Together they materialize ~90M rows + 3 indexes, which the shared RDS doesn't have headroom for. The officers staging tables they read from were dropped on 2026-04-27 to free 20 GB. No active downstream consumer needs people-level data. Revisit when (a) a real consumer pulls on it, AND (b) we either bump RDS storage or pre-process officers to a smaller canonical-direct shape (see RDS storage section).
 
   Aliases and history not built — preserve revisiting until the canonical lookup hits a real consumer need.
@@ -100,7 +100,7 @@ These run as a rolling backlog once Phases 1–2 make iteration safe.
 - **Matching threshold tuning** — still pending. Write a regression harness for `grant_matching.py` so the 6 hard-coded thresholds (name ≥0.95/0.99, addr ≥0.35/0.50/etc.) become tunable and measured.
 - **Matching memory footprint** — still pending. Currently requires r7a.4xlarge to hold both `_unique_names_view` DataFrames + the candidate-pairs MultiIndex in memory. Streaming or out-of-core variants would let this run on cheaper hardware.
 - **Corrections registry for recipient matching** — designed, not built; full plan in `docs/corrections-plan.md`. Human-verified org identities (e.g. the Michael J Fox Foundation suffix variant that survives the exact-name+state tier) live as a raw CSV in git and are UNIONed into the matcher's filer universe with code-side normalization, `match_source` lineage, and the corrections content hash folded into the checkpoint prefix. Build after the matcher-fixes branch lands and a full rerun produces the seed worklist (the post-fix unmatched residue, worked top-down by dollars).
-- Funder classification (DAF / community foundation / government / corporate / family) on `funder_canonical`. Candid classes available as seed data.
+- Funder classification (DAF / community foundation / government / corporate / family) on `funder_canonical`. External provider classes available as seed data.
 - Attachment-grant extraction (the grants listed in 990-PF attachments, currently missed).
 - **Cross-org person deduplication.** *Blocked on `person_canonical` coming back online* — see RDS storage section.
 - Canonical name/address sanitization — title-casing, latest-version selection — pushed upstream from vdl-tools into `nonprofit_canonical` so every consumer benefits.

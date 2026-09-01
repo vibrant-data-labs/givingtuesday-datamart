@@ -56,7 +56,7 @@ the PF matcher computes, labeled for free, with the same messiness
 (lockbox addresses, campus addresses, abbreviations, "The" prefixes). We
 have never used it for evaluation.
 
-**2. The Candid labeled set measures the end-to-end outcome.** 646,167
+**2. The external labeled set measures the end-to-end outcome.** 646,167
 known funder→recipient pairs; current PF-side pair coverage is **57.3%**
 (established in the companion doc, reproducible via
 `build_capture_priority.py --steps labeled`). This is the integration
@@ -83,7 +83,7 @@ a Pfizer-affiliated foundation, 13 rows).
 | artifact | source | size | purpose |
 |---|---|---|---|
 | `matching_golden_rows.parquet` | Schedule I rows with valid EIN, stratified sample | ~200K rows | Row-level eval of blocking + scoring |
-| `matching_golden_pairs.parquet` | Candid labeled set snapshot | 646K pairs | End-to-end coverage metric |
+| `matching_golden_pairs.parquet` | External labeled set snapshot | 646K pairs | End-to-end coverage metric |
 | `matching_regression_cases.csv` | The casebook above, hand-curated | ~50 cases | Fast named tests, checked into git |
 | `matching_negative_controls.parquet` | Placeholder / person / foreign / NC-status rows | ~20K rows | Precision guard: correct answer is NO match |
 
@@ -126,7 +126,7 @@ so a failed eval tells you *where* to look, not just *that* you failed.
    Measured baseline (July 23 run): person rows 0 matched ✓;
    placeholder rows 305 matched; corporate-name rows 13 matched — the
    numbers future runs must not exceed.
-5. **End-to-end** — row match rate (baseline 44%), Candid pair coverage
+5. **End-to-end** — row match rate (baseline 44%), labeled pair coverage
    (baseline 57.3%), and the capture-analysis `recoverable_dollars`
    (baseline $137B), all reproduced by the existing
    `build_capture_priority.py`.
@@ -172,7 +172,7 @@ An ad-hoc version of layers 4–5 ran as the merge gate for the two
 implemented fixes — worth recording both for its results and for what it
 demonstrated about the design:
 
-- **Recall gates: green.** Candid PF pair coverage 57.3% → 61.8%
+- **Recall gates: green.** labeled PF pair coverage 57.3% → 61.8%
   (row-present-but-unmatched pairs 46,842 → 31,237); the 990 side came
   back byte-identical, as it must (matching doesn't touch it).
 - **Precision invariants: green.** Zero join-table key-tuples map to
@@ -212,7 +212,7 @@ Schedule I "gold" EINs are filer-entered: a few % are typos, stale EINs,
 or group-return/subordinate EINs (a chapter's grant labeled with the
 parent's EIN). Treat high-name-score disagreements as "review" rather
 than hard failures, and estimate the label-noise rate once on a manual
-sample of ~100 disagreements. The Candid metric has its own known slack:
+sample of ~100 disagreements. The labeled-set metric has its own known slack:
 pairs may predate e-file coverage, so its ceiling is below 100% (the
 companion doc's per-pair classification bounds this). And
 dollar-weighted metrics must tolerate filings whose itemized rows sum to
@@ -231,7 +231,7 @@ never declared.
 
 Success criteria, stated up front so we can be wrong in public. The
 predictions made for the (then in-flight) fixes are now graded by the
-July 23 rerun: **Gates Trust matches** ✓; **Candid PF pair coverage
+July 23 rerun: **Gates Trust matches** ✓; **labeled PF pair coverage
 meaningfully up** ✓ (57.3% → 61.8%); **MJFF improves only modestly** —
 half right. MJFF jumped 20% → 46%, more than "modestly," because its
 zip-10001 rows are same-state (NY) and the long-form name matches

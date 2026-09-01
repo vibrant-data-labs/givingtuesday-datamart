@@ -543,8 +543,8 @@ def _build_funder_canonical(session) -> int:
     ingested), including its read of the deduped ``_current`` relation
     rather than raw staging. Funder classification
     (DAF / community / corporate / family) is deliberately out of scope for
-    v1 — it's a Phase 3 enrichment task that needs Candid data. v1 carries
-    identity + address + contact only.
+    v1 — it's a Phase 3 enrichment task that needs external funder-type
+    data. v1 carries identity + address + contact only.
 
     Note: many grant-making 501(c)(3)s (community foundations, etc.) file
     990, not 990-PF. They live in ``nonprofit_canonical`` today. A future

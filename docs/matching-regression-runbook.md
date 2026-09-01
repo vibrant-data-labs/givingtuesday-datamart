@@ -143,7 +143,7 @@ for itself every time.
 
 Worth re-checking once a year, or if results ever feel wrong:
 
-- The labeled set is stale-but-stable. If Candid ships a major update,
+- The labeled set is stale-but-stable. If the provider ships a major update,
   coverage percentages will jump for reasons that have nothing to do
   with the matcher.
 - The canary organizations stay structurally the same. If MJFF changed

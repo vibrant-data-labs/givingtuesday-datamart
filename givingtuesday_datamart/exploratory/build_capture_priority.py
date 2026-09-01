@@ -142,7 +142,7 @@ def build_gt() -> None:
     si = pd.read_csv(DATA_DIR / "sched_i_capture_priority.csv", dtype=CSV_DTYPES)
     pf = pd.read_csv(DATA_DIR / "pf_capture_priority.csv", dtype=CSV_DTYPES)
 
-    # Funders present in the Candid labeled set — pairs there give GT
+    # Funders present in the external labeled set — pairs there give GT
     # independent ground truth for what the missing itemization contains.
     with get_session(config=_config()) as session:
         labeled_eins = set(

@@ -12,7 +12,7 @@
 ### Medium Priority
 * Adding the raw XML column to the Basic Fields tables
 * LinkedIn URLs for non-profits, private foundations, people (if you have through open corporates)
-* Categorization for the PFs (DAF / community foundation / government / corporate / family, etc--can provide full Candid category if helpful)
+* Categorization for the PFs (DAF / community foundation / government / corporate / family, etc--can provide full provider category if helpful)
 * Processed clean files where names have been normalized, zip-codes are cleaned, etc
 
 ### Lower Priority / Things We will Do But would be helpful
@@ -83,7 +83,7 @@ Two sided matching problem to match the grant recipient to a list of potential n
 
 ### Does Well
 * Runs the matching algorithm in batches so that if process dies we can re-start from the last checkpoint
-* Spot checking results seems to do really well at matching Candid results
+* Spot checking results seems to do really well at matching provider results
 
 ### Areas for Improvement
 * Brings all data into memory so it requires a very large instance (r7a.4xlarge)
@@ -92,7 +92,7 @@ Two sided matching problem to match the grant recipient to a list of potential n
 
 ## Other General Areas for Improvement
 * Would be great to get metadata for each of Private Foundations
-    * Some sort of classification if they are a government entity, DAF, community foundation, etc. Can share the current classes from Candid on request.
+    * Some sort of classification if they are a government entity, DAF, community foundation, etc. Can share the current classes from the provider on request.
 * Need to update as much as possible to ensure data freshness
 * Everything is run by hand for now section by section, would be good to have a full "load from scratch" script for updates
 
