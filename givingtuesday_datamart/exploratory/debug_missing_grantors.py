@@ -23,6 +23,7 @@ There are 3 types of misses:
 
 """
 
+import os
 import pandas as pd
 import requests
 import threading
@@ -225,12 +226,15 @@ def find_missing_grantors_in_all_dataset(
 
 
 if __name__ == "__main__":
-    labeled_df = insert_labeled_set_into_table(
-        [
-            "/Users/zeintawil/dev/vdl/shared-data-clean/data/candid/2025_09_08/candid_funders.txt",
-            "/Users/zeintawil/dev/vdl/shared-data-clean/data/candid/education revised_2023_05_24/candid_funders.txt",
-        ]
-    )
+    # The labeled-set source files live outside the repo. Point
+    # LABELED_SET_FILES at them as a colon-separated list before running.
+    labeled_paths = [p for p in os.environ.get("LABELED_SET_FILES", "").split(":") if p]
+    if not labeled_paths:
+        raise SystemExit(
+            "Set LABELED_SET_FILES to a colon-separated list of labeled-set "
+            "source files before running this script."
+        )
+    labeled_df = insert_labeled_set_into_table(labeled_paths)
     labeled_df = retrieve_labeled_set()
 
     #########################################################

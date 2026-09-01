@@ -36,7 +36,7 @@ from givingtuesday_datamart._internal.logger import logger
 # --- Baselines: August 4, 2026 run (dedup + corrections registry) ---------
 
 # Recall floors — a matcher change must not lose previously-won coverage.
-PF_PAIR_COVERAGE_FLOOR = 63.1       # %, Candid labeled pairs, PF funders
+PF_PAIR_COVERAGE_FLOOR = 63.1       # %, external labeled pairs, PF funders
 NP_PAIR_COVERAGE_FLOOR = 94.5       # %, 990 funders. Not moved by matching
                                     # itself — the jump from 84.7 came from the
                                     # 2026_06 Schedule I drop (Fidelity et al.);

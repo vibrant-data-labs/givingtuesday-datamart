@@ -6,17 +6,17 @@ data/corrections/org_identities.csv, worked top-down by dollars
 (docs/corrections-plan.md). Run it any time; read-only.
 
     python -m givingtuesday_datamart.corrections_scout [--top N] [--out PATH]
-    python -m givingtuesday_datamart.corrections_scout --candid [--out PATH]
+    python -m givingtuesday_datamart.corrections_scout --labeled [--out PATH]
 
 Two detectors:
 
   default — top-dollar tuple sweep over all unmatched tuples (no labeled
       ground truth required; method below);
-  --candid — ground-truth sweep over the Candid labeled set
+  --labeled — ground-truth sweep over the external labeled set
       (grantor_recipient_labeled_set, 990PF side): for each labeled
       (funder_ein, recip_ein) pair, score the funder's grant tuples
       against the recipient EIN's universe identity rows (falling back to
-      Candid's gm_name when the EIN isn't in the universe). Pairs no
+      the labeled set's gm_name when the EIN isn't in the universe). Pairs no
       current rule can reach whose best tuple still names the recipient
       at JW >= 0.80 become correction drafts with the labeled recipient
       EIN attached, so per-row verification reduces to confirming the
@@ -319,11 +319,11 @@ def run_scout(top: int, out_path: Path) -> int:
     return 0
 
 
-# --- Candid labeled-pair detector ---------------------------------------
+# --- Labeled-pair detector ----------------------------------------------
 
-_DEFAULT_CANDID_OUT = (
+_DEFAULT_LABELED_OUT = (
     Path(__file__).resolve().parents[1]
-    / "data" / "exploratory" / "corrections_candid_candidates.csv"
+    / "data" / "exploratory" / "corrections_labeled_candidates.csv"
 )
 
 _LABELED_PAIRS_SQL = """
@@ -366,9 +366,9 @@ _LABELED_RECIP_UNIVERSE_SQL = f"""
 """
 
 
-_DEFAULT_CANDID_DIGEST_OUT = (
+_DEFAULT_LABELED_DIGEST_OUT = (
     Path(__file__).resolve().parents[1]
-    / "data" / "exploratory" / "corrections_candid_digest.csv"
+    / "data" / "exploratory" / "corrections_labeled_digest.csv"
 )
 
 # Trailing tokens whose absence/presence alone should NOT spend a correction
@@ -378,10 +378,10 @@ _DEFAULT_CANDID_DIGEST_OUT = (
 _SUFFIX_ONLY_RE = re.compile(r"\s+(incorporated|inc|the)$")
 
 
-def _write_candid_digest(
+def _write_labeled_digest(
     report: pd.DataFrame, out_path: Path, jw_min: float = 0.95
 ) -> pd.DataFrame:
-    """Distill the pair-grained candid report into a per-recipient
+    """Distill the pair-grained labeled report into a per-recipient
     worklist: one row per recipient EIN, high-confidence tuples only
     (name_jw >= jw_min), suffix-only variants excluded, ranked by dollars.
 
@@ -456,11 +456,11 @@ def _tuple_addr(t, cache: dict) -> str:
     return cache[t.Index]
 
 
-def run_candid_scout(out_path: Path, jw_min: float = NEAR_MISS_JW_MIN) -> int:
+def run_labeled_scout(out_path: Path, jw_min: float = NEAR_MISS_JW_MIN) -> int:
     config = datamart_config()
     with get_session(config=config) as session:
         conn = session.connection()
-        logger.info("Reading Candid 990-PF labeled pairs ...")
+        logger.info("Reading 990-PF labeled pairs ...")
         labeled = pd.read_sql_query(text(_LABELED_PAIRS_SQL), conn)
         logger.info(f"{len(labeled):,} labeled pairs; aggregating funder tuples ...")
         tuples = pd.read_sql_query(text(_LABELED_FUNDER_TUPLES_SQL), conn)
@@ -598,7 +598,7 @@ def run_candid_scout(out_path: Path, jw_min: float = NEAR_MISS_JW_MIN) -> int:
         .sort_values("dollars", ascending=False)
     )
 
-    print("\n=== candid scout: 990-PF labeled pairs vs current matcher reach ===")
+    print("\n=== labeled scout: 990-PF labeled pairs vs current matcher reach ===")
     for k, v in counts.items():
         print(f"{k:>18}: {v:,}")
     print(f"\ncandidate tuples: {len(report):,} "
@@ -611,7 +611,7 @@ def run_candid_scout(out_path: Path, jw_min: float = NEAR_MISS_JW_MIN) -> int:
     print("\n=== top recipient clusters ===")
     print(cluster.head(15).to_string())
 
-    digest = _write_candid_digest(report, _DEFAULT_CANDID_DIGEST_OUT)
+    digest = _write_labeled_digest(report, _DEFAULT_LABELED_DIGEST_OUT)
     print(
         f"\n=== digest: {len(digest):,} recipients at jw>=0.95, suffix-only "
         f"variants excluded (${digest['dollars'].sum():,.0f}) ==="
@@ -619,7 +619,7 @@ def run_candid_scout(out_path: Path, jw_min: float = NEAR_MISS_JW_MIN) -> int:
     with pd.option_context("display.width", 250, "display.max_colwidth", 40):
         print(digest.head(15).to_string(index=False))
     print(f"\nRaw pair report (audit trail): {out_path}")
-    print(f"Curator worklist: {_DEFAULT_CANDID_DIGEST_OUT}")
+    print(f"Curator worklist: {_DEFAULT_LABELED_DIGEST_OUT}")
     return 0
 
 
@@ -630,16 +630,16 @@ def main() -> None:
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
     )
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--candid", action="store_true",
-                        help="Run the Candid labeled-pair detector instead of the "
+    parser.add_argument("--labeled", action="store_true",
+                        help="Run the labeled-pair detector instead of the "
                              "top-dollar tuple sweep")
     parser.add_argument("--top", type=int, default=1500,
                         help="How many top-dollar tuples to scout (default 1500)")
     parser.add_argument("--out", type=Path, default=None,
                         help="Output CSV path (defaults per detector)")
     args = parser.parse_args()
-    if args.candid:
-        sys.exit(run_candid_scout(out_path=args.out or _DEFAULT_CANDID_OUT))
+    if args.labeled:
+        sys.exit(run_labeled_scout(out_path=args.out or _DEFAULT_LABELED_OUT))
     sys.exit(run_scout(top=args.top, out_path=args.out or _DEFAULT_OUT))
 
 

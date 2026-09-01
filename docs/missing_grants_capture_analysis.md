@@ -371,7 +371,7 @@ non-matching zips, and missing/placeholder addresses (Cigna's
 ## Validation: checking against known funder→recipient pairs
 
 The labeled dataset (~76K funders, **646,167 distinct funder→recipient
-pairs** from Candid) is an independent ground truth: every pair is a
+pairs** from the external provider) is an independent ground truth: every pair is a
 grant relationship we know existed. How many appear in `unioned_grants`?
 
 | funder type | labeled pairs | covered | % covered |
@@ -453,7 +453,7 @@ our side.
 
 - [**data/exploratory/gt_team_priority_by_funder.csv**](../data/exploratory/gt_team_priority_by_funder.csv) — the headline
   list: 45,540 EINs, one row per funder, with affected years, issue
-  type(s), whether the funder appears in the Candid labeled data
+  type(s), whether the funder appears in the external labeled data
   (`in_labeled_set` — true for 15,318 EINs carrying $158.1B of the
   dollars at issue, meaning known funder→recipient pairs exist to
   verify a re-extraction against), and total dollars at issue ($195.3B).
@@ -523,7 +523,7 @@ Fidelity's and Siegel's XMLs are the fastest confirmations of the second
 pattern; One Earth 2022 vs 2023 is the fastest confirmation of the first.
 
 ### In Labeled Set
-These are Grantor EINs that we've recieved data for from Candid, so we know we _should_ be able to map their grants and doing so would give us parity.
+These are Grantor EINs that we've recieved data for from the external provider, so we know we _should_ be able to map their grants and doing so would give us parity.
 
 ### One more heads-up (not in the priority list)
 
