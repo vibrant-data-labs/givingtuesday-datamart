@@ -36,13 +36,13 @@ from __future__ import annotations
 import argparse
 import collections
 import csv
-import json
 import re
 import sys
 from pathlib import Path
 
 from givingtuesday_datamart import irs_source
-from givingtuesday_datamart.attachment_grants import PLACEHOLDER, diagnose, extract, load_elements
+from givingtuesday_datamart.attachment_grants import (
+    PLACEHOLDER, candidate_tables, coverage, diagnose, extract, load_elements)
 
 COMBINED_CSV = Path.home() / "Downloads" / "combined-grants-datamarts-gt_team_priority-20260915.csv"
 SAMPLE_CSV = Path("data/exploratory/placeholder_sample_100.csv")
@@ -67,8 +67,8 @@ def _read_population() -> dict:
     """Placeholder filings from the combined extract, one record per filing."""
     csv.field_size_limit(10 ** 9)
     per: dict = collections.defaultdict(
-        lambda: {"amt": 0.0, "rows": 0, "names": [], "filer": "", "period": "",
-                 "status": collections.Counter()})
+        lambda: {"amt": 0.0, "paid": 0.0, "future": 0.0, "rows": 0, "names": [], "filer": "",
+                 "period": "", "status": collections.Counter()})
     with COMBINED_CSV.open(newline="", encoding="utf-8", errors="replace") as handle:
         for row in csv.DictReader(handle):
             if row["Source"] not in PF_SOURCES:
@@ -82,6 +82,9 @@ def _read_population() -> dict:
                 amount = 0.0
             record = per[(row["FILEREIN"], row["TAXYEAR"], match.group(1) if match else "")]
             record["amt"] += amount
+            # Part XV line 3a (paid) and 3b (approved for future payment) are
+            # separate declared totals and separate statements in the PDF.
+            record["paid" if row["Source"] == "990PF_P14_3A" else "future"] += amount
             record["rows"] += 1
             record["filer"] = row["FILERNAME1"]
             record["period"] = row["TAXPEREND"]
@@ -123,6 +126,8 @@ def build_sample(out: Path) -> None:
             picked.append({"stratum": label, "filerein": ein, "filer_name": value["filer"],
                            "taxyear": year, "taxperend": value["period"], "object_id": object_id,
                            "placeholder_amt": round(value["amt"], 2),
+                           "placeholder_paid": round(value["paid"], 2),
+                           "placeholder_future": round(value["future"], 2),
                            "placeholder_rows": value["rows"],
                            "placeholder_text": " || ".join(value["names"][:2]),
                            "stratum_pop": len(pool),
@@ -224,40 +229,53 @@ def report(sample: Path, results: Path, out: Path | None,
         staged = {r["object_id"]: r["status"] for r in csv.DictReader(manifest.open())}
     by_stratum: dict = collections.defaultdict(
         lambda: {"n": 0, "declared": 0.0, "recovered": 0.0, "reconciled": 0,
-                 "rows": 0, "outcomes": collections.Counter()})
+                 "rows": 0, "near": 0.0, "outcomes": collections.Counter()})
     records = []
 
     for row in rows:
         declared = float(row["placeholder_amt"])
+        paid, future = float(row["placeholder_paid"]), float(row["placeholder_future"])
         path = results / f"{row['object_id']}.pdf.json"
         staging = staged.get(row["object_id"], "")
+        result, covered = None, 0.0
         if staging and staging not in ("staged", "cached"):
-            outcome, result = staging.split(":")[0], None     # never reached OCR
+            outcome = staging.split(":")[0]                  # never reached OCR
         elif not path.exists():
-            outcome, result = "missing_result", None
+            outcome = "missing_result"
         else:
             elements = load_elements(path)
-            result = extract(elements, declared)
-            outcome = result.outcome
+            result = extract(elements, paid, future)
+            outcome = result.paid.outcome
             if outcome == "no_reconciling_run":
-                outcome = diagnose(elements, declared)
+                tables = candidate_tables(elements, (paid, future, declared))
+                outcome = diagnose(tables, declared)
+                covered = coverage(tables, paid)
         bucket = by_stratum[row["stratum"]]
         bucket["n"] += 1
         bucket["declared"] += declared
         bucket["outcomes"][outcome] += 1
-        if result is not None and result.reconciled:
-            bucket["reconciled"] += 1
-            bucket["recovered"] += declared     # credit the declared amount, not the OCR sum
+        if result is not None and result.recovered:
+            bucket["reconciled"] += result.paid.reconciled
+            bucket["recovered"] += result.recovered   # credit the declared amount, not the OCR sum
             bucket["rows"] += len(result.rows)
+        if 0.9 <= covered < 1.1:
+            bucket["near"] += paid      # the list is there; OCR lost a few percent of its rows
+        parts = result.parts if result else ()
         records.append({
             "stratum": row["stratum"], "filerein": row["filerein"],
             "filer_name": row["filer_name"], "taxyear": row["taxyear"],
-            "object_id": row["object_id"], "declared": declared, "outcome": outcome,
+            "object_id": row["object_id"], "declared": declared, "paid": paid, "future": future,
+            "outcome": outcome,
+            "future_outcome": result.future.outcome if (result and result.future) else "",
+            "target": result.paid.target if result else "",
+            "recovered": result.recovered if result else 0.0,
+            "coverage": round(covered, 4) if covered else "",
             "grant_rows": len(result.rows) if result else 0,
-            "extracted": round(result.extracted, 2) if result else 0.0,
-            "error_pct": round(result.error * 100, 4) if (result and result.error is not None) else "",
-            "pages": f"{result.pages[0]}-{result.pages[-1]}" if (result and result.pages) else "",
-            "amount_headers": "|".join(result.amount_headers) if result else "",
+            "labelled": "|".join("Y" if p.labelled else "n" for p in parts if p.reconciled),
+            "total_stated": "|".join("Y" if p.total_stated else "n" for p in parts if p.reconciled),
+            "error_pct": "|".join(f"{p.error * 100:.3f}" for p in parts if p.reconciled),
+            "pages": "|".join(f"{p.pages[0]}-{p.pages[-1]}" for p in parts if p.reconciled and p.pages),
+            "amount_headers": "|".join(h for p in parts if p.reconciled for h in p.amount_headers),
         })
 
     print(f"{'stratum':<9}{'n':>4}{'recon':>7}{'rate':>7}{'declared $M':>13}{'recovered $M':>14}{'grants':>9}")
@@ -273,8 +291,11 @@ def report(sample: Path, results: Path, out: Path | None,
           f"{'':>7}{total_declared/1e6:>13,.1f}{total_recovered/1e6:>14,.1f}{int(total_rows):>9,}")
     if total_declared:
         print(f"\ndollar-weighted recovery on the sample: {100*total_recovered/total_declared:.1f}%")
+        near = sum(b["near"] for b in by_stratum.values())
+        print(f"present but 90-110% covered (OCR row loss, not selection): ${near/1e6:,.1f}M "
+              f"({100*near/total_declared:.1f}%)")
 
-    print("\noutcomes:")
+    print("\noutcomes (paid list):")
     everything = collections.Counter()
     for b in by_stratum.values():
         everything.update(b["outcomes"])

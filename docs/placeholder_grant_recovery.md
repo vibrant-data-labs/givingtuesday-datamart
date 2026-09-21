@@ -2,7 +2,8 @@
 
 *Vibrant Data Labs — September 21, 2026. Work done against GivingTuesday's
 Combined Grants Datamart delivery of September 15, 2026, and the IRS's own
-PDF images of the same filings.*
+PDF images of the same filings. Revised the same evening after an audit of
+the first pass; the audit is Part 7.*
 
 ---
 
@@ -17,14 +18,25 @@ It is not true of the **PDF**. The IRS renders an image of the full
 submission, attachments included, and the grant lists are in it.
 
 We built the recovery path end to end and measured it on a stratified sample
-of 100 filings. **46.0% of sampled placeholder dollars came back — 8,809
-itemised grants with names, addresses and amounts.** A further 21.6% is
-behind extraction work we own. The remaining 30.5% is unreachable by anyone:
-the IRS either serves no PDF, or serves one with no grants section in it.
+of 100 filings. The first pass reported 46% of sampled dollars recovered. An
+audit of those 36 "reconciled" filings found that a third of that figure was
+false positives or wrong row sets: capital-gains schedules and Part I form
+lines that happened to sum to the target, and real lists padded with
+subtotals, expense rows and a blank-name $278M total. **Reconciliation alone
+is not a gate** — over a 0.5% tolerance, some combination of a filing's
+dozens of money tables reaches almost any number.
 
-The method rests on one property: **the placeholder row states the answer.**
-Every extraction is checked against the filer's own declared total, so a
-filing either reconciles or is flagged. Nothing unverified enters the data.
+The selector was rebuilt so that every accepted list carries a second,
+independent piece of evidence. On the same 100 filings it now stands at:
+
+- **Reconciled on evidence — 29 filings, $1,841M (30.4%), 4,760 grants**
+  with names, addresses and amounts.
+- **In the parse but 90–110% covered — 14 filings, $1,552M (25.6%).** The
+  list is there and labelled; OCR dropped a few percent of the rows on lists
+  running to hundreds of pages. This is the backlog, and it is an OCR
+  problem, not a selection problem.
+- **Unreachable — $2,372M (39.1%).** The IRS serves no PDF ($1,181M), or the
+  PDF has no grants section in it ($1,191M).
 
 ---
 
@@ -93,8 +105,22 @@ coarser than a filing — an original and its amendment share a tax period. The
 image filename's trailing token is `YYYYMMDD` plus the IRS index's own
 `RETURN_ID`, so where RETURN_ID is populated an object id pins exactly one
 image. Fidelity's FY2022 is the worked case: two 990 images, and RETURN_ID
-21417445 / 22309568 separates original from amendment. Coverage is uneven —
-100% for 2022 and 2024, ~97% 2023, ~56% 2025.
+21417445 / 22309568 separates original from amendment.
+
+RETURN_ID coverage, measured on the cached indexes (an earlier draft of this
+document had these wrong):
+
+| index year | rows | RETURN_ID populated |
+|---|---|---|
+| 2021 | 589,904 | 100% |
+| 2022 | 656,503 | 95% |
+| 2023 | 705,156 | 97% |
+| 2024 | 728,719 | 62% (990-PF rows: 92%) |
+| 2025 | 748,906 | 55% (990-PF rows: 66%) |
+| 2026 | 436,239 | 52% |
+
+In the sample it did not matter: 91 filings had exactly one TEOS image and 9
+had none. No sampled filing ever had two images to choose between.
 
 ### The PDFs are images
 
@@ -133,7 +159,6 @@ Scratch Foundation, 459 Columbus Avenue Suite 1112, New York NY 10024, PC,
 Those addresses matter more than the names: 990-PF grant rows carry no
 recipient EIN, so our matcher runs on name + address.
 
-
 ---
 
 ## Part 4: the addressable population
@@ -157,7 +182,15 @@ A name pattern also catches Amgen Foundation, Genentech Foundation and Ruth
 Lilly Foundation — ordinary grantmakers, $216M between them.
 
 The population is violently top-heavy: 22 filings hold $4.67B, 6,755 hold
-$1.76B. The sample is therefore stratified, with band A a **census**.
+$1.76B. The sample is therefore stratified, with band A a **census**. The
+frame regenerates identically from seed 20260921.
+
+**Paid and future are separate targets.** Part XV line 3a (grants paid) and
+line 3b (approved for future payment) are separate declared totals and
+separate statements in the PDF. The first frame summed both into one
+number; 22 of the 100 sampled filings, and 9 of the 22 in band A, have a
+placeholder on both lines. The frame now carries `placeholder_paid` and
+`placeholder_future`, and each is reconciled on its own.
 
 ---
 
@@ -171,105 +204,182 @@ PDF says "STATEMENT 22"; the next filer says "SEE ATTACHMENT C" over
 "CHARITABLE LISTING"; a third says "SEE ATTACHED" and names nothing. Wells
 Fargo uses four phrasings in four years.
 
-So selection ignores labels as a *key*. **The placeholder amount states what
-the answer sums to**, which turns selection into a search: find the set of
-tables that reconciles to the declared total. Selection and validation are
-the same mechanism.
+So labels are never the *key*. **The placeholder amount states what the
+answer sums to**, which turns selection into a search: find the set of
+statements whose amount column reconciles to the declared total.
 
-Tables are grouped by the heading they sit under — a schedule is routinely
-split over dozens of pages beneath one heading — and the search runs over
-subsets of statements. Contiguous page runs cannot express *"these two
-sections but not the one between them"*, which is exactly the shape of Cohen
-(paid vs approved-for-future-payment) and Bezos (cash vs non-cash).
+But reconciliation is not sufficient on its own (Part 7 is the evidence).
+Every accepted run therefore needs a second piece of evidence:
+
+- **Labelled runs.** Tables under a heading, page footer or column header
+  that says grants — "Grants Paid Schedule", "Attachment to Part XV, Line
+  3a", a column called "Grantee", "Payee", "Payment Amount" or "Purpose of
+  Grant". Only these may be combined freely across the document (a
+  statement is routinely split over dozens of pages; cash, non-cash and
+  future-payment sections sit apart). Labels are read per page, and a grant
+  heading carries over only to the heading-less pages immediately after it.
+- **Unlabelled runs.** A contiguous run of pages whose rows are mostly
+  organisation names, and which never crosses a table whose heading or
+  header row says it is a revenue, asset or expense schedule. This rescues
+  attachments whose headings OCR'd badly, and it may extend a labelled list
+  onto an unlabelled continuation page — but it may not pad a labelled list
+  that already holds most of the money, which is exactly how the first
+  version went wrong.
 
 ### Guards, each from a filing that broke it
 
 | guard | what it stops |
 |---|---|
-| placeholder rows excluded, **no leading `\b`** | OCR concatenates cells, so the Part XV line reads `…during the yearSEE ATTACHED SCHEDULE1759 R ST…`; `\bsee\b` never matches inside `yearSEE` |
-| rows equal to the declared total are totals | Wyss's schedule ends `['', '', '', 125722675]` — unlabeled, so no text pattern reaches it, and the schedule summed to exactly 2× declared |
-| heading gate | Wyss's Legal Fees + Other Assets + Other Decreases + Other Expenses sum to within **0.16%** of its $125.7M grant total; the real schedule sat six pages later |
-| `x(?:iv\|v)` not `x[iv]+` | the greedy form also matches Parts XI, XII, XIII — cost seven reconciliations |
-| amount column name as evidence | `Grant Amount`, `Payment Amount` survive a heading that OCR'd badly |
-| majority of amounts under $100 → form lines | J&J's Part I reads `Interest on savings` = 3, `Dividends` = 4; the search assembled **62,684** of them |
-| median name length > 110 → prose | Schusterman's Part VIII-A narrates activities with dollar figures beside them |
+| placeholder rows excluded, **no leading `\b`** | OCR concatenates cells, so the Part XV line reads `…during the yearSEE ATTACHED SCHEDULE1759 R ST…` |
+| rows equal to any declared total are totals | Wyss's schedule ends `['', '', '', 125722675]` — unlabelled, and the schedule summed to exactly 2× declared |
+| total rows by **cell**, not by row text; "Subtotal", "Page Total" included | `\btotal\b` on the joined row missed Klarman's nine "Subtotal Healthy Democracy" rows ($65M counted as grants) and dropped real grants whose purpose text says "a total of" |
+| money with no words at all is a carried-forward total | Wells Fargo 2020's list ends with a blank-name row of $277,927,126 that the first version credited as a grant |
+| pointer names are not grants | Hall's Part XV summary reads `GRANTS PAID REPORT 52,829,934 / MATCHING GIFTS REPORT 140,000` and reconciled at three rows |
+| "recipient" as a name column only when it is the whole header | Pritzker's "Foundation Status of Recipient" column named every grant `501 (c) 3`, and the list vanished |
+| heading gate: Parts I–IV, XII, XIII and the named IRS schedules veto | Wyss's Legal Fees + Other Assets + Other Decreases + Other Expenses sum to within 0.16% of its grant total |
+| `x(?:iv\|v)` not `x[iv]+` | the greedy form also matches Parts XI, XII, XIII |
 | amount column by **header**, never position | non-cash sections carry book value beside fair market value — $155M against $340M given |
+| majority of amounts under $100 → form lines | J&J's Part I reads `Interest on savings` = 3, `Dividends` = 4 |
+| median name length > 110 → prose | Schusterman's Part VIII-A narrates activities with dollar figures beside them |
+| a grant heading carries forward; the form's own does not | the Part XV form page is titled "…Paid During the Year or Approved for Future Payment", and carried forward it made every later heading-less page a future-payment list |
 
-**Two guards were tried and reverted** for costing more than they saved: a
-50% recipient-name share, and a form-label test that also rejects `1199SEIU`,
-`4-H` and `100 Black Men of America`. Together they removed $430M of false
-positives and $845M of real recovery.
+The first version tried and reverted a 50% recipient-name share as a
+universal guard, because the name column is often misidentified on real
+lists. It is back, applied only where it is the *only* evidence — unlabelled
+runs.
 
 ---
 
 ## Part 6: results
 
-100 filings, 4,746 pages, 27 minutes of OCR.
+100 filings, 4,746 pages, 27 minutes of OCR. Cells are `filings / $M declared`.
 
 | outcome | A | B | C | D | **TOTAL** |
 |---|---|---|---|---|---|
-| **recovered** | 12 / 2,232.6 | 17 / 532.5 | 6 / 22.8 | 1 / 0.0 | **36 / $2,788.0M** |
-| PDF ok, section missed | 5 / 960.5 | 13 / 329.8 | 6 / 18.6 | 1 / 0.3 | **25 / $1,309.2M** |
-| PDF ok, section partial | — | 3 / 121.4 | — | — | **3 / $121.4M** |
-| PDF ok, no grants section | 2 / 534.1 | 5 / 109.7 | 6 / 19.1 | 8 / 1.5 | **21 / $664.5M** |
+| **reconciled on evidence** | 10 / 1,335.5 | 15 / 545.3 | 3 / 9.6 | 1 / 0.0 | **29 / $1,890.5M** |
+| list in parse, 90–110% covered | 5 / 1,392.3 | 6 / 149.1 | 2 / 9.8 | 1 / 0.3 | **14 / $1,551.5M** |
+| list in parse, other | 1 / 101.7 | 4 / 63.8 | 2 / 3.6 | — | **7 / $169.1M** |
+| list partial (< half the money) | — | 3 / 76.2 | 2 / 4.8 | — | **5 / $81.0M** |
+| PDF ok, no grants section | 3 / 897.7 | 10 / 259.0 | 9 / 32.7 | 8 / 1.5 | **30 / $1,190.9M** |
 | IRS lists a PDF, serves 404 | 2 / 692.5 | 4 / 180.0 | — | — | **6 / $872.5M** |
 | IRS has no PDF at all | 1 / 251.5 | 2 / 40.7 | 4 / 15.8 | 2 / 0.8 | **9 / $308.9M** |
 | **ALL** | 22 / 4,671.2 | 44 / 1,314.2 | 22 / 76.4 | 12 / 2.6 | **100 / $6,064.4M** |
 
-*(cells are `filings / $M declared`)*
-
-**8,809 grants recovered, 46.0% of sampled dollars.** Band A is a census of
-every addressable filing over $100M, so its 55% is exact, not estimated.
+**Recovered: $1,841.2M (30.4%), 4,760 grants.** Recovery credits the
+declared amount of each reconciled target; the $49M gap to the reconciled
+row above is four filings whose paid list reconciled and future list did
+not (Klarman, Kenan, Dow, Elbridge Stuart). Of the 29, 27 rest on a grant
+label and 2 on names alone; 17 also contain a stated total equal to the
+declared amount. Band A is a census, so its figures are exact.
 
 Rolls up to:
 
-- **Recovered — $2,788M (46.0%)**
-- **Ours to fix — $1,431M (23.6%)** — the list is in the document
-- **Unreachable — $1,846M (30.4%)** — $1,181M no PDF served, $665M no grants
-  section in the PDF
+- **Recovered — $1,841M (30.4%)**
+- **Ours to fix — $1,802M (29.7%)** — the list is in the document; $1,552M
+  of it is labelled and within 10% of the target
+- **Unreachable — $2,372M (39.1%)** — $1,181M no PDF served, $1,191M no
+  grants section in the PDF
 
-The practical ceiling is **69.6%**.
-
----
-
-## Part 7: what is a ceiling and what is a backlog
-
-The distinction matters more than the headline, and the report now emits it
-(`diagnose()`), because an absent attachment and a selector bug look
-identical without it.
-
-**Ceiling.** Bezos 2021 carries `ATTACHMENT A` (charitable activities) and
-`ATTACHMENT B` (expenditure responsibility) and simply omits Attachment C.
-Its 2024 filing has it. No extraction method recovers what isn't there.
-
-**IRS-side loss is the larger half of the ceiling** — $1,181M vs $665M — and
-it splits two ways. Nine filings where TEOS lists no image at all, and six
-where TEOS lists a `STATICFILEPATH` that the IRS then 404s. Schusterman's
-2020 990-PF is indexed at `731312965_202012_990PF_2022102620583278.pdf` and
-is not served. **The second kind looks like a bug on the IRS's side and is
-worth reporting**; it costs $872.5M in this sample alone, including two
-band-A filings. All 15 are tax years 2020–2023, 11 of them 2020.
-
-**Backlog.** 25 filings, $1,309M, where the list is in the parse and the
-selector missed it. Band A's share is 5 filings worth $960.5M — fixing those
-five is worth more than bands B, C and D contain in total.
+Projected across the 9,518 addressable filings: **$6.7B** on the reconciled
+rate alone.
 
 ---
 
-## Part 8: open questions
+## Part 7: the audit, and what the first pass got wrong
 
-- **Heuristics or a model?** Three passes in, every fix has been general
-  rather than per-filer. But two "fixes" shipped in this session made things
-  worse before being caught, so the tail is not obviously getting easier. The
-  reconciliation gate is provider-agnostic and is what makes an LLM *safe* to
-  use — the sound design is deterministic first, model behind the gate for
-  the residual, same gate applied to its answer.
-- **The gate has never rejected a wrong answer on its own.** Every false
-  positive here was found by going looking. Wyss "reconciled" at 0.16% on
-  expense schedules and the gate was satisfied. This is the weakness to
-  harden before running unattended on 9,518 filings.
-- **Band D is 12 filings covering 0.2% of its stratum's dollars.** Its 8%
-  rate has very wide error bars; do not project from it.
+The first pass reported 36 reconciled filings and 46.0%. Its own open
+question was that "the gate has never rejected a wrong answer on its own."
+Checking the 36 by hand answered it.
+
+**Six were not grant lists at all** ($74M): Manton and Thome reconciled on
+capital-gains schedules (3,205 "grants" named `14,148`), Foellinger, Doss and
+Longwell on Part I revenue lines plus a land schedule, Waldheim on legal fees
+and cost-basis adjustments. All six came from the subset search running over
+unlabelled tables: with twenty money tables and a 0.5% window, some subset
+hits.
+
+**Five picked the right list and the wrong rows** ($1.1B). Klarman's 235
+rows included nine program subtotals worth $65M. Wells Fargo 2020's 409 rows
+were the last 13 pages of a 203-page attachment plus a blank-name row
+carrying the $277.9M total of the pages before them. Both Schusterman years
+padded the list with the taxes and other-expenses schedules; MG Johnson did
+the same. The dollars "reconciled" by construction, because the gate credits
+the declared amount; the rows — the product — were wrong.
+
+**One "backlog" filing was ceiling.** Schusterman 2023's 43-page image holds
+the expenditure-responsibility statement and nothing else; `diagnose()` called
+it list_present because the ER tables name organisations. $363.5M moved from
+backlog to unreachable.
+
+The rebuild was measured the same way every time: the old and new selector
+run over all 100 filings with the outcome of each filing printed side by
+side, and every change inspected. Two intermediate versions overcorrected
+(to 27%) by letting a stale heading veto the attachment that followed it;
+per-page context fixed that.
+
+**What the remaining backlog is.** Five band-A filings are labelled lists
+within a few percent of the target: Wells Fargo 2020 (list is complete in
+the image — it ends with the $21.3M Community Care section total that closes
+the $299.3M line 3a — OCR returns 101.5% of it over 6,478 rows), Wells Fargo
+2021 (97.6%), Schusterman 2021 (95.7%), Schusterman 2022, Bezos 2023 (98.7%,
+one row lost to a date in the name column). J&J 2021 is 31,830 matching
+gifts over 832 pages at 90.3%. These fail the 0.5% gate for OCR reasons and
+no selector change reaches them. Two options, both cheap to test: a second
+OCR pass on the failing pages, or accepting a labelled list at 90%+ with its
+coverage recorded as a column. Hall 2023 is different: its line 3a is the
+grant list plus matching gifts plus scholarships, each a separate attached
+statement, so the XML target is not the list's total.
+
+---
+
+## Part 8: when the IRS PDF is missing
+
+Fifteen filings ($1,181M) have no usable IRS image, and 30 more have an
+image without the grants section. What else could hold the list:
+
+- **The XML.** All 100 sample XMLs were checked for binary-attachment
+  markers, `AdditionalData`, and long narrative nodes. Nothing: four carry a
+  `GeneralExplanationAttachment`, none over 2,000 characters. The XML gives
+  no signal that an attachment exists, let alone its contents.
+- **ProPublica Nonprofit Explorer.** Its API lists a PDF for **2 of the 15**
+  (Charles Hayden FY2020, Roy A. Hunt FY2020), both from the IRS's older
+  bulk-image program (`download990pdf_11_2021_…` paths). Everything newer is
+  a mirror of TEOS under an `IRS/` prefix, so ProPublica cannot have what TEOS
+  lacks. Download is bot-gated (403 to curl).
+- **The IRS 404s have a pattern.** All six indexed-but-unserved images were
+  generated between 2022-05 and 2022-11; no image generated 2023 or later
+  404s. Worth reporting to the IRS as a batch, since it costs $872M here.
+- **State charity regulators.** Six of the 15 are New York filers (Siegel,
+  Charina, Hayden, Elmezzi, Basch, plus Reynolds and Edelman among the
+  no-section cases), and the NY Charities Bureau registry serves the full
+  CHAR500 package including the 990-PF. Its search is behind a CAPTCHA, so
+  it is a manual step, not a pipeline. California's Registry of Charitable
+  Trusts is similar; none of the 15 is a California filer.
+- **Foundation websites.** Windgate (two band-A filings, $579M) publishes a
+  recipients page with names and locations but no amounts or years;
+  Schusterman publishes nothing itemised. Not a source for amounts.
+- **Candid's 990 Finder** was not tested; its images come from the same IRS
+  programs.
+
+Net: for missing PDFs the practical routes are ProPublica's older images
+(fiscal-year 2020 filers only) and state registries by hand for the largest
+filers. Neither scales; both are worth doing for band A.
+
+---
+
+## Part 9: open questions
+
+- **Heuristics or a model?** The audit is the argument for a model behind
+  the gate: every false positive was a *plausibility* failure (a
+  capital-gains schedule is obviously not a grant list to a reader) that
+  took a hand-written guard to catch. The reconciliation gate plus a label
+  check is what makes an LLM safe to use on the residual — same gate, same
+  evidence requirement, applied to its answer.
+- **The 90–110% bucket needs a policy.** $1.55B sits there. Accepting it
+  with coverage recorded is the pragmatic answer; a second OCR pass is the
+  clean one.
+- **Band D is 12 filings covering 0.2% of its stratum's dollars.** Do not
+  project from it.
 - **Non-cash is 97% of Bezos' giving and it is AMZN stock** (`963 Shares
   AMZN`). The combined datamart hardcodes `non_cash_amount = 0` for all three
   990-PF sources. For this class of foundation the structured extract reports
@@ -298,29 +408,32 @@ five is worth more than bands B, C and D contain in total.
 | path | what |
 |---|---|
 | `givingtuesday_datamart/irs_source.py` | object id → IRS PDF + XML; RETURN_ID pinning |
-| `givingtuesday_datamart/attachment_grants.py` | table selection and the reconciliation gate |
+| `givingtuesday_datamart/attachment_grants.py` | table selection, evidence gating, paid/future reconciliation |
 | `givingtuesday_datamart/exploratory/placeholder_recovery.py` | `sample` / `stage` / `report` |
-| `tests/test_attachment_grants.py` | 16 tests over two real OCR results |
-| `data/exploratory/placeholder_sample_100.csv` | the frame (regenerates, seed 20260921) |
-| `s3://zein-990pf-unstructured-source/` | `source_files/` PDFs, `output_files/` parses |
+| `tests/test_attachment_grants.py` | 21 tests: two real OCR results plus one synthetic case per guard the audit added |
+| `data/exploratory/placeholder_sample_100.csv` | the frame, with paid and future targets (regenerates, seed 20260921) |
+| `data/exploratory/placeholder_staging.csv` | which filings reached OCR and why the others did not |
+| `s3://zein-990pf-unstructured-source/` | `source_files/` PDFs, `output_files/` parses (the only copy) |
 
 ```bash
 python -m givingtuesday_datamart.exploratory.placeholder_recovery sample
 python -m givingtuesday_datamart.exploratory.placeholder_recovery stage
 #   ... run the Unstructured job: source_files/ -> output_files/ ...
-python -m givingtuesday_datamart.exploratory.placeholder_recovery report --results <dir>
+aws s3 sync s3://zein-990pf-unstructured-source/output_files/ <dir>/
+python -m givingtuesday_datamart.exploratory.placeholder_recovery report --results <dir> --out detail.csv
 ```
 
 ## Caveats
 
 - **n = 100, and bands C and D are thin.** Band A is a census and exact;
   everything else is extrapolated from small samples.
-- **Recovery credits the declared amount, not the OCR sum**, for filings that
-  reconcile. Within-tolerance error (≤0.5%) is absorbed, not tracked.
-- **Recovered grants have not been through the matcher.** Recipient names and
-  addresses are recovered; whether they *match* to EINs at the usual rate is
-  untested and will be lower than for clean data.
-- **OCR quality was measured on two filings by hand.** Siegel reconciles to
-  $1 over 110 grants and Bezos to $602 over 279; the other 34 are trusted on
-  the gate alone.
+- **Recovery credits the declared amount, not the OCR sum**, for targets
+  that reconcile. Within-tolerance error (≤0.5%) is absorbed, not tracked.
+- **The audit was by inspection, not by ground truth.** Each of the 29
+  accepted lists was checked for label, contiguity and plausible names, and
+  three pages were read from the images by eye (S&G 2021, Hall, Wells Fargo
+  2020). Nobody has counted the rows in a PDF against the rows recovered.
+- **Recovered grants have not been through the matcher.** Recipient names
+  and addresses are recovered; whether they *match* to EINs at the usual
+  rate is untested and will be lower than for clean data.
 - **The 15 unavailable PDFs were checked once.** IRS availability may vary.
