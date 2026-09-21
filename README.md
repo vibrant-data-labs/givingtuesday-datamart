@@ -278,7 +278,13 @@ Stdlib only, no database. The XML is range-extracted from the IRS batch ZIP
 (a few hundred KB of traffic against a 250MB+ archive, so no full download).
 Where the year's index carries a `RETURN_ID` the PDF resolves to exactly one
 image even for an amended tax period; where it doesn't, every image for the
-period is listed rather than guessed at. See the module docstring for why.
+period is listed and `--pdf` refuses until `--image N` picks one — the
+difference between them is original versus amendment. See the module
+docstring for why.
+
+`--pdf` fetches the whole image, and these run large for the big filers
+(Fidelity's FY2022 990 is 347 MB / 32,829 pages). Omit the flag to just
+print the URL.
 
 GT's data lake has been verified byte-identical to the IRS original
 (SHA-256) on the filings checked so far, including a 51 MB one — the mirror

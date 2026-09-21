@@ -35,7 +35,9 @@ first four digits. Two artifacts, two very different routes:
 
       RETURN_ID is not always populated (all of 2022 and 2024, ~97% of 2023,
       but only ~56% of 2025). Without it this returns every image for the tax
-      period, oldest first, and says so rather than guessing.
+      period, oldest first, and says so rather than guessing — and ``--pdf``
+      refuses to download until ``--image N`` picks one, since the difference
+      between them is original versus amendment.
 """
 
 from __future__ import annotations
@@ -296,6 +298,9 @@ def main() -> None:
     parser.add_argument("filing", help="18-digit OBJECT_ID, or any URL containing one")
     parser.add_argument("--xml", type=Path, default=None, help="save the IRS XML here")
     parser.add_argument("--pdf", type=Path, default=None, help="save the TEOS image here")
+    parser.add_argument("--image", type=int, default=None, metavar="N",
+                        help="which listed image --pdf should save, when the tax period has "
+                             "more than one and no RETURN_ID pins it (1-based)")
     parser.add_argument("--cache", type=Path, default=None,
                         help="directory to cache the index and batch lookups in")
     args = parser.parse_args()
@@ -326,8 +331,22 @@ def main() -> None:
     if args.pdf:
         if not found:
             sys.exit("no TEOS image to download")
-        args.pdf.write_bytes(_get(found[-1].url))
-        print(f"wrote {args.pdf}")
+        if args.image is not None:
+            if not 1 <= args.image <= len(found):
+                sys.exit(f"--image must be between 1 and {len(found)}")
+            chosen = found[args.image - 1]
+        elif len(found) == 1:
+            chosen = found[0]
+        else:
+            # Never pick for the caller here: these differ by original vs
+            # amendment, and defaulting to the newest would quietly hand back
+            # the amendment when the original was asked for.
+            sys.exit(
+                f"{len(found)} images share this tax period and no RETURN_ID pins one "
+                f"to {row.object_id}; re-run with --image N to choose"
+            )
+        args.pdf.write_bytes(_get(chosen.url))
+        print(f"wrote {args.pdf}  ({chosen.url.rsplit('/', 1)[1]})")
 
 
 if __name__ == "__main__":
