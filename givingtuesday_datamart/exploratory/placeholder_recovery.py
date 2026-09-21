@@ -140,42 +140,88 @@ def build_sample(out: Path) -> None:
     print(f"\n{len(picked)} filings -> {out}")
 
 
-def stage(sample: Path, cache: Path, limit: int | None) -> None:
+def _fetch_pdf(object_id: str, cache: Path, local: Path) -> str:
+    """Download one filing's image. Returns a staging status, never raises.
+
+    A filing can fail to reach OCR for reasons that have nothing to do with
+    OCR, and they must not be scored as extraction failures. TEOS lists no
+    image for some filings, and for others it lists a ``STATICFILEPATH`` the
+    IRS no longer serves — Schusterman's 2020 990-PF is indexed and returns a
+    302 to an error page. Both are concentrated in older tax years.
+    """
+    try:
+        index_row = irs_source.lookup(object_id, cache)
+        images = irs_source.images(index_row)
+    except Exception as exc:                              # noqa: BLE001
+        return f"lookup_failed:{type(exc).__name__}"
+    if not images:
+        return "no_teos_image"
+    last_error = "pdf_unavailable"
+    for image in reversed(images):         # newest first; older ones are fallbacks
+        try:
+            payload = irs_source._get(image.url)
+        except Exception as exc:                          # noqa: BLE001
+            last_error = f"pdf_unavailable:{getattr(exc, 'code', type(exc).__name__)}"
+            continue
+        if payload[:4] != b"%PDF":
+            last_error = "not_a_pdf"
+            continue
+        local.write_bytes(payload)
+        return "staged"
+    return last_error
+
+
+def stage(sample: Path, cache: Path, limit: int | None, manifest: Path) -> None:
     import boto3
 
     s3 = boto3.client("s3")
     rows = list(csv.DictReader(sample.open()))[:limit]
     pdf_dir = cache / "pdfs"
     pdf_dir.mkdir(parents=True, exist_ok=True)
-    uploaded = skipped = failed = 0
+    results, counts = [], collections.Counter()
 
     for n, row in enumerate(rows, 1):
         object_id = row["object_id"]
         local = pdf_dir / f"{object_id}.pdf"
-        key = f"{SOURCE_PREFIX}/{object_id}.pdf"
         if local.exists() and local.stat().st_size > 0:
-            skipped += 1
+            status = "cached"
         else:
-            try:
-                index_row = irs_source.lookup(object_id, cache)
-                images = irs_source.images(index_row)
-                if not images:
-                    print(f"  [{n}/{len(rows)}] {object_id} no TEOS image", file=sys.stderr)
-                    failed += 1
-                    continue
-                local.write_bytes(irs_source._get(images[-1].url))
-            except Exception as exc:                      # noqa: BLE001 - report and continue
-                print(f"  [{n}/{len(rows)}] {object_id} {type(exc).__name__}: {exc}", file=sys.stderr)
-                failed += 1
-                continue
-        s3.upload_file(str(local), BUCKET, key)
-        uploaded += 1
-        print(f"  [{n}/{len(rows)}] {row['filer_name'][:34]:<34} {local.stat().st_size/1e6:>6.1f} MB -> {key}")
-    print(f"\nuploaded {uploaded}, reused {skipped} cached, failed {failed}")
+            status = _fetch_pdf(object_id, cache, local)
+
+        size = local.stat().st_size if local.exists() else 0
+        if status in ("staged", "cached"):
+            s3.upload_file(str(local), BUCKET, f"{SOURCE_PREFIX}/{object_id}.pdf")
+            print(f"  [{n}/{len(rows)}] {row['filer_name'][:32]:<32} {size/1e6:>6.1f} MB  {status}")
+        else:
+            print(f"  [{n}/{len(rows)}] {row['filer_name'][:32]:<32} {'':>6}     {status}", file=sys.stderr)
+        counts[status] += 1
+        results.append({"object_id": object_id, "filerein": row["filerein"],
+                        "stratum": row["stratum"], "taxyear": row["taxyear"],
+                        "placeholder_amt": row["placeholder_amt"],
+                        "status": status, "bytes": size})
+
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    with manifest.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(results[0].keys()))
+        writer.writeheader(); writer.writerows(results)
+
+    total_mb = sum(r["bytes"] for r in results) / 1e6
+    print(f"\n{'status':<26}{'n':>5}{'declared $M':>14}")
+    by = collections.defaultdict(lambda: [0, 0.0])
+    for r in results:
+        by[r["status"]][0] += 1; by[r["status"]][1] += float(r["placeholder_amt"])
+    for status, (n, dollars) in sorted(by.items(), key=lambda kv: -kv[1][1]):
+        print(f"  {status:<24}{n:>5}{dollars/1e6:>14,.1f}")
+    print(f"\n{total_mb:,.0f} MB staged -> s3://{BUCKET}/{SOURCE_PREFIX}/")
+    print(f"manifest -> {manifest}")
 
 
-def report(sample: Path, results: Path, out: Path | None) -> None:
+def report(sample: Path, results: Path, out: Path | None,
+           manifest: Path | None = None) -> None:
     rows = list(csv.DictReader(sample.open()))
+    staged: dict[str, str] = {}
+    if manifest and manifest.exists():
+        staged = {r["object_id"]: r["status"] for r in csv.DictReader(manifest.open())}
     by_stratum: dict = collections.defaultdict(
         lambda: {"n": 0, "declared": 0.0, "recovered": 0.0, "reconciled": 0,
                  "rows": 0, "outcomes": collections.Counter()})
@@ -184,7 +230,10 @@ def report(sample: Path, results: Path, out: Path | None) -> None:
     for row in rows:
         declared = float(row["placeholder_amt"])
         path = results / f"{row['object_id']}.pdf.json"
-        if not path.exists():
+        staging = staged.get(row["object_id"], "")
+        if staging and staging not in ("staged", "cached"):
+            outcome, result = staging.split(":")[0], None     # never reached OCR
+        elif not path.exists():
             outcome, result = "missing_result", None
         else:
             result = extract(load_elements(path), declared)
@@ -255,19 +304,21 @@ def main() -> None:
     p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
     p.add_argument("--cache", type=Path, default=Path.home() / ".cache" / "irs_index")
     p.add_argument("--limit", type=int, default=None)
+    p.add_argument("--manifest", type=Path, default=Path("data/exploratory/placeholder_staging.csv"))
 
     p = sub.add_parser("report", help="score the returned Unstructured results")
     p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
     p.add_argument("--results", type=Path, required=True, help="directory of <object_id>.pdf.json")
     p.add_argument("--out", type=Path, default=None)
+    p.add_argument("--manifest", type=Path, default=Path("data/exploratory/placeholder_staging.csv"))
 
     args = parser.parse_args()
     if args.command == "sample":
         build_sample(args.out)
     elif args.command == "stage":
-        stage(args.sample, args.cache, args.limit)
+        stage(args.sample, args.cache, args.limit, args.manifest)
     else:
-        report(args.sample, args.results, args.out)
+        report(args.sample, args.results, args.out, args.manifest)
 
 
 if __name__ == "__main__":
