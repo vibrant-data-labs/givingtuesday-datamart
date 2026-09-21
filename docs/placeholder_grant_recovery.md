@@ -133,11 +133,6 @@ Scratch Foundation, 459 Columbus Avenue Suite 1112, New York NY 10024, PC,
 Those addresses matter more than the names: 990-PF grant rows carry no
 recipient EIN, so our matcher runs on name + address.
 
-**Output format is load-bearing.** The `elements` output returns flat text
-with `text_as_html: null` on every element — the same filing then sums 2.9%
-over its own total, because column boundaries are guesswork. The Pipelines
-job returns real `<table><tr><td>` markup, and the same filing reconciles to
-**$1** across 110 grants.
 
 ---
 
