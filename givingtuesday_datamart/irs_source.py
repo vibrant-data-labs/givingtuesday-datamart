@@ -187,6 +187,49 @@ def _central_directory(zip_url: str) -> bytes:
     return _range(zip_url, cd_offset, cd_offset + cd_size - 1)
 
 
+STORED, DEFLATE, DEFLATE64 = 0, 8, 9
+
+
+def _inflate(blob: bytes, method: int, expected: int) -> bytes:
+    """Decompress a ZIP member and prove it came out the declared length.
+
+    The IRS varies compression per batch: 2025_TEOS_XML_11C and
+    2023_TEOS_XML_05A are entirely Deflate, while 2025_TEOS_XML_11B is
+    entirely **Deflate64** (method 9), which zlib cannot read — its 64KB
+    window makes zlib fail with "invalid distance too far back". Deflate64
+    needs the optional ``inflate64`` package; without it this raises rather
+    than handing back something that isn't the filing.
+
+    The length assertion is the point: an earlier cut of this module fell
+    through to returning the raw compressed bytes for unknown methods, and
+    wrote 8KB of deflate stream to a .xml file without complaint.
+    """
+    if method == STORED:
+        data = blob
+    elif method == DEFLATE:
+        data = zlib.decompress(blob, -15)
+    elif method == DEFLATE64:
+        try:
+            from inflate64 import Inflater
+        except ImportError:
+            raise NotImplementedError(
+                "this batch ZIP uses Deflate64, which zlib cannot decompress — "
+                "either `pip install inflate64`, or take the filing from the GT "
+                "data lake mirror printed above (verified byte-identical to the "
+                "IRS original)"
+            ) from None
+        data = Inflater().inflate(blob)
+    else:
+        raise NotImplementedError(f"unsupported ZIP compression method {method}")
+
+    if len(data) != expected:
+        raise ValueError(
+            f"decompressed {len(data):,} bytes but the central directory "
+            f"declares {expected:,} — refusing to return a partial filing"
+        )
+    return data
+
+
 def _member(zip_url: str, directory: bytes, object_id: str) -> bytes | None:
     """Extract ``<object_id>_public.xml`` if this archive holds it.
 
@@ -202,7 +245,7 @@ def _member(zip_url: str, directory: bytes, object_id: str) -> bytes | None:
     cursor = 0
     while cursor < len(directory) and directory[cursor : cursor + 4] == b"PK\x01\x02":
         (method,) = struct.unpack("<H", directory[cursor + 10 : cursor + 12])
-        (compressed,) = struct.unpack("<I", directory[cursor + 20 : cursor + 24])
+        compressed, uncompressed = struct.unpack("<II", directory[cursor + 20 : cursor + 28])
         name_len, extra_len, comment_len = struct.unpack(
             "<HHH", directory[cursor + 28 : cursor + 34]
         )
@@ -216,7 +259,7 @@ def _member(zip_url: str, directory: bytes, object_id: str) -> bytes | None:
             local_name_len, local_extra_len = struct.unpack("<HH", header[26:30])
             start = local_offset + 30 + local_name_len + local_extra_len
             blob = _range(zip_url, start, start + compressed - 1)
-            return zlib.decompress(blob, -15) if method == 8 else blob
+            return _inflate(blob, method, uncompressed)
 
         cursor += 46 + name_len + extra_len + comment_len
 
