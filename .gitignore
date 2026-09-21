@@ -179,3 +179,7 @@ data/exploratory/*.csv
 givingtuesday_datamart/exploratory/__marimo__/
 !data/exploratory/gt_*.csv
 !data/exploratory/placeholder_*.csv
+
+# Scratch filings pulled by irs_source / pushed through OCR — never artifacts.
+/*.pdf
+/*.xml
