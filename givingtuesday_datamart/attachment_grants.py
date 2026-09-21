@@ -1,0 +1,277 @@
+"""Recover itemised grants from the PDF attachment behind a placeholder row.
+
+Thousands of 990-PF filings itemise nothing: Part XV carries a single row
+reading "SEE Attachment 22" whose amount is the filer's entire grant total
+(9,518 filings, $25.05B once patient-assistance programs are set aside). The
+e-file XML genuinely has no list — but the IRS's own PDF image does, because
+the filer attached it. OCR the image and the grants come back.
+
+This module owns the step after OCR: given an Unstructured result for one
+filing, decide **which tables are the grant list** and return their rows.
+
+The hard part is that nothing labels them reliably. The XML says "SEE
+Attachment 22" and the PDF says "STATEMENT 22"; the next filer says
+"SEE ATTACHMENT C" and "CHARITABLE LISTING"; a third just says "SEE ATTACHED"
+and names nothing at all. Wells Fargo alone uses four phrasings across four
+years. Matching labels is a losing game.
+
+So we don't. **The placeholder amount already states what the right answer
+sums to**, which turns selection into a search: find the contiguous run of
+tables whose amount column reconciles to the declared total. Selection and
+validation collapse into one mechanism — a filing either reconciles or it is
+flagged, and there is no separate quality gate to keep honest.
+
+Three constraints, each of which comes from a way this got it wrong:
+
+* **Placeholder rows can't be candidates.** The Part XV line itself carries
+  the declared amount, so the first version "reconciled" at 0.0000% error by
+  selecting one row — the very row we are trying to replace.
+* **Error dominates row count.** Preferring the run with the most rows lets
+  the search bolt an unrelated table onto a correct run and stay inside
+  tolerance (a foundation's travel-expense page, sitting one page before its
+  grant list).
+* **The amount column is chosen by header, never by position.** Non-cash
+  sections carry both fair market value and book value; taking the last money
+  cell silently grabs the cost basis — $155M against $340M actually given.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass, field
+from html.parser import HTMLParser
+from pathlib import Path
+from typing import Iterable, Sequence
+
+# Ordered by preference. Fair market value must beat book value: a non-cash
+# section lists both, and book value is the cost basis, not the gift.
+AMOUNT_HEADERS: tuple[str, ...] = (
+    r"fair market value",
+    r"value of contribution",
+    r"^amount$",
+    r"amount of (?:grant|contribution)",
+    r"\bamount\b",
+)
+NAME_HEADERS: tuple[str, ...] = (
+    r"name and address",
+    r"name of recipient",
+    r"\bgrantee\b",
+    r"name of org",
+    r"\brecipient\b",
+    r"^name\b",
+    r"\bname\b",
+)
+
+# The same detector that flags a filing as placeholder-only upstream.
+PLACEHOLDER = re.compile(
+    r"(\b(?:see|refer)\w*\b[\s,–-]*(?:attach|addition|schedul|statement|stmt|list))"
+    r"|^\s*see\s*$",
+    re.I,
+)
+_TOTAL_ROW = re.compile(r"\btotals?\b", re.I)
+_MONEY = re.compile(r"^\$?\s?[\d,]+(?:\.\d{2})?$")
+
+DEFAULT_TOLERANCE = 0.005
+MIN_ROWS = 3
+
+
+@dataclass(frozen=True)
+class GrantRow:
+    """One recovered grant."""
+
+    page: int | None
+    name: str
+    amount: float
+    cells: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class CandidateTable:
+    page: int | None
+    amount_header: str
+    rows: tuple[GrantRow, ...]
+    totals: tuple[float, ...]
+
+    @property
+    def sum(self) -> float:
+        return sum(row.amount for row in self.rows)
+
+
+@dataclass(frozen=True)
+class Extraction:
+    """What the selector concluded for one filing."""
+
+    outcome: str                      # see OUTCOMES
+    declared: float
+    extracted: float = 0.0
+    error: float | None = None
+    pages: tuple[int, ...] = ()
+    rows: tuple[GrantRow, ...] = ()
+    amount_headers: tuple[str, ...] = ()
+    candidate_tables: int = 0
+    stated_totals: tuple[float, ...] = field(default=())
+
+    @property
+    def reconciled(self) -> bool:
+        return self.outcome == "reconciled"
+
+
+OUTCOMES = ("reconciled", "no_reconciling_run", "no_candidate_tables", "no_declared_amount")
+
+
+class _TableParser(HTMLParser):
+    """Unstructured serialises tables as ``text_as_html``; pull out the cells."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.rows: list[list[str]] = []
+        self._row: list[str] | None = None
+        self._cell: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag == "tr":
+            self._row = []
+        elif tag in ("td", "th"):
+            self._cell = []
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "tr" and self._row is not None:
+            self.rows.append(self._row)
+            self._row = None
+        elif tag in ("td", "th") and self._cell is not None:
+            if self._row is not None:
+                self._row.append(" ".join("".join(self._cell).split()))
+            self._cell = None
+
+    def handle_data(self, data: str) -> None:
+        if self._cell is not None:
+            self._cell.append(data)
+
+
+def parse_money(cell: str) -> float | None:
+    """A cell is money only if it is *entirely* a number — never a substring."""
+    text = (cell or "").strip()
+    if not _MONEY.fullmatch(text):
+        return None
+    try:
+        return float(re.sub(r"[^\d.]", "", text))
+    except ValueError:
+        return None
+
+
+def _pick_column(header: Sequence[str], patterns: Iterable[str]) -> int | None:
+    lowered = [h.lower() for h in header]
+    for pattern in patterns:
+        for index, head in enumerate(lowered):
+            if re.search(pattern, head):
+                return index
+    return None
+
+
+def candidate_tables(elements: Sequence[dict]) -> list[CandidateTable]:
+    """Every table carrying an amount column, in page order.
+
+    A table with no header match falls back to its most money-dense column,
+    which is what rescues attachments whose header row OCR'd badly.
+    """
+    found: list[CandidateTable] = []
+    for element in elements:
+        metadata = element.get("metadata") or {}
+        if element.get("type") != "Table":
+            continue
+        parser = _TableParser()
+        parser.feed(metadata.get("text_as_html") or "")
+        if len(parser.rows) < 2:
+            continue
+
+        header = parser.rows[0]
+        amount_ix = _pick_column(header, AMOUNT_HEADERS)
+        if amount_ix is None:
+            width = max(len(row) for row in parser.rows)
+            density = [
+                (sum(1 for row in parser.rows[1:] if i < len(row) and parse_money(row[i]) is not None), i)
+                for i in range(width)
+            ]
+            best, amount_ix = max(density) if density else (0, None)
+            if amount_ix is None or best < 2:
+                continue
+        name_ix = _pick_column(header, NAME_HEADERS)
+
+        rows: list[GrantRow] = []
+        totals: list[float] = []
+        for row in parser.rows[1:]:
+            amount = parse_money(row[amount_ix]) if amount_ix < len(row) else None
+            if amount is None:
+                continue
+            if _TOTAL_ROW.search(" ".join(row)):
+                totals.append(amount)
+                continue
+            name = row[name_ix] if (name_ix is not None and name_ix < len(row)) else max(row, key=len)
+            if PLACEHOLDER.search(name):
+                continue  # a pointer to the attachment, not a grant in it
+            rows.append(GrantRow(metadata.get("page_number"), name, amount, tuple(row)))
+
+        if rows:
+            found.append(
+                CandidateTable(
+                    page=metadata.get("page_number"),
+                    amount_header=header[amount_ix] if amount_ix < len(header) else "",
+                    rows=tuple(rows),
+                    totals=tuple(totals),
+                )
+            )
+    return sorted(found, key=lambda table: (table.page or 0))
+
+
+def extract(elements: Sequence[dict], declared: float,
+            tolerance: float = DEFAULT_TOLERANCE) -> Extraction:
+    """Find the run of tables reconciling to ``declared``.
+
+    Runs must be contiguous in page order — a grant list is not interleaved
+    with other schedules — which keeps the search quadratic over a few dozen
+    tables rather than exponential over their subsets.
+    """
+    if not declared or declared <= 0:
+        return Extraction(outcome="no_declared_amount", declared=declared)
+
+    tables = candidate_tables(elements)
+    if not tables:
+        return Extraction(outcome="no_candidate_tables", declared=declared)
+
+    best: Extraction | None = None
+    for start in range(len(tables)):
+        running = 0.0
+        for end in range(start, len(tables)):
+            running += tables[end].sum
+            run = tables[start : end + 1]
+            error = abs(running - declared) / declared
+            row_count = sum(len(table.rows) for table in run)
+            if error <= tolerance and row_count >= MIN_ROWS:
+                if best is None or (error, -row_count) < (best.error, -len(best.rows)):
+                    best = Extraction(
+                        outcome="reconciled",
+                        declared=declared,
+                        extracted=running,
+                        error=error,
+                        pages=tuple(sorted({t.page for t in run if t.page is not None})),
+                        rows=tuple(row for table in run for row in table.rows),
+                        amount_headers=tuple(sorted({t.amount_header for t in run if t.amount_header})),
+                        candidate_tables=len(tables),
+                        stated_totals=tuple(v for table in run for v in table.totals),
+                    )
+            if running > declared * (1 + tolerance):
+                break  # adding more tables can only overshoot further
+
+    if best is not None:
+        return best
+    return Extraction(outcome="no_reconciling_run", declared=declared, candidate_tables=len(tables))
+
+
+def load_elements(path: str | Path) -> list[dict]:
+    """Read an Unstructured result, accepting both the bare list and the
+    job-wrapped ``{"elements": [...]}`` shapes."""
+    data = json.loads(Path(path).read_text())
+    if isinstance(data, dict):
+        return data.get("elements") or []
+    return data
