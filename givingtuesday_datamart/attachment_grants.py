@@ -65,7 +65,7 @@ NAME_HEADERS: tuple[str, ...] = (
 
 # The same detector that flags a filing as placeholder-only upstream.
 PLACEHOLDER = re.compile(
-    r"(\b(?:see|refer)\w*\b[\s,–-]*(?:attach|addition|schedul|statement|stmt|list))"
+    r"((?:see|refer)\w*[\s,–-]*(?:attach|addition|schedul|statement|stmt|list))"
     r"|^\s*see\s*$",
     re.I,
 )
