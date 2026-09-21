@@ -257,38 +257,34 @@ resume on the same inputs.
 ### Trace a filing back to the IRS
 
 ```bash
-# any of these work — bare object id, GT data lake url, or the frontend proxy link
-python -m givingtuesday_datamart.irs_source 202523219349105072
-python -m givingtuesday_datamart.irs_source \
-    "https://gt990datalake-rawdata.s3.amazonaws.com/EfileData/XmlFiles/202523219349105072_public.xml"
+# bare object id, GT data lake url, or the frontend proxy link all work
+python -m givingtuesday_datamart.irs_source 202533119349102158
 
-# save both artifacts; --cache makes repeat lookups in the same year cheap
-python -m givingtuesday_datamart.irs_source 202430459349302913 \
-    --xml fidelity.xml --pdf fidelity.pdf --cache ~/.cache/irs_index
+# save both; --cache avoids re-downloading index_<year>.csv on the next lookup
+python -m givingtuesday_datamart.irs_source 202533119349102158 \
+    --xml f.xml --pdf f.pdf --cache ~/.cache/irs_index
 ```
 
-Prints the IRS's own XML location and the TEOS PDF image for a filing the
-grant tables cite by `url`. Useful when a finding has to be defended with a
-primary source rather than GT's mirror — the placeholder cases in
+Turns the `url` a grant row cites into the IRS's public PDF image and the
+filing XML — for defending a finding with the primary document, as in the
+placeholder cases in
 [docs/missing_grants_capture_analysis.md](docs/missing_grants_capture_analysis.md)
 and the amended filings in
 [docs/gt-duplication-report.md](docs/gt-duplication-report.md).
 
-Stdlib only, no database. The XML is range-extracted from the IRS batch ZIP
-(a few hundred KB of traffic against a 250MB+ archive, so no full download).
-Where the year's index carries a `RETURN_ID` the PDF resolves to exactly one
-image even for an amended tax period; where it doesn't, every image for the
-period is listed and `--pdf` refuses until `--image N` picks one — the
-difference between them is original versus amendment. See the module
-docstring for why.
+Stdlib only, no database. The PDF comes from TEOS, which keys on
+(EIN, tax period, return type) — coarser than a filing, since an original and
+its amendment share a tax period. Where the IRS index carries a `RETURN_ID`
+that resolves to exactly one image; where it doesn't, every image for the
+period is listed and `--pdf` waits for `--image N` rather than guessing.
+Images are the whole return, so they run large for big filers (Fidelity's
+FY2022 990 is 347 MB / 32,829 pages).
 
-`--pdf` fetches the whole image, and these run large for the big filers
-(Fidelity's FY2022 990 is 347 MB / 32,829 pages). Omit the flag to just
-print the URL.
-
-GT's data lake has been verified byte-identical to the IRS original
-(SHA-256) on the filings checked so far, including a 51 MB one — the mirror
-is trustworthy; the IRS copy is simply the citable one.
+The XML is fetched from GT's mirror, which has been verified byte-identical
+to the IRS original by SHA-256 across filings from 43 KB to 51 MB. Pulling it
+from the IRS instead would mean cracking open a 250MB+ batch ZIP, and some
+batches are Deflate64, which zlib cannot read — not worth carrying for a file
+we can prove is the same. The IRS archive URL is printed either way.
 
 ### Recommended first run
 
