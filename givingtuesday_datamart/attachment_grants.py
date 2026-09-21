@@ -70,6 +70,30 @@ PLACEHOLDER = re.compile(
     re.I,
 )
 _TOTAL_ROW = re.compile(r"\btotals?\b", re.I)
+
+# Reconciliation alone is not evidence. These filings carry dozens of money
+# tables, and over a 0.5% tolerance some combination of them will hit almost
+# any target: the Wyss Foundation's Legal Fees, Other Assets, Other Decreases
+# and Other Expenses schedules sum to within 0.16% of its $125.7M grant total,
+# while its actual "Grants Paid Schedule" sits six pages later.
+#
+# What rescues it is that these documents label every schedule. The heading
+# is not reliable enough to *find* the grant list (a filer may call it
+# "STATEMENT 22", "CHARITABLE LISTING" or nothing at all), but it is reliable
+# enough to rule tables out, which is all we need to stop the search wandering.
+GRANT_CONTEXT = re.compile(
+    r"grants?\s+paid|grants?\s+and\s+contributions|contributions?\s+paid"
+    r"|charitable\s+listing|cash\s+contributions|grants?\s+approved"
+    r"|\bgrantee\b|part\s+x[iv]+\b.*grant|grant.*schedule",
+    re.I,
+)
+NON_GRANT_CONTEXT = re.compile(
+    r"\b(legal\s+fees|accounting\s+fees|other\s+expenses|other\s+assets|other\s+income"
+    r"|other\s+decreases|other\s+increases|other\s+liabilities|taxes|depreciation"
+    r"|investments?|corporate\s+stock|land|balance\s+sheet|compensation|officers?"
+    r"|capital\s+gains?|dividends|interest|professional\s+fees|program\s+expenses)\b",
+    re.I,
+)
 _MONEY = re.compile(r"^\$?\s?[\d,]+(?:\.\d{2})?$")
 
 DEFAULT_TOLERANCE = 0.005
@@ -92,6 +116,12 @@ class CandidateTable:
     amount_header: str
     rows: tuple[GrantRow, ...]
     totals: tuple[float, ...]
+    context: str = ""
+
+    @property
+    def grant_context(self) -> bool:
+        """Does the nearest heading say this is a grant schedule?"""
+        return bool(GRANT_CONTEXT.search(self.context)) and not NON_GRANT_CONTEXT.search(self.context)
 
     @property
     def sum(self) -> float:
@@ -169,15 +199,29 @@ def _pick_column(header: Sequence[str], patterns: Iterable[str]) -> int | None:
     return None
 
 
-def candidate_tables(elements: Sequence[dict]) -> list[CandidateTable]:
+def candidate_tables(elements: Sequence[dict],
+                     declared: float | None = None) -> list[CandidateTable]:
     """Every table carrying an amount column, in page order.
 
     A table with no header match falls back to its most money-dense column,
     which is what rescues attachments whose header row OCR'd badly.
+
+    ``declared`` lets a grand-total row be recognised by its value. Text
+    matching is not enough: the Wyss Foundation's grant schedule ends with
+    ``['', '', '', 125722675]`` — every label cell empty — and counting it as
+    a gift makes the schedule sum to exactly twice the declared total.
     """
     found: list[CandidateTable] = []
+    context = ""
     for element in elements:
         metadata = element.get("metadata") or {}
+        if element.get("type") in ("Title", "Header", "FigureCaption"):
+            # Elements arrive in document order, so the last heading seen is
+            # the one this table sits under.
+            text = " ".join((element.get("text") or "").split())
+            if text and not text.startswith("efile GRAPHIC"):
+                context = text
+            continue
         if element.get("type") != "Table":
             continue
         parser = _TableParser()
@@ -207,6 +251,11 @@ def candidate_tables(elements: Sequence[dict]) -> list[CandidateTable]:
             if _TOTAL_ROW.search(" ".join(row)):
                 totals.append(amount)
                 continue
+            if declared and abs(amount - declared) <= max(1.0, declared * 1e-6):
+                totals.append(amount)   # the grand total, however it is labelled
+                continue
+            if amount == 0:
+                continue   # worksheet zeros pad a run toward MIN_ROWS for free
             name = row[name_ix] if (name_ix is not None and name_ix < len(row)) else max(row, key=len)
             if PLACEHOLDER.search(name):
                 continue  # a pointer to the attachment, not a grant in it
@@ -219,6 +268,7 @@ def candidate_tables(elements: Sequence[dict]) -> list[CandidateTable]:
                     amount_header=header[amount_ix] if amount_ix < len(header) else "",
                     rows=tuple(rows),
                     totals=tuple(totals),
+                    context=context,
                 )
             )
     return sorted(found, key=lambda table: (table.page or 0))
@@ -235,9 +285,16 @@ def extract(elements: Sequence[dict], declared: float,
     if not declared or declared <= 0:
         return Extraction(outcome="no_declared_amount", declared=declared)
 
-    tables = candidate_tables(elements)
+    tables = candidate_tables(elements, declared)
     if not tables:
         return Extraction(outcome="no_candidate_tables", declared=declared)
+
+    # Search only tables under a grant heading when any exist. Falling back to
+    # everything keeps filings whose headings OCR'd badly in play, but they
+    # then have to clear the same reconciliation bar on their own.
+    labelled = [t for t in tables if t.grant_context]
+    if labelled:
+        tables = labelled
 
     best: Extraction | None = None
     for start in range(len(tables)):
