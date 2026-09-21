@@ -254,6 +254,36 @@ memory and needs an r7a.4xlarge-class host (~128 GB). A 16 GB laptop is
 killed at the indexing step. Checkpoints make interrupted runs cheap to
 resume on the same inputs.
 
+### Trace a filing back to the IRS
+
+```bash
+# any of these work — bare object id, GT data lake url, or the frontend proxy link
+python -m givingtuesday_datamart.irs_source 202523219349105072
+python -m givingtuesday_datamart.irs_source \
+    "https://gt990datalake-rawdata.s3.amazonaws.com/EfileData/XmlFiles/202523219349105072_public.xml"
+
+# save both artifacts; --cache makes repeat lookups in the same year cheap
+python -m givingtuesday_datamart.irs_source 202430459349302913 \
+    --xml fidelity.xml --pdf fidelity.pdf --cache ~/.cache/irs_index
+```
+
+Prints the IRS's own XML location and the TEOS PDF image for a filing the
+grant tables cite by `url`. Useful when a finding has to be defended with a
+primary source rather than GT's mirror — the placeholder cases in
+[docs/missing_grants_capture_analysis.md](docs/missing_grants_capture_analysis.md)
+and the amended filings in
+[docs/gt-duplication-report.md](docs/gt-duplication-report.md).
+
+Stdlib only, no database. The XML is range-extracted from the IRS batch ZIP
+(a few hundred KB of traffic against a 250MB+ archive, so no full download).
+Where the year's index carries a `RETURN_ID` the PDF resolves to exactly one
+image even for an amended tax period; where it doesn't, every image for the
+period is listed rather than guessed at. See the module docstring for why.
+
+GT's data lake has been verified byte-identical to the IRS original
+(SHA-256) on the filings checked so far, including a 51 MB one — the mirror
+is trustworthy; the IRS copy is simply the citable one.
+
 ### Recommended first run
 
 Refresh smallest-to-largest so that errors surface fast:
