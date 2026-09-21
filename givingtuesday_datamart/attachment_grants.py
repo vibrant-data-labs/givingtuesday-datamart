@@ -149,6 +149,50 @@ class Extraction:
 
 OUTCOMES = ("reconciled", "no_reconciling_run", "no_candidate_tables", "no_declared_amount")
 
+# A failure to reconcile says nothing about whose fault it is. These three
+# split it: whether the filing's grant list is in the document at all.
+# Without the split, an absent attachment and a selector bug look identical,
+# and the first is a ceiling while the second is a backlog.
+DIAGNOSES = ("list_present", "list_partial", "list_absent")
+
+_FORM_LABEL = re.compile(r"^\s*(part\s|[0-9]+[a-z]?\s|line\s|total|sub-?total|\(|see\b)", re.I)
+
+
+def _recipient_like(name: str) -> bool:
+    """Does this row name an organisation rather than a form line?
+
+    Capital-gains and revenue-analysis tables are long and full of money, so
+    row count alone mistakes them for grant lists.
+    """
+    text = (name or "").strip()
+    if len(text) < 6 or _FORM_LABEL.match(text):
+        return False
+    return len(re.findall(r"[A-Za-z]{2,}", text)) >= 2
+
+
+def diagnose(elements: Sequence[dict], declared: float,
+             min_rows: int = 8, name_share: float = 0.6) -> str:
+    """For a filing that did not reconcile, say whether its list is there.
+
+    ``list_absent`` means no table anywhere names recipients — the attachment
+    is not in the IRS image, and no amount of extraction work recovers it
+    (Bezos 2021 carries Attachments A and B and simply omits the charitable
+    listing). ``list_partial`` means recipients are named but the money found
+    is under half the declared total. ``list_present`` means the list is
+    sitting in the parse and the selector failed to pick it.
+    """
+    tables = candidate_tables(elements, declared)
+    grantish = [
+        table for table in tables
+        if len(table.rows) >= min_rows
+        and sum(1 for row in table.rows if _recipient_like(row.name)) >= name_share * len(table.rows)
+    ]
+    if not grantish:
+        return "list_absent"
+    if sum(table.sum for table in grantish) < declared * 0.5:
+        return "list_partial"
+    return "list_present"
+
 
 class _TableParser(HTMLParser):
     """Unstructured serialises tables as ``text_as_html``; pull out the cells."""

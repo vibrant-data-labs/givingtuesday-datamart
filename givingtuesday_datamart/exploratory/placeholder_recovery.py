@@ -42,7 +42,7 @@ import sys
 from pathlib import Path
 
 from givingtuesday_datamart import irs_source
-from givingtuesday_datamart.attachment_grants import PLACEHOLDER, extract, load_elements
+from givingtuesday_datamart.attachment_grants import PLACEHOLDER, diagnose, extract, load_elements
 
 COMBINED_CSV = Path.home() / "Downloads" / "combined-grants-datamarts-gt_team_priority-20260915.csv"
 SAMPLE_CSV = Path("data/exploratory/placeholder_sample_100.csv")
@@ -236,8 +236,11 @@ def report(sample: Path, results: Path, out: Path | None,
         elif not path.exists():
             outcome, result = "missing_result", None
         else:
-            result = extract(load_elements(path), declared)
+            elements = load_elements(path)
+            result = extract(elements, declared)
             outcome = result.outcome
+            if outcome == "no_reconciling_run":
+                outcome = diagnose(elements, declared)
         bucket = by_stratum[row["stratum"]]
         bucket["n"] += 1
         bucket["declared"] += declared
