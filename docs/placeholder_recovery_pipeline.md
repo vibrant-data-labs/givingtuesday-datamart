@@ -109,15 +109,27 @@ line (name, address, status, purpose, amount) and the totals printed on
 it — plus token usage, finish reason and attempt count.
 
 [`vlm_transcription.py`](../givingtuesday_datamart/vlm_transcription.py)
-through the Vercel AI Gateway, prompt fixed at the bake-off's second
-version. Three retries, each for a failure the bake-off showed: a
-transport error waits and asks again (on top of the SDK's own); output cut
-off at the token limit is re-asked with twice the room; a page the model
-labelled a grant list but returned no rows for is asked once more, because
-the empty answer was stochastic. Every page also gets a **page-level
-check**: do its rows sum to a total printed on it? Matched pages need no
-further look; a mismatch is a flag, not a verdict, since printed totals
-are often cumulative.
+through the Vercel AI Gateway. The prompt is versioned and every stored
+page carries the version that produced it; results go to
+`<model>-<version>` folders so a revision is scored against the last one.
+v3 (from the sample) says what a heading is — the list title, not the
+filer masthead Gemini put there or the recipient line Qwen did — keeps a
+contact person inside their organisation's row, and asks for one row per
+recipient however many printed lines it wraps onto.
+
+Three retries, each for a failure the runs showed: a transport error
+waits and asks again (on top of the SDK's own); output cut off at the
+token limit is re-asked with twice the room; a page the model labelled a
+grant list but returned no rows for, or stopped mid-row on, is asked
+again **without JSON mode**, and the fullest parsed answer is kept. That
+last one came from the sample: Qwen answered 401 dense list pages with an
+empty list in five seconds each — 384 of Johnson & Johnson's 836, 7 of
+First Horizon's 30 — twice each, under `response_format=json_object`;
+the same pages read at 59–87 rows without it, five of five tried, and no
+prompt wording changed that. Every page also gets a **page-level check**:
+do its rows sum to a total printed on it? Matched pages need no further
+look; a mismatch is a flag, not a verdict, since printed totals are often
+cumulative.
 
 Volumes after the cut, from the sample's attachment pages per filing
 (30.7 in band A, 30.6 in B, 1.9 in C, 0.3 in D):
@@ -152,7 +164,13 @@ elements, the baseline), `page_tables` (a model's page JSON — the heading
 is the context exactly as an OCR heading was, and the page kind is a
 second, independent label) and `xml_tables` (the itemised rows, exact,
 one table per source); `extract_tables` reconciles whatever mix it is
-given.
+given. A page whose heading says nothing, and which the model labels a
+list, inherits the previous page's heading and kind — the models cannot
+tell a paid continuation from a future one, and both called Kenan's
+second future-payment page a paid list — unless that previous page closed
+its list with a total equal to a declared amount, in which case the next
+page opens a new statement. A page the model calls *other* never
+inherits.
 Paid and future reconcile separately. Failures are diagnosed — list
 present, partial, absent — and *present* carries a coverage number, since
 the largest failure class is a labelled list that OCR returned at 90–110%
@@ -261,19 +279,29 @@ baseline. Per-filing detail is in `data/exploratory/placeholder_report_*.csv`
 and the filing-by-filing differences in `placeholder_engine_differences.csv`
 (`placeholder_recovery.py compare`).
 
-| band | Unstructured | Qwen3-VL instruct | Gemini 3.5 Flash Lite | either model |
-|---|---|---|---|---|
-| A (22) | 10 / $1,326M | 14 / $2,357M | 13 / $2,276M | 15 / $2,536M |
-| B (44) | 15 / $505M | 12 / $294M | 16 / $391M | 18 / $420M |
-| C (22) | 3 / $10M | 7 / $20M | 7 / $20M | 7 / $20M |
-| D (12) | 1 / $0.0M | 2 / $0.3M | 2 / $0.3M | 2 / $0.3M |
-| **all** | **29 / 30.4%** | **35 / 44.0%** | **38 / 44.3%** | **42 / 49.1%** |
+The sample has now been read twice by each model — once under prompt v2,
+once under v3 with the no-JSON retry — and all four reads are scored by
+the current selector (the continuation-page rule included).
+
+| band | Unstructured | Qwen v2 | Gemini v2 | Qwen v3 | Gemini v3 | any of the four |
+|---|---|---|---|---|---|---|
+| A (22) | 10 / $1,326M | 14 / $2,357M | 14 / $2,483M | 14 / $2,453M | 15 / $2,544M | 16 / $2,693M |
+| B (44) | 15 / $505M | 13 / $330M | 17 / $417M | 14 / $344M | 16 / $402M | 20 / $492M |
+| C (22) | 3 / $10M | 7 / $20M | 7 / $20M | 7 / $20M | 7 / $20M | 7 / $20M |
+| D (12) | 1 / $0.0M | 2 / $0.3M | 2 / $0.3M | 2 / $0.3M | 2 / $0.3M | 2 / $0.3M |
+| **all** | **29 / 30.4%** | **36 / 44.6%** | **40 / 48.2%** | **37 / 46.4%** | **40 / 48.9%** | **45 / 52.9%** |
 
 Reconciled filings and declared dollars credited; percentages are of the
-sample's $6,064M. Six filings reconcile only under the OCR pass (Bezos
-2022, Kenan, Pritzker, Pritzker Traubert, Eden Hall 2023, Claude Moore);
-counting those, 48 filings and 52.4% reconcile under some engine. The present-but-90–110% backlog fell from 24.7% of
-dollars under Unstructured to 5.3% (Qwen) and 7.2% (Gemini).
+sample's $6,064M. The v3 pair alone reaches 42 / 51.8%; with the OCR pass
+added, 51 filings and 55.9% reconcile under some engine. (The first
+report of this table, before the continuation-page rule, read 35 / 44.0%
+and 38 / 44.3%.) The present-but-90–110% backlog fell from 24.7% of
+dollars under Unstructured to 4.4–4.6% under either model's second read.
+
+The number to quote is a single read's: 36–40 filings, 45–49% of dollars.
+The union climbs with every read because each read is a different draw
+on the dense pages — see *The second read* below — and a union chosen
+after the fact, with reconciliation as the only check, is not a method.
 
 | | Qwen3-VL instruct | Gemini 3.5 Flash Lite |
 |---|---|---|
@@ -329,6 +357,62 @@ What it showed:
   for most of the baseline's *list absent* outcomes, confirmed rather than
   inferred.
 
+### The second read
+
+Prompt v3 and the no-JSON retry, both models, the same 1,782 pages:
+Qwen $4.24 and 65,793 rows (51,894 under v2 — 1,314 pages were answered
+without JSON mode and none was left partial); Gemini $12.21 and 85,939
+rows, no retries. Filing by filing, each model gained and lost in
+roughly equal measure. Gemini: +Bezos 2023 (the non-cash page, read
+right this time), Hall 2023, Manton, Kenan's future list; −Wyss 2023,
+Roberts 2022, Edelman 2023. Qwen: +Wyss 2023, Aviv, Pacific Life,
+Elbridge Stuart's future list, and First Horizon from 61% to 102%
+coverage; −Hall 2023, Kenan's future list, Raskob.
+
+Comparing the two reads page by page says why. Two readings of a page
+are compared on their (name, amount) pairs; J&J's 836 pages are excluded.
+
+| rows on the page | pages | same model, v2 vs v3: pairs identical | Qwen v3 vs Gemini v3: pairs identical |
+|---|---|---|---|
+| under 10 | ~148 | 91–97% | 80% |
+| 10–24 | ~330 | 89–93% | 83% |
+| 25–49 | ~280 | 36–37% | 15% |
+| 50 and up | ~110 | 31–38% | 25% |
+
+Below 25 rows a page, a reading is reproducible and the two models
+agree. From 25 rows up, the same model reads the same page differently
+on two occasions more often than not, and the two models agree on one
+page in six. **Every read is a different draw on the dense pages.** The
+filing-level numbers above follow from this: a single read lands at
+36–40, and the union of four draws at 45.
+
+Three of the dense-page shapes were confirmed against the page images:
+
+- **A merge shifts every amount below it.** On Wyss 2023 p033 (21 rows),
+  Gemini v3 read "Special Olympics Pennsylvania" and "States Newsroom" as
+  one wrapped name; ARC of Chester County then received States Newsroom's
+  $1,140,000, the Conservation Alliance received ARC's $50,000, and the
+  $5,000,000 at the bottom fell off. The page sum moved by one row while
+  every row after the merge was wrong. v3's own wording ("a name that
+  wraps onto a second line is still one row") caused it; v4 anchors rows
+  on the amount column instead and reads the page exactly under both
+  models.
+- **A split shifts the other way.** Gemini v2 on Roberts 2022 p034 and
+  Wells Fargo 2020 p026 gave an address line its own row, so Metropolitan
+  Economic Development Association received Neighborhood Reinvestment's
+  $1,478,885.
+- **Cents folded into dollars.** Gemini v3 read "$838,000.00" on Wells
+  Fargo p026 as 8,383,000, a $7.5M phantom on one row.
+
+Qwen was exact on both ground-truth pages. The consequence for the
+design: the reconciliation gate cannot see a shift — 0.5% of Wells
+Fargo's $299M is $1.5M of slack — so stage 3b must compare (name, amount)
+pairs, not amount lists, and the ground-truth set must score pairs. A
+page whose readings disagree goes to the third reader; a page on which no
+two readers agree is flagged, not loaded. Whether dense pages should be
+read in horizontal strips (fewer rows per image) is an open question the
+ground-truth set can answer.
+
 ## Order of operations
 
 1. Ground-truth set and a matcher pass on the 4,760 rows already
@@ -348,12 +432,22 @@ What it showed:
    right, so the third reader and the prompt fixes below are what move
    them. The gate stays: on the non-cash pages both models agree on the
    wrong column.
-   Alongside: carry a grant heading forward onto heading-less continuation
-   pages in `page_tables`, as `candidate_tables` already does; and a
-   prompt revision that returns one section per list on a page and keeps a
-   contact name inside its grantee's row. Qwen's open weights remain the
-   reason to prefer it where the two tie — it can run on Baseten or our
-   own GPU with no data leaving our control.
+   ~~Alongside: carry a grant heading forward onto heading-less
+   continuation pages in `page_tables`; and a prompt revision that returns
+   one section per list on a page and keeps a contact name inside its
+   grantee's row.~~ Done, with one change of mind. The carry rule alone,
+   re-scoring the stored v2 pages, took Qwen from 35 to 36 filings and
+   Gemini from 38 to 40 (Wells Fargo 2021's $207M, Eden Hall 2022,
+   Elbridge Stuart's future list). "One section per list" was dropped:
+   measured on the sample, no page holds two lists — the only page whose
+   rows out-sum a target-matching total is Claude Moore's contact
+   doubling — so it would exercise nothing and would add nesting for Qwen
+   to truncate. What the sample did turn up was that Qwen's 401 empty
+   pages were JSON mode's doing, not the prompt's (stage 3 above). Prompt
+   v3 and the retry policy were then run on the 100: see the results
+   section. Qwen's open weights remain the reason to prefer it where the
+   two tie — it can run on Baseten or our own GPU with no data leaving
+   our control.
 3. ~~Band B in full with the broadened classifier.~~ Drawn and staged
    (`sample --expand`: 610 filings, B as a census; 373 have an
    attachment, 9,347 pages). On GT's priority CSV the broadened

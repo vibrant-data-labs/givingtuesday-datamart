@@ -2,8 +2,8 @@
 
 Vibrant Data Labs, September 22, 2026.
 
-Status: measured on a sample of 100 filings; an expanded frame of 610 is
-staged and waiting to be read. Not yet in the pipeline. The build plan is
+Status: measured on a sample of 100 filings, read four times; an expanded
+frame of 610 is staged and waiting to be read. Not yet in the pipeline. The build plan is
 in [placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md).
 
 ## Summary
@@ -15,12 +15,17 @@ in [placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md).
   because the filer attached it.
 - We read those pages with a vision model. We keep a list only when it
   adds up to the declared total and looks like a grant list.
-- On the sample, this recovers 42 of 100 filings and 49% of the dollars.
-  Model cost for the sample: about $16.
+- One read of the sample recovers 36 to 40 of 100 filings and 45% to 49%
+  of the dollars, for $4 to $12 in model cost. The sample has been read
+  four times (two models, two prompts); together the reads reach 45
+  filings and 53%.
+- Pages with 25 or more rows come out differently on every read. The
+  page total hides it, because names shift against amounts while the sum
+  barely moves.
 - 39% of the dollars cannot be recovered this way. The IRS serves no PDF,
   or the PDF has no list in it.
 - Next step: run both models on every page and accept pages where they
-  agree.
+  agree on names and amounts. Send the rest to a third model.
 
 ## The problem
 
@@ -121,11 +126,23 @@ that chose them is in the pipeline doc.
 
 | | Qwen3-VL instruct | Gemini 3.5 Flash Lite |
 |---|---|---|
-| cost for 1,782 pages | $3.57 | $12.37 |
+| cost for one read of 1,782 pages | $3.57 to $4.24 | $12.21 to $12.37 |
 | time per page | 33 s | 8 s |
 
 The first approach, Unstructured OCR, is no longer used. It cost more and
 lost rows on long lists.
+
+One finding from the sample changed the retry rule. Qwen returned no rows
+for 401 dense pages, twice each, when asked for JSON output mode. The
+same pages read fully without that mode. So an empty or cut-off list
+page is now asked again without JSON mode, and the fuller answer is kept.
+
+The prompt is versioned. Version 3 tells the model what a heading is and
+keeps a contact person inside their organisation's row. Version 4, the
+current one, defines rows by the amount column: every printed amount is
+a row, and a line with no amount belongs to the row above it. Version 3
+had said a wrapped name is still one row, and the model then merged two
+neighbouring recipients into one.
 
 ## Choosing the list
 
@@ -148,45 +165,60 @@ accepted list also needs a second piece of evidence:
 Rows equal to a declared total, rows labelled total or subtotal, and rows
 that point at an attachment are never counted as grants.
 
+A list that runs onto a page with no title continues the list before it.
+The models cannot tell a paid continuation from a future one, so such a
+page takes the label of the page before it. The one exception: if that
+earlier page ended with a total equal to a declared amount, its list is
+closed, and the next page starts a new one.
+
 The XML sometimes itemises a few grants beside the placeholder, and the
 expenditure-responsibility statement lists more. Those rows are exact and
 go into the search too. Hall 2023 reconciles only with them.
 
 ## Results
 
-100 filings, best of the two models. Dollars are declared totals.
+100 filings, best of four reads (two models, two prompt versions).
+Dollars are declared totals.
 
 | outcome | filings | dollars | share |
 |---|---|---|---|
-| reconciled | 42 | $3,144M | 52% |
-| list found, rows 88% to 118% of target | 10 | $349M | 6% |
-| list found, non-cash page misread (Bezos 2023) | 1 | $157M | 3% |
+| reconciled | 45 | $3,346M | 55% |
+| list found, rows 88% to 118% of target | 8 | $304M | 5% |
 | attachment present, no money table | 3 | $36M | 1% |
 | attachment is not the list | 3 | $490M | 8% |
 | PDF has no attachment | 26 | $707M | 12% |
 | IRS serves no PDF | 15 | $1,181M | 19% |
 
-Credited recovery is $2,977M, 49.1% of the sample. Credit is the declared
+Credited recovery is $3,205M, 52.9% of the sample. Credit is the declared
 amount of each reconciled target, so a filing's paid list can count while
 its future list does not.
 
-By engine:
+By read:
 
-| engine | reconciled | dollars credited |
+| read | reconciled | dollars credited |
 |---|---|---|
 | Unstructured OCR, the baseline | 29 | 30.4% |
-| Qwen3-VL instruct | 35 | 44.0% |
-| Gemini 3.5 Flash Lite | 38 | 44.3% |
-| either model | 42 | 49.1% |
+| Qwen3-VL, first read | 36 | 44.6% |
+| Gemini Flash Lite, first read | 40 | 48.2% |
+| Qwen3-VL, second read | 37 | 46.4% |
+| Gemini Flash Lite, second read | 40 | 48.9% |
+| any of the four | 45 | 52.9% |
 
-The two models fail on different filings. Eleven filings reconcile under
-only one of them. Where a model fails on a list that is present, the
-cause is a transcription slip: a duplicated row, a contact name read as a
-grantee, a continuation page labelled as the wrong list, or the non-cash
-page where fair market value sits next to book value.
+The number to quote is a single read's. The union grows with every read
+because dense pages come out differently each time, and a best-of-four
+chosen afterwards is not a method.
 
-Projected across all 9,518 addressable filings at these rates: $7B to
-$8B.
+Two reads of the same page agree on every name and amount 89% to 97% of
+the time when the page has fewer than 25 rows. With 25 rows or more,
+31% to 38% of the time, and the two models agree with each other on one
+such page in six. Checked against the page image, the errors are a
+merged pair of rows that shifts every amount below it, a split row that
+shifts them the other way, or cents read as dollars. The page sum barely
+moves, so reconciliation cannot catch them. Page-level agreement has to
+compare names with their amounts, not amounts alone.
+
+Projected across all 9,518 addressable filings at a single read's rate:
+$7B to $8B.
 
 ## What is out of reach
 
@@ -239,15 +271,19 @@ Reading the 9,347 attachment pages with both models costs about $110.
 ## Next steps
 
 1. Run both models on every page. Accept a page when they agree on its
-   amounts, which is 63% of pages outside the one 836-page filing. Send
-   the rest to a third model. Agreement alone fixes 3 of the 10 near
-   misses; the other 7 need the third reader or the prompt fixes below.
-2. Carry a grant heading onto heading-less continuation pages, as the OCR
-   path already did.
-3. Revise the prompt: one section per list on a page, and a contact name
-   stays inside its grantee's row.
-4. Ground truth: 15 filings with rows counted by hand. This sets the
-   row-level precision and the acceptance policy for near-misses.
+   names and amounts. Send the rest to a third model. A page no two
+   readers agree on is flagged, not loaded.
+2. ~~Carry a grant heading onto heading-less continuation pages.~~ Done.
+   On the stored pages alone it moved Qwen from 35 to 36 filings and
+   Gemini from 38 to 40.
+3. ~~Revise the prompt.~~ Done, twice: version 3 was read on the sample,
+   version 4 fixes the merge it introduced and is the prompt for the next
+   read. "One section per list" was dropped: no page in the sample holds
+   two lists.
+4. Ground truth: 15 filings with rows counted by hand, scored on names
+   with their amounts. This sets the row-level precision, the acceptance
+   policy for near-misses, and whether dense pages should be read in
+   strips.
 5. Read the expanded frame, once, with the method above in place.
 6. Report the 2022 image batch to the IRS, with Wells Fargo as the
    example.
@@ -272,11 +308,11 @@ Reading the 9,347 attachment pages with both models costs about $110.
 | `givingtuesday_datamart/vlm_transcription.py` | attachment page to page JSON, with retries and repairs |
 | `givingtuesday_datamart/attachment_grants.py` | choosing the list: reconciliation plus evidence |
 | `givingtuesday_datamart/exploratory/placeholder_recovery.py` | `sample`, `stage`, `transcribe`, `report`, `compare` |
-| `tests/test_attachment_grants.py` | 38 tests |
+| `tests/test_attachment_grants.py`, `tests/test_vlm_transcription.py` | 44 tests |
 | `data/exploratory/placeholder_sample_100.csv` | the sample frame |
 | `data/exploratory/placeholder_sample_xml_rows.csv` | rows the XML itemises for the sampled filings |
 | `data/exploratory/placeholder_staging.csv` | which filings have a PDF, and where the attachments start |
-| `data/exploratory/placeholder_report_*.csv` | per-filing outcomes under each engine |
+| `data/exploratory/placeholder_report_*.csv` | per-filing outcomes under each read (`_v3` = the second read) |
 | `data/exploratory/placeholder_engine_differences.csv` | filings where the engines differ |
 | `data/exploratory/placeholder_unreachable.csv` | the 45 out-of-reach filings, with links |
 | `~/.cache/irs_index/` | PDFs, page renders, and each model's per-page JSON |
@@ -285,7 +321,7 @@ Reading the 9,347 attachment pages with both models costs about $110.
 python -m givingtuesday_datamart.exploratory.placeholder_recovery sample
 python -m givingtuesday_datamart.exploratory.placeholder_recovery stage
 python -m givingtuesday_datamart.exploratory.placeholder_recovery transcribe --model alibaba/qwen3-vl-instruct --workers 40
-python -m givingtuesday_datamart.exploratory.placeholder_recovery report --results ~/.cache/irs_index/vlm/alibaba__qwen3-vl-instruct --out qwen.csv
+python -m givingtuesday_datamart.exploratory.placeholder_recovery report --results ~/.cache/irs_index/vlm/alibaba__qwen3-vl-instruct-v3 --out qwen.csv
 python -m givingtuesday_datamart.exploratory.placeholder_recovery compare unstructured=baseline.csv qwen=qwen.csv
 ```
 
