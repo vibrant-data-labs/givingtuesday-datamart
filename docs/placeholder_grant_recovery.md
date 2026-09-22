@@ -43,8 +43,8 @@ only the attachment pages (see
 [placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md)). On
 the same 100 filings and the same selector, Qwen3-VL instruct reconciles 35
 filings (44.0%) for $3.57 and Gemini 3.5 Flash Lite 38 (44.3%) for $12.37;
-48 filings (52.4%) reconcile under one or the other. The 25.6% backlog
-above falls to 5–7%. The numbers in the rest of this document are the OCR
+42 filings (49.1%) reconcile under one or the other, 48 (52.4%) counting
+the six only this OCR pass got. The 25.6% backlog above falls to 5–7%. The numbers in the rest of this document are the OCR
 baseline those runs were measured against.
 
 ---

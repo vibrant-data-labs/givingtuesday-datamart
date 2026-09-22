@@ -264,13 +264,15 @@ and the filing-by-filing differences in `placeholder_engine_differences.csv`
 | band | Unstructured | Qwen3-VL instruct | Gemini 3.5 Flash Lite | either model |
 |---|---|---|---|---|
 | A (22) | 10 / $1,326M | 14 / $2,357M | 13 / $2,276M | 15 / $2,536M |
-| B (44) | 15 / $505M | 12 / $294M | 16 / $391M | 23 / $617M |
-| C (22) | 3 / $10M | 7 / $20M | 7 / $20M | 8 / $26M |
+| B (44) | 15 / $505M | 12 / $294M | 16 / $391M | 18 / $420M |
+| C (22) | 3 / $10M | 7 / $20M | 7 / $20M | 7 / $20M |
 | D (12) | 1 / $0.0M | 2 / $0.3M | 2 / $0.3M | 2 / $0.3M |
-| **all** | **29 / 30.4%** | **35 / 44.0%** | **38 / 44.3%** | **48 / 52.4%** |
+| **all** | **29 / 30.4%** | **35 / 44.0%** | **38 / 44.3%** | **42 / 49.1%** |
 
 Reconciled filings and declared dollars credited; percentages are of the
-sample's $6,064M. The present-but-90–110% backlog fell from 24.7% of
+sample's $6,064M. Six filings reconcile only under the OCR pass (Bezos
+2022, Kenan, Pritzker, Pritzker Traubert, Eden Hall 2023, Claude Moore);
+counting those, 48 filings and 52.4% reconcile under some engine. The present-but-90–110% backlog fell from 24.7% of
 dollars under Unstructured to 5.3% (Qwen) and 7.2% (Gemini).
 
 | | Qwen3-VL instruct | Gemini 3.5 Flash Lite |
@@ -295,12 +297,13 @@ What it showed:
   Anschutz reconcile from the attachment alone; Hall 2023 reconciles under
   Qwen with the XML's two expenditure-responsibility rows added, which is
   the case stage 2 anticipated.
-- **They fail on different filings, so the union is worth 8 points.**
-  Thirteen filings reconcile under exactly one model (Wells Fargo 2021 and
-  Hall 2023 only under Qwen; Wyss 2023, Roberts, King Street 2021, Aviv,
-  Humana, Pacific Life, Edelman only under Gemini). Two passes at $16 a
-  sample are still a tenth of Unstructured's price, and page-level
-  agreement between them is the obvious next gate.
+- **They fail on different filings, so the union is worth 5 points.**
+  Eleven filings reconcile under exactly one model (Siegel 2022, Hall
+  2023, Wells Fargo 2021 and Raskob only under Qwen; Wyss 2023, Roberts
+  2022, King Street 2021, Aviv, Humana, Pacific Life and Edelman only
+  under Gemini). Two passes at $16 a sample are still a tenth of
+  Unstructured's price, and page-level agreement between them is the
+  obvious next gate.
 - **Seven OCR reconciliations are lost under one or both models**, all as
   *present* at 96–113% coverage: Bezos 2022 (non-cash, the known hard
   page), Kenan 2021 (dense 62-row pages, both misread amounts), Pritzker
@@ -333,7 +336,7 @@ What it showed:
 2. ~~Wire stage 2 into `stage`, stage 3 as a VLM call at 200 DPI, and run
    the sample through both Qwen3-VL instruct and Gemini 3.5 Flash Lite.~~
    Done (see the section above): 44.0% and 44.3% against OCR's 30.4%,
-   52.4% for the union, $3.57 and $12.37 for 1,782 pages. Filing-level
+   49.1% for the union of the two, $3.57 and $12.37 for 1,782 pages. Filing-level
    reconciliation did not choose — they fail on different filings — so
    the next step is the pair: transcribe every page with both, accept a
    page where the two agree on its amounts, and send the disagreeing
