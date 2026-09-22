@@ -85,7 +85,10 @@ fresh session should not reopen them.
 | same-model repeats | never count as agreement | Gemini wrong on 6 of 57 self-agreements, Qwen on 14 of 51 |
 | DPI | 200 | 130 misread digits; 300 costs more for nothing |
 | page comparison key | name lower-cased, non-alphanumerics stripped, first 14 characters; amount exact | what the ground-truth scorer uses |
+| flagged pages | load Sonnet's single reading, marked `flagged` | Zein, 2026-09-22; Sonnet alone right on 11 of 23, maximum reasoning changed nothing |
+| PDF retention | indefinite | Zein, 2026-09-22; ~300 GB for the population is cheap against re-fetching, and the IRS loses images |
 | tables | raw `CREATE TABLE IF NOT EXISTS`, no migration tool | the repo's convention (`ingestion.py`, `canonical/build.py`) |
+| tests | no database in unit tests: a store interface with a Postgres implementation and an in-memory one, plus the fake client | the repo's convention — the client tests build on a `sqlite://` engine that never connects |
 
 ## What exists today
 
@@ -278,7 +281,7 @@ POLICY_V1 = {
     "base": ["alibaba/qwen3-vl-instruct", "google/gemini-3.5-flash-lite"],
     "escalation": ["google/gemini-3.8-flash", "anthropic/claude-sonnet-5"],
     "prompt_version": "v4",
-    "flagged": "leave_out",       # or "load_single": Sonnet's reading, marked
+    "flagged": "load_single",     # the last escalation reader's reading, marked; "leave_out" is the alternative
 }
 
 def agree(session, pages, policy=POLICY_V1, *, workers: dict[str, int]) -> dict[tuple[str, int], Verdict]
@@ -288,12 +291,15 @@ Per page: read with both base models (`read_pages`, which is a no-op for
 stored readings); equal non-empty pair multisets → `agreed`. Otherwise
 read the disputed subset with each escalation model in turn, accepting
 on the first reading that equals any earlier one (`escalated`). No match
-after the last → `flagged`. A page one base reader could not read at
-all after `max_errors` → `unreadable`. Verdicts are upserted under
-`policy_version`; a policy change is a new version and only readers not
-yet stored cost anything. The comparison uses the scorer's `_pairs`
-and `_key`, moved into a shared module so the scorer and `agree` cannot
-drift.
+after the last → `flagged`; under `"flagged": "load_single"` the row
+still carries `accepted_model` and `accepted_hash` for the last
+escalation reader's reading, with `matched_models` empty, so the load
+takes the reading and the verdict travels with it as the mark. A page
+one base reader could not read at all after `max_errors` →
+`unreadable`. Verdicts are upserted under `policy_version`; a policy
+change is a new version and only readers not yet stored cost anything.
+The comparison uses the scorer's `_pairs` and `_key`, moved into a
+shared module so the scorer and `agree` cannot drift.
 
 ### Rewiring
 
@@ -323,8 +329,14 @@ drift.
 - [ ] `report` on the 100-filing sample from `page_verdicts` under the
   stored v4 base readings gives the same filing outcomes as the
   folder-based report on the same readings.
-- [ ] Tests use the fake client from `tests/test_vlm_transcription.py`
-  and a throwaway Postgres schema; no test makes a gateway call.
+- [ ] A flagged page under `load_single` has `accepted_model` set to
+  the last escalation reader and `verdict = 'flagged'`; under
+  `leave_out` it has no accepted reading.
+- [ ] Unit tests use the fake client from
+  `tests/test_vlm_transcription.py` and the in-memory store; no test
+  connects to Postgres or makes a gateway call. The criteria above that
+  need real data are run by hand against the datamart and their output
+  recorded in the pipeline doc.
 
 ## Requirements summary
 
@@ -333,8 +345,9 @@ drift.
   attachment start; backfill of the cached PDFs and staging CSVs.
 - `page_readings` with `read_pages`: bulk lookup, thread pool, chunked
   upserts, error gating; backfill of existing JSON.
-- `page_verdicts` with `agree` under `POLICY_V1`; `transcribe` and
-  `report` rewired; tests.
+- `page_verdicts` with `agree` under `POLICY_V1`, flagged pages loaded
+  from the last reader's reading with the verdict as the mark;
+  `transcribe` and `report` rewired; tests.
 
 **P1**
 - A `flagged` listing command: page, every reading's row count and sum,
@@ -347,8 +360,6 @@ drift.
   names the object.
 - A second frame (band C and D top-up to 1,000 filings) as a plain
   list of object ids; nothing in the tables is frame-specific.
-- Loading flagged pages' single reading with a confidence mark: a
-  `flagged` policy value, no schema change.
 
 ## Success metrics
 
@@ -363,16 +374,12 @@ drift.
 
 ## Open questions
 
-- **Flagged pages** (Zein, before the 1,000-filing load, not before
-  building): leave out, or load Sonnet's single reading with a mark.
-  Sonnet alone was right on 11 of 23; maximum reasoning did not change
-  it.
-- **Bucket confirmation** (Zein, blocking Part A's upload): the spec
-  assumes `givingtuesday-datamart` under `irs/pdf/`.
-- **PDF retention** (Zein, non-blocking): keep indefinitely is the
-  default; about 300 GB for the whole population.
-- **Throwaway schema for tests** (engineering, non-blocking): whether the
-  repo already has a test-database convention to follow.
+None. The four that were open were decided on 2026-09-22 and are in the
+decisions table: flagged pages are loaded from Sonnet's reading with
+the verdict as the mark; the bucket is `givingtuesday-datamart` under
+`irs/pdf/`; PDFs are kept indefinitely; unit tests use an in-memory
+store and the fake client, with the data-dependent criteria run by
+hand.
 
 ## Phasing and session briefs
 
