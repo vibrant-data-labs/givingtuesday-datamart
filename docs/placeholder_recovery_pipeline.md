@@ -469,11 +469,46 @@ value, and the fair-market column plus the cash pages equals the declared
 total exactly. Near misses are transcription error and nothing else; the
 declared total is a valid check on the paid list's completeness.
 
+**Prompt v4, and what a repeat read showed.** The 83 pages were then
+read under v4 by both models, and once more under v4 to measure the
+model's own run-to-run variance ($1.50 for all four passes).
+
+| reader | precision | recall | pages exact |
+|---|---|---|---|
+| Gemini v3 | 90.4% | 89.9% | 53 / 83 |
+| Gemini v4 | 89.0% | 88.7% | 54 / 83 |
+| Gemini v4, again | 90.3% | 90.2% | 54 / 83 |
+| Qwen v3 | 81.7% | 68.0% | 40 / 83 |
+| Qwen v4 | 84.8% | 72.8% | 39 / 83 |
+| Qwen v4, again | 82.3% | 71.5% | 38 / 83 |
+
+For Gemini the prompt is inside the noise: going from v3 to v4 changed
+the rows matched on 26 pages by a mean of 2.5 rows, and running v4 twice
+changed 23 pages by a mean of 2.0. The large swings on dense pages
+(Kenan p127 read exactly under v3 and 17 of 48 under v4; Bezos p035 the
+other way) are one dropped row mid-page that shifts every amount below
+it, and they happen between two runs of the same prompt just as often.
+For Qwen v4 is a modest real gain, four points of recall in both runs.
+v4 stays the prompt in code; a full-sample re-read to produce a
+filing-level table under it would be another draw of the same lottery.
+
+**Agreement must cross models.** Two different models returning the
+same pairs were exactly right on 107 of 107 pages across the three
+pairings tried. The same model read twice is not a check: Gemini agreed
+with itself on 57 pages and was wrong on 6 of them, Qwen on 51 and wrong
+on 14 — a model repeats its own shift. A vote among two Gemini reads and
+one Qwen read was right on 53 of 59 pages with a majority, worse than
+either cross-model pair alone. So stage 3b accepts a page only when two
+*different* models agree, the third reader must be a different model
+again, and a majority of two reads from one model counts for nothing.
+
 Two questions remain open. Whether the multi-column dense pages read
 better in horizontal strips has not been tried; the ground truth for
 Wells Fargo 2021's four pages is the test bed for it. And Gemini 3.8
 Flash, the proposed third reader, has been scored only on the bake-off's
-14 pages, not against this set.
+14 pages, not against this set — and it shares a family with Flash Lite,
+so whether its errors are independent is exactly what the set should
+test before it is trusted as the tie-breaker.
 
 ## Order of operations
 

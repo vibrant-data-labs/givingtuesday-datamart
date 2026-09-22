@@ -245,6 +245,17 @@ no model reads right have wrapped names in many narrow columns, not
 simply many rows: Johnson & Johnson's 75-row single-column pages come
 out exact.
 
+The 83 pages were also read under the current prompt, version 4, twice.
+For Gemini the prompt makes no measurable difference: two runs of the
+same prompt differ from each other as much as version 3 differs from
+version 4. For Qwen version 4 is a small real gain.
+
+The repeat read settled one more thing. Two different models agreeing on
+a page were right 107 times in 107. The same model read twice agreed
+with itself on 57 pages and was wrong on 6 of them. A model repeats its
+own mistakes, so agreement only counts between different models, and
+the third reader must be a third model.
+
 Projected across all 9,518 addressable filings at a single read's rate:
 $7B to $8B.
 

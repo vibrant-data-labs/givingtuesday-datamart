@@ -51,7 +51,16 @@ READERS = {
     "gemini v2": "google__gemini-3.5-flash-lite",
     "qwen v3": "alibaba__qwen3-vl-instruct-v3",
     "gemini v3": "google__gemini-3.5-flash-lite-v3",
+    "qwen v4": "alibaba__qwen3-vl-instruct-v4",         # the ground-truth pages only
+    "gemini v4": "google__gemini-3.5-flash-lite-v4",
+    "qwen v4 again": "alibaba__qwen3-vl-instruct-v4b",   # the same pages, same prompt, a second time
+    "gemini v4 again": "google__gemini-3.5-flash-lite-v4b",
 }
+# The reader pairs whose agreement is a candidate acceptance signal: two
+# models, and the same model read twice. The second kind is the control —
+# a model agreeing with itself is not evidence, as ``score`` shows.
+PAIRS = (("qwen v3", "gemini v3"), ("qwen v4", "gemini v4"), ("qwen v4 again", "gemini v4 again"),
+         ("gemini v4", "gemini v4 again"), ("qwen v4", "qwen v4 again"))
 JJ = "202213189349106261"
 # Near-miss filings small enough to read every attachment page of.
 NEAR_MISS = ["202321219349102697", "202343199349102594", "202243199349101479", "202443189349100829",
@@ -474,20 +483,13 @@ def score() -> None:
                 c["matched"] += matched; c["lenient"] += lenient
                 c["exact"] += int(got == want)
                 c["exact_lenient"] += int(lenient == sum(want.values()) == sum(got.values()))
-        # Is agreement a safe signal? Pairs of readers, and all four.
-        if {"qwen v3", "gemini v3"} <= readings.keys():
-            a, b = readings["qwen v3"], readings["gemini v3"]
-            if a == b:
-                exact_by_agreement["qwen v3 = gemini v3"][stratum, "pages"] += 1
-                exact_by_agreement["qwen v3 = gemini v3"][stratum, "right"] += int(a == want)
-                exact_by_agreement["qwen v3 = gemini v3"]["all", "pages"] += 1
-                exact_by_agreement["qwen v3 = gemini v3"]["all", "right"] += int(a == want)
-        if len(readings) == 4 and len({tuple(sorted(g.elements())) for g in readings.values()}) == 1:
-            g = readings["qwen v3"]
-            exact_by_agreement["all four agree"][stratum, "pages"] += 1
-            exact_by_agreement["all four agree"][stratum, "right"] += int(g == want)
-            exact_by_agreement["all four agree"]["all", "pages"] += 1
-            exact_by_agreement["all four agree"]["all", "right"] += int(g == want)
+        # Is agreement a safe signal? Each model pair, on pages where both answered with rows.
+        for left, right in PAIRS:
+            if {left, right} <= readings.keys() and readings[left] == readings[right] and readings[left]:
+                label = f"{left} = {right}"
+                for bucket in (stratum, "all"):
+                    exact_by_agreement[label][bucket, "pages"] += 1
+                    exact_by_agreement[label][bucket, "right"] += int(readings[left] == want)
 
     strata = ["<10", "10-24", "25-49", "50+", "J&J", "all"]
     print("| reader | stratum | pages | pair precision | pair recall | forgiving spelling: precision / recall | pages exact (forgiving) |")
