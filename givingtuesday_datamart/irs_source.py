@@ -148,13 +148,23 @@ def index_rows(year: str, cache_dir: Path | None = None) -> Iterator[IndexRow]:
             )
 
 
+INDEX_YEARS = ("2021", "2022", "2023", "2024", "2025", "2026")
+
+
 def lookup(object_id: str, cache_dir: Path | None = None) -> IndexRow:
-    """Find a filing's index row. The id's first four digits are its index year."""
+    """Find a filing's index row.
+
+    The id's first four digits are usually its index year, but not always:
+    Caterpillar Foundation's 2021 return (object id 2022…) sits in
+    ``index_2024.csv``, released with the 2024 batches. So the id's own
+    year is tried first and the other years after it.
+    """
     year = object_id[:4]
-    for row in index_rows(year, cache_dir):
-        if row.object_id == object_id:
-            return row
-    raise LookupError(f"{object_id} not in index_{year}.csv")
+    for candidate in (year, *(y for y in INDEX_YEARS if y != year)):
+        for row in index_rows(candidate, cache_dir):
+            if row.object_id == object_id:
+                return row
+    raise LookupError(f"{object_id} not in index_{year}.csv or any other year")
 
 
 def images(row: IndexRow) -> list[Image]:
