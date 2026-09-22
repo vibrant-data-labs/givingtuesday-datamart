@@ -198,9 +198,10 @@ them; do not load them into a grants table.
 
 ### 6 · Report and gates
 
-- **Ground truth:** 15 filings with rows counted from the PDF by hand.
-  This is the only measurement of row-level precision the pipeline will
-  have, and it sets the coverage policy.
+- **Ground truth:** pages read from the image by hand and scored on
+  (name, amount) pairs — done for 83 pages, see *Ground truth* below.
+  This is the only measurement of row-level precision the pipeline has,
+  and it sets the acceptance policy.
 - **Regression gate:** the old-versus-new harness over the 100-filing
   sample, run on every selector change. Two intermediate versions this
   session overcorrected to 27%; the harness is what caught them.
@@ -404,19 +405,84 @@ Three of the dense-page shapes were confirmed against the page images:
 - **Cents folded into dollars.** Gemini v3 read "$838,000.00" on Wells
   Fargo p026 as 8,383,000, a $7.5M phantom on one row.
 
-Qwen was exact on both ground-truth pages. The consequence for the
-design: the reconciliation gate cannot see a shift — 0.5% of Wells
-Fargo's $299M is $1.5M of slack — so stage 3b must compare (name, amount)
-pairs, not amount lists, and the ground-truth set must score pairs. A
-page whose readings disagree goes to the third reader; a page on which no
-two readers agree is flagged, not loaded. Whether dense pages should be
-read in horizontal strips (fewer rows per image) is an open question the
-ground-truth set can answer.
+Qwen was exact on both of those pages. The consequence for the design:
+the reconciliation gate cannot see a shift — 0.5% of Wells Fargo's $299M
+is $1.5M of slack — so stage 3b must compare (name, amount) pairs, not
+amount lists, and the ground-truth set must score pairs. The ground-truth
+set, next, confirmed both.
+
+## Ground truth
+
+[`placeholder_ground_truth.py`](../givingtuesday_datamart/exploratory/placeholder_ground_truth.py):
+91 pages drawn from the sample's 1,740 pages with rows — six per cell of
+density (under 10 rows, 10–24, 25–49, 50 and up, and Johnson & Johnson's
+836 matching-gift pages as their own stratum) by reader agreement (all
+four stored readings identical on their pairs, or not) — plus every
+attachment page of seven near-miss filings small enough to read in full
+(Kenan, Pritzker Traubert, Claude Moore, Pritzker 2023, Eden Hall 2023,
+Bezos 2022 and 2023). 83 were checked against the image; the eight left
+are disagreeing pages beyond the three per cell that were needed. 48
+pages were transcribed by hand; 35 were seeded from the reading that
+matched a printed total, or that three of four readers agreed on, and
+checked row by row against the image — no seeded page needed a
+correction. Each page carries its list kind (paid, future,
+expenditure-responsibility, other). The files are
+`data/exploratory/placeholder_gt_pages.csv` (the draw) and
+`placeholder_ground_truth.csv` (the rows).
+
+**Agreement is a safe acceptance signal.** When Qwen v3 and Gemini v3
+return the same (name, amount) pairs, the page is exactly right on 37 of
+38; when all four readings agree, 33 of 33. The one miss is a page both
+models returned empty — an expenditure-responsibility statement whose
+two rows they both skipped — so agreement on an empty page must not
+count as acceptance.
+
+**Reader accuracy on the 83 pages**, pairs matched against the truth:
+
+| reader | precision | recall | pages exact |
+|---|---|---|---|
+| Gemini 3.5 Flash Lite, v3 | 90.4% | 89.9% | 53 / 83 |
+| Gemini 3.5 Flash Lite, v2 | 87.7% | 88.3% | 54 / 83 |
+| Qwen3-VL instruct, v3 | 81.7% | 68.0% | 40 / 83 |
+| Qwen3-VL instruct, v2 | 80.3% | 63.7% | 41 / 83 |
+
+Under 25 rows a page every reader is at or above about 90%. From 25 rows
+up Gemini holds about 85% and Qwen falls to 50–70% recall. Density alone
+is not the cause: Gemini reads J&J's 75-row single-column pages at 99.9%
+and Qwen's recall there is a JSON-mode leftover, not a misread. The
+pages every reader gets wrong are the ones with wrapped names and many
+columns — Wells Fargo 2021's 61-row statements at a tiny point size shift
+every reader by a row or two, and no reading of them is exact.
+
+**A vote between these two is not enough.** On the 45 pages where the
+two models disagree, Gemini v3 is exactly right on 16, Qwen v3 on 3, and
+neither on 26 — 15 of the 22 such pages at 25–49 rows and 8 of the 9 at
+50 and up. An oracle choosing the better of the two per page would still
+reach only 85% of the rows, which is why the third reader is part of the
+design rather than a fallback: a disagreeing page needs an independent
+third reading, and a page with no majority is flagged, not loaded.
+
+**The lists are complete; the readers misplace them.** Each of the seven
+near-miss filings' true paid rows sum to the declared paid amount to the
+dollar. Bezos's non-cash pages carry both book value and fair market
+value, and the fair-market column plus the cash pages equals the declared
+total exactly. Near misses are transcription error and nothing else; the
+declared total is a valid check on the paid list's completeness.
+
+Two questions remain open. Whether the multi-column dense pages read
+better in horizontal strips has not been tried; the ground truth for
+Wells Fargo 2021's four pages is the test bed for it. And Gemini 3.8
+Flash, the proposed third reader, has been scored only on the bake-off's
+14 pages, not against this set.
 
 ## Order of operations
 
-1. Ground-truth set and a matcher pass on the 4,760 rows already
-   recovered. Together they say whether the output is product-grade.
+1. ~~Ground-truth set~~ Done (83 pages, seven near-miss filings in
+   full, see *Ground truth* above): agreement between the two models is
+   a safe accept (37 of 38 exact); a two-way vote is not (neither model
+   right on 26 of 45 disagreeing pages), so the third reader is required.
+   Still to do: a matcher pass on the recovered rows, which says whether
+   the output is product-grade.
 2. ~~Wire stage 2 into `stage`, stage 3 as a VLM call at 200 DPI, and run
    the sample through both Qwen3-VL instruct and Gemini 3.5 Flash Lite.~~
    Done (see the section above): 44.0% and 44.3% against OCR's 30.4%,

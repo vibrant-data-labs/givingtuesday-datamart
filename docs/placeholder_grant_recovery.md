@@ -217,6 +217,34 @@ shifts them the other way, or cents read as dollars. The page sum barely
 moves, so reconciliation cannot catch them. Page-level agreement has to
 compare names with their amounts, not amounts alone.
 
+## Ground truth
+
+83 pages were read from the page image by hand and scored against each
+model's reading, name with amount. The pages were drawn across row
+density and across whether the readers agreed, plus every page of seven
+near-miss filings.
+
+| reader | rows right, precision | rows right, recall | pages exact |
+|---|---|---|---|
+| Gemini Flash Lite, second read | 90% | 90% | 53 of 83 |
+| Qwen3-VL, second read | 82% | 68% | 40 of 83 |
+
+Three findings:
+
+- When the two models agree on a page, the page is right 37 times in
+  38. Agreement can accept a page without a further look.
+- When they disagree, Gemini is right on 16 pages of 45, Qwen on 3, and
+  neither on 26. Choosing between the two would still get only 85% of
+  the rows. A disagreeing page needs a third reading.
+- Every near-miss filing's true rows sum exactly to the declared total.
+  The lists are complete on the page. The readers misplace rows; they
+  do not miss lists.
+
+Pages under 25 rows are read at 90% or better by every model. The pages
+no model reads right have wrapped names in many narrow columns, not
+simply many rows: Johnson & Johnson's 75-row single-column pages come
+out exact.
+
 Projected across all 9,518 addressable filings at a single read's rate:
 $7B to $8B.
 
@@ -280,10 +308,12 @@ Reading the 9,347 attachment pages with both models costs about $110.
    version 4 fixes the merge it introduced and is the prompt for the next
    read. "One section per list" was dropped: no page in the sample holds
    two lists.
-4. Ground truth: 15 filings with rows counted by hand, scored on names
-   with their amounts. This sets the row-level precision, the acceptance
-   policy for near-misses, and whether dense pages should be read in
-   strips.
+4. ~~Ground truth.~~ Done: 83 pages checked against the image, seven
+   near-miss filings in full. When the two models agree on a page's
+   names and amounts, the page is right 37 times in 38. When they
+   disagree, neither is right on 26 pages of 45, so the third reader is
+   not optional. Every near-miss filing's true rows sum exactly to the
+   declared total: the lists are complete, the readers misplace rows.
 5. Read the expanded frame, once, with the method above in place.
 6. Report the 2022 image batch to the IRS, with Wells Fargo as the
    example.
@@ -308,7 +338,9 @@ Reading the 9,347 attachment pages with both models costs about $110.
 | `givingtuesday_datamart/vlm_transcription.py` | attachment page to page JSON, with retries and repairs |
 | `givingtuesday_datamart/attachment_grants.py` | choosing the list: reconciliation plus evidence |
 | `givingtuesday_datamart/exploratory/placeholder_recovery.py` | `sample`, `stage`, `transcribe`, `report`, `compare` |
-| `tests/test_attachment_grants.py`, `tests/test_vlm_transcription.py` | 44 tests |
+| `givingtuesday_datamart/exploratory/placeholder_ground_truth.py` | `pick`, `seed`, `fix`, `accept`, `add`, `show`, `crop`, `score` |
+| `data/exploratory/placeholder_gt_pages.csv`, `placeholder_ground_truth.csv` | the 91-page draw and the 83 pages read from the image |
+| `tests/test_attachment_grants.py`, `tests/test_vlm_transcription.py` | 45 tests |
 | `data/exploratory/placeholder_sample_100.csv` | the sample frame |
 | `data/exploratory/placeholder_sample_xml_rows.csv` | rows the XML itemises for the sampled filings |
 | `data/exploratory/placeholder_staging.csv` | which filings have a PDF, and where the attachments start |
@@ -329,6 +361,6 @@ python -m givingtuesday_datamart.exploratory.placeholder_recovery compare unstru
 
 - n = 100. Band A is exact. Bands C and D are thin.
 - Credit is the declared amount, not the transcribed sum.
-- No ground truth yet. Accepted lists were checked by inspection, not by
-  counting rows in the PDF.
+- Ground truth covers 83 pages. It measures the readers, not the
+  selector's filing-level decisions.
 - Recovered grants have not been through the matcher.
