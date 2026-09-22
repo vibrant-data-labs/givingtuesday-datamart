@@ -354,7 +354,15 @@ What it showed:
    contact name inside its grantee's row. Qwen's open weights remain the
    reason to prefer it where the two tie — it can run on Baseten or our
    own GPU with no data leaving our control.
-3. Band B in full with the broadened classifier.
+3. ~~Band B in full with the broadened classifier.~~ Drawn and staged
+   (`sample --expand`: 610 filings, B as a census; 373 have an
+   attachment, 9,347 pages). On GT's priority CSV the broadened
+   classifier changes the addressable population by under 0.1%, since
+   its additions are mostly patient assistance. Read it once the prompt
+   revision and 3b are in, so its 9,347 pages are paid for once. The
+   staging alone settled two things: all 38 404s are images the IRS
+   generated in 2022, and 40% of tax-year-2020 filings have no usable
+   PDF against 5–7% for 2022–2023.
 4. Decide the coverage policy; re-OCR band A's failing pages.
 5. C and D once the per-page price is in hand.
 6. Send GT the findings list; report the 2022 image batch to the IRS.
