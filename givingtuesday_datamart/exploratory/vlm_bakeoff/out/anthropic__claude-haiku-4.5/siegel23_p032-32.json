@@ -1,0 +1,102 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "F-393 - GRANTEE LIST - 2018 CONTRIBUTIONS PAID DURING 2018",
+ "rows": [
+  {
+   "name": "Center for Puerto Rican Concerns (CPRC)",
+   "address": "P.O. Box 357",
+   "status": "PC",
+   "purpose": "To support the Empowerment of Technology Society.",
+   "amount": 5100000
+  },
+  {
+   "name": "Cornell Law School",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support the Empire of Technology Society.",
+   "amount": 950000
+  },
+  {
+   "name": "New York University",
+   "address": "New York, NY 10012",
+   "status": "PC",
+   "purpose": "To support the See of Osteen Committee for New York to Refurbish Local Leadership Communities.",
+   "amount": 950000
+  },
+  {
+   "name": "City University of the City",
+   "address": "University of New York",
+   "status": "PC",
+   "purpose": "To support CUF's Computing Integration For New York.",
+   "amount": 950000
+  },
+  {
+   "name": "Peace K.V. 2686",
+   "address": "GPA - Inc. (Chelsea Inc.)",
+   "status": "PC",
+   "purpose": "To provide general operating support.",
+   "amount": 500000
+  },
+  {
+   "name": "Girls' Center",
+   "address": "16 Solis Street, Suite 123",
+   "status": "PC",
+   "purpose": "To support the Annual Benefit.",
+   "amount": 500000
+  },
+  {
+   "name": "Social Theatre NY 0573",
+   "address": "P.O. Box 1301",
+   "status": "PC",
+   "purpose": "To support them's effort to cash them apprenticeship model.",
+   "amount": 975000
+  },
+  {
+   "name": "DBLM Ministries",
+   "address": "2301 Martin Luther King Blvd",
+   "status": "PC",
+   "purpose": "To support community outreach & job training.",
+   "amount": 950000
+  },
+  {
+   "name": "Dominican University",
+   "address": "66 W 28th St, Suite 3W",
+   "status": "PC",
+   "purpose": "To support placement and living services.",
+   "amount": 950000
+  },
+  {
+   "name": "Gettysburg History",
+   "address": "Tucson AZ 85201",
+   "status": "PC",
+   "purpose": "To support community research on digital infrastructure.",
+   "amount": 950000
+  },
+  {
+   "name": "Job Support Services Inc.",
+   "address": "Phoenix, AZ",
+   "status": "PC",
+   "purpose": "To support community research on digital infrastructure.",
+   "amount": 950000
+  },
+  {
+   "name": "ESE Development Programs Inc.",
+   "address": "3250 E Denice St",
+   "status": "PC",
+   "purpose": "To provide responsible support to the Public Interest Technology Consortium.",
+   "amount": 5140000
+  }
+ ],
+ "totals": [
+  {
+   "label": "Subtotals",
+   "amount": 17328123
+  }
+ ],
+ "_usage": {
+  "in": 1853,
+  "out": 878
+ },
+ "_seconds": 8.0,
+ "_finish": "stop"
+}

@@ -1,0 +1,116 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "FORM 990-PF - GRANTS AND CONTRIBUTIONS PAID - LINE 26 GRANTS",
+ "rows": [
+  {
+   "name": "Heidelberg Project (University)",
+   "address": "",
+   "status": "PC",
+   "purpose": "To provide general operating support",
+   "amount": 50000
+  },
+  {
+   "name": "University",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support the High-Skilled Muskegon 75th Anniversary Campaign",
+   "amount": 150000
+  },
+  {
+   "name": "Every X Athlete Council",
+   "address": "",
+   "status": "PC",
+   "purpose": "To provide general operating support for pre-service teachers",
+   "amount": 50000
+  },
+  {
+   "name": "Holland Sentinel",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support the K-3 Math Initiative",
+   "amount": 50000
+  },
+  {
+   "name": "SSCO",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support the future initiative",
+   "amount": 50000
+  },
+  {
+   "name": "Kowaaskee Museum",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support the calling of the future initiative",
+   "amount": 50000
+  },
+  {
+   "name": "Kalamazoo College",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support the calling of the future initiative",
+   "amount": 50000
+  },
+  {
+   "name": "SSCO",
+   "address": "",
+   "status": "PC",
+   "purpose": "To provide general operating support",
+   "amount": 150000
+  },
+  {
+   "name": "Holland Public Schools",
+   "address": "",
+   "status": "PC",
+   "purpose": "To provide general operating support",
+   "amount": 150000
+  },
+  {
+   "name": "Kalamazoo College",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support the general operations of Ken Academy",
+   "amount": 1000000
+  },
+  {
+   "name": "Kalamazoo College",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support the development of Last Mile infrastructure initiative",
+   "amount": 150000
+  },
+  {
+   "name": "Saginaw Community Schools",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support technology and education trust and general operating",
+   "amount": 250000
+  },
+  {
+   "name": "Lansing School District",
+   "address": "",
+   "status": "PC",
+   "purpose": "To provide general operating support",
+   "amount": 1250000
+  },
+  {
+   "name": "Saginaw Community Schools",
+   "address": "",
+   "status": "PC",
+   "purpose": "To provide infrastructural support",
+   "amount": 250000
+  }
+ ],
+ "totals": [
+  {
+   "label": "SUBTOTAL 23-2",
+   "amount": 3728000
+  }
+ ],
+ "_usage": {
+  "in": 1853,
+  "out": 865
+ },
+ "_seconds": 6.3,
+ "_finish": "stop"
+}

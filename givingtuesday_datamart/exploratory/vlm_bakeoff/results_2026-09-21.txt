@@ -7,7 +7,6 @@ alibaba/qwen3-vl-235b-a22b-instruct                 9/9       100%        20/20 
 alibaba/qwen3-vl-instruct                           9/9       100%        20/20      104.7%       85%       84%   0    3,276  $0.0016        9x
 google/gemini-3.8-flash@200dpi                      8/9       100%        20/20      100.0%       19%      100%   1    4,155  $0.0116        1x
 inclusionai/ling-3.0-flash-vl-free                  8/9       102%        20/20      100.0%       76%       78%   0    9,760  $0.0000          
-inclusionai/ling-3.0-flash-vl-free                  8/9       102%        20/20      100.0%       76%       78%   0    9,760  $0.0000          
 inclusionai/ling-3.0-flash-vl                       8/9       104%        20/20      104.7%       70%       77%   0    7,294  $0.0000          
 gpt-5-mini                                          8/9        88%        16/20      103.2%        0%       46%   0    5,689      n/a          
 meta/llama-4-maverick                               7/9        99%        20/20      101.2%       62%       73%   0    6,323  $0.0023        7x

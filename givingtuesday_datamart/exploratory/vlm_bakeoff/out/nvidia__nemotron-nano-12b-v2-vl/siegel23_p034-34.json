@@ -1,0 +1,9 @@
+{
+ "parse_error": "{\n    \"page_kind\": \"grants_paid_list\",\n    \"heading\": \"GRANTS PAID DURING THE YEAR\",\n    \"rows\": [\n        {\n            \"name\": \"Hechinger Report (Fiscal Sponsor: Teachers College, Columbia University)\",\n            \"status\": \"PC\",\n            \"purpose\": \"To provide general operating support.\"\n    ",
+ "_usage": {
+  "in": 3669,
+  "out": 1295
+ },
+ "_seconds": 8.9,
+ "_finish": "stop"
+}

@@ -1,0 +1,111 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "STATEMENT 21",
+ "rows": [
+  {
+   "name": "Creative Commons Corporation",
+   "address": "211 Hope St, Unit 1866, Mountain View, CA 94042",
+   "status": "PC",
+   "purpose": "To support the stewardship and maintenance of Creative Commons licenses.",
+   "amount": 25000
+  },
+  {
+   "name": "CSforAll",
+   "address": "3809 W. Anderson Dr., Peoria, IL 61615",
+   "status": "PC",
+   "purpose": "To support computer science education research.",
+   "amount": 50000
+  },
+  {
+   "name": "CSforALL",
+   "address": "11 East Loop Rd, 6th Floor, New York, NY 10044",
+   "status": "PC",
+   "purpose": "To provide general operating support and to assist CSforAll in creating a sustainable revenue infrastructure.",
+   "amount": 700000
+  },
+  {
+   "name": "Data & Society Research Institute",
+   "address": "228 Park Ave S, PMB 83075, New York, NY 10003",
+   "status": "PC",
+   "purpose": "To support one fellow and research on the impact of technology on society",
+   "amount": 300000
+  },
+  {
+   "name": "Digital Promise Global",
+   "address": "1001 Connecticut Ave NW, Suite 935, Washington, DC 20036",
+   "status": "PC",
+   "purpose": "To support a webinar series at Digital Promise.",
+   "amount": 60000
+  },
+  {
+   "name": "Echion Green Foundation (Emerging Leaders in Technology and Engineering - ELITE)",
+   "address": "402 Seventh Avenue, 13th Floor, New York, NY 10018",
+   "status": "PC",
+   "purpose": "To provide general operating support to ELITE.",
+   "amount": 150000
+  },
+  {
+   "name": "Editorial Projects in Education (EdWeek)",
+   "address": "6935 Arlington Rd, Suite 100, Bethesda, MD 20814",
+   "status": "PC",
+   "purpose": "To provide general operating support.",
+   "amount": 50000
+  },
+  {
+   "name": "Education Reimagined (Learning Landscape Challenge)",
+   "address": "600 14th Street NW, Convene, 5th Floor - Suite 509, Washington, DC 20005",
+   "status": "PC",
+   "purpose": "To serve as the fiscal agent and support the Learning Landscape Challenge",
+   "amount": 220000
+  },
+  {
+   "name": "Empirical Resolution, Inc. (Quill.org)",
+   "address": "41 E 11th St, 11th Floor, New York, NY 10003",
+   "status": "PC",
+   "purpose": "To support the development of AI-powered learning tools.",
+   "amount": 150000
+  },
+  {
+   "name": "Feedback Labs, Inc.",
+   "address": "1100 13th St NW, Suite 800, Washington, DC 20005",
+   "status": "PC",
+   "purpose": "To support Feedback Labs in their mission to make feedback the norm in aid, philanthropy, nonprofits, and government.",
+   "amount": 200000
+  },
+  {
+   "name": "FIRST",
+   "address": "200 Bedford Street, Manchester, NH 03101",
+   "status": "PC",
+   "purpose": "To support FIRST Gala and general operations",
+   "amount": 200000
+  },
+  {
+   "name": "FreeWorld",
+   "address": "3571 Far West Blvd #3693, Austin, TX 78731",
+   "status": "PC",
+   "purpose": "To support general operating support.",
+   "amount": 100000
+  },
+  {
+   "name": "Govern for America, Inc.",
+   "address": "1629 K Street NW, Suite 300, Washington, DC 20006",
+   "status": "PC",
+   "purpose": "To support Govern for America's Fellowships.",
+   "amount": 100000
+  },
+  {
+   "name": "Grove Collective Foundation (The League)",
+   "address": "5185 MacArthur Blvd NW, Suite 456, Washington, DC 20016",
+   "status": "PC",
+   "purpose": "To support Grove Collective Foundation's general charitable purposes and activities.",
+   "amount": 25000
+  }
+ ],
+ "totals": [],
+ "_usage": {
+  "in": 2466,
+  "out": 1046
+ },
+ "_seconds": 5.7,
+ "_finish": "stop"
+}

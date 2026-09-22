@@ -1,0 +1,116 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "",
+ "rows": [
+  {
+   "name": "Grant Purpose",
+   "address": "",
+   "status": "amount",
+   "purpose": "",
+   "amount": 0
+  },
+  {
+   "name": "San Francisco General Hospital Foundation",
+   "address": "P.O. Box 410836",
+   "status": "PC",
+   "purpose": "To support predictive analytics for public health.",
+   "amount": 250000
+  },
+  {
+   "name": "San Francisco, CA 94141",
+   "address": "Santa Fe Institute",
+   "status": "PC",
+   "purpose": "To support one fellow and research on the impact of technology on society.",
+   "amount": 240000
+  },
+  {
+   "name": "1399 Hyde Park Rd",
+   "address": "Santa Fe, NM 87501",
+   "status": "PC",
+   "purpose": "",
+   "amount": 500
+  },
+  {
+   "name": "Scarsdale Adult School",
+   "address": "P.O. Box 205",
+   "status": "PC",
+   "purpose": "To provide general operating support.",
+   "amount": 100
+  },
+  {
+   "name": "Scarsdale, NY 10583",
+   "address": "Scarsdale Foundation",
+   "status": "PC",
+   "purpose": "To provide general operating support.",
+   "amount": 2000
+  },
+  {
+   "name": "P.O. Box 542",
+   "address": "Scarsdale, NY 10583",
+   "status": "PC",
+   "purpose": "To provide support to PTA Scholarship Fund for College.",
+   "amount": 100
+  },
+  {
+   "name": "Scarsdale Highschool",
+   "address": "1057 Post Road",
+   "status": "PC",
+   "purpose": "To provide general operating support.",
+   "amount": 150000
+  },
+  {
+   "name": "Scarsdale, NY 10583",
+   "address": "Scarsdale Historical Society",
+   "status": "PC",
+   "purpose": "To provide general operating support.",
+   "amount": 103
+  },
+  {
+   "name": "P.O. Box 431",
+   "address": "Scarsdale, NY 10583",
+   "status": "PC",
+   "purpose": "To provide general operating support.",
+   "amount": 100
+  },
+  {
+   "name": "Scarsdale, NY 10583",
+   "address": "Volunteer Ambulance Corps",
+   "status": "PC",
+   "purpose": "To provide general operating support.",
+   "amount": 5000000
+  },
+  {
+   "name": "5 Weaaver St",
+   "address": "Scarsdale, NY 10583",
+   "status": "PC",
+   "purpose": "To support Scratch Foundation.",
+   "amount": 200000
+  },
+  {
+   "name": "201 South St, Suite 201",
+   "address": "Boston, MA 32111",
+   "status": "PC",
+   "purpose": "To provide general operating support and scaling efforts.",
+   "amount": 1250000
+  },
+  {
+   "name": "Springboard Collaborative",
+   "address": "1500 John F. Kennedy Boulevard - Two Penn Center, Suite 1160",
+   "status": "PC",
+   "purpose": "To provide general operating support and scaling efforts.",
+   "amount": 37500
+  }
+ ],
+ "totals": [
+  {
+   "label": "Amount",
+   "amount": 0
+  }
+ ],
+ "_usage": {
+  "in": 3669,
+  "out": 919
+ },
+ "_seconds": 6.6,
+ "_finish": "stop"
+}

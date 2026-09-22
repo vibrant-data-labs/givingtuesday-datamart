@@ -1,0 +1,459 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "CASH CONTRIBUTIONS",
+ "rows": [
+  {
+   "name": "Hockaday, Alexander R.",
+   "address": "689 Valley View, Milpitas, CA 95035",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "National League of Cities Institute",
+   "address": "660 N. Capitol St. NW, Ste. 450, Washington, DC 20001",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Texas Tech Foundation",
+   "address": "Box 41031, Lubbock, TX 79409",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "University of Texas at Austin",
+   "address": "P.O. Box 7458, Austin, TX 78713",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "The Holdsworth Foundation",
+   "address": "400 N. Capitol St. NW, Suite 500, Washington, DC 20001",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Woodrow Wilson International Center for Scholars",
+   "address": "One Woodrow Wilson Plaza, 1300 Pennsylvania Ave NW, Washington, DC 20004",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Atlanta Symphony Orchestra",
+   "address": "1299 Peachtree St. NE, Suite 300, Atlanta, GA 30309",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "The Episcopal Cathedral of St. Philip",
+   "address": "2744 Peachtree Rd. NW, Atlanta, GA 30305",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Louisville Presbyterian Theological Seminary",
+   "address": "1044 Alta Vista Rd, Louisville, KY 40205",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Center for Public Integrity",
+   "address": "910 17th Street, NW, Suite 800, Washington, DC 20006",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "The Atlanta Opera, Inc.",
+   "address": "1575 Northside Drive, NW, Building 100, Suite 400, Atlanta, GA 30318",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Bobby Dodd Institute, Inc.",
+   "address": "1815 S. Ponce de Leon Avenue, Atlanta, GA 30307",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Horizons Atlanta",
+   "address": "327 Dahlonega St., Suite 160, Atlanta, GA 30316",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Project Vote Smart",
+   "address": "2070 NW 9th St., Suite 203, Bend, OR 97701",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Library of Congress Trust Fund Board",
+   "address": "101 Independence Ave SE, Washington, DC 20540",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Woodrow Wilson Intl Center for Scholars",
+   "address": "1300 Pennsylvania Ave NW, Washington, DC 20004",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 50000
+  },
+  {
+   "name": "American Society of International Law",
+   "address": "2223 Massachusetts Avenue NW, Washington, DC 20008",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "The Carter Center",
+   "address": "One Copenhill, 453 Freedom Parkway, Atlanta, GA 30307",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Chicago Council on Global Affairs",
+   "address": "332 S. Michigan Avenue, Suite 1100, Chicago, IL 60604",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Brookings Institution",
+   "address": "1775 Massachusetts Ave., NW, Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 50000
+  },
+  {
+   "name": "American Society of International Law",
+   "address": "2223 Massachusetts Avenue NW, Washington, DC 20008",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Fulbright Association",
+   "address": "1133 15th Street, NW, Suite 1000, Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "American University",
+   "address": "4400 Massachusetts Ave., NW, Washington, DC 20016",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Institute of International Education",
+   "address": "809 United Nations Plaza, New York, NY 10017",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "University of Illinois Urbana-Champaign",
+   "address": "506 S. Wright, Urbana, IL 61801",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Georgetown University",
+   "address": "37th & O Streets NW, Washington, DC 20057",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Trinity College",
+   "address": "1 Trinity Street, Hartford, CT 06106",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "University of Maryland Foundation",
+   "address": "3300 Metzerott Rd., Adelphi, MD 20783",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Northeastern University",
+   "address": "360 Huntington Avenue, Boston, MA 02115",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Purdue University",
+   "address": "610 Purdue Mall, West Lafayette, IN 47907",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "University of Notre Dame",
+   "address": "501 Grace Hall, Notre Dame, IN 46556",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "GuideStar USA, Inc.",
+   "address": "4801 Courthouse Street, Suite 220, Williamsburg, VA 23188",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Marshall Legacy Institute",
+   "address": "2000 N. 15th Street, Suite 350, Arlington, VA 22201",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "University of Washington Foundation",
+   "address": "4333 Brooklyn Ave NE, Seattle, WA 98105",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Foundation For International Law & Development",
+   "address": "1 Queen Victoria Street, London, EC4V 4LJ, UK",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Center for Public Integrity",
+   "address": "910 17th Street, NW, Suite 800, Washington, DC 20006",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Atlanta Opera",
+   "address": "1575 Northside Drive, NW, Building 100, Suite 400, Atlanta, GA 30318",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Bobby Dodd Institute",
+   "address": "1815 S. Ponce de Leon Avenue, Atlanta, GA 30307",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Horizons Atlanta",
+   "address": "327 Dahlonega St., Suite 160, Atlanta, GA 30316",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Woodrow Wilson International Center for Scholars",
+   "address": "1300 Pennsylvania Ave NW, Washington, DC 20004",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 50000
+  },
+  {
+   "name": "American Society of International Law",
+   "address": "2223 Massachusetts Avenue NW, Washington, DC 20008",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Fulbright Association",
+   "address": "1133 15th Street, NW, Suite 1000, Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "American University",
+   "address": "4400 Massachusetts Ave., NW, Washington, DC 20016",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Institute of International Education",
+   "address": "809 United Nations Plaza, New York, NY 10017",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "University of Illinois Urbana-Champaign",
+   "address": "506 S. Wright, Urbana, IL 61801",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Georgetown University",
+   "address": "37th & O Streets NW, Washington, DC 20057",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Trinity College",
+   "address": "1 Trinity Street, Hartford, CT 06106",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "University of Maryland Foundation",
+   "address": "3300 Metzerott Rd., Adelphi, MD 20783",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Northeastern University",
+   "address": "360 Huntington Avenue, Boston, MA 02115",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Purdue University",
+   "address": "610 Purdue Mall, West Lafayette, IN 47907",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "University of Notre Dame",
+   "address": "501 Grace Hall, Notre Dame, IN 46556",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Guess Who's Coming to Dinner",
+   "address": "3310 W. Main Street, Suite 200, Atlanta, GA 30341",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "The Atlanta Ballet, Inc.",
+   "address": "1695 Marietta Blvd., NW, Atlanta, GA 30314",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Museum of Design Atlanta (MODA)",
+   "address": "1315 Peachtree St. NE, Atlanta, GA 30309",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "SUNY Purchase College Foundation",
+   "address": "735 Anderson Hill Road, Purchase, NY 10577",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Rutgers University Foundation",
+   "address": "335 George Street, Suite 300, New Brunswick, NJ 08901",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "School of the Museum of Fine Arts Boston",
+   "address": "230 The Fenway, Boston, MA 02115",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Georgia State University Foundation",
+   "address": "P.O. Box 3987, Atlanta, GA 30302",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Emory University",
+   "address": "1762 Clifton Rd. NE, Atlanta, GA 30322",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Goizueta Business School",
+   "address": "1300 Clifton Rd NE, Atlanta, GA 30322",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Montgomery County Public Schools",
+   "address": "850 Hungerford Drive, Rockville, MD 20850",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "The Hebrew Home of Greater Washington",
+   "address": "6121 Montrose Road, Rockville, MD 20852",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "The American Society for the Prevention of Cruelty to Animals (ASPCA)",
+   "address": "424 E. 92nd Street, New York, NY 10128",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 10000
+  }
+ ],
+ "totals": [
+  {
+   "label": "Total Cash Contributions",
+   "amount": 1425000
+  }
+ ],
+ "_usage": {
+  "in": 695,
+  "out": 23547
+ },
+ "_seconds": 103.1,
+ "_finish": "stop"
+}

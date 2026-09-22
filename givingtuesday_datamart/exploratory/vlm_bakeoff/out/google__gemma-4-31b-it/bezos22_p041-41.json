@@ -1,0 +1,421 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "CHARITABLE CONTRIBUTIONS",
+ "rows": [
+  {
+   "name": "Academy for Education",
+   "address": "153 Woodland Ave, New Haven, CT 06511",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 5000
+  },
+  {
+   "name": "American Museum of Natural History",
+   "address": "200 Central Park West, New York, NY 10024",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Brooklyn Botanic Garden",
+   "address": "1000 Washington Park, Brooklyn, NY 11225",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 5000
+  },
+  {
+   "name": "Central Park Conservancy",
+   "address": "17 Central Park South, New York, NY 10019",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Columbia University",
+   "address": "116th St & Broadway, New York, NY 10027",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Cornell University",
+   "address": "Ithaca, NY 14853",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 5000
+  },
+  {
+   "name": "Evergreen Fund",
+   "address": "100 Water St, New York, NY 10004",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Environmental Defense Fund",
+   "address": "200 East 67th St, New York, NY 10065",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 5000
+  },
+  {
+   "name": "Federal Reserve Bank of New York",
+   "address": "33 Liberty Street, New York, NY 10045",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 5000
+  },
+  {
+   "name": "Ford Foundation",
+   "address": "1440 Broadway, New York, NY 10018",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 5000
+  },
+  {
+   "name": "Harkness Memorial Foundation",
+   "address": "100 East 75th St, New York, NY 10021",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Jewish Community Foundation",
+   "address": "235 East 40th St, New York, NY 10017",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 5000
+  },
+  {
+   "name": "Kips Bay YMCA",
+   "address": "555 East 34th St, New York, NY 10016",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 5000
+  },
+  {
+   "name": "Memorial Sloan Kettering Cancer Center",
+   "address": "1275 York Ave, New York, NY 10065",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Museum of Modern Art",
+   "address": "11 West 53rd St, New York, NY 10019",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "New York Public Library",
+   "address": "476 Fifth Ave, New York, NY 10036",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "New York University",
+   "address": "70 Washington Square South, New York, NY 10012",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Princeton University",
+   "address": "Princeton, NJ 08544",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 5000
+  },
+  {
+   "name": "Regents College, Columbia University",
+   "address": "116th St & Broadway, New York, NY 10027",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Robin Hood Foundation",
+   "address": "445 Park Ave, New York, NY 10022",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 50000
+  },
+  {
+   "name": "Rockefeller University",
+   "address": "660 Rockefeller Plaza, New York, NY 10020",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Rutgers, The State University of New Jersey",
+   "address": "New Brunswick, NJ 08901",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 5000
+  },
+  {
+   "name": "The Board of Regents of the University of California",
+   "address": "110 Spruce St, Berkeley, CA 94720",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 5000
+  },
+  {
+   "name": "The Metropolitan Museum of Art",
+   "address": "1000 Fifth Ave, New York, NY 10028",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "The New York Philharmonic",
+   "address": "1512 Broadway, New York, NY 10036",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "The Rockefeller University",
+   "address": "660 Rockefeller Plaza, New York, NY 10020",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "The University of Pennsylvania",
+   "address": "Philadelphia, PA 19104",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 5000
+  },
+  {
+   "name": "United Negro College Fund",
+   "address": "1805 7th St NW, Washington, DC 20001",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Yale University",
+   "address": "New Haven, CT 06520",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 5000
+  },
+  {
+   "name": "Zionist Organization of America",
+   "address": "1111 16th St NW, Washington, DC 20036",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Aparna Foundation",
+   "address": "1111 16th St NW, Washington, DC 20036",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Aspen Institute",
+   "address": "1111 16th St NW, Washington, DC 20036",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Banting Foundation",
+   "address": "1111 16th St NW, Washington, DC 20036",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Brookdale Community College",
+   "address": "354 Brookdale Valley Rd, Lincroft, NJ 07738",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Center for the Study of Social Policy",
+   "address": "1111 16th St NW, Washington, DC 20036",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Community College of Rhode Island",
+   "address": "480 Davol Ave, East Providence, RI 02914",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Cornell University School of Hotel Administration",
+   "address": "Ithaca, NY 14853",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "East Coast Foundation",
+   "address": "225 E 42nd St, New York, NY 10017",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Environmental Defense Fund",
+   "address": "200 East 67th St, New York, NY 10065",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Fairfield University",
+   "address": "1073 North Benson Rd, Fairfield, CT 06824",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Foundation for the National Interest in Cardiology",
+   "address": "1111 16th St NW, Washington, DC 20036",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "George Washington University",
+   "address": "1111 16th St NW, Washington, DC 20036",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Harkness Memorial Foundation",
+   "address": "100 East 75th St, New York, NY 10021",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Health Care Foundation of Virginia",
+   "address": "250 S 9th Street, Richmond, VA 23220",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "High Point University",
+   "address": "1301 N Main Street, High Point, NC 27262",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Hope For the Homeless",
+   "address": "405 N Main Street, Virginia Beach, VA 23452",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Medical University of South Carolina",
+   "address": "171 Ashley Ave, Charleston, SC 29425",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "North Carolina State University",
+   "address": "2100 Hillsborough St, Raleigh, NC 27695",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "North Carolina State University Foundation",
+   "address": "2100 Hillsborough St, Raleigh, NC 27695",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Old Dominion University",
+   "address": "45 University Dr, Norfolk, VA 23529",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Piedmont Virginia Community College",
+   "address": "1100 East Main St, Charlottesville, VA 22902",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Radford University",
+   "address": "1008 E Main St, Radford, VA 24064",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "University of Virginia",
+   "address": "Charlottesville, VA 22903",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Virginia Commonwealth University",
+   "address": "Richmond, VA 23284",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Virginia State University",
+   "address": "100 State University Blvd, Petersburg, VA 23806",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "Virginia Tech",
+   "address": "Blacksburg, VA 24061",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  },
+  {
+   "name": "William & Mary",
+   "address": "Williamsburg, VA 23185",
+   "status": "PC",
+   "purpose": "General Support",
+   "amount": 10000
+  }
+ ],
+ "totals": [
+  {
+   "label": "Total Non-Cash Contributions",
+   "amount": 0
+  },
+  {
+   "label": "Total Contributions",
+   "amount": 880000
+  }
+ ],
+ "_usage": {
+  "in": 469,
+  "out": 3985
+ },
+ "_seconds": 111.6,
+ "_finish": "stop"
+}

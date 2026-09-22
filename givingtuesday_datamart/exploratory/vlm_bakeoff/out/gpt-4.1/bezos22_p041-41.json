@@ -1,0 +1,221 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "CHARITABLE LISTING",
+ "rows": [
+  {
+   "name": "Samaritan's Purse",
+   "address": "PO Box 3000 Boone, NC 28607",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 2000000
+  },
+  {
+   "name": "Billy Graham Evangelistic Association",
+   "address": "1 Billy Graham Parkway, Charlotte, NC 28201",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 2000000
+  },
+  {
+   "name": "International Disaster Emergency Service",
+   "address": "PO Box 379, Noblesville, IN 46061",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 1100000
+  },
+  {
+   "name": "Operation Blessing International Relief and Development Corp.",
+   "address": "977 Centerville Turnpike, Virginia Beach, VA 23463",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 1000000
+  },
+  {
+   "name": "Direct Relief",
+   "address": "6100 Wallace Becknell Rd, Santa Barbara, CA 93117",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 1500000
+  },
+  {
+   "name": "Catholic Relief Services",
+   "address": "228 W Lexington St, Baltimore, MD 21201",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 1000000
+  },
+  {
+   "name": "Convoy of Hope",
+   "address": "1 Convoy Drive, Springfield, MO 65802",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 1000000
+  },
+  {
+   "name": "World Vision, Inc.",
+   "address": "P O Box 9716, Federal Way, WA 98063",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 500000
+  },
+  {
+   "name": "MAP International",
+   "address": "4700 Glynco Parkway, Brunswick, GA 31525",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 500000
+  },
+  {
+   "name": "Project HOPE",
+   "address": "255 Carter Hall Lane, Millwood, VA 22646",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 500000
+  },
+  {
+   "name": "Feed the Children",
+   "address": "333 N Meridian Ave, Oklahoma City, OK 73107",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 500000
+  },
+  {
+   "name": "Muscular Dystrophy Association",
+   "address": "161 N Clark, Suite 3550, Chicago, IL 60601",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 100000
+  },
+  {
+   "name": "St. Jude Children's Research Hospital",
+   "address": "262 Danny Thomas Place, Memphis, TN 38105",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 100000
+  },
+  {
+   "name": "Dana-Farber Cancer Institute",
+   "address": "450 Brookline Ave, Boston, MA 02215",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 100000
+  },
+  {
+   "name": "American Cancer Society",
+   "address": "250 Williams Street NW, Atlanta, GA 30303",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 100000
+  },
+  {
+   "name": "The Leukemia & Lymphoma Society",
+   "address": "3 International Drive, Suite 200, Rye Brook, NY 10573",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 100000
+  },
+  {
+   "name": "American Heart Association",
+   "address": "7272 Greenville Ave, Dallas, TX 75231",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 100000
+  },
+  {
+   "name": "University of Colorado",
+   "address": "1800 Grant Street, Ste 745, Denver, CO 80203",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 50000
+  },
+  {
+   "name": "American National Red Cross",
+   "address": "2025 E Street NW, Washington, DC 20006",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 50000
+  },
+  {
+   "name": "International Rescue Committee, Inc.",
+   "address": "122 East 42nd St, New York, NY 10168",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 50000
+  },
+  {
+   "name": "UNICEF USA",
+   "address": "125 Maiden Lane, New York, NY 10038",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 50000
+  },
+  {
+   "name": "Doctors Without Borders USA Inc.",
+   "address": "40 Rector Street, 16th Floor, New York, NY 10006",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 50000
+  },
+  {
+   "name": "The Salvation Army",
+   "address": "615 Slaters Lane, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 50000
+  },
+  {
+   "name": "United Way Worldwide",
+   "address": "701 N Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 50000
+  },
+  {
+   "name": "Catholic Charities USA",
+   "address": "2050 Ballenger Ave., Suite 400, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 50000
+  },
+  {
+   "name": "Habitat for Humanity International Inc.",
+   "address": "322 West Lamar St., Americus, GA 31709",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 50000
+  },
+  {
+   "name": "Feeding America",
+   "address": "161 North Clark Street, Suite 700, Chicago, IL 60601",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 50000
+  },
+  {
+   "name": "Chesapeake Bay Foundation",
+   "address": "6 Herndon Avenue, Annapolis, MD 21403",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 50000
+  },
+  {
+   "name": "WWF-US",
+   "address": "1250 24th Street, NW, Washington, DC 20037",
+   "status": "PC",
+   "purpose": "General Contribution",
+   "amount": 50000
+  }
+ ],
+ "totals": [
+  {
+   "label": "Total Listed Contributions",
+   "amount": 11250000
+  }
+ ],
+ "_usage": {
+  "in": 1077,
+  "out": 1695
+ },
+ "_seconds": 12.3,
+ "_finish": "stop"
+}

@@ -1,0 +1,123 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "CHARITABLE CONTRIBUTIONS",
+ "rows": [
+  {
+   "name": "Together For Education",
+   "address": "9/19/2022 Together For Education, Inc",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 59971.1854
+  },
+  {
+   "name": "Together For Education",
+   "address": "9/19/2022 Together For Education, Inc",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 59971.1854
+  },
+  {
+   "name": "Together For Education",
+   "address": "9/19/2022 Together For Education, Inc",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 59971.1854
+  },
+  {
+   "name": "Together For Education",
+   "address": "9/19/2022 Together For Education, Inc",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 59971.1854
+  },
+  {
+   "name": "Together For Education",
+   "address": "9/19/2022 Together For Education, Inc",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 59971.1854
+  },
+  {
+   "name": "Together For Education",
+   "address": "9/19/2022 Together For Education, Inc",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 59971.1854
+  },
+  {
+   "name": "Together For Education",
+   "address": "9/19/2022 Together For Education, Inc",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 59971.1854
+  },
+  {
+   "name": "Together For Education",
+   "address": "9/19/2022 Together For Education, Inc",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 59971.1854
+  },
+  {
+   "name": "Together For Education",
+   "address": "9/19/2022 Together For Education, Inc",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 59971.1854
+  },
+  {
+   "name": "Together For Education",
+   "address": "9/19/2022 Together For Education, Inc",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 59971.1854
+  },
+  {
+   "name": "Together For Education",
+   "address": "9/19/2022 Together For Education, Inc",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 59971.1854
+  },
+  {
+   "name": "Together For Education",
+   "address": "9/19/2022 Together For Education, Inc",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 59971.1854
+  },
+  {
+   "name": "Together For Education",
+   "address": "9/19/2022 Together For Education, Inc",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 59971.1854
+  },
+  {
+   "name": "Together For Education",
+   "address": "9/19/2022 Together For Education, Inc",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 59971.1854
+  },
+  {
+   "name": "Together For Education",
+   "address": "9/19/2022 Together For Education, Inc",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 59971.1854
+  }
+ ],
+ "totals": [
+  {
+   "label": "Total Non-Cash Contributions",
+   "amount": 5897205.38149
+  }
+ ],
+ "_usage": {
+  "in": 2466,
+  "out": 876
+ },
+ "_seconds": 5.3,
+ "_finish": "stop"
+}

@@ -1,0 +1,109 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "FORM 990-PF - GRANTS AND CONTRIBUTIONS PAID",
+ "rows": [
+  {
+   "name": "MIT (Mental Health)",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support the annual campaign at MIT",
+   "amount": 510000
+  },
+  {
+   "name": "Cold Spring Harbor Laboratory",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support the labs and research in the empire of technology and society",
+   "amount": 550000
+  },
+  {
+   "name": "Rockefeller University",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support the MIT Center for Intelligence",
+   "amount": 1000000
+  },
+  {
+   "name": "University of Pennsylvania",
+   "address": "",
+   "status": "PC",
+   "purpose": "To combine buildings and cable the Data Futures lab at the McKinley Foundation",
+   "amount": 250000
+  },
+  {
+   "name": "Princeton University",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support the Felton Foundation fellowship",
+   "amount": 325000
+  },
+  {
+   "name": "Yale University",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support the cash of New Archival Research and Biostatistics",
+   "amount": 550000
+  },
+  {
+   "name": "Stanford University",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support the research and development scheme",
+   "amount": 500000
+  },
+  {
+   "name": "Harvard Medical School",
+   "address": "",
+   "status": "PC",
+   "purpose": "To provide general operating support",
+   "amount": 500000
+  },
+  {
+   "name": "California Institute of Technology",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support the commitment and administration of the Public Technology Infrastructure Fund",
+   "amount": 750000
+  },
+  {
+   "name": "Northwestern University",
+   "address": "",
+   "status": "PC",
+   "purpose": "To provide general operating support",
+   "amount": 1000000
+  },
+  {
+   "name": "Duke University",
+   "address": "",
+   "status": "PC",
+   "purpose": "To provide general support to the New 80 Rabbis Brunch",
+   "amount": 500000
+  },
+  {
+   "name": "University of Chicago",
+   "address": "",
+   "status": "PC",
+   "purpose": "To provide general operating support",
+   "amount": 250000
+  },
+  {
+   "name": "Johns Hopkins University",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support the Akin Foundation Center for the Development of Young Scientists",
+   "amount": 520000
+  }
+ ],
+ "totals": [
+  {
+   "label": "$37,525,281.22",
+   "amount": 37525281.22
+  }
+ ],
+ "_usage": {
+  "in": 1853,
+  "out": 814
+ },
+ "_seconds": 7.5,
+ "_finish": "stop"
+}

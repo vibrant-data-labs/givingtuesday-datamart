@@ -1,0 +1,97 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "",
+ "rows": [
+  {
+   "name": "The Artest Foundation",
+   "address": "450 West 42nd St\nNew York, NY 10036",
+   "status": "PC",
+   "purpose": "To sponsor their youth outreach event at Queensbridge Houses.",
+   "amount": 10000
+  },
+  {
+   "name": "The Aspen Institute (Digital)\n2300 N Street NW, Suite 700\nWashington, DC 20037",
+   "status": "PC",
+   "purpose": "To support Aspen Digital's convening series on AI and news media.",
+   "amount": 300000
+  },
+  {
+   "name": "The Aspen Institute\n2300 N Street NW, Suite 700\nWashington, DC 20037",
+   "status": "PC",
+   "purpose": "To support one fellow and research on the impact of technology on society.",
+   "amount": 150000
+  },
+  {
+   "name": "Washington, DC 20037\nThe Bell (Foundation of Philanthropic Funds)\n25 Broadway, 12th Floor\nNew York, NY 10004",
+   "status": "PC",
+   "purpose": "To provide general operating support.",
+   "amount": 50000
+  },
+  {
+   "name": "The Citizens and Technology Lab at Cornell University\nOffice of Sponsored Programs\n373 Pine Tree Rd\nIthaca, NY 14850",
+   "status": "PC",
+   "purpose": "To support a research symposium (Fall '23) focused on social science researchers and public-interest technologists.",
+   "amount": 75000
+  },
+  {
+   "name": "The Knowledge House, Inc.\n363 Rider Avenue, 3rd Floor\nBronx, NY 10451",
+   "status": "PC",
+   "purpose": "To support The Knowledge House's expansion of programs.",
+   "amount": 250000
+  },
+  {
+   "name": "The Trustees of Princeton University - Center for Information Technology Policy's (CITP)\n100 Overlook Center, Suite 300\nPrinceton, NJ 08540",
+   "status": "PC",
+   "purpose": "To support Princeton's Center for Information Technology Policy's (CITP) research and external engagement efforts.",
+   "amount": 500000
+  },
+  {
+   "name": "The Trustees of Princeton University\n100 Overlook Center, Suite 300\nPrinceton, NJ 08540",
+   "status": "PC",
+   "purpose": "To support the Annual Campaign at Princeton University.",
+   "amount": 500000
+  },
+  {
+   "name": "The UCLA Foundation\n2043 Moore Hall - Box 951521\nLos Angeles, CA 90095",
+   "status": "PC",
+   "purpose": "To support Computer Science Initiatives at Center X at the UCLA School of Education and Information Studies.",
+   "amount": 150000
+  },
+  {
+   "name": "The University of Chicago RISC (Data Science 4 Everyone)\nGift Administration and Business Data\n5235 S. Harper Court, 4th Floor\nChicago, IL 60615",
+   "status": "PC",
+   "purpose": "To support the expansion of Data Science for Everyone.",
+   "amount": 500000
+  },
+  {
+   "name": "Transcend, Inc.\n159 Lincoln Avenue\nHastings on Hudson, NY 10706",
+   "status": "PC",
+   "purpose": "To scale Transcends innovative models exchange platform.",
+   "amount": 250000
+  },
+  {
+   "name": "University of NC at Chapel Hill - Center for Information, Technology,\nand Public Life at the University of North Carolina (CITAP)",
+   "status": "PC",
+   "purpose": "To support one fellow and research on the impact of technology on society.",
+   "amount": 260000
+  },
+  {
+   "name": "University of Washington Tech Policy Lab\nWilliam H. Gates Hall, Room 222\nUW Campus Box 353020\nSeattle, WA 98195",
+   "status": "PC",
+   "purpose": "To support a Research Fellow.",
+   "amount": 125000
+  }
+ ],
+ "totals": [
+  {
+   "label": "Amount",
+   "amount": 1975000
+  }
+ ],
+ "_usage": {
+  "in": 3669,
+  "out": 1112
+ },
+ "_seconds": 7.6,
+ "_finish": "stop"
+}

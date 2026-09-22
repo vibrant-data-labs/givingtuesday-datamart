@@ -1,0 +1,260 @@
+{
+ "page_kind": "other",
+ "heading": "NON-CASH CONTRIBUTIONS",
+ "rows": [
+  {
+   "name": "Together Education",
+   "address": "25 Broadway, 3rd Floor, New York, NY 10004",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 397231.43
+  },
+  {
+   "name": "NewSchools Venture Fund",
+   "address": "31 Hamilton Landing, Ste 220, Novato, CA 94949",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 623184.46
+  },
+  {
+   "name": "The Buck Institute for Education",
+   "address": "225 West Santa Clara Street, Suite 900, San Jose, CA 95113",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 1012488.52
+  },
+  {
+   "name": "CAAFID USA Foundation",
+   "address": "151 Hills Street NE, Atlanta, GA 30303",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 522325.4
+  },
+  {
+   "name": "Cooperative for Assistance and Relief Everywhere, Inc.",
+   "address": "199 Lincoln Ave, Hastings-on-Hudson, NY 10706-3012",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 2530571.98
+  },
+  {
+   "name": "Transcend",
+   "address": "199 Lincoln Ave, Hastings-on-Hudson, NY 10706-3012",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 1367487.72
+  },
+  {
+   "name": "HarborCats, Inc.",
+   "address": "1610 Franklin Street, 2nd Floor, Oakland, CA 94612",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 498811.52
+  },
+  {
+   "name": "NewSchools Venture Fund",
+   "address": "1901 Pacific Ave, Suite 203, Tacoma, WA 98402",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 3306181.98
+  },
+  {
+   "name": "First 5 Fundamentals",
+   "address": "PO Box 7408, New York, NY 10150",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 857136.15
+  },
+  {
+   "name": "African Leadership University",
+   "address": "P.O. Box 001, Kigali, Rwanda, RW 1000",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 999785.06
+  },
+  {
+   "name": "Children's Museum of Manhattan",
+   "address": "212 West 83rd Street, New York, NY 10024-1003",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 210621.46
+  },
+  {
+   "name": "Narrative 4",
+   "address": "45 West 73rd St, #5, New York, NY 10023-3141",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 824110.39
+  },
+  {
+   "name": "Transcend",
+   "address": "199 Lincoln Ave, Hastings-on-Hudson, NY 10706-3012",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 241297.47
+  },
+  {
+   "name": "Teachers College, Columbia University",
+   "address": "525 West 120th Street, New York, NY 10027-6696",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 385030.62
+  },
+  {
+   "name": "Betsy Graduate School of Education",
+   "address": "25 Broadway, 3rd Floor, New York, NY 10004",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 2653212.58
+  },
+  {
+   "name": "American Indian College Fund",
+   "address": "1000 1st Avenue, Suite 1100, Seattle, WA 98104",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 2991097.28
+  },
+  {
+   "name": "The Aspen Institute",
+   "address": "2090 N St, NW, Suite 700, Washington, DC 20037-1122",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 151456.69
+  },
+  {
+   "name": "Child Care Aware of America",
+   "address": "1515 N. Courthouse Rd., 3rd Floor, Arlington, VA 22201",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 345795.3
+  },
+  {
+   "name": "TSNE MissionWorks",
+   "address": "1111 Broadway, Suite 1400, Oakland, CA 94607",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 655972.2
+  },
+  {
+   "name": "The Regents of the University of California",
+   "address": "99 South St, Ste 700, Boston, MA 02111",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 983859.36
+  },
+  {
+   "name": "College Access Foundation",
+   "address": "2900 S. El Camino Real, Suite 200, San Mateo, CA 94403",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 250873.08
+  },
+  {
+   "name": "Council on States Media",
+   "address": "6998th St, Suite C150, San Francisco, CA 94103",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 245968.4
+  },
+  {
+   "name": "Families and Work Institute, Inc.",
+   "address": "2904 Baltimore Court, Hillsborough, NJ 08844-5001",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 280246.26
+  },
+  {
+   "name": "Narrative 4",
+   "address": "45 West 73rd St, #5, New York, NY 10023-3141",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 172715.28
+  },
+  {
+   "name": "The Aspen Institute",
+   "address": "2090 N St, NW, Suite 700, Washington, DC 20037-1122",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 125190.84
+  },
+  {
+   "name": "Dopex Family, Inc.",
+   "address": "301 E. Duarte, Granville, RI 02810, California, CA 91229",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 131402.61
+  },
+  {
+   "name": "Education SuperHighway",
+   "address": "One Park Avenue, 3rd Floor, New York, NY 10016",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 1868.0
+  },
+  {
+   "name": "NYU Grossman School of Medicine",
+   "address": "200 S. Michigan Ave, Suite 1000, Chicago, IL 60604",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 896553.18
+  },
+  {
+   "name": "Families and Work Institute, Inc.",
+   "address": "2904 Baltimore Court, Hillsborough, NJ 08844-5001",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 160212.5
+  },
+  {
+   "name": "Milka Challenge",
+   "address": "1730 Rhode Island Ave, NW, Suite 1101, Washington, DC 20036",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 279624.0
+  },
+  {
+   "name": "Search for Common Ground",
+   "address": "1730 Rhode Island Ave, NW, Suite 1101, Washington, DC 20036",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 8372526.0
+  },
+  {
+   "name": "Society for Advancement of Chicanos/Hispanics & Native Americans in Science",
+   "address": "206 Broadway, 9th Floor, New York, NY 10003",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 1395672.11
+  },
+  {
+   "name": "Robin Hood Foundation",
+   "address": "6355 N.W. 34th Street, Suite 2200, Virginia Gardens, FL 33166",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 1988119.0
+  },
+  {
+   "name": "Televista Foundation",
+   "address": "6355 N.W. 34th Street, Suite 2200, Virginia Gardens, FL 33166",
+   "status": "AMZN",
+   "purpose": "General Support",
+   "amount": 884981.24
+  }
+ ],
+ "totals": [
+  {
+   "label": "Total Non-Cash Contributions",
+   "amount": 88573692.86
+  },
+  {
+   "label": "Total Non-Cash Contributions",
+   "amount": 29265381.73
+  }
+ ],
+ "_usage": {
+  "in": 1895,
+  "out": 2680
+ },
+ "_seconds": 47.3,
+ "_finish": "stop"
+}

@@ -1,0 +1,207 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "GRANTEE FUNDS - GRANTS PAID OR COMMITTED",
+ "rows": [
+  {
+   "name": "Rogers Financial Services Inc.",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 20134.54
+  },
+  {
+   "name": "Community Advocates Inc.",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 79138.43
+  },
+  {
+   "name": "The Nature Conservancy",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 325126.48
+  },
+  {
+   "name": "Audubon Society of Rhode Island",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 40823.52
+  },
+  {
+   "name": "The Audubon Society of Western Pennsylvania",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 25000.0
+  },
+  {
+   "name": "Environmental Defense Center",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 13774.37
+  },
+  {
+   "name": "Sierra Club Foundation",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 34343.47
+  },
+  {
+   "name": "World Wildlife Fund",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 29436.54
+  },
+  {
+   "name": "The Trust for Public Land",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 10370.98
+  },
+  {
+   "name": "Conservation International",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 50718.09
+  },
+  {
+   "name": "The Nature Conservancy",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 239976.23
+  },
+  {
+   "name": "American Rivers Inc.",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 11238.43
+  },
+  {
+   "name": "Environmental Law & Policy Center",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 25000.0
+  },
+  {
+   "name": "Defenders of Wildlife",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 37500.0
+  },
+  {
+   "name": "National Audubon Society",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 20234.87
+  },
+  {
+   "name": "The Wilderness Society",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 25000.0
+  },
+  {
+   "name": "Natural Resources Defense Council",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 50323.21
+  },
+  {
+   "name": "The Nature Conservancy",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 161472.32
+  },
+  {
+   "name": "American Farmland Trust",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 30443.12
+  },
+  {
+   "name": "The Audubon Society of Western Pennsylvania",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 23771.28
+  },
+  {
+   "name": "World Resources Institute",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 31273.43
+  },
+  {
+   "name": "Environmental Defense Fund",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 32768.52
+  },
+  {
+   "name": "The Nature Conservancy",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 50000.0
+  },
+  {
+   "name": "Sierra Club Foundation",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 47263.54
+  },
+  {
+   "name": "World Wildlife Fund",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 42368.71
+  },
+  {
+   "name": "The Trust for Public Land",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 32847.11
+  },
+  {
+   "name": "Conservation International",
+   "address": "",
+   "status": "Yes",
+   "purpose": "Conservation",
+   "amount": 25367.39
+  }
+ ],
+ "totals": [
+  {
+   "label": "Total contributions",
+   "amount": 1381218.25
+  }
+ ],
+ "_usage": {
+  "in": 1853,
+  "out": 1068
+ },
+ "_seconds": 7.1,
+ "_finish": "stop"
+}

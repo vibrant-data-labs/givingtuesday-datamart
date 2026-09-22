@@ -1,0 +1,412 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "ATTACHMENT C\nCHARITABLE LISTING\nCASH CONTRIBUTIONS",
+ "rows": [
+  {
+   "name": "American Associates - National Institute",
+   "address": "489 5th Ave, Suite 1510, New York, NY 10017",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 250000
+  },
+  {
+   "name": "Alliance for Excellent Education",
+   "address": "1201 Connecticut Ave NW, Suite 901, Washington, DC 20036",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 250000
+  },
+  {
+   "name": "President and Fellows of Harvard College",
+   "address": "Office of Sponsored Programs, 1033 Massachusetts Ave., 5th Floor, Cambridge, MA 02138",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 250000
+  },
+  {
+   "name": "Sesame Workshop",
+   "address": "One Lincoln Plaza, New York, NY 10023",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 600000
+  },
+  {
+   "name": "Donors Choose Fund",
+   "address": "134 West 37th Street, Floor 11, New York, NY 10018",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 510000
+  },
+  {
+   "name": "Foundation for the Mid South",
+   "address": "134 East Amite Street, Jackson, MS 39201",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 50000
+  },
+  {
+   "name": "Leadership Roundtable",
+   "address": "Washington DC",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 50000
+  },
+  {
+   "name": "West Virginia University Foundation, Inc.",
+   "address": "PO Box 1650, Morgantown, WV 26507-1650",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 50000
+  },
+  {
+   "name": "United Negro College Fund",
+   "address": "1805 7th Street NW, Washington, DC 20001",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 267500
+  },
+  {
+   "name": "United Way of Dane County Foundation, Inc.",
+   "address": "2059 Atwood Ave, Madison, WI 53704",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 50000
+  },
+  {
+   "name": "Child Care Aware of America",
+   "address": "1515 N. Courthouse Rd., 3rd Floor, Arlington, VA 22201",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 518750
+  },
+  {
+   "name": "Detroit Parent Network",
+   "address": "726 Lothrop Road, Detroit, MI 48202",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 50000
+  },
+  {
+   "name": "Hopelink",
+   "address": "8990 154th Ave NE, Redmond, WA 98052",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 446730
+  },
+  {
+   "name": "Vashon Maury Community Food Bank",
+   "address": "10019 SW 178th Street, Vashon, WA 98070",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 40000
+  },
+  {
+   "name": "Communities in Schools",
+   "address": "2345 Crystal Dr, Suite 801, Arlington, VA 22202",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 50000
+  },
+  {
+   "name": "Chicago Children's Advocacy Center",
+   "address": "1240 S. Damen, Chicago, IL 60608",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 50000
+  },
+  {
+   "name": "Reading is Fundamental Inc.",
+   "address": "750 First Street NE, Suite 920, Washington, DC 20002",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 54000
+  },
+  {
+   "name": "First Book",
+   "address": "1319 F St. NW, Suite 1000, Washington, DC 20004",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 50000
+  },
+  {
+   "name": "Parent's Campaign Research and Education Fund",
+   "address": "120 North Congress Street, Suite 1114, Jackson, MS 39201",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Georgia Center for Nonprofits",
+   "address": "881 Memorial Drive, Atlanta, GA 30316",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 57412
+  },
+  {
+   "name": "Communities in Schools of North Carolina, Inc.",
+   "address": "222 N. Person Street, Suite 410, Raleigh, NC 27601",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 50000
+  },
+  {
+   "name": "School on Wheels, Inc.",
+   "address": "1999 N. Amherst Ave., Los Angeles, CA 90064",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 26700
+  },
+  {
+   "name": "Donaldson Adoption Institute",
+   "address": "120 E. 38th Street, New York, NY 10016",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 55000
+  },
+  {
+   "name": "National Center for Learning Disabilities",
+   "address": "32 Laight Street, 2nd Floor, New York, NY 10013",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 50746
+  },
+  {
+   "name": "Kennedy Center for the Performing Arts",
+   "address": "2700 F Street NW, Washington, DC 20566",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 57000
+  },
+  {
+   "name": "Foundations Inc.",
+   "address": "2 Aquarium Dr. Suite 100, Camden, NJ 08103",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 54930
+  },
+  {
+   "name": "The Seattle Foundation",
+   "address": "1200 5th Avenue, Suite 1300, Seattle, WA 98101",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 551477
+  },
+  {
+   "name": "Teach for America, Inc.",
+   "address": "25 Broadway, 12th Floor, New York, NY 10004",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 250000
+  },
+  {
+   "name": "Research Foundation for the State University of New York",
+   "address": "PO Box 9, Albany, NY 12201",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 50000
+  },
+  {
+   "name": "Seattle Community Colleges Foundation",
+   "address": "1500 Harvard Avenue, Seattle, WA 98122",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 554000
+  },
+  {
+   "name": "Eastside Baby Corner",
+   "address": "1510 NW Maple Ave, Issaquah, WA 98027",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Harlem Children's Zone",
+   "address": "35 East 125th Street, New York, NY 10035",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 1000000
+  },
+  {
+   "name": "Jumpstart for Young Children Inc.",
+   "address": "308 Congress Street, 6th Floor, Boston, MA 02210",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 514000
+  },
+  {
+   "name": "LEAP Innovations",
+   "address": "230 West Monroe St., Suite 2100, Chicago, IL 60606",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 250000
+  },
+  {
+   "name": "Year Up, Inc.",
+   "address": "45 Milk St., Boston, MA 02109",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 250000
+  },
+  {
+   "name": "College Advising Corps",
+   "address": "301 W. Barbee Chapel Rd., Suite 180, Chapel Hill, NC 27516",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 250000
+  },
+  {
+   "name": "College Possible",
+   "address": "755 Prior Ave N., Suite 210, St. Paul, MN 55104",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 254000
+  },
+  {
+   "name": "University of Washington",
+   "address": "Box 359505, 4333 Brooklyn Ave NE, Seattle, WA 98195",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 9500000
+  },
+  {
+   "name": "University of Washington",
+   "address": "PO Box 358210, Seattle, WA 98195",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 1870000
+  },
+  {
+   "name": "Smithsonian Institution",
+   "address": "PO Box 418320, Boston, MA 02241",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 1000000
+  },
+  {
+   "name": "Pathfinder International",
+   "address": "2 Cabot Road, Suite 201, Medford, MA 02155",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 551460
+  },
+  {
+   "name": "Global Partnership for Education Fund",
+   "address": "PO Box 4090, New York, NY 10163",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 5000000
+  },
+  {
+   "name": "Summer Search Foundation",
+   "address": "500 Sansome Street, Suite 100, San Francisco, CA 94111",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 250000
+  },
+  {
+   "name": "Thrive Washington",
+   "address": "1111 Third Avenue, Suite 710, Seattle, WA 98101",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 150000
+  },
+  {
+   "name": "Bureau of Fearless Ideas",
+   "address": "8415 Greenwood Ave N, Seattle, WA 98103",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 535000
+  },
+  {
+   "name": "Partnership for Public Service",
+   "address": "1100 New York Ave NW, Suite 200 East, Washington, DC 20005",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 257000
+  },
+  {
+   "name": "The Christensen Fund",
+   "address": "260 Townsend Street, San Francisco, CA 94107",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 2098500
+  },
+  {
+   "name": "Scholarship America, Inc.",
+   "address": "7900 International Drive, Suite 500, Bloomington, MN 55425",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 550000
+  },
+  {
+   "name": "PRISM",
+   "address": "1515 N. Courthouse Rd., Arlington, VA 22201",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "PRISM",
+   "address": "PO Box 31727, Seattle, WA 98103",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "America's Promise - The Alliance for Youth",
+   "address": "1110 Vermont Ave. NW, Suite 900, Washington, DC 20005",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 50000
+  },
+  {
+   "name": "Interagency Academy",
+   "address": "3700 S. Alaska Street, Seattle, WA 98118",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 25500
+  },
+  {
+   "name": "University of Washington",
+   "address": "PO Box 359505, Seattle, WA 98195",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 550000
+  },
+  {
+   "name": "Seattle Schools Foundation",
+   "address": "2445 3rd Ave S, Seattle, WA 98134",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 250000
+  },
+  {
+   "name": "Raising A Reader National Programs",
+   "address": "485 Valley Way, Milpitas, CA 95035",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 257000
+  },
+  {
+   "name": "Research and Education Fund",
+   "address": "5 Hanover Square, Suite 716, New York, NY 10004",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 25000
+  },
+  {
+   "name": "Sound Mental Health Foundation",
+   "address": "4700 36th Ave S, Seattle, WA 98118",
+   "status": "",
+   "purpose": "General Support",
+   "amount": 511500
+  }
+ ],
+ "totals": [],
+ "_usage": {
+  "in": 1077,
+  "out": 2777
+ },
+ "_seconds": 24.7,
+ "_finish": "stop"
+}

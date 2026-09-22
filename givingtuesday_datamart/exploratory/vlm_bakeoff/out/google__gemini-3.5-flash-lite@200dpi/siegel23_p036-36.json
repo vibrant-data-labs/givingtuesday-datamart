@@ -1,0 +1,111 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "STATEMENT 21",
+ "rows": [
+  {
+   "name": "New York Hall of Science",
+   "address": "47-01 111th Street\nCorona, NY 11368",
+   "status": "PC",
+   "purpose": "To support the Margaret Honey Design Make Play Fund.",
+   "amount": 50000
+  },
+  {
+   "name": "New York Road Runners",
+   "address": "156 West 56th Street 5th Floor\nNew York, NY 10019",
+   "status": "PC",
+   "purpose": "To support their annual benefit.",
+   "amount": 500
+  },
+  {
+   "name": "New York University (Rebuild by Design)",
+   "address": "665 Broadway, Suite 801\nNew York, NY 10012",
+   "status": "PC",
+   "purpose": "To support the next phase of Rebuild by Design's Atlas of Disaster",
+   "amount": 260000
+  },
+  {
+   "name": "Northeastern University, Center for Inclusive Computing",
+   "address": "716 Columbus Avenue, 402 CP\nBoston, MA 02120",
+   "status": "PC",
+   "purpose": "To support the Center on Inclusive Computing transfer pathways research.",
+   "amount": 160000
+  },
+  {
+   "name": "NYC First, Inc.",
+   "address": "100 6th Ave, 16th Fl\nNew York, NY 10013",
+   "status": "PC",
+   "purpose": "To provide general operating support and scaling efforts.",
+   "amount": 1000000
+  },
+  {
+   "name": "Passport Atlanta",
+   "address": "504 Fair St SW\nAtlanta, GA 30313",
+   "status": "PC",
+   "purpose": "To provide general operating support.",
+   "amount": 150000
+  },
+  {
+   "name": "Project Tomorrow",
+   "address": "3943 Irvine Blvd, Suite #416\nrvine CA 92602",
+   "status": "PC",
+   "purpose": "To support Project Tomorrow's (PT) work on computational thinking.",
+   "amount": 50000
+  },
+  {
+   "name": "Projects with Care",
+   "address": "430 West 24th Street, Suite #1E\nNew York NY 10011",
+   "status": "PC",
+   "purpose": "To support Project with Care's distribution of graphing calculators in NYCHA housing\ndevelopments.",
+   "amount": 12000
+  },
+  {
+   "name": "Pursuit Transformation Company, Inc.",
+   "address": "47-10 Austell Pl, 2nd Fl\nLong Island City, NY 11101",
+   "status": "PC",
+   "purpose": "To provide general operating support to help Pursuit expand their training model in New York\nCity.",
+   "amount": 1000000
+  },
+  {
+   "name": "Regional Plan Association (Gala)",
+   "address": "One Whitehall St, 16th Floor\nNew York, NY 10004",
+   "status": "PC",
+   "purpose": "To support The RPA Centennial Gala and Exhibition.",
+   "amount": 25000
+  },
+  {
+   "name": "Regional Plan Association",
+   "address": "One Whitehall St, 16th Floor\nNew York, NY 10004",
+   "status": "PC",
+   "purpose": "To provide general operating support to RPA.",
+   "amount": 100000
+  },
+  {
+   "name": "Res Publica US, Inc. (Columbia elab)",
+   "address": "50 Riverside Blvd, #6J\nNew York, NY 10069",
+   "status": "PC",
+   "purpose": "To support the continued development and scaling of eLab.",
+   "amount": 250000
+  },
+  {
+   "name": "Research Found of the City University of NY (LaGuardia Community\nCollege)",
+   "address": "230 West 41st Street\nNew York, NY 10036",
+   "status": "PC",
+   "purpose": "To support the JobsDirect program at LaGuardia Community College.",
+   "amount": 150000
+  },
+  {
+   "name": "Robin Hood Foundation",
+   "address": "826 Broadway, 9th Fl\nNew York, NY 10003",
+   "status": "PC",
+   "purpose": "To provide support to the Learning + Technology Fund.",
+   "amount": 1130000
+  }
+ ],
+ "totals": [],
+ "_usage": {
+  "in": 1426,
+  "out": 1234
+ },
+ "_seconds": 3.8,
+ "_finish": "stop"
+}

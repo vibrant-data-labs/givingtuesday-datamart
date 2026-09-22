@@ -1,0 +1,74 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "The Klarman Family Foundation\n2020 Form 990-PF",
+ "rows": [
+  {
+   "name": "The Project On Government Oversight Inc",
+   "address": "1100 G Street NW, Suite 500\nWashington, DC 20005",
+   "status": "PC",
+   "purpose": "Unrestricted operating support (2020 Rapid Response)",
+   "amount": 250000
+  },
+  {
+   "name": "The Shalom Hartman Institute of North America",
+   "address": "475 Riverside Drive, Suite 1450\nNew York, NY 10115",
+   "status": "PC",
+   "purpose": "To support the mission and goals of SHIINA for fiscal years 2020 and 2021",
+   "amount": 500000
+  },
+  {
+   "name": "Tides Foundation",
+   "address": "P.O. Box 29903\nSan Francisco, CA 94129",
+   "status": "PC",
+   "purpose": "To support the fines and fees campaign of the Florida Rights Restoration Coalition Education Fund (2020 Rapid Response)",
+   "amount": 500000
+  },
+  {
+   "name": "Trustees Of Tufts College",
+   "address": "Research Administration & Development\n75 Kneeland St.\nBoston, MA 02111",
+   "status": "PC",
+   "purpose": "To support a study on antisemitic attitudes among U.S. adults ages 18-30",
+   "amount": 17500
+  },
+  {
+   "name": "United States Holocaust Memorial Museum",
+   "address": "100 Raoul Wallenberg Place SW\nWashington, DC 20024-2126",
+   "status": "PC",
+   "purpose": "Unrestricted operating support for fiscal years 2020, 2021, and 2022",
+   "amount": 150000
+  },
+  {
+   "name": "Western States Center Inc.",
+   "address": "PO Box 40305\nPortland, OR 97240-0305",
+   "status": "PC",
+   "purpose": "Unrestricted operating support for fiscal years 2020 and 2021",
+   "amount": 150000
+  },
+  {
+   "name": "Western States Center Inc.",
+   "address": "PO Box 40305\nPortland, OR 97240-0305",
+   "status": "PC",
+   "purpose": "Unrestricted operating support (2020 Rapid Response)",
+   "amount": 100000
+  },
+  {
+   "name": "William J Brennan Jr Center For Justice Inc",
+   "address": "120 Broadway, Suite 1750\nNew York, NY 10271",
+   "status": "PC",
+   "purpose": "Unrestricted operating support for fiscal years 2019, 2020, and 2021",
+   "amount": 250000
+  }
+ ],
+ "totals": [
+  {
+   "label": "Subtotal Healthy Democracy",
+   "amount": 30352500
+  }
+ ],
+ "_usage": {
+  "in": 695,
+  "out": 3223
+ },
+ "_seconds": 17.1,
+ "_finish": "stop"
+}

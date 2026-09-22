@@ -1,0 +1,46 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "FORM 990-PF, PART XV - GRANTS AND CONTRIBUTIONS PAID DURING THE YEAR",
+ "rows": [
+  {
+   "name": "University of Michigan",
+   "address": "500 S. State St, Suite 7040 Ann Arbor, MI 48109",
+   "status": "PC",
+   "purpose": "To support a pilot initiative aimed at eliminating systemic hiring bias.",
+   "amount": 550000
+  },
+  {
+   "name": "New York University",
+   "address": "70 Washington Square S New York, NY 10012",
+   "status": "PC",
+   "purpose": "To support provide general operating support.",
+   "amount": 550000
+  },
+  {
+   "name": "Washington Center for Equitable Growth",
+   "address": "1500 K Street NW, Suite 800 Washington, DC 20005",
+   "status": "PC",
+   "purpose": "To offer general operating support.",
+   "amount": 525000
+  },
+  {
+   "name": "WGBH Educational Foundation",
+   "address": "One Guest Street Boston, MA 02135",
+   "status": "PC",
+   "purpose": "To support WGBH's development of \"Work in Our America\".",
+   "amount": 500000
+  }
+ ],
+ "totals": [
+  {
+   "label": "TOTAL",
+   "amount": 2125000
+  }
+ ],
+ "_usage": {
+  "in": 695,
+  "out": 1205
+ },
+ "_seconds": 7.2,
+ "_finish": "stop"
+}

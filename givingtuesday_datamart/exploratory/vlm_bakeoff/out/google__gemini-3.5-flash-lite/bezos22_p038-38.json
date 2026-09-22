@@ -1,0 +1,9 @@
+{
+ "parse_error": "{\n \"page_kind\": \"grants_paid_list\",\n \"heading\": \"CASH CONTRIBUTIONS\",\n \"rows\": [\n  {\n   \"name\": \"Raising A Reader National\",\n   \"address\": \"489 Valley Way, Milpitas, CA 95035\",\n   \"status\": \"\",\n   \"purpose\": \"General Support\",\n   \"amount\": 223427.00\n  },\n  {\n   \"name\": \"National League of Cities Ins",
+ "_usage": {
+  "in": 1426,
+  "out": 3498
+ },
+ "_seconds": 8.9,
+ "_finish": "stop"
+}

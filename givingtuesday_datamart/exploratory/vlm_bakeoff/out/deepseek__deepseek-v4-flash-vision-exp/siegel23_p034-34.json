@@ -1,0 +1,118 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "FORM 990-PF PART XV - GRANTS AND CONTRIBUTIONS PAID DURING THE YEAR",
+ "rows": [
+  {
+   "name": "National Audubon Society",
+   "address": "225 Varick Street, Floor 7, New York, NY 10014",
+   "status": "PC",
+   "purpose": "To provide general operating support",
+   "amount": 25000
+  },
+  {
+   "name": "Teachers College Columbia University",
+   "address": "525 W 120th Street, Box 122, New York, NY 10027",
+   "status": "PC",
+   "purpose": "To support the \"Our Bard, Our Common Wealth\" campaign:",
+   "amount": 25000
+  },
+  {
+   "name": "Herbert Simon - based at Carnegie Mellon University",
+   "address": "5000 Forbes Avenue, Pittsburgh, PA 15213",
+   "status": "PC",
+   "purpose": "To support the Bard Faculty's work reducing threats on the impact of technology on society.",
+   "amount": 25000
+  },
+  {
+   "name": "Mozilla Foundation",
+   "address": "825 5th Street NW Suite 500, Washington DC 20001",
+   "status": "PC",
+   "purpose": "To support CAV calling efforts",
+   "amount": 21000
+  },
+  {
+   "name": "Innovators in Health",
+   "address": "137 A Franklin St, Brooklyn NY 11222",
+   "status": "PC",
+   "purpose": "To support a more responsive, effective ecosystem.",
+   "amount": 35000
+  },
+  {
+   "name": "Global Health Strategies",
+   "address": "14 Wall Street, 11th Floor, New York, NY 10005",
+   "status": "PC",
+   "purpose": "To support the scaling of new financing for the future initiatives",
+   "amount": 35000
+  },
+  {
+   "name": "ideas42",
+   "address": "114 5th Avenue, 13th Floor, New York, NY 10011",
+   "status": "PC",
+   "purpose": "To provide general operating support",
+   "amount": 20000
+  },
+  {
+   "name": "Results for Development Institute",
+   "address": "1100 15th Street NW, Suite 400, Washington, DC 20005",
+   "status": "PC",
+   "purpose": "To provide general operating support",
+   "amount": 55000
+  },
+  {
+   "name": "Vera Institute of Justice",
+   "address": "233 Broadway, 12th Floor, New York, NY 10279",
+   "status": "PC",
+   "purpose": "To support the general operations of the Juno Academy.",
+   "amount": 20000
+  },
+  {
+   "name": "Vital Projects Fund",
+   "address": "1300 19th Street NW, Suite 200, Washington, DC 20036",
+   "status": "PC",
+   "purpose": "To support the development of a national network of educators, innovators, and investment in a balanced, thoughtful approach to technological change.",
+   "amount": 25000
+  },
+  {
+   "name": "Muhammad Yunus",
+   "address": "1290 Avenue of the Americas, New York, NY 10104",
+   "status": "PC",
+   "purpose": "To support research and education on the impact of technology on society.",
+   "amount": 1000000
+  },
+  {
+   "name": "Friends of the Global Fund Africa",
+   "address": "1200 18th Street NW, Suite 900, Washington DC 20036",
+   "status": "PC",
+   "purpose": "To support a balanced, thoughtful approach to technological change.",
+   "amount": 1000000
+  },
+  {
+   "name": "Redford Center",
+   "address": "4758 Melrose Avenue, Los Angeles, CA 90029",
+   "status": "PC",
+   "purpose": "To support early stage establishment of an international network of emerging leaders and media partner organizations to advance social and environmental change.",
+   "amount": 250000
+  },
+  {
+   "name": "Skoll Foundation",
+   "address": "100 Independence Mall West, Philadelphia, PA 19106",
+   "status": "PC",
+   "purpose": "To support the founding of a new global network to advance social and environmental change.",
+   "amount": 250000
+  },
+  {
+   "name": "Greg Asner",
+   "address": "4758 Melrose Avenue, Los Angeles, CA 90029",
+   "status": "PC",
+   "purpose": "To support the founding of a new global network to advance social and environmental change.",
+   "amount": 250000
+  }
+ ],
+ "totals": [],
+ "_usage": {
+  "in": 695,
+  "out": 9626
+ },
+ "_seconds": 44.5,
+ "_finish": "stop"
+}

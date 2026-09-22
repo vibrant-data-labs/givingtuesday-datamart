@@ -1,0 +1,97 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "FORM 990-PF, PART XV - GRANTS AND CONTRIBUTIONS PAID DURING THE YEAR",
+ "rows": [
+  {
+   "name": "Junior Coaching Academy",
+   "address": "P.O. Box 977, Alpine, CA 91903",
+   "status": "PC",
+   "purpose": "To support the scaling of Jr. Coaching Academy model.",
+   "amount": 65000
+  },
+  {
+   "name": "Adler Center: School of Education",
+   "address": "595 Market St., Suite 1700, San Francisco, CA 94105",
+   "status": "PC",
+   "purpose": "To support Adler Center's academy model.",
+   "amount": 150000
+  },
+  {
+   "name": "Foundation for Childcare Coordination, the Families and Workers Fund",
+   "address": "3845 Fairfax Drive, Arlington, VA 22203",
+   "status": "PC",
+   "purpose": "To support general operating support.",
+   "amount": 250000
+  },
+  {
+   "name": "Biotechnology Innovation Organization",
+   "address": "1201 Maryland Ave SW, Suite 900, Washington DC 20024",
+   "status": "PC",
+   "purpose": "To support the BioGlobal competition.",
+   "amount": 85000
+  },
+  {
+   "name": "Black River Innovation Campus (BRIC) - Southern Windsor County Inc.",
+   "address": "45 Union Street, Windsor, VT 05089",
+   "status": "PC",
+   "purpose": "To support expansion of BRIC's rural entrepreneurship program.",
+   "amount": 150000
+  },
+  {
+   "name": "Marlborough, Inc. (dba: Common Ground Marlborough Elementary School)",
+   "address": "55 South Main Street, Marlborough, CT 06447",
+   "status": "PC",
+   "purpose": "Active to expand their 'Coding in Spanish' pilot and expand their Coders as a language curriculum.",
+   "amount": 25000
+  },
+  {
+   "name": "Sprout Up NYC",
+   "address": "1133 Broadway, Suite 614, New York, NY 10010",
+   "status": "PC",
+   "purpose": "To help Sprout scale in NYC.",
+   "amount": 20000
+  },
+  {
+   "name": "The Warren Alpert Medical School of Brown University",
+   "address": "222 Richmond St., Suite 310, Providence, RI 02903",
+   "status": "PC",
+   "purpose": "To provide general operating support to Brown University.",
+   "amount": 69280
+  },
+  {
+   "name": "Project Invent",
+   "address": "PO Box 1222, Campbell, CA 95009",
+   "status": "PC",
+   "purpose": "To support a working group focused on infrastructure and future-ready education systems.",
+   "amount": 50000
+  },
+  {
+   "name": "Carnegie Hall Corporation",
+   "address": "881 Seventh Ave, New York, NY 10019",
+   "status": "PC",
+   "purpose": "To support Carnegie Hall's Opening Nights Gala (2021/2022 Season).",
+   "amount": 50000
+  },
+  {
+   "name": "Sloan School of Management, Massachusetts Institute of Technology",
+   "address": "77 Massachusetts Ave, Building E62-383, Cambridge, MA 02139",
+   "status": "PC",
+   "purpose": "To support one (1) fellow and research on the impact of technology on society.",
+   "amount": 250000
+  },
+  {
+   "name": "School of Engineering and Applied Science, George Washington University",
+   "address": "Science and Engineering Hall, 800 22nd St. NW, Suite 107, Washington, DC 20052",
+   "status": "PC",
+   "purpose": "To support one (1) fellow and research on the impact of technology on society.",
+   "amount": 150000
+  }
+ ],
+ "totals": [],
+ "_usage": {
+  "in": 1077,
+  "out": 892
+ },
+ "_seconds": 7.9,
+ "_finish": "stop"
+}

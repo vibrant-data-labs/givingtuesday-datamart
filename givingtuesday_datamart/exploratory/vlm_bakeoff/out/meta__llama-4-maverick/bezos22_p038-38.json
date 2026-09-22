@@ -1,0 +1,293 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "CASH CONTRIBUTIONS",
+ "rows": [
+  {
+   "name": "Raising A Reader National",
+   "address": "489 Valley Way, Millpitas, CA 95035",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 223427.0
+  },
+  {
+   "name": "National League of Cities Institute",
+   "address": "660 N Capitol St Nw, Ste 150, Washington, DC 20011",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000.0
+  },
+  {
+   "name": "Harvard College",
+   "address": "1033 Massachusetts Avenue, Suite 3, Cambridge, MA 02138",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250255.0
+  },
+  {
+   "name": "Children's Defense Fund",
+   "address": "2000 East 6th Street, Austin, TX 78702",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 600000.0
+  },
+  {
+   "name": "Doha for Impact",
+   "address": "440 Barranca Avenue #2927, Covina, CA 91723",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 600400.0
+  },
+  {
+   "name": "Pahara Institute",
+   "address": "800 Grant Street, Willimantic, CT 06226",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 300000.0
+  },
+  {
+   "name": "The Ultimate Block Party",
+   "address": "4 Hill Road, Milwaukee WI 53226",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 300000.0
+  },
+  {
+   "name": "The Medical College of Wisconsin, Inc.",
+   "address": "8701 Watertown Plank Road, Milwaukee, WI 53226",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 1250000.0
+  },
+  {
+   "name": "Embrace Global",
+   "address": "201 Ank Rd, Rhinelbeck, DE 19806",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 2651654.0
+  },
+  {
+   "name": "TED Foundation, Inc.",
+   "address": "330 Hudson Street, Floor 12, New York, NY 10013",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 5010154.0
+  },
+  {
+   "name": "Child Care Aware of America",
+   "address": "109 Courthouse St, 3rd Floor, Arlington, VA 22201",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 21205.45
+  },
+  {
+   "name": "Equal Opportunity Schools",
+   "address": "5401 N 16th St, Seattle, WA 98103",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 1557902.0
+  },
+  {
+   "name": "Welcoming America",
+   "address": "PO Box 47002, Seattle, WA 98146-7002",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 300000.0
+  },
+  {
+   "name": "Soliya",
+   "address": "54 West 40th Street, 7th Floor, New York, NY 10018",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 75000.0
+  },
+  {
+   "name": "Choose Love, Inc.",
+   "address": "215 Central Avenue, Suite 212, Louisville, KY 40208",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 14700.0
+  },
+  {
+   "name": "University of Louisville Foundation",
+   "address": "2429 Nicollet Ave, Louisville, KY 40208",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 4317.26
+  },
+  {
+   "name": "World Savvy",
+   "address": "701 East Gate Drive, Mount Laurel, NJ 08054",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 433333.0
+  },
+  {
+   "name": "Campaign for Grade-Level Reading",
+   "address": "1201 Hardtner Lane, Suite 300, Baton Rouge, LA 70806",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000.0
+  },
+  {
+   "name": "ArtistYear",
+   "address": "2500 Auburn Boulevard #449, Auburn, CA 95603",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 187500.0
+  },
+  {
+   "name": "The Martin Luther King Jr. Center for Nonviolent Social Chang",
+   "address": "PO Box 6156, Mississippi State, MS 39762",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 125000.0
+  },
+  {
+   "name": "Mississippi State University",
+   "address": "159 Lincoln Avenue, Mississippi State, MS 39762",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 373931.0
+  },
+  {
+   "name": "Transcend",
+   "address": "330 Hudson Street, Floor 12, New York, NY 10013",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 562117.0
+  },
+  {
+   "name": "TED Foundation, Inc.",
+   "address": "330 Hudson Street, Floor 12, New York, NY 10013",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 5100000.0
+  },
+  {
+   "name": "Amara",
+   "address": "5907 Martin Luther King Jr. Way South, Seattle, WA 98118",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 1048000.0
+  },
+  {
+   "name": "FIRST (National)",
+   "address": "200 Bedford Street, Manchester, NH 03101",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 151000.0
+  },
+  {
+   "name": "Green Chimneys",
+   "address": "400 Doansburg Road, Toppfield, NY 12586",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000.0
+  },
+  {
+   "name": "The Greater Seattle Bureau of Education & Research",
+   "address": "3200 Port Rd, Toppenish, WA 98948",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000.0
+  },
+  {
+   "name": "Heritage University",
+   "address": "1011 East Heritage Avenue, Toppenish, WA 98948",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 108400.0
+  },
+  {
+   "name": "Inner-City Scholarship Fund",
+   "address": "3438 164th Street, Flushing, NY 11358",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000.0
+  },
+  {
+   "name": "Import Public Schools",
+   "address": "2524 16th Avenue S, Seattle, WA 98144",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 232400.0
+  },
+  {
+   "name": "Martha's Table",
+   "address": "2110 24th Avenue South, Seattle, WA 98144",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "Open Arms Perinatal Services",
+   "address": "89 South Street, 5th Floor, Freeburg, MA 02111",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 87000.0
+  },
+  {
+   "name": "Rainier Scholars",
+   "address": "PO Box 2688, Tacoma, WA 98401",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000.0
+  },
+  {
+   "name": "Reach Out and Read",
+   "address": "135 Harvard Avenue, 3rd Floor, Boston, MA 02134",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000.0
+  },
+  {
+   "name": "SystemsGo",
+   "address": "2101 24th Avenue South, Seattle, WA 98144",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000.0
+  },
+  {
+   "name": "Treehouse",
+   "address": "55 Broad Avenue, 3rd Floor, New York, NY 10004",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000.0
+  },
+  {
+   "name": "Uncommon Schools, Inc.",
+   "address": "1901 Rainier Avenue South, Seattle, WA 98144",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000.0
+  },
+  {
+   "name": "Westchester Jewish Community Services",
+   "address": "PO Box 190, White Plains, NY 10603",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000.0
+  },
+  {
+   "name": "Yalkut Pioneers Clinic",
+   "address": "845 North Broadway, New York, NY 10003",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000.0
+  },
+  {
+   "name": "South Seattle Women's Health Foundation",
+   "address": "4701 S Mead St, Seattle, WA 98118",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 115000.0
+  }
+ ],
+ "totals": [],
+ "_usage": {
+  "in": 5276,
+  "out": 2039
+ },
+ "_seconds": 10.5,
+ "_finish": "stop"
+}

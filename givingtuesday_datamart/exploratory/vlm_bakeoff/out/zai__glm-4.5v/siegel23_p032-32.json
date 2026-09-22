@@ -1,0 +1,97 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "FORM 990-PF, PART XIV - GRANTS AND CONTRIBUTIONS PAID DURING THE YEAR STATEMENT 21",
+ "rows": [
+  {
+   "name": "Center for Rural Innovation (CORI)",
+   "address": "P.O. Box 392 Hartford, VT 05048",
+   "status": "PC",
+   "purpose": "To support CORI's expanded capacity building efforts to support more rural/communities across the US.",
+   "amount": 1000000
+  },
+  {
+   "name": "Center for Social Media and Politics (CSMaP) at New York University (NYU)",
+   "address": "547 LaGuardia Pl New York, NY 10012",
+   "status": "PC",
+   "purpose": "To support one fellow and research on the impact of technology on society.",
+   "amount": 250000
+  },
+  {
+   "name": "Citizens Committee for New York City",
+   "address": "30 East 12th St, #4189 New York, NY 10035",
+   "status": "PC",
+   "purpose": "To support the work of Citizens Committee for New York City to foster and develop local leadership and communities.",
+   "amount": 75000
+  },
+  {
+   "name": "City University of New York (Research Foundation of The City University of New York)",
+   "address": "230 W. 41st Street New York, NY 10036",
+   "status": "PC",
+   "purpose": "To support CUNY Computing Integrated Teacher Education.",
+   "amount": 50000
+  },
+  {
+   "name": "Cwvc News Company (Chalkbeat Inc.)",
+   "address": "450 7th Avenue 32nd Floor New York, NY 10123",
+   "status": "PC",
+   "purpose": "To provide general operating support.",
+   "amount": 50000
+  },
+  {
+   "name": "Clay Arts Center",
+   "address": "40 Beecher St Port Chester, NY 10573",
+   "status": "PC",
+   "purpose": "To support the Annual Benefit.",
+   "amount": 10000
+  },
+  {
+   "name": "Code The Dream",
+   "address": "201 W. Main Street, Suite 100 - PMB003 Durham, NC 27701",
+   "status": "PC",
+   "purpose": "To support Code the Dream's efforts to scale their apprenticeship model.",
+   "amount": 75000
+  },
+  {
+   "name": "Comunidades America",
+   "address": "461 W 126th St, Suite 5W New York, NY 10027",
+   "status": "PC",
+   "purpose": "To support Comunidades America's social entrepreneurship programming.",
+   "amount": 50000
+  },
+  {
+   "name": "CommunityShare",
+   "address": "47 East Pennington St Tucson, AZ 85701",
+   "status": "PC",
+   "purpose": "To support CommunityShare's online platform and capacity-building services",
+   "amount": 50000
+  },
+  {
+   "name": "Connect Humanity",
+   "address": "185 Santa Rita Avenue Palo Alto, CA 94301",
+   "status": "PC",
+   "purpose": "To support Connect Humanity's research on digital infrastructure.",
+   "amount": 150000
+  },
+  {
+   "name": "Co-Op Careers, Inc.",
+   "address": "1390 Market St, Suite 200 San Francisco, CA 94102",
+   "status": "PC",
+   "purpose": "To support COOP Careers program expansion in NYC.",
+   "amount": 250000
+  },
+  {
+   "name": "Cornell University",
+   "address": "130 E. Seneca Street, Suite 400 Ithaca, NY 14850",
+   "status": "PC",
+   "purpose": "To provide expendable support to the Public Interest Tech programs on its Cornell Tech campus; - K-12 initiative - Cornell Tech Annual Fund - PITECH",
+   "amount": 1400000
+  }
+ ],
+ "totals": [],
+ "_usage": {
+  "in": 2454,
+  "out": 2795
+ },
+ "_seconds": 51.7,
+ "_finish": "stop"
+}

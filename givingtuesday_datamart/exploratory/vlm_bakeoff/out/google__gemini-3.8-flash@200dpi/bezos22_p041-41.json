@@ -1,0 +1,9 @@
+{
+ "parse_error": "{\"page_kind\": \"grants_paid_list\",\n \"heading\": \"CHARITABLE LISTING\\nATTACHMENT C\\nBEZOS FAMILY FOUNDATION\\nEIN: 91-2073258\\nNON-CASH CONTRIBUTIONS\",\n \"rows\": [{\"name\": \"Together Education\", \"address\": \"25 Broadway, 3rd Floor, New York, NY 10004\", \"status\": null, \"purpose\": \"General Support\", \"amount\"",
+ "_usage": {
+  "in": 1426,
+  "out": 7993
+ },
+ "_seconds": 42.6,
+ "_finish": "length"
+}

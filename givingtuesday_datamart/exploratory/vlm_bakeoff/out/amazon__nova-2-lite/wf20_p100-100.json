@@ -1,0 +1,291 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "",
+ "rows": [
+  {
+   "name": "BAY NEIGHBORHOOD HOUSING SERVICES OF GREEN",
+   "address": "4375 JACKSON BLVD STE 200",
+   "status": "PC",
+   "purpose": "Needs Works Green Bay COVID-19 Emerging",
+   "amount": 20000
+  },
+  {
+   "name": "NEIGHBORHOOD MINISTRIES INC",
+   "address": "926 WISLIRE BLVD STE 200",
+   "status": "PC",
+   "purpose": "General Operating / COVID-19 Support",
+   "amount": 150000
+  },
+  {
+   "name": "NEIGHBORHOOD SERVICES OF LOS",
+   "address": "3918 VAN WERT ST",
+   "status": "PC",
+   "purpose": "Neighbors Family Services",
+   "amount": 55000
+  },
+  {
+   "name": "NEW HORIZONS SOUTHWEST FLORIDA",
+   "address": "19088 ELIAS ST",
+   "status": "PC",
+   "purpose": "COVID-19 Relief",
+   "amount": 35000
+  },
+  {
+   "name": "NORTHEAST AREA AGENCY ON AGING",
+   "address": "PO BOX 1183 AUGUSTINE ROAD",
+   "status": "PC",
+   "purpose": "Assisting Seniors",
+   "amount": 55000
+  },
+  {
+   "name": "ON THE MOVE HOUSE",
+   "address": "1063 COLYN AVE",
+   "status": "PC",
+   "purpose": "Napa Financial Housing Costs",
+   "amount": 55000
+  },
+  {
+   "name": "ORGANIZATION OF CHINESE AMERICANS",
+   "address": "7803 COLUMBIA ST",
+   "status": "PC",
+   "purpose": "Naas With Transitional Initiative",
+   "amount": 50000
+  },
+  {
+   "name": "ON THE MOVE HOUSE INC",
+   "address": "PO BOX 22356",
+   "status": "PC",
+   "purpose": "DCA FOOD ECONOMY PROJECT",
+   "amount": 100000
+  },
+  {
+   "name": "ORANGE COUNTY LONG TERM RECOVERY GROUP, INC",
+   "address": "1096 RAINER DR STE 1002",
+   "status": "PC",
+   "purpose": "Support From COVID-19 Operating",
+   "amount": 150000
+  },
+  {
+   "name": "PACIFIC ASIAN CONSORTIUM IN EMPLOYMENT",
+   "address": "1055 VAN WERT ST",
+   "status": "PC",
+   "purpose": "RSE Recovery in Disaster",
+   "amount": 55000
+  },
+  {
+   "name": "PATHWAYS EQUITY CENTER",
+   "address": "2904 MUSKINGUM BLVD STE 1475",
+   "status": "PC",
+   "purpose": "PAPE Adapting for Work and Career",
+   "amount": 57000
+  },
+  {
+   "name": "PEOPLE FUND",
+   "address": "1525 N VAN NUYS BLVD STE 201",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 17000
+  },
+  {
+   "name": "PEOPLE FUND",
+   "address": "2921 17TH BLVD BLDG STE 1",
+   "status": "PC",
+   "purpose": "Texas COVID-19 Relief Fund",
+   "amount": 25000
+  },
+  {
+   "name": "PEOPLE FUND",
+   "address": "2921 17TH BLVD BLDG STE 1",
+   "status": "PC",
+   "purpose": "Texas COVID-19 Relief Fund",
+   "amount": 35000
+  },
+  {
+   "name": "PEOPLE FUND",
+   "address": "2921 17TH BLVD BLDG STE 1",
+   "status": "PC",
+   "purpose": "Texas COVID-19 Relief Fund",
+   "amount": 15000
+  },
+  {
+   "name": "PEOPLE FUND",
+   "address": "2921 17TH BLVD BLDG STE 1",
+   "status": "PC",
+   "purpose": "Texas COVID-19 Relief Fund",
+   "amount": 20000
+  },
+  {
+   "name": "REBUILDING TOGETHER AURORA INC",
+   "address": "291 EAST 17TH ST",
+   "status": "PC",
+   "purpose": "COVID-19 Response",
+   "amount": 20000
+  },
+  {
+   "name": "REBUILDING TOGETHER HENRY COUNTY",
+   "address": "311 W DOWNERT PLACE #402",
+   "status": "PC",
+   "purpose": "Skilled Volunteer Lives",
+   "amount": 10000
+  },
+  {
+   "name": "REBUILDING TOGETHER LIVES",
+   "address": "PO BOX 254",
+   "status": "PC",
+   "purpose": "Rebuilding Day Recruitment for National",
+   "amount": 25000
+  },
+  {
+   "name": "REBUILDING TOGETHER NATIONAL",
+   "address": "841 KAWAYNE ST",
+   "status": "PC",
+   "purpose": "Workforce Development Project",
+   "amount": 25000
+  },
+  {
+   "name": "REBUILDING TOGETHER PENNSYLVANIA",
+   "address": "PO BOX 255854",
+   "status": "PC",
+   "purpose": "Promote Zone Operating Improvement and",
+   "amount": 15000
+  },
+  {
+   "name": "RESPOND NOW NEIGHBORHOOD HOUSING",
+   "address": "1152 23RD ST",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 25000
+  },
+  {
+   "name": "SACRAMENTO FREEDOM INC.",
+   "address": "PO BOX 2115",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 15000
+  },
+  {
+   "name": "SAINT JOHN'S EDUCATION FOUNDATION INC",
+   "address": "2411 ALLHAMBRA BLVD STE 200",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 25000
+  },
+  {
+   "name": "SAN AUGUSTINE",
+   "address": "1 CHRISTOPHER ST",
+   "status": "PC",
+   "purpose": "Five Learning Years (FLY) - General",
+   "amount": 57000
+  },
+  {
+   "name": "SAN FRANCISCO AIDS FOUNDATION",
+   "address": "1035 MARKET ST STE 400",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 35000
+  },
+  {
+   "name": "SAVE THE FAMILY FOUNDATION OF ARIZONA",
+   "address": "125 E UNIVERSITY DR",
+   "status": "PC",
+   "purpose": "Operating Support - COVID-19",
+   "amount": 20000
+  },
+  {
+   "name": "SEEDSPOINT",
+   "address": "3201 E GRANT ST",
+   "status": "PC",
+   "purpose": "Response Economic Opportunity through",
+   "amount": 55000
+  },
+  {
+   "name": "SERVICE OF RETIRED EXECUTIVES",
+   "address": "2828 E CENTRAL AVE STE 800",
+   "status": "PC",
+   "purpose": "Virtual Programming",
+   "amount": 55000
+  },
+  {
+   "name": "ASSOCIATION OF FAMILY FOUNDATIONS",
+   "address": "505 FIFTH ST, Suite 412",
+   "status": "PC",
+   "purpose": "Small Business Owner Education, Training, and",
+   "amount": 21000
+  },
+  {
+   "name": "SONOMA VALLEY EDUCATION FOUNDATION",
+   "address": "PO BOX 193",
+   "status": "PC",
+   "purpose": "Assistance Distance Learning Technology",
+   "amount": 50000
+  },
+  {
+   "name": "SOTENIA WORLD OUTREACH FOUNDATION",
+   "address": "210 SHAW ST",
+   "status": "PC",
+   "purpose": "COVID-19 Response Recovery",
+   "amount": 10000
+  },
+  {
+   "name": "ST JUDE GREAT COMMISSION COMMUNITY",
+   "address": "PO BOX 50806",
+   "status": "PC",
+   "purpose": "General Operating Support during COVID-19",
+   "amount": 50000
+  },
+  {
+   "name": "DEVELOPMENT CORPORATION",
+   "address": "2001 AIRPORT RD S",
+   "status": "PC",
+   "purpose": "First Home Buying financial aid",
+   "amount": 27000
+  },
+  {
+   "name": "MATTHEWS HOUSE INC",
+   "address": "P.O. CAMELBACK RD",
+   "status": "PC",
+   "purpose": "Emergency Operating Support",
+   "amount": 15000
+  },
+  {
+   "name": "STATE OF BLACK ARIZONA",
+   "address": "24 W CAMELBACK RD #558",
+   "status": "PC",
+   "purpose": "African American Leadership Institute (AAI)",
+   "amount": 55000
+  },
+  {
+   "name": "Every Day Connect Foundation",
+   "address": "1031 FRANKLIN STREET FLOOR 2",
+   "status": "PC",
+   "purpose": "Every Day Connect Historical Association",
+   "amount": 55000
+  },
+  {
+   "name": "San Mateo County Historical Society",
+   "address": "2200 BROADWAY",
+   "status": "PC",
+   "purpose": "Leadership Council",
+   "amount": 55000
+  },
+  {
+   "name": "Seattle Goodwill Industries",
+   "address": "700 DEARBORN PLACE S",
+   "status": "PC",
+   "purpose": "COVID-19 Critical Support Services; and Case",
+   "amount": 5000
+  }
+ ],
+ "totals": [
+  {
+   "label": "ATTACHMENT",
+   "amount": 9
+  }
+ ],
+ "_usage": {
+  "in": 581,
+  "out": 2245
+ },
+ "_seconds": 11.6,
+ "_finish": "stop"
+}

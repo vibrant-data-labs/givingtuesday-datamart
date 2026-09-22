@@ -1,0 +1,222 @@
+{
+ "page_kind": "expenditure_responsibility",
+ "heading": "NON-CASH CONTRIBUTIONS",
+ "rows": [
+  {
+   "name": "Rogers Family Inc.",
+   "address": "25 Broadway, Floor 1, New York, NY 10004",
+   "purpose": "Central Support",
+   "amount": 52258144
+  },
+  {
+   "name": "Together We Educate",
+   "address": "221 E. Dumont Rd., Suite 104, Palos Verdes Estates, CA 90274",
+   "purpose": "Central Support",
+   "amount": 52319146
+  },
+  {
+   "name": "Cancer Research Institute",
+   "address": "225 E. 43rd Street, New York, NY 10017",
+   "purpose": "Central Support",
+   "amount": 52158434
+  },
+  {
+   "name": "Children's Defense Fund",
+   "address": "25 H St. Southeast, Suite 300, Washington, DC 20003-4511",
+   "purpose": "Central Support",
+   "amount": 52127326
+  },
+  {
+   "name": "Cranbrook Institute of Science",
+   "address": "1125 N. Woodward Ave., Bloomfield Hills, MI 48304",
+   "purpose": "Central Support",
+   "amount": 52244744
+  },
+  {
+   "name": "The Association for Advancement of Rehabilitation Professionals",
+   "address": "159 Lincoln Avenue, Hastings-on-Hudson, NY 10706-3012",
+   "purpose": "Central Support",
+   "amount": 51741798
+  },
+  {
+   "name": "Trosend",
+   "address": "1016 Franklin Street, 2nd Floor, Oakland, CA 94612",
+   "purpose": "Central Support",
+   "amount": 51745435
+  },
+  {
+   "name": "Transcend",
+   "address": "1601 Van Ness Ave., Suite 203, San Francisco, CA 94109",
+   "purpose": "Central Support",
+   "amount": 52355145
+  },
+  {
+   "name": "BRAC USA, Inc.",
+   "address": "1310 Pacific Ave., Suite 2nd, Tacoma, WA 98402",
+   "purpose": "Central Support",
+   "amount": 52577773
+  },
+  {
+   "name": "NewSchools Venture Fund",
+   "address": "2101 Franklin Street, Suite 305, Oakland, CA 94612",
+   "purpose": "Central Support",
+   "amount": 51522346
+  },
+  {
+   "name": "NewsSchools Foundation",
+   "address": "2141 Court Ave., Suite 2nd, Tacoma, WA 98402",
+   "purpose": "Central Support",
+   "amount": 52727446
+  },
+  {
+   "name": "School Leadership Institute",
+   "address": "735 E. Edison Street, Suite 1100, Los Angeles, CA 90011",
+   "purpose": "Central Support",
+   "amount": 52116191
+  },
+  {
+   "name": "African Leadership Foundation Inc.",
+   "address": "Box 85434, New York, NY 10185-0001",
+   "purpose": "Central Support",
+   "amount": 52201126
+  },
+  {
+   "name": "Children's Museum of Manhattan",
+   "address": "212 W. 53rd Street, New York, NY 10019",
+   "purpose": "Central Support",
+   "amount": 52103416
+  },
+  {
+   "name": "Affirmative Action",
+   "address": "601 West 26th Street, Suite 1100, New York, NY 10001",
+   "purpose": "Central Support",
+   "amount": 52213213
+  },
+  {
+   "name": "Children's College of Education",
+   "address": "Box 35170, New York, NY 10087-0012",
+   "purpose": "Central Support",
+   "amount": 52531136
+  },
+  {
+   "name": "Tracy Foundation",
+   "address": "2501 S. Dixie Hwy., Suite 800, Coral Gables, FL 33134",
+   "purpose": "Central Support",
+   "amount": 51545961
+  },
+  {
+   "name": "The Aspen Institute",
+   "address": "2700 N. Street, N.W., Washington, DC 20037",
+   "purpose": "Central Support",
+   "amount": 52159169
+  },
+  {
+   "name": "The Child's Play Institute",
+   "address": "2310 N.S.W. Avenue, Suite 700, Washington, DC 20007-2908",
+   "purpose": "Central Support",
+   "amount": 51567956
+  },
+  {
+   "name": "The Regents of the University of California",
+   "address": "1115 N. Broadway, Suite 340, Oakland, CA 94607",
+   "purpose": "Central Support",
+   "amount": 52441020
+  },
+  {
+   "name": "Child Aware of America",
+   "address": "2315 W. Court Ave., Suite 700, Washington, DC 20037-1221",
+   "purpose": "Central Support",
+   "amount": 52466811
+  },
+  {
+   "name": "TSNE MissionWorks",
+   "address": "209 South St., Suite 224, New York, NY 10007",
+   "purpose": "Central Support",
+   "amount": 52723356
+  },
+  {
+   "name": "Global Non-Profit Group",
+   "address": "1611 N. Washington St., Suite 1100, Alexandria, VA 22201",
+   "purpose": "Central Support",
+   "amount": 52758132
+  },
+  {
+   "name": "Community West Institute",
+   "address": "219 W. 7th Street, Suite 1000, Los Angeles, CA 90014",
+   "purpose": "Central Support",
+   "amount": 52746116
+  },
+  {
+   "name": "Center for Social Policy",
+   "address": "215 W. 8th Street, Suite 1401, New York, NY 10014",
+   "purpose": "Central Support",
+   "amount": 52171611
+  },
+  {
+   "name": "The Family Institute",
+   "address": "701 N. State College Blvd., Suite 400, Orange, CA 92868",
+   "purpose": "Central Support",
+   "amount": 52314716
+  },
+  {
+   "name": "New York State Institute",
+   "address": "103 E. Sullivan St., Suite 201, New York, NY 10012",
+   "purpose": "Central Support",
+   "amount": 52195146
+  },
+  {
+   "name": "The Children's Medicine",
+   "address": "501 E. Park Avenue, Suite 400, New York, NY 10017",
+   "purpose": "Central Support",
+   "amount": 52133618
+  },
+  {
+   "name": "Save the Children",
+   "address": "203 N. Walnut Hill Lane, Suite 100, Fairfax, VA 22030",
+   "purpose": "Central Support",
+   "amount": 51496355
+  },
+  {
+   "name": "The Crescent Fund, Inc.",
+   "address": "One Lincoln Highway, Suite 610, W. Chester, PA 19380",
+   "purpose": "Central Support",
+   "amount": 52062350
+  },
+  {
+   "name": "Milvus Work Institute",
+   "address": "2804 S. Halsted Ave., Suite 400, Chicago, IL 60616",
+   "purpose": "Central Support",
+   "amount": 52707454
+  },
+  {
+   "name": "Family Challenge, Inc.",
+   "address": "1720 Michigan Ave., Suite 1100, Ann Arbor, MI 48104",
+   "purpose": "Central Support",
+   "amount": 52293211
+  },
+  {
+   "name": "Center for Common Ground",
+   "address": "65 South State Street, Suite 200, Boston, MA 02111",
+   "purpose": "Central Support",
+   "amount": 51167294
+  },
+  {
+   "name": "Johns Hopkins Foundation",
+   "address": "6333 N.W. 53rd Street, Suite 2100, Vienna, VA 22182",
+   "purpose": "Central Support",
+   "amount": 52942139
+  }
+ ],
+ "totals": [
+  {
+   "label": "Total Non-Cash Contributions",
+   "amount": 99235109
+  }
+ ],
+ "_usage": {
+  "in": 581,
+  "out": 1909
+ },
+ "_seconds": 9.8,
+ "_finish": "stop"
+}

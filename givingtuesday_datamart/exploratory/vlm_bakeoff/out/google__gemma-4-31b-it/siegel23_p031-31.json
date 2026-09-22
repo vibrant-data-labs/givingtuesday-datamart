@@ -1,0 +1,111 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "FORM 990-PF PART XIV - GRANTS AND CONTRIBUTIONS PAID DURING THE YEAR",
+ "rows": [
+  {
+   "name": "University of Pennsylvania",
+   "address": "104 South Garrison Ave\nPhiladelphia, PA 19104",
+   "status": "PC",
+   "purpose": "To support the scaling of UPenn's Coding Teng",
+   "amount": 50000
+  },
+  {
+   "name": "University of Education",
+   "address": "2940 Broadway\nNew York, NY 10025",
+   "status": "PC",
+   "purpose": "To provide general operating support.",
+   "amount": 150000
+  },
+  {
+   "name": "Augustus and Caroline Lusardi Foundation (The Families and Workers Initiative)",
+   "address": "2040 Broadway\nNew York, NY 10023",
+   "status": "PC",
+   "purpose": "To support the goals of Lusardi's mission.",
+   "amount": 250000
+  },
+  {
+   "name": "Booking.com",
+   "address": "1825 K Street NW\nWashington, DC 20006",
+   "status": "",
+   "purpose": "To provide general operating support.",
+   "amount": 50000
+  },
+  {
+   "name": "The Beacon Corporation",
+   "address": "1400 Pennsylvania Ave NW\nWashington, DC 20004",
+   "status": "PC",
+   "purpose": "To support the expansion of the BRC's minority entrepreneurship program.",
+   "amount": 50000
+  },
+  {
+   "name": "Center for Coding Competence (BRC) - Southern Venture County",
+   "address": "14 Mountain View Ln, Suite 4\nMountain View, CA 94043",
+   "status": "PC",
+   "purpose": "To support the Beacon Corporation.",
+   "amount": 150000
+  },
+  {
+   "name": "Coding Nation",
+   "address": "1400 Pennsylvania Ave NW\nWashington, DC 20004",
+   "status": "PC",
+   "purpose": "To support DevTech's expand to their \"Coding Brain\" pilot and expanding their Coding as a Language construction.",
+   "amount": 150000
+  },
+  {
+   "name": "Cornell University, Cornell Computing and Information Science",
+   "address": "140 Cornell Ave, Suite 208\nIthaca, NY 14853",
+   "status": "PC",
+   "purpose": "To help break barriers in NYC.",
+   "amount": 200000
+  },
+  {
+   "name": "Cornell University, Cornell Foundation",
+   "address": "P.O. Box 5191\nIthaca, NY 14853",
+   "status": "PC",
+   "purpose": "To provide general operating support to Brown University",
+   "amount": 200000
+  },
+  {
+   "name": "Computer Science Center (Denver)",
+   "address": "1201 Broadway, Suite 207\nDenver, CO 80203",
+   "status": "PC",
+   "purpose": "To support a working group focused on infrastructure and future energy education systems.",
+   "amount": 50000
+  },
+  {
+   "name": "Columbia University",
+   "address": "209 West 116th Street\nNew York, NY 10027",
+   "status": "PC",
+   "purpose": "To provide general operating support.",
+   "amount": 50000
+  },
+  {
+   "name": "Computer Science Center (New York)",
+   "address": "209 West 116th Street\nNew York, NY 10027",
+   "status": "PC",
+   "purpose": "To support Carnegie's urban Night Owl (Code 1200) education beacon.",
+   "amount": 200000
+  },
+  {
+   "name": "Center for Democracy and Technology",
+   "address": "1131 15th Street NW\nWashington, DC 20005",
+   "status": "PC",
+   "purpose": "To support one fellow and research on the impact of technology on society.",
+   "amount": 200000
+  },
+  {
+   "name": "Center for Democracy and Technology",
+   "address": "1131 15th Street NW\nWashington, DC 20005",
+   "status": "PC",
+   "purpose": "To support one fellow and research on the impact of technology on society.",
+   "amount": 150000
+  }
+ ],
+ "totals": [],
+ "_usage": {
+  "in": 469,
+  "out": 992
+ },
+ "_seconds": 27.3,
+ "_finish": "stop"
+}

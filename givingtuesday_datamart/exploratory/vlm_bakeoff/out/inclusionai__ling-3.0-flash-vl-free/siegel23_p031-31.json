@@ -1,0 +1,104 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "FORM 990PF, PART XIV \u2014 GRANTS AND CONTRIBUTIONS PAID DURING THE YEAR STATEMENT 21",
+ "rows": [
+  {
+   "name": "1UP Coaching",
+   "address": "P.O. Box 524 Elgemont, PA 19028",
+   "status": "PC",
+   "purpose": "To support the scaling of 1UPCoaching",
+   "amount": 50000
+  },
+  {
+   "name": "Alder Graduate School of Education",
+   "address": "2946 Broadway St Redwood City, CA 94062",
+   "status": "PC",
+   "purpose": "To support of Alder GSE's residency model",
+   "amount": 150000
+  },
+  {
+   "name": "Amalgamated Charitable Foundation (The Families and Workers Fund)",
+   "address": "1825 K Street NW Washington, DC 20006",
+   "status": "PC",
+   "purpose": "To provide general operating support.",
+   "amount": 250000
+  },
+  {
+   "name": "Biodesign Challenge",
+   "address": "250 Hudson St, Suite 702 New York, NY 10013",
+   "status": "PC",
+   "purpose": "To support the BioDesign competition.",
+   "amount": 65000
+  },
+  {
+   "name": "Black River Innovation Campus (BRIC) - Southern Windsor County",
+   "address": "14 Clinton St, Suite 7 Springfield, VT 05156",
+   "status": "PC",
+   "purpose": "To support the expansion of BRIC's rural entrepreneurship program.",
+   "amount": 85000
+  },
+  {
+   "name": "Boston College (DevTech Research Group)",
+   "address": "Lynch School Of Education, Campion Hall - Office 210 Chestnut Hill, MA 02467",
+   "status": "PC",
+   "purpose": "To support DevTech to expand their \"Coding Brain\" pilot and expanding their Coding as a Language curriculum.",
+   "amount": 150000
+  },
+  {
+   "name": "Braven Inc.",
+   "address": "100 N. La Salle St, Suite 310 Chicago, IL 60602",
+   "status": "PC",
+   "purpose": "To help Braven scale in NYC.",
+   "amount": 200000
+  },
+  {
+   "name": "Brown University",
+   "address": "P.O. Box 1893 Providence, RI 02912",
+   "status": "PC",
+   "purpose": "To provide general operating support to Brown University.",
+   "amount": 50000
+  },
+  {
+   "name": "Cambiar Education (Learner Studio)",
+   "address": "4653 Carmel Mountain Rd, Ste. 308-37 San Diego, CA 92130",
+   "status": "PC",
+   "purpose": "To support a working group focused on infrastructure and future-ready education systems.",
+   "amount": 60800
+  },
+  {
+   "name": "Capital B News",
+   "address": "209 W 29th St, Suite 107 New York, NY 10001",
+   "status": "PC",
+   "purpose": "To provide general operating support.",
+   "amount": 550000
+  },
+  {
+   "name": "Carnegie Hall",
+   "address": "881 7th Ave New York, NY 10019",
+   "status": "PC",
+   "purpose": "To support Carnegie Hall's Opening Night Gala (2023/2024 season).",
+   "amount": 200000
+  },
+  {
+   "name": "Center for American Progress",
+   "address": "1333 H St Northwest, 10th Floor Washington, DC 20005",
+   "status": "PC",
+   "purpose": "To support one fellow and research on the impact of technology on society.",
+   "amount": 300000
+  },
+  {
+   "name": "Center for Democracy and Technology",
+   "address": "1401 K St NW, Suite 200 Washington, DC 20005",
+   "status": "PC",
+   "purpose": "To support one fellow and research on the impact of technology on society.",
+   "amount": 150000
+  }
+ ],
+ "totals": [],
+ "_usage": {
+  "in": 1925,
+  "out": 3351
+ },
+ "_seconds": 24.4,
+ "_finish": "stop"
+}

@@ -1,0 +1,116 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "",
+ "rows": [
+  {
+   "name": "United Way Worldwide DAF / YourCause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 125678.24
+  },
+  {
+   "name": "United Way Worldwide DAF / YourCause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 214382.97
+  },
+  {
+   "name": "United Way Worldwide DAF / YourCause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 1314268.97
+  },
+  {
+   "name": "United Way Worldwide DAF / YourCause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 2500.0
+  },
+  {
+   "name": "United Way Worldwide DAF / YourCause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 3000.96
+  },
+  {
+   "name": "United Way Worldwide DAF / YourCause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 18109.58
+  },
+  {
+   "name": "YourCause fbo The Blackbaud Giving Fund",
+   "address": "65 Fairchild Street, Charleston, SC 29492",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 4000.0
+  },
+  {
+   "name": "YourCause fbo The Blackbaud Giving Fund",
+   "address": "65 Fairchild Street, Charleston, SC 29492",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 41886.4
+  },
+  {
+   "name": "YourCause fbo The Blackbaud Giving Fund",
+   "address": "65 Fairchild Street, Charleston, SC 29492",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 116888.0
+  },
+  {
+   "name": "YourCause fbo The Blackbaud Giving Fund",
+   "address": "65 Fairchild Street, Charleston, SC 29492",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 540482.73
+  },
+  {
+   "name": "YourCause fbo The Blackbaud Giving Fund",
+   "address": "65 Fairchild Street, Charleston, SC 29492",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 104127.63
+  },
+  {
+   "name": "YourCause fbo The Blackbaud Giving Fund",
+   "address": "65 Fairchild Street, Charleston, SC 29492",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 943086.49
+  },
+  {
+   "name": "YourCause fbo The Blackbaud Giving Fund",
+   "address": "65 Fairchild Street, Charleston, SC 29492",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 2400000.0
+  },
+  {
+   "name": "YourCause fbo The Blackbaud Giving Fund",
+   "address": "65 Fairchild Street, Charleston, SC 29492",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 8510427.97
+  }
+ ],
+ "totals": [
+  {
+   "label": "",
+   "amount": 21344804.43
+  }
+ ],
+ "_usage": {
+  "in": 1077,
+  "out": 918
+ },
+ "_seconds": 6.1,
+ "_finish": "stop"
+}

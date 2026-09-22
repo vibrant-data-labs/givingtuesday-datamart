@@ -1,0 +1,118 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "GRANTS AND CONTRIBUTIONS PAID DURING THE YEAR",
+ "rows": [
+  {
+   "name": "The Margaret Honey Design Make Play Fund",
+   "address": "4701 11th Street",
+   "status": "PC",
+   "purpose": "To support the Margaret Honey Design Make Play Fund.",
+   "amount": 50000
+  },
+  {
+   "name": "To support their annual benefit:",
+   "address": "New York Runners",
+   "status": "PC",
+   "purpose": null,
+   "amount": 5500
+  },
+  {
+   "name": "To support the next phase of Rebuild by Design's Atlas of Disaster",
+   "address": "156 West 56th Street 5th Floor",
+   "status": "PC",
+   "purpose": null,
+   "amount": 256000
+  },
+  {
+   "name": "To support the Center on Inclusive Computing transfer pathways research.",
+   "address": "New York University, 402 CP",
+   "status": "PC",
+   "purpose": "To support the Center on Inclusive Computing transfer pathways research.",
+   "amount": 156000
+  },
+  {
+   "name": "To provide general operating support and scaling efforts.",
+   "address": "716 Columbus Avenue",
+   "status": "PC",
+   "purpose": null,
+   "amount": 1100000
+  },
+  {
+   "name": "To provide general operating support.",
+   "address": "100 6th Ave, 16th Fl",
+   "status": "PC",
+   "purpose": null,
+   "amount": 15000
+  },
+  {
+   "name": "To provide general operating support.",
+   "address": "New York, NY 10013",
+   "status": "PC",
+   "purpose": null,
+   "amount": 15500
+  },
+  {
+   "name": "To support Project Tomorrow's (PT) work on computational thinking.",
+   "address": "Atlanta, GA",
+   "status": "PC",
+   "purpose": null,
+   "amount": 50000
+  },
+  {
+   "name": "To support Projects with Care's distribution of graphing calculators in NYCHA Housing",
+   "address": "3943 Irvine Blvd, Suite 4416",
+   "status": "PC",
+   "purpose": "To support Projects with Care's distribution of graphing calculators in NYCHA Housing developments.",
+   "amount": 12000
+  },
+  {
+   "name": "To provide general operating support to help Pursuit expand their training model in New York City.",
+   "address": "430 West 24th Street Suite M1E",
+   "status": "PC",
+   "purpose": null,
+   "amount": 1000000
+  },
+  {
+   "name": "To support The RPA Centennial Gala and Exhibition.",
+   "address": "47-10 Astoria Blvd, 2nd Fl",
+   "status": "PC",
+   "purpose": null,
+   "amount": 25000
+  },
+  {
+   "name": "To provide general operating support to RPA.",
+   "address": "Regional Plan Association",
+   "status": "PC",
+   "purpose": null,
+   "amount": 100000
+  },
+  {
+   "name": "To support the continued development and scaling of eLab.",
+   "address": "New Whitehall 16th Floor",
+   "status": "PC",
+   "purpose": null,
+   "amount": 25000
+  },
+  {
+   "name": "To support the JobsDirect program at LaGuardia Community College.",
+   "address": "50 Riverside Blvd, 4th Fl",
+   "status": "PC",
+   "purpose": null,
+   "amount": 15000
+  },
+  {
+   "name": "To provide support to the learning + technology fund.",
+   "address": "Research Found of the City University of NY (LaGuardia Community College)",
+   "status": "PC",
+   "purpose": null,
+   "amount": 1130000
+  }
+ ],
+ "totals": [],
+ "_usage": {
+  "in": 581,
+  "out": 896
+ },
+ "_seconds": 4.7,
+ "_finish": "stop"
+}

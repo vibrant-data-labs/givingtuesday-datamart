@@ -1,0 +1,321 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "ATTACHMENT 9",
+ "rows": [
+  {
+   "name": "REGIONAL HUMAN SERVICES CENTER OF GEORGIA",
+   "address": "831 FIRST AVENUE SW\nGREENWOOD, GA 31234",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 10000.0
+  },
+  {
+   "name": "ORGANIZATION FOR HUMAN SERVICES OF GERLIN",
+   "address": "431 KEOUGH ST\nGREEN BAY, WI 54301",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 10000.0
+  },
+  {
+   "name": "METRO HOUSE",
+   "address": "2054 HUGHES ST BLDG 20\nLOS ANGELES, CA 90017",
+   "status": "PC",
+   "purpose": "General Operating Support for COVID-19 Support",
+   "amount": 15000.0
+  },
+  {
+   "name": "EMERGENCY MEN'S SHELTER FOR YOUNG ADULTS",
+   "address": "1550 N. MAIN ST\nLOS ANGELES, CA 90012",
+   "status": "PC",
+   "purpose": "General Operating Support for COVID-19 Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "MEN'S NEW START HOME FOR YOUNG ADULTS",
+   "address": "1550 N. MAIN ST\nLOS ANGELES, CA 90012",
+   "status": "PC",
+   "purpose": "General Operating Support for COVID-19 Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "GAYLE AND GLENN HOUSE",
+   "address": "4215 SURLEY ST\nLOS ANGELES, CA 90043",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "HOPE CENTER",
+   "address": "1450 N. MAIN ST\nLOS ANGELES, CA 90012",
+   "status": "PC",
+   "purpose": "General Operating Support for COVID-19 Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "ORGANIZATIONS FOR CHANGE EMPOWERMENT INC",
+   "address": "PO BOX 22610\nSACRAMENTO, CA 95820",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 10000.0
+  },
+  {
+   "name": "OCCA FOOD CONNEXION COMMUNITY CENTER INC",
+   "address": "PO BOX 22610\nSACRAMENTO, CA 95820",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 10000.0
+  },
+  {
+   "name": "CHART FOUNDATION",
+   "address": "1443 STATE ST\nALBANY, NY 12210",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "CHART FOUNDATION",
+   "address": "1443 STATE ST\nALBANY, NY 12210",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "PARK REGENCY COMMUNITY CENTER",
+   "address": "2054 SUNNYSIDE AVE\nSACRAMENTO, CA 95823",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "PARK REGENCY COMMUNITY CENTER",
+   "address": "2054 SUNNYSIDE AVE\nSACRAMENTO, CA 95823",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "SOCIETY FOR THE PROTECTION OF ANIMALS",
+   "address": "PO BOX 254\nSUNNYVALE, CA 94085",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "SOCIETY FOR THE PROTECTION OF ANIMALS",
+   "address": "PO BOX 254\nSUNNYVALE, CA 94085",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "PELLEGRINI HOME",
+   "address": "PO BOX 254\nSUNNYVALE, CA 94085",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "PELLEGRINI HOME",
+   "address": "PO BOX 254\nSUNNYVALE, CA 94085",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "REBUILDING HOPE FOR HOMELESS YOUTH",
+   "address": "PO BOX 254\nSUNNYVALE, CA 94085",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "REBUILDING HOPE FOR HOMELESS YOUTH",
+   "address": "PO BOX 254\nSUNNYVALE, CA 94085",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "ROBINSON HOME FOR HOMELESS YOUTH",
+   "address": "PO BOX 254\nSUNNYVALE, CA 94085",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "ROBINSON HOME FOR HOMELESS YOUTH",
+   "address": "PO BOX 254\nSUNNYVALE, CA 94085",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "SAVE THE FAMILY COMMUNITY EDUCATION INC",
+   "address": "152-2279 SURLEY ST\nLOS ANGELES, CA 90043",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "SAVE THE FAMILY COMMUNITY EDUCATION INC",
+   "address": "152-2279 SURLEY ST\nLOS ANGELES, CA 90043",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "SAN DIEGO COMMUNITY EDUCATION INC",
+   "address": "152-2279 SURLEY ST\nLOS ANGELES, CA 90043",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "SAN DIEGO COMMUNITY EDUCATION INC",
+   "address": "152-2279 SURLEY ST\nLOS ANGELES, CA 90043",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "SAN FRANCISCO EDUCATION FOUNDATION",
+   "address": "1214 UNIVERSITY AVE\nSAN FRANCISCO, CA 94103",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 10000.0
+  },
+  {
+   "name": "SAN FRANCISCO EDUCATION FOUNDATION",
+   "address": "1214 UNIVERSITY AVE\nSAN FRANCISCO, CA 94103",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 10000.0
+  },
+  {
+   "name": "SAN FRANCISCO EDUCATION FOUNDATION",
+   "address": "1214 UNIVERSITY AVE\nSAN FRANCISCO, CA 94103",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 10000.0
+  },
+  {
+   "name": "SONORA VALLEY EDUCATION FOUNDATION",
+   "address": "515-1 NORTH AVE\nSONORA, CA 95368",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 10000.0
+  },
+  {
+   "name": "SONORA VALLEY EDUCATION FOUNDATION",
+   "address": "515-1 NORTH AVE\nSONORA, CA 95368",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 10000.0
+  },
+  {
+   "name": "SONORA VALLEY EDUCATION FOUNDATION",
+   "address": "515-1 NORTH AVE\nSONORA, CA 95368",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 10000.0
+  },
+  {
+   "name": "SEEDWORKS",
+   "address": "PO BOX 403\nPHOENIX, AZ 85001",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "SEEDWORKS",
+   "address": "PO BOX 403\nPHOENIX, AZ 85001",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "SEEDWORKS",
+   "address": "PO BOX 403\nPHOENIX, AZ 85001",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 5000.0
+  },
+  {
+   "name": "SOTERIA NORTHWEST EDUCATION FOUNDATION",
+   "address": "210-19TH ST\nGROVERSMONT, WA 98232",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 10000.0
+  },
+  {
+   "name": "SOTERIA NORTHWEST EDUCATION FOUNDATION",
+   "address": "210-19TH ST\nGROVERSMONT, WA 98232",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 10000.0
+  },
+  {
+   "name": "SOTERIA NORTHWEST EDUCATION FOUNDATION",
+   "address": "210-19TH ST\nGROVERSMONT, WA 98232",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 10000.0
+  },
+  {
+   "name": "STATE OF BLACK AMERICA FOUNDATION",
+   "address": "PO BOX 1300\nPAXTON, MA 01639",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 10000.0
+  },
+  {
+   "name": "STATE OF BLACK AMERICA FOUNDATION",
+   "address": "PO BOX 1300\nPAXTON, MA 01639",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 10000.0
+  },
+  {
+   "name": "STATE OF BLACK AMERICA FOUNDATION",
+   "address": "PO BOX 1300\nPAXTON, MA 01639",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 10000.0
+  },
+  {
+   "name": "SAN MARTIN CHURCH PROFESSIONAL ASSOCIATION",
+   "address": "230-114th AVE\nSEATTLE, WA 98134",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 10000.0
+  },
+  {
+   "name": "SAN MARTIN CHURCH PROFESSIONAL ASSOCIATION",
+   "address": "230-114th AVE\nSEATTLE, WA 98134",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 10000.0
+  },
+  {
+   "name": "SAN MARTIN CHURCH PROFESSIONAL ASSOCIATION",
+   "address": "230-114th AVE\nSEATTLE, WA 98134",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 10000.0
+  },
+  {
+   "name": "Seattle Goodwill Industries",
+   "address": "390 Dearborn Place S.\nSEATTLE, WA 98104",
+   "status": "PC",
+   "purpose": "COVID-19 - Support Services and Case",
+   "amount": 10000.0
+  }
+ ],
+ "totals": [],
+ "_usage": {
+  "in": 469,
+  "out": 2789
+ },
+ "_seconds": 51.0,
+ "_finish": "stop"
+}

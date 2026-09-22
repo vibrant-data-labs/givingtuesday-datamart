@@ -1,0 +1,160 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "FORM 990-PF PART XV - GRANTS AND CONTRIBUTIONS PAID DURING THE YEAR",
+ "rows": [
+  {
+   "name": "Columbia University",
+   "address": "New York Hall of Science\n65-01 Metropolitan Parkway\nQueens, NY 11368",
+   "status": "PC",
+   "purpose": "To support the Margaret Huey Design Make Play Fund.",
+   "amount": 50000
+  },
+  {
+   "name": "New York Hall of Science",
+   "address": "65-01 Metropolitan Parkway\nQueens, NY 11368",
+   "status": "PC",
+   "purpose": "To support their annual benefit.",
+   "amount": 500
+  },
+  {
+   "name": "The New York Public Library",
+   "address": "155 5th Avenue (Mail Stop 11th Floor)\nNew York, NY 10017",
+   "status": "PC",
+   "purpose": "To support the next phase of Rebuild by Design's Atlas of Adaptation.",
+   "amount": 20000
+  },
+  {
+   "name": "New York University (Deborah Myriby)",
+   "address": "729 Third Avenue\nNew York, NY 10017",
+   "status": "PC",
+   "purpose": "To support the creation of inclusive computing",
+   "amount": 20000
+  },
+  {
+   "name": "Center for Inclusive Computing",
+   "address": "729 Third Avenue\nNew York, NY 10017",
+   "status": "PC",
+   "purpose": "To support general infrastructure support and scaling efforts.",
+   "amount": 150000
+  },
+  {
+   "name": "Columbia University",
+   "address": "725 Corollary Place, Rm 402\nNew York, NY 10027",
+   "status": "PC",
+   "purpose": "To support general infrastructure support and scaling efforts.",
+   "amount": 150000
+  },
+  {
+   "name": "Columbia University",
+   "address": "725 Corollary Place, Rm 402\nNew York, NY 10027",
+   "status": "PC",
+   "purpose": "To support general infrastructure support and scaling efforts.",
+   "amount": 150000
+  },
+  {
+   "name": "Columbia University",
+   "address": "725 Corollary Place, Rm 402\nNew York, NY 10027",
+   "status": "PC",
+   "purpose": "To support Project Everest (PYT) work on computational parking.",
+   "amount": 150000
+  },
+  {
+   "name": "Columbia University",
+   "address": "725 Corollary Place, Rm 402\nNew York, NY 10027",
+   "status": "PC",
+   "purpose": "To support Project Everest (PYT) work on computational parking.",
+   "amount": 150000
+  },
+  {
+   "name": "Columbia University",
+   "address": "725 Corollary Place, Rm 402\nNew York, NY 10027",
+   "status": "PC",
+   "purpose": "To support Project Everest (PYT) work on computational parking.",
+   "amount": 150000
+  },
+  {
+   "name": "Columbia University",
+   "address": "725 Corollary Place, Rm 402\nNew York, NY 10027",
+   "status": "PC",
+   "purpose": "To support Project Everest (PYT) work on computational parking.",
+   "amount": 50000
+  },
+  {
+   "name": "Columbia University",
+   "address": "725 Corollary Place, Rm 402\nNew York, NY 10027",
+   "status": "PC",
+   "purpose": "To promote generative adversarial (GAN) research to develop\ncomputational parking solutions.",
+   "amount": 50000
+  },
+  {
+   "name": "Columbia University",
+   "address": "725 Corollary Place, Rm 402\nNew York, NY 10027",
+   "status": "PC",
+   "purpose": "To provide generative adversarial (GAN) research to develop\ncomputational parking solutions.",
+   "amount": 50000
+  },
+  {
+   "name": "Columbia University",
+   "address": "725 Corollary Place, Rm 402\nNew York, NY 10027",
+   "status": "PC",
+   "purpose": "To provide generative adversarial (GAN) research to develop\ncomputational parking solutions.",
+   "amount": 12000
+  },
+  {
+   "name": "Columbia University",
+   "address": "725 Corollary Place, Rm 402\nNew York, NY 10027",
+   "status": "PC",
+   "purpose": "To support the RPA External seminar and its Exhibition.",
+   "amount": 12000
+  },
+  {
+   "name": "Columbia University",
+   "address": "725 Corollary Place, Rm 402\nNew York, NY 10027",
+   "status": "PC",
+   "purpose": "To provide general operating support to RPA.",
+   "amount": 25000
+  },
+  {
+   "name": "Columbia University",
+   "address": "725 Corollary Place, Rm 402\nNew York, NY 10027",
+   "status": "PC",
+   "purpose": "To support the convenient environment and networking at RPA.",
+   "amount": 25000
+  },
+  {
+   "name": "Columbia University",
+   "address": "725 Corollary Place, Rm 402\nNew York, NY 10027",
+   "status": "PC",
+   "purpose": "To support the convenient environment and networking at RPA.",
+   "amount": 100000
+  },
+  {
+   "name": "Columbia University",
+   "address": "725 Corollary Place, Rm 402\nNew York, NY 10027",
+   "status": "PC",
+   "purpose": "To support the convenient environment and networking at RPA.",
+   "amount": 250000
+  },
+  {
+   "name": "City University of New York (CUNY)",
+   "address": "New York, NY 10004",
+   "status": "PC",
+   "purpose": "To support the scholarship program at LaGuardia Community College.",
+   "amount": 100000
+  },
+  {
+   "name": "City University of New York (CUNY)",
+   "address": "New York, NY 10004",
+   "status": "PC",
+   "purpose": "To provide support to the Learning Technology Fund.",
+   "amount": 1300000
+  }
+ ],
+ "totals": [],
+ "_usage": {
+  "in": 469,
+  "out": 1440
+ },
+ "_seconds": 29.0,
+ "_finish": "stop"
+}

@@ -1,0 +1,111 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "GRANTS AND CONTRIBUTIONS PAID DURING THE YEAR",
+ "rows": [
+  {
+   "name": "Natural Resources Defense Council",
+   "address": "40 West 20th Street, New York, NY 10011",
+   "status": "PC",
+   "purpose": "To support the Margaret Hersey Design Make Play Fund",
+   "amount": 50000
+  },
+  {
+   "name": "NYU",
+   "address": "70 Washington Square South, New York, NY 10012",
+   "status": "PC",
+   "purpose": "To support their music benefit",
+   "amount": 500
+  },
+  {
+   "name": "New York University (Rebuild by Design)",
+   "address": "70 Washington Square South, New York, NY 10012",
+   "status": "PC",
+   "purpose": "To support the new phase of Rebuild by Design's Atlas of Disaster",
+   "amount": 240000
+  },
+  {
+   "name": "Northeastern University, Center for Inclusive Computing",
+   "address": "177 Huntington Avenue, 10th Floor, Boston, MA 02115",
+   "status": "PC",
+   "purpose": "To support the Center on Inclusive Computing for teacher pathway research",
+   "amount": 500000
+  },
+  {
+   "name": "Harvard University",
+   "address": "124 Mt Auburn Street, Cambridge, MA 02138",
+   "status": "PC",
+   "purpose": "To provide general operating support and scaling efforts.",
+   "amount": 1000000
+  },
+  {
+   "name": "Smith College",
+   "address": "10 Elm Street, Northampton, MA 01063",
+   "status": "PC",
+   "purpose": "To provide general operating support",
+   "amount": 250000
+  },
+  {
+   "name": "Project Tomorrow",
+   "address": "PO Box 20815, Catalina, CA 93707",
+   "status": "PC",
+   "purpose": "To support Project Tomorrow (PT) work on computational thinking",
+   "amount": 500000
+  },
+  {
+   "name": "Projects With Care",
+   "address": "950 3rd Street, Suite 410, Santa Monica, CA 90403",
+   "status": "PC",
+   "purpose": "To support project with Care's distribution of graphing calculators in NYC/YHA housing developments.",
+   "amount": 52000
+  },
+  {
+   "name": "Research Foundation for the City University of New York",
+   "address": "230 West 41st Street, New York, NY 10036",
+   "status": "PC",
+   "purpose": "To provide general operating support to help Pursue expand their training model in New York City",
+   "amount": 1000000
+  },
+  {
+   "name": "Regional Plan Association",
+   "address": "One Whitehall Street, 16th Floor, New York, NY 10004",
+   "status": "PC",
+   "purpose": "To support the RPA's 4th Regional Plan and exhibition",
+   "amount": 250000
+  },
+  {
+   "name": "New York University",
+   "address": "70 Washington Square South, New York, NY 10012",
+   "status": "PC",
+   "purpose": "To provide general operating support to RPA",
+   "amount": 500000
+  },
+  {
+   "name": "Riverkeeper Inc.",
+   "address": "20 Secor Road, Ossining, NY 10562",
+   "status": "PC",
+   "purpose": "To support the continued development and scaling of Fish",
+   "amount": 250000
+  },
+  {
+   "name": "Research Foundation of the City University of NY (LaGuardia Community College)",
+   "address": "230 West 41st Street, New York, NY 10036",
+   "status": "PC",
+   "purpose": "To support the IntelliQuest program at LaGuardia Community College",
+   "amount": 500000
+  },
+  {
+   "name": "Robin Hood Foundation",
+   "address": "826 Broadway, 8th Floor, New York, NY 10003",
+   "status": "PC",
+   "purpose": "To provide support to the Learning + Technology Fund",
+   "amount": 1130000
+  }
+ ],
+ "totals": [],
+ "_usage": {
+  "in": 695,
+  "out": 2937
+ },
+ "_seconds": 14.8,
+ "_finish": "stop"
+}

@@ -1,0 +1,3981 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "SPECIAL CONTRIBUTIONS",
+ "rows": [
+  {
+   "name": "1793, Inc.",
+   "address": "1912 Eye Street, NW / Washington, DC 20006",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 109500
+  },
+  {
+   "name": "22nd Century Technologies, Inc.",
+   "address": "4 Corporate Drive, 2nd Floor / Lake Success, NY 11042",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 5000
+  },
+  {
+   "name": "21st Century Leaders, Inc.",
+   "address": "2002 Summit Blvd., NE, Suite 680 / Atlanta, GA 30319",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 51600
+  },
+  {
+   "name": "A Wider Bridge",
+   "address": "1208 Broadway Street / San Francisco, CA 94109",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Accion International",
+   "address": "3 Center Plaza, Suite 450 / Boston, MA 02108",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Adalah: Legal Center for Arab Minority Rights in Israel",
+   "address": "90 Abed Al-Rahman Ibn Awf Street / P.O. Box 51056, Jerusalem 9151001",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "ADARA",
+   "address": "P.O. Box 6100 / Wilton, CT 06854",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Advocates for Children of New York",
+   "address": "151 West 30th Street, 5th Floor / New York, NY 10001",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Advocates for Youth",
+   "address": "2000 M Street, NW, Suite 750 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 15000
+  },
+  {
+   "name": "AFL-CIO",
+   "address": "815 16th Street, NW / Washington, DC 20006",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "African Economic Development Solutions",
+   "address": "500 East 8th Street / St. Paul, MN 55101",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "African Leadership Academy",
+   "address": "65 Main Street, P.O. Box 55 / Wartburg, 3520, South Africa",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "African Women's Development Fund",
+   "address": "14 Rowan Road, East Legon / Accra, Ghana",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Agros International",
+   "address": "1560 N.E. 24th Avenue, Suite 4 / Camas, WA 98607",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "AIPAC New York",
+   "address": "131 East 80th Street / New York, NY 10028",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Akilah Institute for Women",
+   "address": "1000 Potomac Street, NW / Washington, DC 20007",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Albuquerque Community Foundation",
+   "address": "624 Tijeras Avenue NW / Suite 700 / Albuquerque, NM 87102",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 100000
+  },
+  {
+   "name": "Alliance for Children and Families",
+   "address": "11700 West Lake Park Drive / Milwaukee, WI 53224",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "American-Arab Anti-Discrimination Committee",
+   "address": "1990 M Street, NW, Suite 610 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 15000
+  },
+  {
+   "name": "American Civil Liberties Union Foundation",
+   "address": "125 Broad Street, 18th Floor / New York, NY 10004",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 100000
+  },
+  {
+   "name": "American Constitution Society for Law and Policy",
+   "address": "1332 H Street NW / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "American Friends of Neve Shalom/Wahat al-Salam",
+   "address": "481 Carroll Street / Brooklyn, NY 11215",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 30000
+  },
+  {
+   "name": "American India Foundation",
+   "address": "292 Madison Avenue, 9th Floor / New York, NY 10017",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 100000
+  },
+  {
+   "name": "American Indian College Fund",
+   "address": "8333 Greenwood Boulevard / Denver, CO 80221",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 20000
+  },
+  {
+   "name": "American Jewish Joint Distribution Committee",
+   "address": "711 Third Avenue / New York, NY 10017",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 250000
+  },
+  {
+   "name": "American Society for Yad Vashem",
+   "address": "500 Fifth Avenue, Suite 1600 / New York, NY 10110",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 100000
+  },
+  {
+   "name": "Americans United for Separation of Church and State",
+   "address": "1301 K Street, NW, Suite 850, East Tower / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Amnesty International USA",
+   "address": "600 Massachusetts Avenue NW, Suite 500 / Washington, DC 20001",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "An-Nahar Arab American Association",
+   "address": "50 Wall Street / New York, NY 10005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 5000
+  },
+  {
+   "name": "Anchorage Community Land Trust",
+   "address": "535 E. 4th Avenue / Anchorage, AK 99501",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Anti-Defamation League Foundation",
+   "address": "605 Third Avenue / New York, NY 10158",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 15000
+  },
+  {
+   "name": "Arab American Institute Foundation",
+   "address": "1600 K Street, NW, Suite 501 / Washington, DC 20006",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Arab Community Center for Economic and Social Services",
+   "address": "26501 Lawrence Avenue / Dearborn, MI 48126",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Architects Without Borders",
+   "address": "1000 Potomac Street, NW / Washington, DC 20007",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 30000
+  },
+  {
+   "name": "Arizona Community Foundation",
+   "address": "2201 East Camelback Road, Suite 202B / Phoenix, AZ 85016",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Armor of Light",
+   "address": "17 S. East 21st Street / Boston, MA 02114",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Asamblea de Desarrollo Comunitario",
+   "address": "1600 W. 37th Street / Los Angeles, CA 90018",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Asian Americans Advancing Justice",
+   "address": "1145 Wilshire Blvd, 2nd Floor / Los Angeles, CA 90017",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Asian Americans Advancing Justice",
+   "address": "1825 K Street, NW / Washington, DC 20006",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Asian Art Museum of San Francisco",
+   "address": "200 Larkin Street / San Francisco, CA 94102",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Aspen Institute",
+   "address": "One Dupont Circle, NW, Suite 700 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Associated Grantmakers, Inc.",
+   "address": "55 Court Street, Suite 404 / Boston, MA 02108",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Association of American Indian Affairs",
+   "address": "54 Kings Highway West / Haddonfield, NJ 08033",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Association of Black Foundation Executives",
+   "address": "1400 Peachtree Street, NW, Suite 1140 / Atlanta, GA 30309",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Association of Fundraising Professionals",
+   "address": "1101 King St, Suite 700 / Alexandria, VA 22314",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Auburn Theological Seminary",
+   "address": "475 Riverside Drive, Suite 500 / New York, NY 10115",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 100000
+  },
+  {
+   "name": "Backbone Campaign",
+   "address": "P.O. Box 159 / Vashon, WA 98070",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 15000
+  },
+  {
+   "name": "Bay Area Institute",
+   "address": "1000 Potomac Street, NW / Washington, DC 20007",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Bend the Arc Jewish Action",
+   "address": "330 Seventh Avenue, Suite 1901 / New York, NY 10001",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 100000
+  },
+  {
+   "name": "Berkeley Repertory Theater",
+   "address": "2025 Addison Street / Berkeley, CA 94704",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Beth Shalom Congregation",
+   "address": "9401 Wornall Road / Kansas City, MO 64114",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 284050
+  },
+  {
+   "name": "Beth Shalom Congregation",
+   "address": "9401 Wornall Road / Kansas City, MO 64114",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Big Brothers Big Sisters of New York City",
+   "address": "130 East 40th Street / New York, NY 10016",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 15000
+  },
+  {
+   "name": "Billings - Butte Central High School",
+   "address": "3220 Central Avenue / Butte, MT 59701",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 5750
+  },
+  {
+   "name": "Birmingham New South Fund",
+   "address": "2100 Rev. Abraham Woods, Jr. Blvd, Suite 300 / Birmingham, AL 35203",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 20000
+  },
+  {
+   "name": "Blue Mountain Center",
+   "address": "P.O. Box 109 / Blue Mountain Lake, NY 12812",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Boston Area Rape Crisis Center",
+   "address": "99 Bishop Richard D. Johnson / Boston, MA 02114",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Boston Bar Foundation",
+   "address": "16 Beacon Street / Boston, MA 02108",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Boston Cultural Council",
+   "address": "974 Commonwealth Avenue / Boston, MA 02215",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Boston Foundation",
+   "address": "75 Arlington Street, 10th Floor / Boston, MA 02116",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 100000
+  },
+  {
+   "name": "Boston Interfaith Organization",
+   "address": "5008 Washington Street / Boston, MA 02132",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Boston Natural Areas Network",
+   "address": "62 Summer Street / Boston, MA 02110",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "The Boston Pops Orchestra",
+   "address": "301 Massachusetts Avenue / Boston, MA 02115",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Boston Public Library Fund",
+   "address": "700 Boylston Street / Boston, MA 02116",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Bowdoin College",
+   "address": "3500 College Station / Brunswick, ME 04011",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 60000
+  },
+  {
+   "name": "Boys & Girls Clubs of America",
+   "address": "1275 Peachtree Street, NE / Atlanta, GA 30309",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Brandeis University",
+   "address": "P.O. Box 549110 / Waltham, MA 02454",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 100000
+  },
+  {
+   "name": "Brooklyn Academy of Music",
+   "address": "30 Lafayette Avenue / Brooklyn, NY 11217",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "A Broken Umbrella Theatre",
+   "address": "P.O. Box 4003 / New Haven, CT 06536",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 15000
+  },
+  {
+   "name": "Bronx Community College Foundation",
+   "address": "2155 University Avenue, Suite 216 / Bronx, NY 10453",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Brooklyn Children's Museum",
+   "address": "145 Brooklyn Avenue / Brooklyn, NY 11213",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Brooklyn Community Foundation",
+   "address": "1006 Fulton Street / Brooklyn, NY 11238",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 100000
+  },
+  {
+   "name": "Brooklyn Public Library",
+   "address": "10 Grand Army Plaza / Brooklyn, NY 11238",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Brookings Institution",
+   "address": "1775 Massachusetts Avenue, NW / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 100000
+  },
+  {
+   "name": "Building Changes",
+   "address": "700 Third Avenue, Suite 330 / Seattle, WA 98104",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Burroughs Wellcome Fund",
+   "address": "21 T.W. Alexander Drive / P.O. Box 13901 / Research Triangle Park, NC 27709",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 20000
+  },
+  {
+   "name": "Business Executives for National Security",
+   "address": "701 Pennsylvania Avenue, NW, Suite 750 / Washington, DC 20004",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "California Academy of Sciences",
+   "address": "55 Music Concourse Drive / Golden Gate Park / San Francisco, CA 94118",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "California Institute of Technology",
+   "address": "1200 East California Boulevard, MC 5-32 / Pasadena, CA 91125",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 100000
+  },
+  {
+   "name": "California Institute of the Arts",
+   "address": "24700 McBean Parkway / Valencia, CA 91355",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "California State University at Monterey Bay",
+   "address": "100 Campus Center, Building 82 / Seaside, CA 93955",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 15000
+  },
+  {
+   "name": "Center for Community Change",
+   "address": "1000 Wisconsin Avenue, NW / Washington, DC 20007",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Center for Economic and Policy Research",
+   "address": "1611 Connecticut Avenue, NW / Washington, DC 20009",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Center for Public Integrity",
+   "address": "910 17th Street, NW, 7th Floor / Washington, DC 20006",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Center for Responsible Lending",
+   "address": "302 West Main Street / Durham, NC 27701",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Center for Third World Organizing",
+   "address": "12701 B St, Suite 100 / Oakland, CA 94612",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Center on Budget and Policy Priorities",
+   "address": "820 First Street, NE, Suite 510 / Washington, DC 20002",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Center for Strategic and International Studies",
+   "address": "1616 Rhode Island Avenue, NW / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Central Virginia Community Health Center",
+   "address": "P.O. Box 380 / 1002 Commerce Street / Lynchburg, VA 24504",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Change the World Ministries",
+   "address": "6337 North Church / Kansas City, MO 64118",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Charlestown Lacrosse and Learning Center",
+   "address": "235 Medford Street / Charlestown, MA 02129",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Chicanos Por La Causa, Inc.",
+   "address": "200 East First Street / Tucson, AZ 85701",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Children's Defense Fund",
+   "address": "25 E Street, NW / Washington, DC 20001",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Children's Health Fund",
+   "address": "215 West 125th Street, 5th Floor / New York, NY 10027",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 45000
+  },
+  {
+   "name": "Children's Institute International",
+   "address": "2000 North Main Street / Los Angeles, CA 90031",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Chinese Progressive Association",
+   "address": "1042 Grant Avenue / San Francisco, CA 94133",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Christ Temple Church of God in Christ",
+   "address": "6700 Church Avenue / Baltimore, MD 21207",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Church of St. James the Less",
+   "address": "5500 Langdon Street / Philadelphia, PA 19124",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Circle of Protection",
+   "address": "110 Maryland Avenue, NE / Washington, DC 20002",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Citizens for a Better Environment",
+   "address": "1211 West 22nd Street, Suite 830 / Oak Brook, IL 60521",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 15000
+  },
+  {
+   "name": "Citizens for Responsibility and Ethics in Washington",
+   "address": "1400 Eye Street, NW, Suite 450 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "City Harvest, Inc.",
+   "address": "6 West 37th Street / New York, NY 10018",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 15000
+  },
+  {
+   "name": "City University of New York",
+   "address": "205 East 42nd Street / New York, NY 10017",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Civil Liberties and Public Policy Program",
+   "address": "811 West Street / Ithaca, NY 14850",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Clearinghouse on Women's Issues",
+   "address": "P.O. Box 70612 / Washington, DC 20024",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Cleveland Clinic Foundation",
+   "address": "9500 Euclid Avenue, JJ-40 / Cleveland, OH 44195",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Coast Guard Foundation, Inc.",
+   "address": "394 State Street / New London, CT 06320",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 20000
+  },
+  {
+   "name": "College Board",
+   "address": "45 Columbus Avenue / New York, NY 10023",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Colorado Public Interest Research Foundation",
+   "address": "1543 Wazee Street, Suite 300 / Denver, CO 80202",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Columbia University",
+   "address": "2960 Broadway, MC 2800 / New York, NY 10027",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Commander's Resource Council",
+   "address": "10820 Connecticut Avenue, Suite 201 / Kensington, MD 20895",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Committee for a Democratic Future",
+   "address": "28 Edgewater Road / New Rochelle, NY 10805",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Committee for Economic Development",
+   "address": "1330 Connecticut Avenue, NW, Suite 700 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Committee for Justice",
+   "address": "1650 King Street, Suite 602 / Alexandria, VA 22314",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Common Cause",
+   "address": "1133 19th Street, NW, 9th Floor / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 20000
+  },
+  {
+   "name": "Community Change, Inc.",
+   "address": "19 Temple Place, 4th Floor / Boston, MA 02111",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Community Foundation for Greater New Haven",
+   "address": "70 Audubon Street / New Haven, CT 06510",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 75000
+  },
+  {
+   "name": "Concord Academy",
+   "address": "166 Main Street / Concord, MA 01742",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Concord Council on Aging",
+   "address": "1275 Main Street / Concord, MA 01742",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Congregation Agudath Sholom",
+   "address": "9505 Northfield Road / Stamford, CT 06903",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 972264
+  },
+  {
+   "name": "Conservation Law Foundation",
+   "address": "62 Summer Street / Boston, MA 02110",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 20000
+  },
+  {
+   "name": "Congressional Black Caucus Foundation, Inc.",
+   "address": "1720 Massachusetts Avenue NW / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Consumer Federation of America",
+   "address": "1620 I Street, NW, Suite 200 / Washington, DC 20006",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Cornell University",
+   "address": "P.O. Box 508 / Providence, RI 02901",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 20000
+  },
+  {
+   "name": "Cornerstone Consulting Group",
+   "address": "29 Speno Ridge, Suite 103 / New York, NY 10012",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Council on Foundations",
+   "address": "2121 Crystal Drive, Suite 700 / Arlington, VA 22202",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Creators Syndicate",
+   "address": "5777 West Century Blvd, Suite 700 / Los Angeles, CA 90045",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Dining for Women",
+   "address": "P.O. Box 9881 / Greenville, SC 29604",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Doctors of the World USA",
+   "address": "225 West 39th Street, 12th Floor / New York, NY 10018",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Dolphin Theater",
+   "address": "25 North Washington Street, Suite 50 / Baltimore, MD 21231",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Earthjustice",
+   "address": "1625 Massachusetts Avenue, NW, Suite 702 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Economic Policy Institute",
+   "address": "1330 H Street, NW, Suite 300 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "EdChange",
+   "address": "P.O. Box 2 / Arlington, MA 02476",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Editorial Projects in Education",
+   "address": "6935 Arlington Road, Suite 100 / Bethesda, MD 20814",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Educational Media Foundation",
+   "address": "5700 West Oaks Blvd / Rocklin, CA 95765",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Emory University",
+   "address": "1762 Clifton Road, NE / Atlanta, GA 30322",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Encore.org",
+   "address": "1000 Potomac Street, NW / Washington, DC 20007",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "End Child Hunger Coalition",
+   "address": "25 E Street, NW / Washington, DC 20001",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Enterprise Community Partners, Inc.",
+   "address": "1145 Market Street, Fifth Floor / San Francisco, CA 94103",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Equal Justice Initiative",
+   "address": "122 Commerce Street / Montgomery, AL 36104",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Essential Information",
+   "address": "P.O. Box 19405 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Ethan Allen Institute",
+   "address": "108 Court Street, Suite 2 / Montpelier, VT 05602",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Ethics and Public Policy Center",
+   "address": "1015 15th Street NW, Suite 900 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Faith and Politics Institute",
+   "address": "1001 Connecticut Ave NW, Suite 900 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Faith in Public Life",
+   "address": "145 E Street, NW / Washington, DC 20001",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Federal City Council",
+   "address": "1501 K Street, NW / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Federation of American Scientists",
+   "address": "1112 16th Street, NW, Suite 1200 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Federation of State Humanities Councils",
+   "address": "1600 Wilson Blvd, Suite 902 / Arlington, VA 22209",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "F E G S",
+   "address": "1140 Broadway, 10th Floor / New York, NY 10001",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "First Book",
+   "address": "1310 L Street, NW, Suite 650 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Fledgling Fund",
+   "address": "24 Thayer Pond Road / Norwalk, CT 06854",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Florida Immigrant Coalition",
+   "address": "733 SW 4th Street / Miami, FL 33130",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Food Research and Action Center",
+   "address": "1200 18th Street, NW, Suite 400 / Washington, DC 20009",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Foundation for Individual Rights in Education",
+   "address": "510 Walnut Street, Suite 1250 / Philadelphia, PA 19106",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Fresno Regional Foundation",
+   "address": "5260 North Palm Avenue, Suite 327 / Fresno, CA 93704",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Friends of the Institute for Policy Studies",
+   "address": "1112 16th Street, NW, Suite 600 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Full Circle America, Inc.",
+   "address": "2 Woodland Avenue / Larchmont, NY 10538",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Fund for Constitutional Government",
+   "address": "1225 I Street, NW, Suite 350 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "G.A.L.A. Inc.",
+   "address": "2022 S Street, NW / Washington, DC 20009",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Garfield Foundation",
+   "address": "1322 Rockrest Street / Mclean, VA 22101",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Georgetown University",
+   "address": "37th and O Streets, NW / Washington, DC 20057",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "George Washington University",
+   "address": "2121 Eye Street, NW / Washington, DC 20052",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Georgetown University Medical Center",
+   "address": "3700 Reservoir Road NW / Washington, DC 20057",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Georgia Organics",
+   "address": "1784 McLendon Ave NE / Atlanta, GA 30307",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Global AIDS Interfaith Alliance",
+   "address": "333 Valencia Street, Suite 400 / San Francisco, CA 94103",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Global Exchange",
+   "address": "2017 Mission Street, Suite 302 / San Francisco, CA 94110",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Global Fund for Children",
+   "address": "1413 K Street NW, Suite 1200 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Goods for Good",
+   "address": "14 Diagonal Street, Unit 4 / Washington, MO 63090",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Great Communities Foundation",
+   "address": "11911 San Vicente Blvd, Suite 240 / Los Angeles, CA 90049",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Greater Boston Food Bank",
+   "address": "70 South Bay Avenue / Boston, MA 02118",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Guild for Human Services",
+   "address": "200 Powder Mill Road / Concord, MA 01742",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 90000
+  },
+  {
+   "name": "Haiti Outreach",
+   "address": "P.O. Box 1041 / Minnetonka, MN 55345",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Harvard University",
+   "address": "1350 Massachusetts Ave, Suite 750 / Cambridge, MA 02138",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 100000
+  },
+  {
+   "name": "Hispanic Federation",
+   "address": "1725 West 7th Street, Suite 300 / New York, NY 10032",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Historic Boston Incorporated",
+   "address": "13 Moraine Street / Jamaica Plain, MA 02130",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Hopkins Community Development",
+   "address": "1810 Bel Air Road, Suite A / Baltimore, MD 21215",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Hope House",
+   "address": "50 Duryea Road / Dorchester, MA 02122",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 15000
+  },
+  {
+   "name": "Horizons National",
+   "address": "52 South Main Street / Hanover, NH 03755",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Howard University",
+   "address": "2400 6th Street, NW / Washington, DC 20059",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Human Rights Campaign",
+   "address": "1640 Rhode Island Avenue, NW / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Human Rights First",
+   "address": "333 Seventh Avenue, 13th Floor / New York, NY 10001",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Human Rights Watch",
+   "address": "350 Fifth Avenue, 34th Floor / New York, NY 10118",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Huntington Theatre Company",
+   "address": "264 Huntington Avenue / Boston, MA 02115",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "I Be Foundation",
+   "address": "1025 Connecticut Ave NW / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Illinois Coalition for Religious Freedom",
+   "address": "101 West Mulberry Street / Springfield, IL 62704",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Impact America Fund",
+   "address": "3328 16th Street, Suite A / San Francisco, CA 94110",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Independent Sector",
+   "address": "1600 K Street, NW, Suite 600 / Washington, DC 20006",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Indian Law Resource Center",
+   "address": "602 N. Ewing St. / Helena, MT 59601",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Institute for Justice",
+   "address": "901 N. Glebe Road, Suite 900 / Arlington, VA 22203",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Institute for Policy Studies",
+   "address": "1112 16th Street, NW, Suite 600 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "International Center for Transitional Justice",
+   "address": "5 Hanover Square, 24th Floor / New York, NY 10004",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "International Community Foundation",
+   "address": "1001 Connecticut Ave NW, Suite 1025 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "International Institute of New England",
+   "address": "One Milk Street, 6th Floor / Boston, MA 02109",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "International Justice Mission",
+   "address": "P.O. Box 58145 / Washington, DC 20037",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Interfaith Conference of Greater Milwaukee",
+   "address": "1479 N. 24th Street / Milwaukee, WI 53205",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "International Rescue Committee",
+   "address": "122 East 42nd Street / New York, NY 10168",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "INVESTED",
+   "address": "1180, 5th Avenue, 12th Floor / New York, NY 10029",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Isabella Stewart Gardner Museum",
+   "address": "25 Evans Way / Boston, MA 02115",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "James Madison University",
+   "address": "800 South Main Street / Harrisburg, VA 22801",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "John F. Kennedy Library Foundation",
+   "address": "20 Columbia Point / Boston, MA 02125",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "John Hopkins University",
+   "address": "100 International Drive, 4th Floor / Baltimore, MD 21202",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Johnson C. Smith University",
+   "address": "100 Beatties Ford Road / Charlotte, NC 28216",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "The Joint (The Center for Pediatric Rehabilitation)",
+   "address": "401 Whittier Ave / Okmulgee, OK 74447",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Jubilee Ministries",
+   "address": "1111 South Plaza / Kansas City, MO 64111",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Jumpstart, Inc.",
+   "address": "500 Euclid Avenue, Suite 200 / Cleveland, OH 44115",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Justice at Stake",
+   "address": "150 Nassau Street, Suite 1750 / New York, NY 10038",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "KaBOOM!",
+   "address": "4450 Connecticut Ave NW, Suite 400 / Washington, DC 20008",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Keren-Or, Inc.",
+   "address": "P.O. Box 2060 / New York, NY 10159",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Kidpower Teenpower Fullpower International",
+   "address": "P.O. Box 1212 / Santa Cruz, CA 95061",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 39000
+  },
+  {
+   "name": "Legal Aid Society",
+   "address": "199 Water Street / New York, NY 10038",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "LISC",
+   "address": "501 Seventh Avenue / New York, NY 10018",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Los Angeles Regional Food Bank",
+   "address": "1734 East 41st Street / Los Angeles, CA 90058",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Louisiana Public Broadcasting",
+   "address": "7733 Perkins Road / Baton Rouge, LA 70810",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "LULAC National Educational Service Centers, Inc.",
+   "address": "1133 20th Street NW, Suite 400 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Lutheran Family Services of Colorado",
+   "address": "1600 Downing Street / Denver, CO 80218",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Maccabee Task Force",
+   "address": "5408 Alton Pkwy / Cleveland, OH 44125",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 80000
+  },
+  {
+   "name": "Main Street Connect",
+   "address": "2133 Arch Street, Suite 2 / Philadelphia, PA 19103",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Maine Community Foundation",
+   "address": "245 Main Street / Ellsworth, ME 04605",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Management Sciences for Health",
+   "address": "4301 North Fairfax Drive, Suite 400 / Arlington, VA 22203",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Massachusetts Association for Mental Health",
+   "address": "1416 Hancock Street / Quincy, MA 02169",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Massachusetts General Hospital",
+   "address": "55 Fruit Street / Boston, MA 02114",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Massachusetts Immigrant and Refugee Advocacy Coalition",
+   "address": "105 Chauncy Street, Suite 901 / Boston, MA 02111",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "MAZON: A Jewish Response to Hunger",
+   "address": "10850 Wilshire Blvd, Suite 400 / Los Angeles, CA 90024",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Medical Education Cooperation with Cuba",
+   "address": "1580 Midtown Drive / San Francisco, CA 94107",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Mercy Corps",
+   "address": "45 SW Ankeny Street / Portland, OR 97204",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Meridian Institute",
+   "address": "1920 L Street NW, Suite 500 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Metropolitan Educational and Cultural Association",
+   "address": "1600 Peachtree Street, NW / Atlanta, GA 30309",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Metropolitan Museum of Art",
+   "address": "1000 Fifth Avenue / New York, NY 10028",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "MicroCredit Enterprises",
+   "address": "350 5th Avenue, Suite 2410 / New York, NY 10118",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Mile High United Way",
+   "address": "711 Park Avenue West / Denver, CO 80205",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Mission Continues",
+   "address": "1034 S Brentwood Blvd, Suite 1700 / St. Louis, MO 63117",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Mothers Against Drunk Driving",
+   "address": "2520 South Arlington Mill Drive / Arlington, VA 22206",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Museum of Fine Arts, Boston",
+   "address": "465 Huntington Avenue / Boston, MA 02115",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Museum of Science",
+   "address": "One Science Park / Boston, MA 02114",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "NAACP",
+   "address": "4805 Mt. Hope Drive / Baltimore, MD 21215",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "NAACP Legal Defense and Educational Fund, Inc.",
+   "address": "99 Hudson Street, Suite 1600 / New York, NY 10013",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Alliance on Mental Illness",
+   "address": "3803 N. Fairfax Drive, Suite 100 / Arlington, VA 22203",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Association for the Advancement of Colored People",
+   "address": "4805 Mt Hope Drive / Baltimore, MD 21215",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Center for the Study of Civil Rights and African American Culture",
+   "address": "12 Old South Street / Montgomery, AL 36104",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Committee on United States-China Relations",
+   "address": "71 West 23rd Street, Suite 1901 / New York, NY 10010",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Congress of American Indians",
+   "address": "1516 P Street, NW / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Council of La Raza",
+   "address": "1120 Connecticut Avenue NW, Suite 100 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Education Association",
+   "address": "1201 16th Street, NW / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Employment Law Project",
+   "address": "75 Maiden Lane, Suite 601 / New York, NY 10038",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Federation of Community Development Credit Unions",
+   "address": "90 John Street, Suite 509 / New York, NY 10038",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Immigration Forum",
+   "address": "50 F Street, NW, Suite 300 / Washington, DC 20001",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Immigration Law Center",
+   "address": "3435 Wilshire Blvd, Suite 2850 / Los Angeles, CA 90010",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Korean American Service and Education Consortium",
+   "address": "1000 Vermont Avenue, NW, Suite 600 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Low Income Housing Coalition",
+   "address": "1000 Vermont Avenue, NW, Suite 500 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Network to End Domestic Violence",
+   "address": "1325 Massachusetts Ave NW / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Public Radio",
+   "address": "1111 North Capitol Street, NE / Washington, DC 20002",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Urban League",
+   "address": "120 Wall Street, 8th Floor / New York, NY 10005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Nature Conservancy",
+   "address": "4245 North Fairfax Drive, Suite 100 / Arlington, VA 22203",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "New America Foundation",
+   "address": "740 15th Street, NW, Suite 900 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "New Israel Fund",
+   "address": "330 7th Avenue, 19th Floor / New York, NY 10001",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "New Jersey Institute for Social Justice",
+   "address": "60 Park Place, Suite 511 / Newark, NJ 07102",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "New Mexico Community Foundation",
+   "address": "501 Tijeras NE / Albuquerque, NM 87102",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "New Orleans Jazz Orchestra",
+   "address": "400 Block of Common Street / New Orleans, LA 70130",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "New York Advisory Committee",
+   "address": "150 E 56th Street / New York, NY 10022",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "New York Hall of Science",
+   "address": "47-01 111th Street, Queens, NY 11368",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "New York Public Library",
+   "address": "476 Fifth Avenue / New York, NY 10018",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "New York Public Radio",
+   "address": "160 Varick Street, 7th Floor / New York, NY 10013",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "New York University School of Law",
+   "address": "40 Washington Square South, 314A / New York, NY 10012",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Nonprofit VOTE",
+   "address": "14 Oxford Road, Suite 1 / Cambridge, MA 02138",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Northern California Grantmakers",
+   "address": "330 Townsend Street, Suite 205 / San Francisco, CA 94107",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Oberlin College",
+   "address": "50 N. Professor Street / Oberlin, OH 44074",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Ohio State University",
+   "address": "2400 Olentangy River Road / Columbus, OH 43210",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "One Campaign",
+   "address": "1300 L Street NW, Suite 700 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "One Hundred Black Men of New York, Inc.",
+   "address": "128 East 80th Street / New York, NY 10021",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Operation Smile",
+   "address": "3641 Faculty Boulevard / Virginia Beach, VA 23453",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Opportunities Industrialization Centers of America, Inc.",
+   "address": "1415 North Broad Street, Suite 228 / Philadelphia, PA 19122",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Oregon Environmental Council",
+   "address": "1320 SW Broadway, Suite 300 / Portland, OR 97201",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Oregon Food Bank",
+   "address": "7900 NE 33rd Drive / Portland, OR 97211",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Organization for Economic Cooperation and Development",
+   "address": "2001 L Street, NW, Suite 700 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Oxidation Fund",
+   "address": "77 Park Avenue, 2nd Floor / New York, NY 10016",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "PACE Center for Girls",
+   "address": "1600 North Main Street, Suite 5 / Jacksonville, FL 32207",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Pact, Inc.",
+   "address": "1925 K Street, NW, Suite 220, Washington, DC 20006",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Parkersburg Community Foundation",
+   "address": "One Founders Square / Parkersburg, WV 26101",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Partners in Health",
+   "address": "888 Commonwealth Avenue, 3rd Floor / Boston, MA 02215",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Pax Populi",
+   "address": "550 Silver Spur Road #221 / Rolling Hills Estates, CA 90274",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Peace Corps",
+   "address": "1111 20th Street, NW, Suite 610 / Washington, DC 20526",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Peace Development Fund",
+   "address": "P.O. Box 1280 / Amherst, MA 01004",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Pennywise Perfection",
+   "address": "9908 Cove Point Court / Vienna, VA 22182",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "People For the American Way",
+   "address": "2000 M Street NW, Suite 400 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Peralta Education Fund",
+   "address": "333 East 8th Street, Suite 202 / Oakland, CA 94606",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Pew Charitable Trusts",
+   "address": "901 E Street, NW, Suite 900 / Washington, DC 20004",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Philadelphia Education Fund",
+   "address": "100 North 20th Street, Suite 201 / Philadelphia, PA 19103",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Philadelphia Futures",
+   "address": "1207 Chestnut Street, Suite 402 / Philadelphia, PA 19107",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Planned Parenthood Federation of America",
+   "address": "123 William Street, Floor 10 / New York, NY 10038",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Ploughshares Fund",
+   "address": "330 Townsend Street, Suite 205 / San Francisco, CA 94107",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Population Services International",
+   "address": "1120 19th Street NW, Suite 600 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Prevention Institute",
+   "address": "221 Oak Street / Oakland, CA 94607",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "ProPublica, Inc.",
+   "address": "155 Avenue of the Americas, 13th Floor / New York, NY 10013",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Proteus Fund",
+   "address": "6 Blackstone Street / Cambridge, MA 02139",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Public Campaign",
+   "address": "700 13th Street, NW, Suite 600 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Public Citizen Foundation",
+   "address": "1600 20th Street, NW / Washington, DC 20009",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Public Education Center",
+   "address": "1125 15th Street NW, Suite 500 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Public Interest Research Group",
+   "address": "44 Winter Street, Suite 601 / Boston, MA 02108",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Public Justice",
+   "address": "1825 K Street, NW, Suite 200 / Washington, DC 20006",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Public Radio International",
+   "address": "1901 Cathedral Street, NE / Washington, DC 20002",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Public Strategies, Inc.",
+   "address": "3254 Market Street / San Francisco, CA 94114",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Public Voice for Food and Health Policy",
+   "address": "1101 15th Street NW, Suite 500 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Puerto Rico Community Foundation",
+   "address": "P.O. Box 362649 / San Juan, PR 00936",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "R Street Institute",
+   "address": "1201 L Street NW, Suite 700 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Radio Free Europe/Radio Liberty",
+   "address": "1101 Connecticut Avenue, NW, Suite 1000 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Railroad Commission of Texas",
+   "address": "P.O. Box 12967 / Austin, TX 78711",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Rebuilding Together",
+   "address": "1899 L Street, NW, Suite 1000 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Refugee and Immigrant Fund",
+   "address": "250 West 57th Street, Suite 220, New York, NY 10107",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Regional Foundation",
+   "address": "1620 16th Street, Suite 100 / Denver, CO 80202",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Research and Evaluation Center",
+   "address": "105 W. Adams Street, Suite 1900 / Chicago, IL 60603",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Rockefeller Family Fund",
+   "address": "475 Riverside Drive, Suite 900 / New York, NY 10115",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 30000
+  },
+  {
+   "name": "Rockefeller Foundation",
+   "address": "420 Fifth Avenue / New York, NY 10018",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "R Street Institute",
+   "address": "1201 L Street NW, Suite 700 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Save the Children",
+   "address": "54 Wilton Road / Westport, CT 06880",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "SEED Foundation",
+   "address": "7021 Georgia Ave NW / Washington, DC 20012",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Service Women's Action Network",
+   "address": "1220 L Street NW, Suite 100 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Shriver Center on Poverty Law",
+   "address": "50 E. Washington Street, Suite 500 / Chicago, IL 60602",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Smithsonian Institution",
+   "address": "1000 Jefferson Drive SW / Washington, DC 20560",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Social Justice Project",
+   "address": "1017 12th Street, NW, Suite 300 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Southern Coalition for Social Justice",
+   "address": "1415 West Highway 54, Suite 101 / Durham, NC 27707",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Southern Poverty Law Center",
+   "address": "400 Washington Avenue / Montgomery, AL 36104",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Spark MicroGrants",
+   "address": "3692 8th Street / Berkeley, CA 94710",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Spelman College",
+   "address": "350 Spelman Lane SW / Atlanta, GA 30314",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "St. Mary's University",
+   "address": "One Camino Santa Maria / San Antonio, TX 78228",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "State of Oklahoma Office of the Attorney General",
+   "address": "313 N.E. 21st Street / Oklahoma City, OK 73105",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "Student Conservation Association",
+   "address": "2121 Crystal Drive, Suite 450 / Arlington, VA 22202",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "T4A",
+   "address": "1620 L Street NW, Suite 900 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Teach for All",
+   "address": "25 Broadway, 5th Floor / New York, NY 10004",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Teach for America",
+   "address": "25 Broadway, 12th Floor / New York, NY 10004",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Tennessee Justice Center",
+   "address": "301 Seventh Avenue North, Suite 300 / Nashville, TN 37219",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Texas Rio Grande Legal Aid",
+   "address": "4920 North IH-35 / Austin, TX 78751",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Thurgood Marshall College Fund",
+   "address": "90 Fifth Avenue, 8th Floor / New York, NY 10011",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "TransAfrica Forum",
+   "address": "1744 R Street NW / Washington, DC 20009",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Trust for Public Land",
+   "address": "35 East Wacker Drive, Suite 1000 / Chicago, IL 60601",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "The Trust for Public Land",
+   "address": "101 Montgomery Street, Suite 900 / San Francisco, CA 94104",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Tufts University",
+   "address": "27 Holland Street, 2nd Floor / Somerville, MA 02144",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "U.S. Fund for UNICEF",
+   "address": "125 Maiden Lane / New York, NY 10038",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Union of Concerned Scientists",
+   "address": "2 Brattle Square, Suite 6 / Cambridge, MA 02139",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Unitarian Universalist Service Committee",
+   "address": "245 Boylston Street / Boston, MA 02116",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "United Church of Christ",
+   "address": "700 Prospect Avenue / Cleveland, OH 44115",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "United Nations Foundation",
+   "address": "1800 Massachusetts Avenue NW, Suite 400 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "United States Naval Academy",
+   "address": "589 McNair Road / Annapolis, MD 21402",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "United Way of Metropolitan Atlanta",
+   "address": "100 Edgewood Avenue, NE / Atlanta, GA 30303",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "United Way of Massachusetts Bay",
+   "address": "51 Sleeper Street / Boston, MA 02210",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 50000
+  },
+  {
+   "name": "United Way of Metropolitan Dallas",
+   "address": "701 N. Pearl Street / Dallas, TX 75201",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "University of California Berkeley",
+   "address": "2080 Addison Street, Suite 200 / Berkeley, CA 94704",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "University of Maryland",
+   "address": "4321 Hartwick Road, Suite 500 / College Park, MD 20740",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "University of New Orleans",
+   "address": "2000 Lakeshore Drive, 301 / New Orleans, LA 70122",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "University of Pennsylvania",
+   "address": "3451 Walnut Street / Philadelphia, PA 19104",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "University of Southern California",
+   "address": "University Park Campus / Los Angeles, CA 90089",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "University of Texas",
+   "address": "702 North Street, Suite 201 / Austin, TX 78701",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Urban Affairs Institute",
+   "address": "P.O. Box 2025 / Savannah, GA 31402",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Urban Institute",
+   "address": "2100 M Street NW / Washington, DC 20037",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Urban Strategies Council",
+   "address": "405 14th Street, Suite 1100 / Oakland, CA 94612",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Venture Philanthropy Partners",
+   "address": "1201 Connecticut Avenue, NW, Suite 300 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Venture Fund for International Development",
+   "address": "1300 28th Street, Suite 102 / Boulder, CO 80303",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Vera Institute of Justice",
+   "address": "233 Broadway, 12th Floor / New York, NY 10279",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Washington Center",
+   "address": "1255 23rd Street, NW, Suite 700 / Washington, DC 20037",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Washington Legal Foundation",
+   "address": "2009 Massachusetts Ave NW / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "WGBH Educational Foundation",
+   "address": "One Guest Street / Boston, MA 02135",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Whitman-Walker Health",
+   "address": "1525 14th Street NW / Washington, DC 20009",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Willow Creek Community Church",
+   "address": "67 Algonquin Road / South Barrington, IL 60010",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Witness",
+   "address": "80 Hanson Street, Floor 2 / Brooklyn, NY 11217",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Women, Action and the Media",
+   "address": "P.O. Box 350963 / Boston, MA 02135",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 10000
+  },
+  {
+   "name": "Women Donors Network",
+   "address": "3435 Wilshire Blvd, Suite 2850 / Los Angeles, CA 90010",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Women's Action for New Directions (WAND)",
+   "address": "691 Massachusetts Avenue / Arlington, MA 02476",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Women's Foundation of Greater Atlanta",
+   "address": "815 Juniper Street, Suite 2 / Atlanta, GA 30308",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Women's Resource Center",
+   "address": "615 16th Street, Suite 300 / Denver, CO 80202",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "World Bank",
+   "address": "1818 H Street NW, Room MC4-106 / Washington, DC 20433",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "World Vision",
+   "address": "34834 Weyerhaeuser Way South / Federal Way, WA 98001",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 20000
+  },
+  {
+   "name": "YMCA of Metropolitan Minneapolis",
+   "address": "3400 47th Avenue South / Minneapolis, MN 55406",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 20000
+  },
+  {
+   "name": "YouthBuild USA",
+   "address": "58 Day Street, Suite 200 / Somerville, MA 02144",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Youth Service America",
+   "address": "1101 15th Street, NW, Suite 900 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "ZERO TO THREE: National Center for Infants, Toddlers and Families",
+   "address": "1255 23rd Street NW, Suite 350 / Washington, DC 20037",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Zoological Society of San Diego",
+   "address": "2920 Zoo Drive, P.O. Box 120551 / San Diego, CA 92112",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "A.C. R. N. (Assessment and Community-Response Network)",
+   "address": "1040 McAllister Street / San Francisco, CA 94115",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "A. M. E. Zion Church Connectional Lay Council",
+   "address": "1641 South Boulevard / Charlotte, NC 28203",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Abortion Access Project",
+   "address": "37 John Street, Suite 4 / Providence, RI 02906",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Abortion Care Network",
+   "address": "60 Amsterdam Street, Suite 2 / New York, NY 10023",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Bread for the World",
+   "address": "425 3rd Street SW, Suite 1000 / Washington, DC 20024",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "The Center for Effective Philanthropy",
+   "address": "151 Beverly Road / Boston, MA 02143",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Center for Global Development",
+   "address": "2055 L Street NW, 5th Floor / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Child Rights Information Network",
+   "address": "1 Paradise Row / London, E1 6PX, UK",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Climate Works Foundation",
+   "address": "1001 4th Avenue, Suite 2200 / Seattle, WA 98154",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "The Concord Coalition",
+   "address": "1120 20th Street, NW, Suite 700 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Environmental Defense Fund",
+   "address": "257 Park Avenue South / New York, NY 10010",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "The Fairness Center",
+   "address": "105 N. 22nd Street, Third Floor / Harrisburg, PA 17103",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Federation for American Immigration Reform",
+   "address": "25 Massachusetts Avenue, NW, Suite 330 / Washington, DC 20001",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "The Glen Echo Foundation",
+   "address": "1101 30th Street NW, Suite 500 / Washington, DC 20007",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Grassroots Leadership",
+   "address": "1648 Hillside Avenue / Charlotte, NC 28203",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "International Youth Foundation",
+   "address": "32 South Street, Suite 500 / Baltimore, MD 21202",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "The Jewish Federations of North America",
+   "address": "25 Broadway, Suite 1700 / New York, NY 10004",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Association of Mortgage Brokers",
+   "address": "700 13th Street, NW, Suite 600 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Coalition for the Homeless",
+   "address": "2201 P Street NW / Washington, DC 20037",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Committee for Responsive Philanthropy",
+   "address": "1331 H Street, NW, Suite 300 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Institute for Reproductive Health",
+   "address": "14 East 60th Street, Suite 1200 / New York, NY 10022",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Network for Public Education",
+   "address": "P.O. Box 820 / New York, NY 10028",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Operation Homefront",
+   "address": "1230 East Street, Suite 101 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Oxfam America",
+   "address": "226 Causeway Street, 5th Floor / Boston, MA 02114",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "PICO National Network",
+   "address": "2020 21st Street, Suite 2 / Sacramento, CA 95814",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Self-Help Ventures Fund",
+   "address": "139 East 29th Street / New York, NY 10016",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "SIECUS",
+   "address": "1020 16th Street NW, Suite 301 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Southerners for Economic Justice",
+   "address": "201 W. Trade Street, Suite 1240 / Charlotte, NC 28202",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Southern Poverty Law Center",
+   "address": "400 Washington Avenue / Montgomery, AL 36104",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "St. Augustine's University",
+   "address": "1315 Oakwood Avenue / Raleigh, NC 27610",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "UMOS, Inc.",
+   "address": "2002 South 63rd Street / Milwaukee, WI 53219",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Union for Reform Judaism",
+   "address": "633 Third Avenue, 7th Floor / New York, NY 10017",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "United States Conference of Catholic Bishops",
+   "address": "3211 4th Street NE / Washington, DC 20017",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Virginia Organizing",
+   "address": "9325 Patterson Avenue / Richmond, VA 23229",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "World Resources Institute",
+   "address": "10 G St NE, Suite 800 / Washington, DC 20002",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Young Women's Christian Association of the USA",
+   "address": "1025 Vermont Avenue NW, Suite 910 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "1001 Friends of Florida",
+   "address": "500 East Virginia Street, Suite 300 / Tallahassee, FL 32301",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "1803 Foundation",
+   "address": "3750 Milwaukee Street / Denver, CO 80205",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "1832 Foundation",
+   "address": "3750 Milwaukee Street / Denver, CO 80205",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "1st Amendment Foundation",
+   "address": "1000 Potomac Street NW, Washington, D.C. 20007",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "3Gen Consulting",
+   "address": "6301 Stevens Forest Road, Suite 110 / Columbia, MD 21046",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "4th Branch, Inc.",
+   "address": "4608 8th Street NW / Washington, DC 20011",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "A. Philip Randolph Institute",
+   "address": "815 16th Street, NW, Suite 300 / Washington, DC 20006",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "AALAS Foundation",
+   "address": "330 North Charles Street, Suite 210 / Baltimore, MD 21201",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Abortion Care Network",
+   "address": "60 Amsterdam Street, Suite 2 / New York, NY 10023",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "ACLU Foundation",
+   "address": "125 Broad Street, 18th Floor / New York, NY 10004",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Advocates for Youth",
+   "address": "2000 M Street NW, Suite 750 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Aga Khan Foundation",
+   "address": "1744 R Street NW, Suite 300 / Washington, DC 20009",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Alliance for Justice",
+   "address": "11 Dupont Circle NW, 2nd Floor / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "American Arbitration Association, Inc.",
+   "address": "120 Broadway, 21st Floor / New York, NY 10271",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "American Bar Association",
+   "address": "321 North Clark Street / Chicago, IL 60654",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "American Civil Liberties Union Foundation",
+   "address": "125 Broad Street, 18th Floor / New York, NY 10004",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "American Constitution Society for Law and Policy",
+   "address": "1332 H Street NW / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "American Immigration Council",
+   "address": "1331 G Street NW, Suite 200 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Anti-Defamation League Foundation",
+   "address": "605 Third Avenue / New York, NY 10158",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Arab-American Family Support Center",
+   "address": "150 Court Street, 2nd Floor / Brooklyn, NY 11201",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Asian American Justice Center",
+   "address": "1145 Wilshire Blvd, 2nd Floor / Los Angeles, CA 90017",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Bend the Arc Jewish Action",
+   "address": "330 Seventh Avenue, Suite 1901 / New York, NY 10001",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Black Alliance for Just Immigration",
+   "address": "4508 Georgia Avenue NW, 2nd Floor / Washington, DC 20011",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Black Women's Health Imperative",
+   "address": "1101 14th Street NW, Suite 801 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Border Network for Human Rights",
+   "address": "2111 North Zaragoza Road, Suite 201 / El Paso, TX 79938",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Center for American Progress",
+   "address": "1333 H Street NW, 10th Floor / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Center for Constitutional Rights",
+   "address": "666 Broadway, 7th Floor / New York, NY 10012",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Center for Effective Government",
+   "address": "2040 S Street NW / Washington, DC 20009",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Center for Reproductive Rights",
+   "address": "199 Water Street, 22nd Floor / New York, NY 10038",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Center for the Study of Social Policy",
+   "address": "1620 L Street, NW, Suite 900 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Center on Budget and Policy Priorities",
+   "address": "820 First Street, NE, Suite 510 / Washington, DC 20002",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Children's Defense Fund",
+   "address": "25 E Street NW / Washington, DC 20001",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Children's Partnership",
+   "address": "1001 East Street, Suite 300 / Washington, DC 20006",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Coalition for Humane Immigrant Rights of Los Angeles",
+   "address": "2533 West Third Street, Suite 101 / Los Angeles, CA 90057",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Color of Change",
+   "address": "1611 Telegraph Avenue, Suite 411 / Oakland, CA 94612",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Common Cause Education Fund",
+   "address": "1133 19th Street NW, 9th Floor / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Communications Workers of America",
+   "address": "501 3rd Street NW / Washington, DC 20001",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Community Change, Inc.",
+   "address": "19 Temple Place, 4th Floor / Boston, MA 02111",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Congressional Black Caucus Foundation, Inc.",
+   "address": "1720 Massachusetts Avenue NW / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Council for Opportunity in Education",
+   "address": "1025 Vermont Avenue, NW, Suite 900 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Council of Chief State School Officers",
+   "address": "One Massachusetts Avenue NW, Suite 700 / Washington, DC 20001",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Demos",
+   "address": "220 Fifth Avenue, 5th Floor / New York, NY 10001",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "EdFund",
+   "address": "250 14th Street / Oakland, CA 94612",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Equal Rights Advocates",
+   "address": "235 Montgomery Street, Suite 500 / San Francisco, CA 94104",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Family Equality Council",
+   "address": "30 Winter Street, 7th Floor / Boston, MA 02108",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "First Focus Campaign for Children",
+   "address": "1400 16th Street NW, Suite 101 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "FISCAL",
+   "address": "1100 17th Street NW, Suite 900 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Food Research and Action Center",
+   "address": "1200 18th Street NW, Suite 400 / Washington, DC 20009",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Forum for Youth Investment",
+   "address": "1575 Eye Street NW, Suite 300 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "GLSEN (Gay, Lesbian and Straight Education Network)",
+   "address": "90 Broad Street, 2nd Floor / New York, NY 10004",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Hip Hop Caucus",
+   "address": "1211 Connecticut Ave, NW, Suite 310 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Hispanic Association of Colleges and Universities",
+   "address": "8415 Westheimer Road, Suite 300 / Houston, TX 77063",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Immigration Advocates Network",
+   "address": "1000 Potomac Street NW, Suite 200 / Washington, DC 20007",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Immigration Policy Center",
+   "address": "1331 G Street NW, Suite 200 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Institute for Policy Studies",
+   "address": "1112 16th Street NW, Suite 600 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Jewish Public Affairs Committee of California",
+   "address": "2800 L Street, Suite 210 / Sacramento, CA 95816",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Justice Policy Institute",
+   "address": "1000 Vermont Ave NW, Suite 1100 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "League of United Latin American Citizens",
+   "address": "1133 20th Street NW, Suite 400 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Legal Aid Justice Center",
+   "address": "1000 Preston Avenue, Suite A / Charlottesville, VA 22903",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Libertarian Party",
+   "address": "2600 Virginia Avenue NW, Suite 100 / Washington, DC 20037",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Mexican American Legal Defense and Educational Fund",
+   "address": "1016 16th Street NW, Suite 100 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Association for the Advancement of Colored People",
+   "address": "4805 Mt. Hope Drive / Baltimore, MD 21215",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Association of Social Workers",
+   "address": "750 First Street NE, Suite 700 / Washington, DC 20002",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Coalition for the Homeless",
+   "address": "2201 P Street NW / Washington, DC 20037",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Council of La Raza",
+   "address": "1120 Connecticut Avenue NW, Suite 100 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Education Association",
+   "address": "1201 16th Street NW / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Immigration Forum",
+   "address": "50 F Street NW, Suite 300 / Washington, DC 20001",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Immigration Law Center",
+   "address": "3435 Wilshire Blvd, Suite 2850 / Los Angeles, CA 90010",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Organization for Women",
+   "address": "1100 H Street NW, Suite 300 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Partnership for Women & Families",
+   "address": "1875 Connecticut Avenue NW, Suite 650 / Washington, DC 20009",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Urban League",
+   "address": "120 Wall Street, 8th Floor / New York, NY 10005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "New America Foundation",
+   "address": "740 15th Street NW, Suite 900 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "New York Civil Liberties Union",
+   "address": "125 Broad Street, 18th Floor / New York, NY 10004",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Council on Aging",
+   "address": "1901 L Street NW, 4th Floor / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Opportunities for All",
+   "address": "1025 Vermont Ave NW, Suite 900 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Progressive Change Campaign Committee",
+   "address": "205 Maryland Avenue NE / Washington, DC 20009",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Project Vote",
+   "address": "1001 Connecticut Avenue NW, Suite 200 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Public Campaign",
+   "address": "700 13th Street NW, Suite 600 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Public Citizen Foundation",
+   "address": "1600 20th Street NW / Washington, DC 20009",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Public Knowledge",
+   "address": "1815 S Street NW / Washington, DC 20009",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "SEIU",
+   "address": "1800 Massachusetts Avenue NW / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Southern Poverty Law Center",
+   "address": "400 Washington Avenue / Montgomery, AL 36104",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "The Sentencing Project",
+   "address": "1705 DeSales Street NW, 8th Floor / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "U.S. Public Interest Research Group",
+   "address": "44 Winter Street, Suite 601 / Boston, MA 02108",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "United States Student Association",
+   "address": "1211 Connecticut Ave NW, Suite 406 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "United We Dream",
+   "address": "1211 Connecticut Ave NW, Suite 310 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Voices for America's Children",
+   "address": "1525 East 53rd Street, Suite 1600 / Chicago, IL 60615",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Working Families Party",
+   "address": "441 Atlantic Avenue, Suite 116 / Brooklyn, NY 11217",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "5280 Foundation",
+   "address": "1000 Potomac Street NW / Washington, DC 20007",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "A.F.C. Fund",
+   "address": "3450 Connecticut Avenue NW, Suite 217 / Washington, DC 20008",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "AFL-CIO Building Investment Trust",
+   "address": "815 16th Street NW / Washington, DC 20006",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "American Cancer Society",
+   "address": "250 Williams Street, Suite 600 / Atlanta, GA 30303",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "American Heart Association",
+   "address": "7272 Greenville Avenue / Dallas, TX 75231",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "American Institute of Architects",
+   "address": "1735 New York Avenue NW / Washington, DC 20006",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "American Institute of Certified Public Accountants",
+   "address": "1211 Avenue of the Americas / New York, NY 10036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "American Lung Association",
+   "address": "55 West Wacker Drive, Suite 800 / Chicago, IL 60601",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "American Public Health Association",
+   "address": "800 I Street NW / Washington, DC 20001",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "American Red Cross",
+   "address": "2025 E Street NW / Washington, DC 20006",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "American SIDS Institute",
+   "address": "509 Augusta Drive / Atlanta, GA 30341",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "American Society for Deaf Children",
+   "address": "P.O. Box 240 / East Petersburg, PA 17520",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "American Society for the Prevention of Cruelty to Animals",
+   "address": "424 East 92nd Street / New York, NY 10128",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "American Speech-Language-Hearing Association",
+   "address": "2200 Research Boulevard / Rockville, MD 20850",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "American Stroke Association",
+   "address": "7272 Greenville Avenue / Dallas, TX 75231",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "American Veterinary Medical Association",
+   "address": "1931 North Meacham Road, Suite 100 / Schaumburg, IL 60173",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Animal Legal Defense Fund",
+   "address": "1500 Water Street, Suite 201 / Petaluma, CA 94954",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Arthritis Foundation",
+   "address": "1330 West Peachtree Street NW, Suite 100 / Atlanta, GA 30309",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Associated Builders and Contractors",
+   "address": "1450 North Washington Street / Alexandria, VA 22314",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Association for the Advancement of Medical Instrumentation",
+   "address": "4300 Wilson Blvd, Suite 125 / Arlington, VA 22203",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Association of Public Health Laboratories",
+   "address": "8515 Georgia Avenue, Suite 700 / Silver Spring, MD 20910",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Autism Society of America",
+   "address": "4340 East West Highway, Suite 350 / Bethesda, MD 20814",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Be The Match Foundation",
+   "address": "3001 Harbor Lane North / Minneapolis, MN 55447",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Cystic Fibrosis Foundation",
+   "address": "6931 Arlington Road, 2nd Floor / Bethesda, MD 20814",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Defenders of Wildlife",
+   "address": "1130 17th Street NW / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Diabetes Research Institute Foundation",
+   "address": "200 South Park Road, Suite 100 / Hollywood, FL 33021",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Easter Seals, Inc.",
+   "address": "330 N. Wabash Avenue, Suite 2000 / Chicago, IL 60611",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Environmental Law Institute",
+   "address": "1730 M Street NW, Suite 700 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Farm Animal Reform Movement",
+   "address": "10101 Ashburton Lane / Bethesda, MD 20817",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Food Allergy Research and Education",
+   "address": "1425 K Street NW, Suite 500 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Goodwill Industries International",
+   "address": "15810 Indianola Drive / Rockville, MD 20855",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Habitat for Humanity International",
+   "address": "121 Habitat Street / Americus, GA 31709",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Human Society of the United States",
+   "address": "2100 L Street NW / Washington, DC 20037",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "International City/County Management Association",
+   "address": "777 North Capitol Street NE, Suite 500 / Washington, DC 20002",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "JDRF (Juvenile Diabetes Research Foundation)",
+   "address": "26 Broadway, 14th Floor / New York, NY 10004",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "League of Conservation Voters Education Fund",
+   "address": "1920 L Street NW, Suite 800 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Leukaemia & Lymphoma Society",
+   "address": "3 International Drive, Suite 200 / Rye Brook, NY 10573",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "March of Dimes Foundation",
+   "address": "1275 Mamaroneck Avenue / White Plains, NY 10605",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Michael J. Fox Foundation for Parkinson's Research",
+   "address": "555 Broadway, 12th Floor / New York, NY 10012",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Alliance on Mental Illness",
+   "address": "3803 North Fairfax Drive, Suite 100 / Arlington, VA 22203",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Audubon Society",
+   "address": "225 Varick Street, 7th Floor / New York, NY 10014",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Center for Missing and Exploited Children",
+   "address": "699 Prince Street / Alexandria, VA 22314",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Environmental Health Association",
+   "address": "720 South Colorado Blvd, Suite 1000-N / Denver, CO 80246",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Health Council",
+   "address": "1730 M Street NW, Suite 500 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Kidney Foundation",
+   "address": "30 East 33rd Street / New York, NY 10016",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Multiple Sclerosis Society",
+   "address": "733 Third Avenue, 6th Floor / New York, NY 10017",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Parks Conservation Association",
+   "address": "777 6th Street NW, Suite 700 / Washington, DC 20001",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Resource Defense Council",
+   "address": "40 West 20th Street / New York, NY 10011",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Safety Council",
+   "address": "1121 Spring Lake Drive / Itasca, IL 60143",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Society of Professional Engineers",
+   "address": "1420 King Street / Alexandria, VA 22314",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Volunteer Fire Council",
+   "address": "7852 Walker Drive, Suite 450 / Greenbelt, MD 20770",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "National Wildlife Federation",
+   "address": "11100 Wildlife Center Drive / Reston, VA 20190",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Ocean Conservancy",
+   "address": "1300 19th Street NW, Suite 800 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "One Percent for the Planet",
+   "address": "42 Main Street, 3rd Floor / Burlington, VT 05401",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Planned Parenthood Action Fund",
+   "address": "123 William Street, Floor 10 / New York, NY 10038",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Public Citizen",
+   "address": "1600 20th Street NW / Washington, DC 20009",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Rachel Carson Council",
+   "address": "1100 15th Street NW, Suite 800 / Washington, DC 20005",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Rails-to-Trails Conservancy",
+   "address": "2121 Ward Court, Suite 200 / Washington, DC 20037",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Respiratory Health Association",
+   "address": "35 East Wacker Drive, Suite 400 / Chicago, IL 60601",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Sierra Club Foundation",
+   "address": "50 F Street NW, Suite 600 / Washington, DC 20001",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Susan G. Komen Foundation",
+   "address": "5005 LBJ Freeway, Suite 250 / Dallas, TX 75244",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Trout Unlimited",
+   "address": "1777 North Kent Street, Suite 100 / Arlington, VA 22209",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Union of Concerned Scientists",
+   "address": "1825 K Street NW, Suite 800 / Washington, DC 20006",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Waterkeeper Alliance",
+   "address": "180 Maiden Lane, Suite 603 / New York, NY 10038",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Wounded Warrior Project",
+   "address": "4899 Belfort Road, Suite 300 / Jacksonville, FL 32256",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  },
+  {
+   "name": "Zero Population Growth",
+   "address": "1138 19th Street NW, Suite 400 / Washington, DC 20036",
+   "status": "Yes",
+   "purpose": "General support",
+   "amount": 25000
+  }
+ ],
+ "totals": [
+  {
+   "label": "Total Cash Contributions",
+   "amount": 59042842.69
+  },
+  {
+   "label": "Total Noncash Contributions",
+   "amount": 8086481.24
+  },
+  {
+   "label": "Total Contributions",
+   "amount": 67129323.93
+  }
+ ],
+ "_usage": {
+  "in": 695,
+  "out": 62537
+ },
+ "_seconds": 262.1,
+ "_finish": "stop"
+}

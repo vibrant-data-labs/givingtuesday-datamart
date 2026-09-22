@@ -1,0 +1,46 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "FORM 990-PF, PART XIV - GRANTS AND CONTRIBUTIONS PAID DURING THE YEAR",
+ "rows": [
+  {
+   "name": "Unady Global",
+   "address": "505 8th Ave, Suite 1704 New York, NY 10018",
+   "status": "PC",
+   "purpose": "To support a pilot initiative aimed at eliminating systemic hiring biases.",
+   "amount": 50000
+  },
+  {
+   "name": "Urban Arts Partnership",
+   "address": "39 W 19th St, 5th Fl New York, NY 10011",
+   "status": "PC",
+   "purpose": "To support provide general operating support.",
+   "amount": 50000
+  },
+  {
+   "name": "Washington Center for Equitable Growth",
+   "address": "740 15th St NW Washington, DC 20005",
+   "status": "PC",
+   "purpose": "To offer general operating support.",
+   "amount": 250000
+  },
+  {
+   "name": "WGBH Educational Foundation",
+   "address": "One Guest Street Boston, MA 02135",
+   "status": "PC",
+   "purpose": "To support WGBH's development of \"Work It Out Wombats!\".",
+   "amount": 100000
+  }
+ ],
+ "totals": [
+  {
+   "label": "TOTAL",
+   "amount": 26907603
+  }
+ ],
+ "_usage": {
+  "in": 1925,
+  "out": 1236
+ },
+ "_seconds": 10.7,
+ "_finish": "stop"
+}

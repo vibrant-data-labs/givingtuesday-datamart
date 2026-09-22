@@ -1,0 +1,307 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "",
+ "rows": [
+  {
+   "name": "NATIVE AMERICAN COMMUNITY CLINIC",
+   "address": "9714 5TH AVE NE",
+   "status": "",
+   "purpose": "General Operating Support - COVID-19 Emergency",
+   "amount": 25000
+  },
+  {
+   "name": "NEIGHBORHOOD HOUSE",
+   "address": "753 25TH AVE",
+   "status": "",
+   "purpose": "General Operating Support - COVID-19",
+   "amount": 25000
+  },
+  {
+   "name": "NEW HORIZONS MINISTRIES",
+   "address": "PO BOX 10818",
+   "status": "",
+   "purpose": "General Operating Support - COVID-19",
+   "amount": 20000
+  },
+  {
+   "name": "NORTHWEST HARVEST",
+   "address": "PO BOX 11388",
+   "status": "",
+   "purpose": "COVID-19 Response Efforts",
+   "amount": 50000
+  },
+  {
+   "name": "NORTHWEST IMMIGRANT RIGHTS PROJECT",
+   "address": "615 2ND AVE, SUITE 400",
+   "status": "",
+   "purpose": "Supporting Immigrants and Refugees in Washington State - COVID-19 Response",
+   "amount": 50000
+  },
+  {
+   "name": "OLIVE CREST",
+   "address": "7240 LINDER AVE",
+   "status": "",
+   "purpose": "Housing Support for Individuals with Mental Illness - COVID-19",
+   "amount": 55000
+  },
+  {
+   "name": "OPEN DOOR",
+   "address": "2801 WALNUT ST",
+   "status": "",
+   "purpose": "General Operating Support - COVID-19 (AIDS)",
+   "amount": 25000
+  },
+  {
+   "name": "OUR LADY OF GUADALUPE SOCIETY",
+   "address": "1 W MARKET ST",
+   "status": "",
+   "purpose": "Emergency Rental Assistance in Santa Clara County",
+   "amount": 25000
+  },
+  {
+   "name": "PENINSULA FAMILY YMCA",
+   "address": "1875 L ST",
+   "status": "",
+   "purpose": "COVID-19 Response",
+   "amount": 10000
+  },
+  {
+   "name": "PENINSULA CHILDREN'S CENTER",
+   "address": "200 2ND AVE",
+   "status": "",
+   "purpose": "General Operating Support",
+   "amount": 25000
+  },
+  {
+   "name": "PENINSULA CONCILIO",
+   "address": "2900 GARFIELD WAY",
+   "status": "",
+   "purpose": "COVID-19 Response",
+   "amount": 25000
+  },
+  {
+   "name": "PENINSULA FAMILY SERVICE",
+   "address": "1310 HEWITT AVE",
+   "status": "",
+   "purpose": "General Operating Support",
+   "amount": 25000
+  },
+  {
+   "name": "PHOENIX THEATRE INC dba ACT",
+   "address": "PO BOX 8987",
+   "status": "",
+   "purpose": "COVID-19 Relief for Human Services",
+   "amount": 20000
+  },
+  {
+   "name": "PLUM STREET C/O CARMEL HOUSE",
+   "address": "1274 49TH AVE",
+   "status": "",
+   "purpose": "COVID-19 Response",
+   "amount": 20000
+  },
+  {
+   "name": "PRAXIS COMMUNITY CLINICS",
+   "address": "3 BOGDANOS WAY",
+   "status": "",
+   "purpose": "COVID-19 Response",
+   "amount": 25000
+  },
+  {
+   "name": "REBUILDING TOGETHER SILICON VALLEY",
+   "address": "PO BOX 1274",
+   "status": "",
+   "purpose": "Home Repairs in Santa Clara County",
+   "amount": 10000
+  },
+  {
+   "name": "REFUGEE AND IMMIGRANT SERVICES",
+   "address": "1001 17TH ST",
+   "status": "",
+   "purpose": "COVID-19 Emergency Needs",
+   "amount": 15000
+  },
+  {
+   "name": "REBUILDING TOGETHER",
+   "address": "1277 H ST NW",
+   "status": "",
+   "purpose": "COVID-19 Response",
+   "amount": 50000
+  },
+  {
+   "name": "REBUILDING TOGETHER SACRAMENTO",
+   "address": "2413 N ST",
+   "status": "",
+   "purpose": "Homeless individuals Accommodation",
+   "amount": 25000
+  },
+  {
+   "name": "RENEWAL AND HYMNS OF THE CATHOLIC COMMUNITY",
+   "address": "312 E 4TH ST",
+   "status": "",
+   "purpose": "General Operating Support",
+   "amount": 10000
+  },
+  {
+   "name": "RICHMOND CHILD DEVELOPMENT CENTER",
+   "address": "4415 E 22ND ST",
+   "status": "",
+   "purpose": "General Operating Support",
+   "amount": 10000
+  },
+  {
+   "name": "SAFE JUSTICE",
+   "address": "PO BOX 2038",
+   "status": "",
+   "purpose": "General Operating Support",
+   "amount": 10000
+  },
+  {
+   "name": "SAN FRANCISCO AIDS FOUNDATION",
+   "address": "1035 MARKET ST, SUITE 400",
+   "status": "",
+   "purpose": "General Operating Support - COVID-19",
+   "amount": 50000
+  },
+  {
+   "name": "SAN FRANCISCO FOOD BANK",
+   "address": "3130 S ALABAMA ST",
+   "status": "",
+   "purpose": "Fresh Food Distribution - COVID-19",
+   "amount": 50000
+  },
+  {
+   "name": "SAN YSIDRO HEALTH CENTER",
+   "address": "1035 GRANT ST",
+   "status": "",
+   "purpose": "COVID-19 Response",
+   "amount": 25000
+  },
+  {
+   "name": "SENIOR DISCOVERY CENTER",
+   "address": "1100 W CHESTNUT ST",
+   "status": "",
+   "purpose": "General Operating Support - COVID-19",
+   "amount": 10000
+  },
+  {
+   "name": "SOUTH BAY COMMUNITY SERVICES",
+   "address": "3137 GRANT ST",
+   "status": "",
+   "purpose": "Emergency Food Fund",
+   "amount": 20000
+  },
+  {
+   "name": "ST JOSEPH'S HEALTH ALLIANCE",
+   "address": "2542 E BROADWAY RD",
+   "status": "",
+   "purpose": "General Operating Support",
+   "amount": 25000
+  },
+  {
+   "name": "ST JOSEPH'S MEDICAL CENTER",
+   "address": "1000 W CARLTON ST",
+   "status": "",
+   "purpose": "COVID-19 Emergency Support",
+   "amount": 10000
+  },
+  {
+   "name": "STATE OF CALIFORNIA, STATE BOARD OF EQUALIZATION",
+   "address": "PO BOX 942879",
+   "status": "",
+   "purpose": "Homeowner Exemption (Department of Finance)",
+   "amount": 10000
+  },
+  {
+   "name": "TENDERLOIN NEIGHBORHOOD DEVELOPMENT CORP",
+   "address": "233 12TH ST",
+   "status": "",
+   "purpose": "COVID-19 Response",
+   "amount": 20000
+  },
+  {
+   "name": "THE MARIN COMMUNITY FOUNDATION",
+   "address": "655 LEDERER AVE",
+   "status": "",
+   "purpose": "Nonprofit Relief Fund",
+   "amount": 25000
+  },
+  {
+   "name": "THE NEIGHBORHOOD HOUSE",
+   "address": "2130 PINE ST",
+   "status": "",
+   "purpose": "COVID-19 Response",
+   "amount": 15000
+  },
+  {
+   "name": "THE SALVATION ARMY FRONTLINES ASSOC",
+   "address": "312 4TH AVE",
+   "status": "",
+   "purpose": "General Operating Support",
+   "amount": 10000
+  },
+  {
+   "name": "TOGETHER - A NEW DAY TOGETHER",
+   "address": "342 SANTA FE DR",
+   "status": "",
+   "purpose": "Emergency Food and Sheltering",
+   "amount": 25000
+  },
+  {
+   "name": "TRAINING EMPLOYMENT AND DEVELOPMENT",
+   "address": "1226 UNIVERSITY AVE",
+   "status": "",
+   "purpose": "Employment Services in San Diego",
+   "amount": 10000
+  },
+  {
+   "name": "UNIVERSITY OF CALIFORNIA SAN DIEGO",
+   "address": "9500 GILMAN DR",
+   "status": "",
+   "purpose": "COVID-19 Response",
+   "amount": 25000
+  },
+  {
+   "name": "VHA - NW OREGON",
+   "address": "PO BOX 390",
+   "status": "",
+   "purpose": "Healthy Housing Project",
+   "amount": 25000
+  },
+  {
+   "name": "VILLAGE CHURCH",
+   "address": "10330 SW CANTON ST",
+   "status": "",
+   "purpose": "COVID-19 Response",
+   "amount": 15000
+  },
+  {
+   "name": "VOA CHAPEL",
+   "address": "1415 E PINE ST",
+   "status": "",
+   "purpose": "COVID-19 Response",
+   "amount": 25000
+  },
+  {
+   "name": "WELLS FARGO FOUNDATION",
+   "address": "PO BOX 43611",
+   "status": "",
+   "purpose": "Employee Emergency Fund",
+   "amount": 25000
+  },
+  {
+   "name": "YMCA OF GREATER KING COUNTY",
+   "address": "PO BOX 10778",
+   "status": "",
+   "purpose": "Emergency Food and Housing",
+   "amount": 25000
+  }
+ ],
+ "totals": [],
+ "_usage": {
+  "in": 695,
+  "out": 22972
+ },
+ "_seconds": 99.7,
+ "_finish": "stop"
+}

@@ -1,0 +1,125 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "",
+ "rows": [
+  {
+   "name": "United Way Worldwide DAF / Your Cause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 1629350.0
+  },
+  {
+   "name": "United Way Worldwide DAF / Your Cause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 1268787.24
+  },
+  {
+   "name": "United Way Worldwide DAF / Your Cause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 514.29
+  },
+  {
+   "name": "United Way Worldwide DAF / Your Cause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 2214282.97
+  },
+  {
+   "name": "United Way Worldwide DAF / Your Cause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 1130876.09
+  },
+  {
+   "name": "United Way Worldwide DAF / Your Cause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 271841.4
+  },
+  {
+   "name": "United Way Worldwide DAF / Your Cause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 1688.0
+  },
+  {
+   "name": "United Way Worldwide DAF / Your Cause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 416235.72
+  },
+  {
+   "name": "United Way Worldwide DAF / Your Cause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 1061276.33
+  },
+  {
+   "name": "United Way Worldwide DAF / Your Cause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 848497.97
+  },
+  {
+   "name": "United Way Worldwide DAF / Your Cause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 4300086.49
+  },
+  {
+   "name": "United Way Worldwide DAF / Your Cause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 5000.0
+  },
+  {
+   "name": "United Way Worldwide DAF / Your Cause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 2400000.0
+  },
+  {
+   "name": "United Way Worldwide DAF / Your Cause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 1807678.54
+  },
+  {
+   "name": "United Way Worldwide DAF / Your Cause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 855104.97
+  },
+  {
+   "name": "United Way Worldwide DAF / Your Cause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 21344804.43
+  }
+ ],
+ "totals": [],
+ "_usage": {
+  "in": 3669,
+  "out": 1216
+ },
+ "_seconds": 7.4,
+ "_finish": "stop"
+}

@@ -1,0 +1,242 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "",
+ "rows": [
+  {
+   "name": "NEIGHBORHOOD HOUSING SERVICES OF LOS ANGELES COUNTY",
+   "address": "3926 WILSHIRE BLVD STE 200, LOS ANGELES, CA 90010",
+   "status": "PC",
+   "purpose": "General Operating / COVID-19 Support",
+   "amount": 150000
+  },
+  {
+   "name": "NEIGHBORHOOD MINISTRIES INC",
+   "address": "1918 WEST VAN BUREN ST, CHICAGO, IL 60607",
+   "status": "PC",
+   "purpose": "Neighborhood Family Services",
+   "amount": 50000
+  },
+  {
+   "name": "NEW HORIZONS OF SOUTHWEST FLORIDA INC",
+   "address": "34108 ORCHID ST, FORT MYERS, FL 33905",
+   "status": "PC",
+   "purpose": "Response to COVID-19",
+   "amount": 50000
+  },
+  {
+   "name": "NORTHEAST FLORIDA AGENCY ON AGING",
+   "address": "6423 COLLINS RD, JACKSONVILLE, FL 32244",
+   "status": "PC",
+   "purpose": "COVID-19 Relief for Seniors",
+   "amount": 30000
+  },
+  {
+   "name": "OKLAHOMA ELKS AID INC",
+   "address": "94618 N MACARTHUR BLVD, OKLAHOMA CITY, OK 73142",
+   "status": "PC",
+   "purpose": "ASSISTING WITH TRANSITIONAL HOUSING COSTS",
+   "amount": 50000
+  },
+  {
+   "name": "ORGANIZATION OF CHINESE AMERICANS INC",
+   "address": "780 LINCOLN AVE, SACRAMENTO, CA 95825",
+   "status": "PC",
+   "purpose": "NAPA FINANCIAL STRENGTHENING INITIATIVE",
+   "amount": 10000
+  },
+  {
+   "name": "PACIFIC ASIAN CONSORTIUM IN EMPLOYMENT",
+   "address": "1096 RAINER DR STE 1002, SACRAMENTO, CA 95824",
+   "status": "PC",
+   "purpose": "RISE AND RECOVER FROM COVID-19 OPERATING SUPPORT",
+   "amount": 10000
+  },
+  {
+   "name": "PACE EQUALITY CENTER PATHWAYS - VA INC",
+   "address": "4954 VAN NUYS BLVD STE 201, SHERMAN OAKS, CA 91403",
+   "status": "PC",
+   "purpose": "PACE AID (ASSISTANCE IN DISASTER PREPARING IMMIGRANTS FOR WORK AND CAREER PATHWAYS)",
+   "amount": 100000
+  },
+  {
+   "name": "PEOPLEFUND",
+   "address": "1200 W WASHINGTON ST, AUSTIN, TX 78703",
+   "status": "PC",
+   "purpose": "Financial Education General Operating Support",
+   "amount": 75000
+  },
+  {
+   "name": "PEOPLEFUND",
+   "address": "2921 EAST 17TH ST BLDG D STE 1, AUSTIN, TX 78702",
+   "status": "PC",
+   "purpose": "Texas COVID-19 Relief Fund",
+   "amount": 20000
+  },
+  {
+   "name": "PEOPLEFUND",
+   "address": "2921 EAST 17TH ST BLDG D STE 1, AUSTIN, TX 78702",
+   "status": "PC",
+   "purpose": "Texas COVID-19 Relief Fund",
+   "amount": 15000
+  },
+  {
+   "name": "PEOPLEFUND",
+   "address": "2921 EAST 17TH ST BLDG D STE 1, AUSTIN, TX 78702",
+   "status": "PC",
+   "purpose": "Texas COVID-19 Relief Fund",
+   "amount": 30000
+  },
+  {
+   "name": "REBUILDING TOGETHER AURORA INC",
+   "address": "31 W DOWNER PLACE #402, AURORA, IL 60506",
+   "status": "PC",
+   "purpose": "Texas COVID-19 Response",
+   "amount": 10000
+  },
+  {
+   "name": "REBUILDING TOGETHER HENRY COUNTY",
+   "address": "PO BOX 254, GENESEO, IL 61254",
+   "status": "PC",
+   "purpose": "COVID-19 Response",
+   "amount": 10000
+  },
+  {
+   "name": "REBUILDING TOGETHER PENNSYLVANIA",
+   "address": "841 KAYWAYNE ST, REDWOOD CITY, CA 94063",
+   "status": "PC",
+   "purpose": "Skilled Volunteer Recruitment for National Rebuilding Day (NRD)",
+   "amount": 2500
+  },
+  {
+   "name": "REBUILDING TOGETHER SACRAMENTO REGION NOW INC",
+   "address": "PO BOX 25584, SACRAMENTO, CA 95825",
+   "status": "PC",
+   "purpose": "Workforce Development Project Promote Zone Home Improvement and General Operating Support",
+   "amount": 25000
+  },
+  {
+   "name": "REBUILDING TOGETHER SONOMA, INC.",
+   "address": "1152 30TH ST W, SANTA ROSA, CA 95403",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 15000
+  },
+  {
+   "name": "SACRAMENTO NEIGHBORHOOD HOUSING SERVICES INC",
+   "address": "2411 ALHAMBRA BLVD STE 200, SACRAMENTO, CA 95817",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 25000
+  },
+  {
+   "name": "SAINT JOHNS COUNTY EDUCATION FOUNDATION INC",
+   "address": "515 E GRANT ST, ST AUGUSTINE, FL 32084",
+   "status": "PC",
+   "purpose": "Five Learning Years (FLY) San Francisco AIDS Foundation General Operating Support",
+   "amount": 7500
+  },
+  {
+   "name": "SAN FRANCISCO AIDS FOUNDATION",
+   "address": "1035 MARKET ST STE 400, SAN FRANCISCO, CA 94103",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 35000
+  },
+  {
+   "name": "SAVE THE FAMILY FOUNDATION OF ARIZONA",
+   "address": "125 E UNIVERSITY DR, MESA, AZ 85201",
+   "status": "PC",
+   "purpose": "General Operating Support - COVID-19 Response",
+   "amount": 20000
+  },
+  {
+   "name": "SEEDSPOT",
+   "address": "515 E GRANT ST, PHOENIX, AZ 85004",
+   "status": "PC",
+   "purpose": "Exploring Economic Opportunity through Virtual Programming",
+   "amount": 5000
+  },
+  {
+   "name": "SERVICES CORPS OF RETIRED EXECUTIVES ASSOCIATION",
+   "address": "2828 N CENTRAL AVE STE 800, PHOENIX, AZ 85004",
+   "status": "PC",
+   "purpose": "Small Business Owner Education, Training, and General Operating Support",
+   "amount": 5000
+  },
+  {
+   "name": "SOLUTIONS COMMUNITY AID SOCIETY INC",
+   "address": "505 FIFTH STREET SUITE 412, SIOUX CITY, IA 51101",
+   "status": "PC",
+   "purpose": "ASSISTANCE COVID-19 Disaster Response and Recovery",
+   "amount": 21500
+  },
+  {
+   "name": "SONOMA VALLEY EDUCATION FOUNDATION",
+   "address": "PO BOX 493, SONOMA, CA 95476",
+   "status": "PC",
+   "purpose": "Online / Distance Learning Technology",
+   "amount": 10000
+  },
+  {
+   "name": "SOTERIA WORLD OUTREACH MINISTRIES",
+   "address": "210 SHAW ST, GREENVILLE, SC 29609",
+   "status": "PC",
+   "purpose": "General Operating Support during COVID-19",
+   "amount": 10000
+  },
+  {
+   "name": "ST JUDE GREAT COMMISSION COMMUNITY DEVELOPMENT CORPORATION",
+   "address": "P O BOX 530863, NAPLES, FL 33942",
+   "status": "PC",
+   "purpose": "First Time Home Buyer Financial Health-CVID-19 Response",
+   "amount": 7500
+  },
+  {
+   "name": "ST MATTHEWS HOUSE INC",
+   "address": "2001 AIRPORT RD S, REDWOOD CITY, CA 94063",
+   "status": "PC",
+   "purpose": "Emergency Operating Support",
+   "amount": 10000
+  },
+  {
+   "name": "STATE OF BLACK ARIZONA",
+   "address": "24 W CAMELBACK RD #558, PHOENIX, AZ 85013",
+   "status": "PC",
+   "purpose": "African American Leadership Institute (AALI)",
+   "amount": 5000
+  },
+  {
+   "name": "STATE OF BLACK ARIZONA",
+   "address": "1031 Franklin Street Floor 2, SAN MATEO COUNTY HISTORICAL ASSOCIATION, CA 94401",
+   "status": "PC",
+   "purpose": "Every Man Connect",
+   "amount": 50000
+  },
+  {
+   "name": "STATE OF BLACK ARIZONA",
+   "address": "22200 Broadway, SAN MATEO COUNTY HISTORICAL ASSOCIATION, CA 94401",
+   "status": "PC",
+   "purpose": "Leadership Council",
+   "amount": 5000
+  },
+  {
+   "name": "STATE OF BLACK ARIZONA",
+   "address": "700 Dearborn Place S, SEATTLE GOODWILL INDUSTRIES, WA 98114",
+   "status": "PC",
+   "purpose": "COVID-19 - Critical Support Services and Case Management",
+   "amount": 10000
+  }
+ ],
+ "totals": [
+  {
+   "label": "Payment Amount",
+   "amount": 910000
+  }
+ ],
+ "_usage": {
+  "in": 2466,
+  "out": 2556
+ },
+ "_seconds": 14.4,
+ "_finish": "stop"
+}

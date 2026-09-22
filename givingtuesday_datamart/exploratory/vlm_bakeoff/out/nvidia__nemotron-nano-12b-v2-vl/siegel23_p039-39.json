@@ -1,0 +1,46 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "",
+ "rows": [
+  {
+   "name": "Upwardly Global",
+   "address": "505 8th Ave, Suite 1704 New York, NY 10018 Urban Arts Partnership",
+   "status": "PC",
+   "purpose": "To support a pilot initiative aimed at eliminating systemic hiring biases",
+   "amount": 50000
+  },
+  {
+   "name": "39 W 19th St, 5th FI New York, NY 10011 Washington Center for Equitable Growth",
+   "address": "740 15th St NW Washington, DC 20005 WGBH Educational Foundation",
+   "status": "PC",
+   "purpose": "To offer general operating support.",
+   "amount": 250000
+  },
+  {
+   "name": "One Guest Street Boston, MA 02135",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support WGBH\u2019s development of \u201cWork It Out Wombats!\u201d.",
+   "amount": 100000
+  },
+  {
+   "name": "TOTAL",
+   "address": "",
+   "status": "",
+   "purpose": "",
+   "amount": 400000
+  }
+ ],
+ "totals": [
+  {
+   "label": "$",
+   "amount": 400000
+  }
+ ],
+ "_usage": {
+  "in": 3669,
+  "out": 364
+ },
+ "_seconds": 3.4,
+ "_finish": "stop"
+}

@@ -1,0 +1,151 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "WELLS FARGO FOUNDATION\\nEIN: 41-1967441",
+ "rows": [
+  {
+   "name": "United Way Worldwide DAF / YourCause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 1629350.0
+  },
+  {
+   "name": "United Way Worldwide DAF / YourCause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 1248789.24
+  },
+  {
+   "name": "United Way Worldwide DAF / YourCause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 514.29
+  },
+  {
+   "name": "United Way Worldwide DAF / YourCause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 2214282.97
+  },
+  {
+   "name": "United Way Worldwide DAF / YourCause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 1130876.09
+  },
+  {
+   "name": "United Way Worldwide DAF / YourCause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 5200.0
+  },
+  {
+   "name": "United Way Worldwide DAF / YourCause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 530944.84
+  },
+  {
+   "name": "United Way Worldwide DAF / YourCause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 282039.58
+  },
+  {
+   "name": "United Way Worldwide DAF / YourCause",
+   "address": "701 North Fairfax Street, Alexandria, VA 22314",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 1000.0
+  },
+  {
+   "name": "YourCause FBO The Blackbaud Giving Fund",
+   "address": "65 Fairchild Street, Charleston, SC 29492",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 2771841.4
+  },
+  {
+   "name": "YourCause FBO The Blackbaud Giving Fund",
+   "address": "65 Fairchild Street, Charleston, SC 29492",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 1168.0
+  },
+  {
+   "name": "YourCause FBO The Blackbaud Giving Fund",
+   "address": "65 Fairchild Street, Charleston, SC 29492",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 2145225.72
+  },
+  {
+   "name": "YourCause FBO The Blackbaud Giving Fund",
+   "address": "65 Fairchild Street, Charleston, SC 29492",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 1061276.33
+  },
+  {
+   "name": "YourCause FBO The Blackbaud Giving Fund",
+   "address": "65 Fairchild Street, Charleston, SC 29492",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 848037.97
+  },
+  {
+   "name": "YourCause FBO The Blackbaud Giving Fund",
+   "address": "65 Fairchild Street, Charleston, SC 29492",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 5300.0
+  },
+  {
+   "name": "YourCause FBO The Blackbaud Giving Fund",
+   "address": "65 Fairchild Street, Charleston, SC 29492",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 3050108.49
+  },
+  {
+   "name": "YourCause FBO The Blackbaud Giving Fund",
+   "address": "65 Fairchild Street, Charleston, SC 29492",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 1052800.0
+  },
+  {
+   "name": "YourCause FBO The Blackbaud Giving Fund",
+   "address": "65 Fairchild Street, Charleston, SC 29492",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 1001437.54
+  },
+  {
+   "name": "YourCause FBO The Blackbaud Giving Fund",
+   "address": "65 Fairchild Street, Charleston, SC 29492",
+   "status": "PC",
+   "purpose": "Community Care Grants",
+   "amount": 985104.97
+  }
+ ],
+ "totals": [
+  {
+   "label": "$",
+   "amount": 21348404.43
+  }
+ ],
+ "_usage": {
+  "in": 695,
+  "out": 5895
+ },
+ "_seconds": 26.0,
+ "_finish": "stop"
+}

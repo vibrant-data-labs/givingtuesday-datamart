@@ -1,0 +1,188 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "ATTACHMENT 9",
+ "rows": [
+  {
+   "name": "AMERICAN RED CROSS WISCONSIN CHAPTER",
+   "address": "2131 N OAKLAND AVE",
+   "status": "PC",
+   "purpose": "General Operating Support, including: East Central Bay COVID-19 Emergency Response Fund",
+   "amount": 25000
+  },
+  {
+   "name": "NEIGHBORHOOD HOUSING SERVICES OF GREEN BAY",
+   "address": "437 S JACKSON ST",
+   "status": "PC",
+   "purpose": "Program and COVID-19 Support",
+   "amount": 15000
+  },
+  {
+   "name": "NEIGHBORHOOD HOUSING SERVICES OF FLORIDA",
+   "address": "115 UNION BLVD STE 700",
+   "status": "PC",
+   "purpose": "Donor Directed Gift - Scholars",
+   "amount": 15000
+  },
+  {
+   "name": "NEIGHBORHOOD HOUSE INC",
+   "address": "20 SOUTH MAIN STREET",
+   "status": "PC",
+   "purpose": "Food Distribution/Relief - COVID-19",
+   "amount": 25000
+  },
+  {
+   "name": "ONEIDA NATION OF CHECKS AMERICANS INC",
+   "address": "534 AIRPORT DRIVE",
+   "status": "PC",
+   "purpose": "COVID-19 Relief: Food Distribution/Health, Mask Cost",
+   "amount": 50000
+  },
+  {
+   "name": "ORIGINAL COVENANT CHURCH OF THE CHEROKEE NATION",
+   "address": "10485 WASHINGTON ST",
+   "status": "PC",
+   "purpose": "General Operating Support/COVID-19 Relief",
+   "amount": 15000
+  },
+  {
+   "name": "OPERATION BREAKTHROUGH INC",
+   "address": "3039 TROOST AVENUE",
+   "status": "PC",
+   "purpose": "Food Assistance/Distribution for COVID-19 Emergency Relief",
+   "amount": 50000
+  },
+  {
+   "name": "PARADISE VALLEY CENTER",
+   "address": "10050 WASHINGTON BLVD STE 1",
+   "status": "PC",
+   "purpose": "PPE & Educational Outreach: COVID-19",
+   "amount": 15000
+  },
+  {
+   "name": "PARTNERSHIP FOR AMADORIA INC",
+   "address": "3215 MAIN STREET #B",
+   "status": "PC",
+   "purpose": "Coronavirus Emergency Assistance",
+   "amount": 15000
+  },
+  {
+   "name": "PEACEFUL HOUSEHOLD",
+   "address": "PO BOX 386",
+   "status": "PC",
+   "purpose": "COVID-19 Relief: Food Distribution and Center",
+   "amount": 15000
+  },
+  {
+   "name": "PLANNED PARENTHOOD OF THE ROCKY MOUNTAIN",
+   "address": "7155 E 38TH AVE",
+   "status": "PC",
+   "purpose": "General operations",
+   "amount": 20000
+  },
+  {
+   "name": "REBUILDING TOGETHER SACRAMENTO",
+   "address": "PO BOX 255584",
+   "status": "PC",
+   "purpose": "Safe and Healthy Housing Project",
+   "amount": 25225
+  },
+  {
+   "name": "REBUILDING TOGETHER WEST SOUND",
+   "address": "PO BOX 1001",
+   "status": "PC",
+   "purpose": "Safe and Healthy Housing Project",
+   "amount": 15000
+  },
+  {
+   "name": "RENEWING INSPIRATION FOUNDATION",
+   "address": "PO BOX 2365",
+   "status": "PC",
+   "purpose": "Rehabilitation Support for National Youth Development Project",
+   "amount": 25000
+  },
+  {
+   "name": "RIVER CITY FOOD BANK",
+   "address": "1800 28TH ST",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 25000
+  },
+  {
+   "name": "SACRAMENTO FAMILY MEDICAL FOUNDATION",
+   "address": "5055 BUSINESS CENTER DR #B",
+   "status": "PC",
+   "purpose": "Supporting COVID-19 Response Efforts",
+   "amount": 53700
+  },
+  {
+   "name": "SACRAMENTO LOAVES & FISHES",
+   "address": "1351 NORTH C ST",
+   "status": "PC",
+   "purpose": "First Resiliency Grants - General Operating Support",
+   "amount": 53700
+  },
+  {
+   "name": "SACRAMENTO RT COMM FOUNDATION",
+   "address": "2816 N STREET",
+   "status": "PC",
+   "purpose": "General Operating Support",
+   "amount": 7500
+  },
+  {
+   "name": "SAN FRANCISCO FAMILY SUPPORT NETWORK",
+   "address": "1388 SUTTER ST STE 400",
+   "status": "PC",
+   "purpose": "Network Resiliency Grants - General Operating Support",
+   "amount": 53500
+  },
+  {
+   "name": "SAN FRANCISCO FOUNDATION",
+   "address": "1 SANSOME ST SUITE 800",
+   "status": "PC",
+   "purpose": "People Power Economic Opportunity through COVID-19",
+   "amount": 35000
+  },
+  {
+   "name": "SAN FRANCISCO FOUNDATION",
+   "address": "1 SANSOME ST SUITE 800",
+   "status": "PC",
+   "purpose": "COVID-19 relief",
+   "amount": 35000
+  },
+  {
+   "name": "SAN FRANCISCO COVID-19 COMMUNITY FOUNDATION",
+   "address": "155 GRANT ST",
+   "status": "PC",
+   "purpose": "COVID-19 Relief",
+   "amount": 100000
+  },
+  {
+   "name": "SAN FRANCISCO COVID-19 FAMILIES FUND",
+   "address": "155 GRANT ST",
+   "status": "PC",
+   "purpose": "General Operating Support, COVID-19",
+   "amount": 50000
+  },
+  {
+   "name": "SAN MATEO COUNTY HISTORICAL ASSOCIATION",
+   "address": "2200 BROADWAY",
+   "status": "PC",
+   "purpose": "African American Leadership Institute (AALI)",
+   "amount": 25000
+  },
+  {
+   "name": "SEATTLE GOODWILL INDUSTRIES",
+   "address": "700 Dearborn Place S",
+   "status": "PC",
+   "purpose": "General Civil Support Services and Case Management",
+   "amount": 10000
+  }
+ ],
+ "totals": [],
+ "_usage": {
+  "in": 1077,
+  "out": 1301
+ },
+ "_seconds": 12.6,
+ "_finish": "stop"
+}

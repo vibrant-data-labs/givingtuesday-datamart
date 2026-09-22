@@ -1,0 +1,9 @@
+{
+ "parse_error": "\n{\n  \"page_kind\": \"grants_paid_list\",\n  \"heading\": \"FORM 990-PF, PART XIV - GRANTS AND CONTRIBUTIONS PAID DURING THE YEAR\",\n  \"rows\": [\n    {\n      \"name\": \"Upwardly Global\",\n      \"address\": \"505 8th Avenue, Suite 1704 New York, NY 10018\",\n      \"status\": \"PC\",\n      \"purpose\": \"To support a pilot ",
+ "_usage": {
+  "in": 2454,
+  "out": 1592
+ },
+ "_seconds": 57.5,
+ "_finish": "stop"
+}

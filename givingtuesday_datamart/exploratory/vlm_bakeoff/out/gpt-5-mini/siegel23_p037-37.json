@@ -1,0 +1,111 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "STATEMENT 21",
+ "rows": [
+  {
+   "name": "San Francisco General Hospital Foundation",
+   "address": "P.O. Box 3053, San Francisco, CA 94141",
+   "status": "PC",
+   "purpose": "To support predictive analytics for public health.",
+   "amount": 250000
+  },
+  {
+   "name": "San Francisco Foundation",
+   "address": "1390 Market St., San Francisco, CA 94102",
+   "status": "PC",
+   "purpose": "To support one fellow and research on the impact of technology on society.",
+   "amount": 240000
+  },
+  {
+   "name": "Scarsdale Adult School",
+   "address": "P.O. Box 25, Scarsdale, NY 10583",
+   "status": "PC",
+   "purpose": "To provide general operating support.",
+   "amount": 500
+  },
+  {
+   "name": "Scarsdale Foundation",
+   "address": "P.O. Box 52, Scarsdale, NY 10583",
+   "status": "PC",
+   "purpose": "To provide general operating support.",
+   "amount": 100
+  },
+  {
+   "name": "Scarsdale High School PTA Scholarship Fund for College",
+   "address": "P.O. Box 421, Scarsdale, NY 10583",
+   "status": "PC",
+   "purpose": "To provide support to PTA Scholarship Fund for College.",
+   "amount": 2000
+  },
+  {
+   "name": "Scarsdale Public Library",
+   "address": "31 Heathcote Road, Scarsdale, NY 10583",
+   "status": "PC",
+   "purpose": "To provide general operating support.",
+   "amount": 100
+  },
+  {
+   "name": "Scarsdale Volunteer Ambulance Corps",
+   "address": "41 Fox Meadow Rd., Scarsdale, NY 10583",
+   "status": "PC",
+   "purpose": "To provide general operating support.",
+   "amount": 103
+  },
+  {
+   "name": "Scratch Foundation",
+   "address": "201 South St., Suite 102, Boston, MA 02111",
+   "status": "PC",
+   "purpose": "To support Scratch Foundation.",
+   "amount": 1500000
+  },
+  {
+   "name": "Brookline Collaborative",
+   "address": "1500 John F. Kennedy Boulevard - Two Penn Center, Suite 1160, Philadelphia, PA 19102",
+   "status": "PC",
+   "purpose": "To provide general operating support and scaling efforts.",
+   "amount": 200000
+  },
+  {
+   "name": "STEM Teachers NYC",
+   "address": "245 W. 10th St., New York, NY 10014",
+   "status": "PC",
+   "purpose": "To support STEM Teachers NYC in developing practice-based learning hubs.",
+   "amount": 37500
+  },
+  {
+   "name": "Roadtrip Nation (The Technology in Society Roadtrip)",
+   "address": "10 W. 18th Street, Suite 1008, New York, NY 10011",
+   "status": "PC",
+   "purpose": "To support the Technology in Society Roadtrip.",
+   "amount": 550000
+  },
+  {
+   "name": "Summit Public Schools - Marshall Street Initiative",
+   "address": "780 Broadway, Redwood City, CA 94063",
+   "status": "PC",
+   "purpose": "To support the Marshall Street Initiative at Summit Public Schools.",
+   "amount": 150000
+  },
+  {
+   "name": "Superbloom (Design Convocation Research & Design)",
+   "address": "276 Fifth Ave., Suite 704, New York, NY 10001",
+   "status": "PC",
+   "purpose": "To support one fellow and research on the impact of technology on society.",
+   "amount": 125000
+  },
+  {
+   "name": "TechCongress",
+   "address": "1100 15th St. NW, Suite 400, Washington, DC 20005",
+   "status": "PC",
+   "purpose": "To support TechCongress fellowships.",
+   "amount": 250000
+  }
+ ],
+ "totals": [],
+ "_usage": {
+  "in": 2201,
+  "out": 3821
+ },
+ "_seconds": 35.1,
+ "_finish": "stop"
+}

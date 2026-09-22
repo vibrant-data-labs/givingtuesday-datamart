@@ -1,0 +1,272 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "CHARITY AUDIT LISTINGS",
+ "rows": [
+  {
+   "name": "Rising's Reach National Institute of this Harvard College",
+   "address": "49 Willet Ave, Mpls, CA 56365",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000
+  },
+  {
+   "name": "National Council of this Harvard",
+   "address": "660 Carpark SN, St. Paul, MN 55105",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000
+  },
+  {
+   "name": "University of this Harvard",
+   "address": "105 First Ave, St. Paul, MN 55105",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000
+  },
+  {
+   "name": "Children Dealers fund",
+   "address": "80 First Sec, St. Paul, MN 55105",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000
+  },
+  {
+   "name": "Educational Service Trust",
+   "address": "200 East Austin, MN 55105",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 625000
+  },
+  {
+   "name": "Community Assistance Foundation",
+   "address": "40 North Sage, MN 55105",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000
+  },
+  {
+   "name": "Grant Show, Sage",
+   "address": "800 Grant Show, Sage, CO 8023",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 1000000
+  },
+  {
+   "name": "The Martin Luther Foundation",
+   "address": "870 Western Park Road, Mikeades, WI 53226",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 500000
+  },
+  {
+   "name": "Harley Johnson Foundations",
+   "address": "30 Hadley Road, New York, NY 10013",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 500000
+  },
+  {
+   "name": "OTHER Church of America",
+   "address": "195 S Church Street, New York, NY 10013",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250514
+  },
+  {
+   "name": "Education In School",
+   "address": "50 Ace South, Sec 238, WA 88188",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 375302
+  },
+  {
+   "name": "Association Educational",
+   "address": "170 Sage Ave, New York, NY 10013",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 375000
+  },
+  {
+   "name": "Silcs Ave Inc",
+   "address": "54 West 70th Street, New York, NY 10013",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 500000
+  },
+  {
+   "name": "Community Development Inc",
+   "address": "45 East 125 Street, New York, NY 10035",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 625000
+  },
+  {
+   "name": "Central Avenue Inc",
+   "address": "218 Central Ave, Sage, NY 10028",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 1475000
+  },
+  {
+   "name": "Educational Services Corp",
+   "address": "282 East 42nd Street, New York, NY 10028",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 333216
+  },
+  {
+   "name": "Grant Avenue Project Institute",
+   "address": "70 Grant Avenue South, New York, PA 18054",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000
+  },
+  {
+   "name": "Healthcare Initiatives",
+   "address": "120 Health Lane, Glastonbury, PA 18054",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 230000
+  },
+  {
+   "name": "American Foundation",
+   "address": "40 Adams Street, Alton, IL 62301",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 375000
+  },
+  {
+   "name": "Associated Community Service Foundation",
+   "address": "170 Box 526, Sage, IL 62301",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000
+  },
+  {
+   "name": "Lincoln Education Inc",
+   "address": "150 Lincoln Education-Bakersfield, NV 76012",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 498115
+  },
+  {
+   "name": "Hamilton Institute Fund",
+   "address": "39 Hamilton Institute Road, Denver, CO 87201",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 500000
+  },
+  {
+   "name": "Martin Institute Services",
+   "address": "59 Martin Street, Sage, WA 98115",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 1500000
+  },
+  {
+   "name": "Kentucky School Service",
+   "address": "220 Zoe Street, Georgetown, OH 44312",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000
+  },
+  {
+   "name": "Educational Services Board",
+   "address": "40 Dooley Road, Beavers, NV 10609",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 330000
+  },
+  {
+   "name": "Educational Services",
+   "address": "320 Bell Expressway, NY 10022",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000
+  },
+  {
+   "name": "First School Programs",
+   "address": "101 Leventina Plaza, MA 02114",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 500000
+  },
+  {
+   "name": "Educational Services",
+   "address": "345 Soil Street, Toledo, CA 93168",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 600000
+  },
+  {
+   "name": "Educational Services Continued",
+   "address": "235 Elixon SN, Washington DC 20201",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 325000
+  },
+  {
+   "name": "Educational Services",
+   "address": "245 Road Institute, Elixon Road, PA 18054",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000
+  },
+  {
+   "name": "Educational Services and Assistance",
+   "address": "200 24th Avenue South, Suite, Washington 98114",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 330000
+  },
+  {
+   "name": "Family Services",
+   "address": "95 School Way, IL 60623",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000
+  },
+  {
+   "name": "Educational Services",
+   "address": "200 24th Avenue South, Suite, MN 55406",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000
+  },
+  {
+   "name": "Community Services",
+   "address": "155 Lincoln School, St. Paul, MN 55104",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 310000
+  },
+  {
+   "name": "Worksheet Community Services",
+   "address": "45 Worksheet Services, St. Paul, MN 55104",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 250000
+  },
+  {
+   "name": "Educational Services",
+   "address": "485 North University, White Plains, NY 10605",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 330000
+  },
+  {
+   "name": "Community Foundation",
+   "address": "470 S 3rd Street, Seattle, WA 98118",
+   "status": "Yes",
+   "purpose": "General Support",
+   "amount": 15000000
+  }
+ ],
+ "totals": [],
+ "_usage": {
+  "in": 1853,
+  "out": 2354
+ },
+ "_seconds": 15.7,
+ "_finish": "stop"
+}

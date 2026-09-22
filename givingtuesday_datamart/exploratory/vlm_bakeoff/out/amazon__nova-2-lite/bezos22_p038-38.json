@@ -1,0 +1,9 @@
+{
+ "parse_error": "```json\n{\n  \"page_kind\": \"expenditure_responsibility\",\n  \"heading\": \"CASH CONTRIBUTIONS\",\n  \"rows\": [\n    {\n      \"name\": \"Raising A Reader National\",\n      \"address\": \"489 Valley Way, Milpitas CA 95035\",\n      \"status\": \"Yes\",\n      \"purpose\": \"General Support\",\n      \"amount\": 225000\n    },\n    {\n",
+ "_usage": {
+  "in": 581,
+  "out": 2383
+ },
+ "_seconds": 11.9,
+ "_finish": "stop"
+}

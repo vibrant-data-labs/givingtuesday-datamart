@@ -1,0 +1,111 @@
+{
+ "page_kind": "grants_paid_list",
+ "heading": "FORM 990-PF, PART XIV - GRANTS AND CONTRIBUTIONS PAID DURING THE YEAR",
+ "rows": [
+  {
+   "name": "Creative Commons Corporation",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support the stewardship and maintenance of Creative Commons licenses.",
+   "amount": 25000
+  },
+  {
+   "name": "",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support computer science education research.",
+   "amount": 50000
+  },
+  {
+   "name": "",
+   "address": "",
+   "status": "PC",
+   "purpose": "To provide general operating support and to assist CSforAll in creating a sustainable revenue infrastructure.",
+   "amount": 700000
+  },
+  {
+   "name": "",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support one fellow and research on the impact of technology on society.",
+   "amount": 300000
+  },
+  {
+   "name": "Digital Promise",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support a webinar series at Digital Promise.",
+   "amount": 60000
+  },
+  {
+   "name": "",
+   "address": "",
+   "status": "PC",
+   "purpose": "To provide general operating support to ELITE.",
+   "amount": 150000
+  },
+  {
+   "name": "",
+   "address": "",
+   "status": "PC",
+   "purpose": "To provide general operating support.",
+   "amount": 50000
+  },
+  {
+   "name": "",
+   "address": "",
+   "status": "PC",
+   "purpose": "To serve as the fiscal agent and support the Learning Landscape Challenge.",
+   "amount": 220000
+  },
+  {
+   "name": "",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support the development of AI-powered learning tools.",
+   "amount": 150000
+  },
+  {
+   "name": "",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support Feedback Labs in their mission to make feedback the norm in aid, philanthropy, nonprofit, and government.",
+   "amount": 200000
+  },
+  {
+   "name": "",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support the FIRST Gala and general operations.",
+   "amount": 200000
+  },
+  {
+   "name": "",
+   "address": "",
+   "status": "PC",
+   "purpose": "To provide general operating support.",
+   "amount": 100000
+  },
+  {
+   "name": "",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support Govern for America's fellowships.",
+   "amount": 100000
+  },
+  {
+   "name": "",
+   "address": "",
+   "status": "PC",
+   "purpose": "To support Grove Collective Foundation's general charitable purposes and activities.",
+   "amount": 250000
+  }
+ ],
+ "totals": [],
+ "_usage": {
+  "in": 2201,
+  "out": 3045
+ },
+ "_seconds": 33.8,
+ "_finish": "stop"
+}
