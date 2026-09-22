@@ -25,6 +25,7 @@ from givingtuesday_datamart.attachment_grants import (
     PLACEHOLDER,
     candidate_tables,
     extract,
+    is_pointer,
     load_elements,
     parse_money,
 )
@@ -193,3 +194,22 @@ def test_unlabelled_run_may_not_cross_a_vetoed_schedule():
                    [("ACUSHNET", "1", "4,000")], heading="Investments Corporate Bonds Schedule")
     assert extract(grants + bonds, 10_000).paid.outcome == "no_reconciling_run"
     assert extract(grants, 6_000).paid.reconciled
+
+
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        ("SEE Attachment 22", True),                 # the frame's own definition
+        ("SEE GRANTS PAID ATTACHMENT", True),        # words between see and attachment
+        ("SCHEDULE ATTACHED", True),                 # bare reference
+        ("STATEMENT 25", True),
+        ("ATCH 4", True),                            # Sanofi Cares, $6.2B
+        ("GRANTS", True),                            # bare category
+        ("SCHEDULE AVAILABLE UPON REQUEST", False),  # withheld: nothing is attached
+        ("RIDER UNIVERSITY FBO H SOULE", False),     # a real grantee
+        ("Scratch Foundation", False),
+        ("Center for Investigative Reporting", False),
+    ],
+)
+def test_is_pointer_matches_the_measured_classes(name, expected):
+    assert is_pointer(name) is expected

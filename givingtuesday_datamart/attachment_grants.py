@@ -77,12 +77,35 @@ NAME_HEADERS: tuple[str, ...] = (
     r"organization",
 )
 
-# The same detector that flags a filing as placeholder-only upstream.
+# The detector the sample frame was drawn with: "see/refer" immediately
+# before the attachment word. Frozen — the frame must regenerate identically.
 PLACEHOLDER = re.compile(
     r"((?:see|refer)\w*[\s,–-]*(?:attach|addition|schedul|statement|stmt|list))"
     r"|^\s*see\s*$",
     re.I,
 )
+# Its superset, measured on the loaded datamart (2020+, Part XV rows): adds
+# about 1,750 filings / $11.3B that PLACEHOLDER misses, nearly all of it
+# confirmed by the row carrying >= 90% of the filing's declared total. Words may sit
+# between "see" and the attachment word ("SEE GRANTS PAID ATTACHMENT"), the
+# name may be a bare reference ("SCHEDULE ATTACHED", "STATEMENT 25",
+# "ATCH 4") or a bare category ("GRANTS", "TOTAL"). "Available upon
+# request" is not a pointer: nothing is attached. See
+# data/exploratory/placeholder_classifier_assessment.sql.
+WITHHELD = re.compile(r"upon request|on request|on file|hipaa|hippa|not required|privacy|confidential", re.I)
+_POINTER_NAME = re.compile(
+    r"\b(?:see|refer)\w*\b.{0,40}\b(?:attach|schedul|statement|stmt|list|exhibit|detail|footnote|supplement)"
+    r"|^\W*(?:please\s+)?(?:see\s+)?(?:attached|attachment|atch|sched|schedule|statement|stmt|exhibit|listing|list|details?|supplement(?:al)?)\b[\w\s#&().,/-]{0,30}$"
+    r"|\b(?:attached|attachment|atch)\b"
+    r"|^\W*(?:total|grants?|contributions?|donations?|grants?\s+paid|grants?\s+approved\s+for\s+future\s+payment)\W*$",
+    re.I,
+)
+
+
+def is_pointer(name: str) -> bool:
+    """Does this recipient name point at an attachment instead of naming a grantee?"""
+    text = name or ""
+    return not WITHHELD.search(text) and bool(PLACEHOLDER.search(text) or _POINTER_NAME.search(text))
 
 # Headings that say grants. Parts XIV and XV are the 990-PF sections that
 # carry the grant tables, and filers head them without the word "grant"
@@ -417,7 +440,7 @@ def candidate_tables(elements: Sequence[dict],
             if not name:
                 totals.append(amount)   # money with no words at all: a carried-forward total
                 continue
-            if not name or PLACEHOLDER.search(name) or (len(name.split()) <= 4 and _POINTER.search(name)):
+            if not name or is_pointer(name) or (len(name.split()) <= 4 and _POINTER.search(name)):
                 continue   # a pointer to the attachment, not a grant in it
             rows.append(GrantRow(page, name, amount, tuple(row)))
 

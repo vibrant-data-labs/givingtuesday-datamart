@@ -185,6 +185,85 @@ The population is violently top-heavy: 22 filings hold $4.67B, 6,755 hold
 $1.76B. The sample is therefore stratified, with band A a **census**. The
 frame regenerates identically from seed 20260921.
 
+### Does the filing need its PDF? Assessing the classifier
+
+Everything below starts from a row-level pattern on the recipient name —
+"see/refer" followed by attach/schedule/statement/list — and the earlier
+drafts only ever eyeballed it on GT's CSV. It was assessed on the loaded
+datamart instead: `privategrants_current` for 2020 onward (9.58M rows,
+$564.6B, 521,065 filer-years) joined to Part I line 25 in
+`basic_fields_pf`. The query is
+[`placeholder_classifier_assessment.sql`](../data/exploratory/placeholder_classifier_assessment.sql).
+
+**Precision is not the problem.** The pattern flags 12,472 rows, $54.7B,
+11,706 filings. The head is what you would expect ("SEE ATTACHED" 1,920
+rows and $7.0B, "SEE ATTACHED SCHEDULE" 1,810, "SEE ATTACHED LIST" 1,186,
+"SEE ATTACHED STATEMENT" 877), and a random 70 of the names seen only once
+are all pointers too. The nearest thing to a false positive is a named
+recipient with a pointer beside it — "THE LIEBER INSTITUTE FOR BRAIN
+DEV-SEE ATTACHED", "RENAISSANCE CHARITABLE FOUNDATION (SEE ATTACHED)" —
+and the attachment exists in those cases as well. An address on the row is
+no evidence against: 6,316 flagged rows carry one, and it is the filer's
+own or its bank's.
+
+At the filing level the row flag is a decision. Of the 11,706 filings with
+a flagged row, 10,989 (94%) have flagged dollars within 10% of the declared
+total ($52.0B); 225 have under half, 187 between half and 90%, 46 over
+110%, and 259 no declared total. Only 572 filings mix flagged and
+unflagged rows ($1.5B against $1.25B).
+
+**Recall is where it loses.** Two probes: a broader pattern, and the
+text-independent shape of a placeholder (at most three rows, one of them
+at least 90% of the declared total).
+
+- The broader pattern lets words sit between "see" and the attachment word
+  ("SEE GRANTS PAID ATTACHMENT", $168M), accepts a bare reference as the
+  whole name ("SCHEDULE ATTACHED" in 456 filings, "STATEMENT 25", "ATCH 4",
+  "ATTACHMENT B"), and a bare category ("GRANTS" in 44 filings, $1.6B). It
+  adds about 1,750 filings and $11.3B, nearly all of it confirmed by shape
+  — the row carries the filing's declared total. The single largest
+  addition is Sanofi Cares' "ATCH 4" at $6.2B, patient assistance and
+  excluded downstream anyway. Two tokens were tried and dropped after
+  reading the additions ("rider" is Rider University; a bare "att" is
+  people — 524 rows, $15M between them), and anything reading "available
+  upon request" is kept out (147 rows, $231M): that is a bare reference to
+  nothing.
+- The shape probe alone is useless as a rule. 105,017 filings ($78.0B) are
+  single-row and named, and the top of that pile is Gates ($31B from the
+  trust), Kellogg, and every pass-through foundation that gives its whole
+  year to one donor-advised fund sponsor.
+
+**Two classes a PDF cannot help.** 788 filings ($5.9B) withhold the list
+outright — "available upon request", "kept on file", HIPAA. 3,088 filings
+($35.5B) name "VARIOUS …" with no pointer; $31B of that is patient
+assistance ("VARIOUS INDIVIDUALS", "VARIOUS NEEDY PATIENTS"), and whether
+the organisational remainder attaches a list anyway is untested — twenty
+PDFs would settle it.
+
+The filing-level rule that falls out, over 2020–2025 (measured before the
+two corrections above, which move at most 125 filings and $0.23B from the
+first row to the withheld row):
+
+| class | filings | declared |
+|---|---|---|
+| **fetch the PDF** — pointer rows hold ≥ 50% of declared | 12,977 | $64.6B (of which 4,565 filings are patient assistance) |
+| mixed — pointer rows under 50% | 649 | $10.8B |
+| withheld — no PDF will help | 788 | $5.9B |
+| "various", no pointer — untested | 3,088 | $35.5B |
+| single row, named — pass-through, not placeholder | 105,017 | $78.0B |
+| itemised | 332,761 | $360.5B |
+| no declared total | 65,785 | — |
+
+Against the CSV: the priority-list file gave 9,964 placeholder filings and
+$47.4B under the original pattern; the full datamart gives 11,706 and
+$54.7B. The priority list is about 85% of the population.
+
+The original pattern stays as `PLACEHOLDER` so the sample frame
+regenerates identically; the broader one is `is_pointer()` in
+[`attachment_grants.py`](../givingtuesday_datamart/attachment_grants.py)
+and is what the selector uses to drop pointer rows from OCR'd tables. It
+changes nothing on the 100 sampled filings.
+
 **Paid and future are separate targets.** Part XV line 3a (grants paid) and
 line 3b (approved for future payment) are separate declared totals and
 separate statements in the PDF. The first frame summed both into one
@@ -349,7 +428,7 @@ image without the grants section. What else could hold the list:
 - **The IRS 404s have a pattern.** All six indexed-but-unserved images were
   generated between 2022-05 and 2022-11; no image generated 2023 or later
   404s. Worth reporting to the IRS as a batch, since it costs $872M here.
-- **State charity regulators.** Six of the 15 are New York filers (Siegel,
+- **State charity regulators.** Six of the 15 are New York filers (Siegel's 2020 filing — its 2021–2024 images all carry the list,
   Charina, Hayden, Elmezzi, Basch, plus Reynolds and Edelman among the
   no-section cases), and the NY Charities Bureau registry serves the full
   CHAR500 package including the 990-PF. Its search is behind a CAPTCHA, so
