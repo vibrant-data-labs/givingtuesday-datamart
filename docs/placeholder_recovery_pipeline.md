@@ -340,7 +340,14 @@ What it showed:
    reconciliation did not choose — they fail on different filings — so
    the next step is the pair: transcribe every page with both, accept a
    page where the two agree on its amounts, and send the disagreeing
-   pages (about a fifth) to Gemini 3.8 Flash or to a second Qwen pass.
+   pages to Gemini 3.8 Flash. Measured on the sample: outside Johnson &
+   Johnson the two readings are identical on 63% of pages; on J&J's 836
+   dense pages, 11%. Choosing the better of the two existing readings per
+   page would reconcile 3 of the 10 near-miss filings (Kenan, First
+   Horizon, Eden Hall 2023); the other 7 have a page neither model read
+   right, so the third reader and the prompt fixes below are what move
+   them. The gate stays: on the non-cash pages both models agree on the
+   wrong column.
    Alongside: carry a grant heading forward onto heading-less continuation
    pages in `page_tables`, as `candidate_tables` already does; and a
    prompt revision that returns one section per list on a page and keeps a

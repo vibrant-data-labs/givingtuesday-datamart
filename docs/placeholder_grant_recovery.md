@@ -213,7 +213,9 @@ Other sources were checked:
 ## Next steps
 
 1. Run both models on every page. Accept a page when they agree on its
-   amounts. Send the rest to a third model.
+   amounts, which is 63% of pages outside the one 836-page filing. Send
+   the rest to a third model. Agreement alone fixes 3 of the 10 near
+   misses; the other 7 need the third reader or the prompt fixes below.
 2. Carry a grant heading onto heading-less continuation pages, as the OCR
    path already did.
 3. Revise the prompt: one section per list on a page, and a contact name
