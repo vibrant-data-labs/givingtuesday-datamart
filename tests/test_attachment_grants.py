@@ -25,10 +25,14 @@ from givingtuesday_datamart.attachment_grants import (
     PLACEHOLDER,
     candidate_tables,
     extract,
+    extract_tables,
     is_pointer,
     load_elements,
+    page_tables,
     parse_money,
+    xml_tables,
 )
+from givingtuesday_datamart.irs_source import attachment_start
 
 
 def _table(page, header, rows, heading=None):
@@ -213,3 +217,71 @@ def test_unlabelled_run_may_not_cross_a_vetoed_schedule():
 )
 def test_is_pointer_matches_the_measured_classes(name, expected):
     assert is_pointer(name) is expected
+
+
+# --- vision-model pages and XML-itemised rows -------------------------------
+
+def _page(kind, heading, rows, totals=()):
+    """A vision model's response for one page, as ``page_tables`` reads it."""
+    return {"page_kind": kind, "heading": heading,
+            "rows": [{"name": n, "address": "", "status": "PC", "purpose": "", "amount": a} for n, a in rows],
+            "totals": [{"label": l, "amount": a} for l, a in totals]}
+
+
+def test_page_tables_keep_totals_and_pointers_out_of_the_rows():
+    pages = {31: _page("grants_paid_list", "STATEMENT 22", [
+        ("Scratch Foundation", "2,500,000"), ("Total", 4000000), ("See attached", 1500000),
+        ("Brooklyn Museum", 1500000)], totals=[("TOTAL", 4000000)])}
+    [table] = page_tables(pages)
+    assert [row.name for row in table.rows] == ["Scratch Foundation", "Brooklyn Museum"]
+    assert table.rows[0].amount == 2_500_000.0        # "2,500,000" parsed
+    assert table.totals == (4_000_000.0, 4_000_000.0)  # the row that was a total, and the totals list
+    assert table.labelled and not table.future and table.page == 31
+
+
+def test_page_kind_is_evidence_when_the_heading_says_nothing():
+    pages = {40: _page("grants_future_list", "", [("Alpha Trust", 1000), ("Beta House", 2000), ("Gamma Fund", 3000)]),
+             41: _page("other", "", [("Delta Center", 1000), ("Epsilon Clinic", 2000), ("Zeta Library", 3000)])}
+    future, plain = page_tables(pages)
+    assert future.labelled and future.future
+    assert not plain.labelled and not plain.future and not plain.vetoed
+    # the future page cannot be spent against the paid target
+    recovery = extract_tables([future, plain], paid=6000, future=6000)
+    assert recovery.paid.reconciled and recovery.paid.pages == (41,)
+    assert recovery.future.reconciled and recovery.future.pages == (40,)
+
+
+def test_xml_rows_close_the_gap_the_attachment_leaves():
+    """Cohen 2020: the attachment lists $6.5M, the expenditure-responsibility
+    statement in the XML holds the $85M, and only together do they reconcile."""
+    pages = {28: _page("grants_paid_list", "PART XV - GRANTS AND CONTRIBUTIONS PAID",
+                       [("A Moment To Breathe", 10000), ("ACE Programs", 50000), ("Brooklyn Museum", 6_400_000)])}
+    xml = [{"source": "990PF_EXPENDITURE_RESP", "recipient_name": "Cohen Veterans Network", "amount": "38000000"},
+           {"source": "990PF_EXPENDITURE_RESP", "recipient_name": "COHEN VETERANS NETWORK INC", "amount": "47000000"},
+           {"source": "990PF_P14_3A", "recipient_name": "SEE ATTACHMENT", "amount": "91460000"}]
+    tables = page_tables(pages) + xml_tables(xml, targets=(91_460_000,))
+    assert [t.kind for t in tables] == ["paid", "paid"]
+    assert len(tables[1].rows) == 2                    # the placeholder row itself is dropped
+    recovery = extract_tables(tables, paid=91_460_000)
+    assert recovery.paid.reconciled and recovery.paid.labelled
+    assert sum(1 for row in recovery.rows if row.page is None) == 2
+    # and without the XML the list is present but short
+    assert not extract_tables(tables[:1], paid=91_460_000).paid.reconciled
+
+
+def test_expenditure_responsibility_page_is_only_used_when_it_reconciles():
+    pages = {10: _page("grants_paid_list", "GRANTS PAID", [("Alpha Trust", 1000), ("Beta House", 2000), ("Gamma Fund", 3000)]),
+             11: _page("expenditure_responsibility", "", [("Beta House", 2000), ("Omega Institute", 500)])}
+    recovery = extract_tables(page_tables(pages), paid=6000)
+    assert recovery.paid.reconciled and recovery.paid.pages == (10,)
+    recovery = extract_tables(page_tables(pages), paid=8500)
+    assert recovery.paid.reconciled and recovery.paid.pages == (10, 11)
+
+
+@pytest.mark.parametrize("widths, start", [
+    ([2246, 2259, 2246, 3081, 2440, 2246, 2550, 2550], 7),   # Siegel-shaped
+    ([2246, 2246, 2246], None),                              # all IRS-rendered: nothing attached
+    ([2246, 2521, 2246], 2),                                 # a filer page, then the IRS again: keep both
+])
+def test_attachment_start_is_the_first_page_the_irs_did_not_render(widths, start):
+    assert attachment_start(widths) == start

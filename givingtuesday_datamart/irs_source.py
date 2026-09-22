@@ -28,6 +28,16 @@ original by SHA-256 on filings spanning 43KB to 51MB and both compression
 types. The IRS batch URL is still printed, so the archive is citable even
 though we don't crack it open. If a filing ever has to be proved against the
 IRS copy directly, unzip that archive by hand.
+
+**Where the attachments start** — every TEOS image is two documents
+stapled together: the IRS's own rendering of the XML, then whatever the
+filer attached. The rendered pages come out at a handful of fixed image
+widths (portrait form pages at 2246 px, the wide supporting-statement
+tables at 2440–3081 px), cropped to content; a filer's attachment is a full
+letter page (2550 px) or whatever their scanner produced. ``pdfimages -list``
+reads the widths without rendering anything, so the boundary is free, and
+only the attachment pages need transcribing. A filing whose image is all
+IRS-rendered pages has no attachment at all.
 """
 
 from __future__ import annotations
@@ -37,10 +47,11 @@ import csv
 import io
 import json
 import re
+import subprocess
 import sys
 import urllib.request
 from pathlib import Path
-from typing import Iterator, NamedTuple
+from typing import Iterator, NamedTuple, Sequence
 
 IRS_XML_BASE = "https://apps.irs.gov/pub/epostcard/990/xml"
 IRS_PDF_BASE = "https://apps.irs.gov"
@@ -55,6 +66,12 @@ _OBJECT_ID = re.compile(r"(?<!\d)(\d{18})(?!\d)")
 _PDF_TOKEN = re.compile(r"_(\d{8})(\d+)\.pdf$")
 
 _UA = {"User-Agent": "vdl-givingtuesday-datamart/irs_source"}
+
+# Image widths, in pixels at 300 DPI, of the pages the IRS renders from the
+# XML. Measured on 85 filings: 2246 (form pages), 2259 (Part VIII), 2440,
+# 3062 and 3081 (supporting statements, landscape). Anything else is the
+# filer's.
+IRS_RENDERED_WIDTHS = frozenset({2246, 2259, 2440, 3062, 3081})
 
 
 class IndexRow(NamedTuple):
@@ -170,6 +187,27 @@ def images(row: IndexRow) -> list[Image]:
     return exact or found
 
 
+def page_widths(pdf: Path) -> list[int]:
+    """Image width of every page, from ``pdfimages -list`` — no rendering."""
+    listing = subprocess.run(["pdfimages", "-list", str(pdf)], capture_output=True,
+                             text=True, check=True).stdout
+    widths: dict[int, int] = {}
+    for line in listing.splitlines()[2:]:
+        fields = line.split()
+        if len(fields) > 4 and fields[2] == "image":
+            widths.setdefault(int(fields[0]), int(fields[3]))   # first image on the page
+    return [widths.get(page, 0) for page in range(1, max(widths, default=0) + 1)]
+
+
+def attachment_start(widths: Sequence[int]) -> int | None:
+    """First page (1-based) of the filer's attachments, or None when the
+    image is the IRS rendering and nothing else."""
+    for page, width in enumerate(widths, 1):
+        if width not in IRS_RENDERED_WIDTHS:
+            return page
+    return None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("filing", help="18-digit OBJECT_ID, or any URL containing one")
@@ -225,6 +263,10 @@ def main() -> None:
             )
         args.pdf.write_bytes(_get(chosen.url))
         print(f"wrote {args.pdf}  ({chosen.url.rsplit('/', 1)[1]})")
+        widths = page_widths(args.pdf)
+        start = attachment_start(widths)
+        print(f"  {len(widths)} pages; filer attachments start at page "
+              f"{start if start else 'none — all IRS-rendered'}")
 
 
 if __name__ == "__main__":

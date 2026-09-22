@@ -1,18 +1,21 @@
-"""Measure how much placeholder grant money OCR can actually recover.
+"""Measure how much placeholder grant money transcription can actually recover.
 
-Three steps, run in order. Each is separately cached, because the expensive
-parts (downloading images, paying for OCR) must not be repeated when the
+Four steps, run in order. Each is separately cached, because the expensive
+parts (downloading images, paying a model) must not be repeated when the
 cheap part (the selector) changes.
 
     python -m givingtuesday_datamart.exploratory.placeholder_recovery sample
     python -m givingtuesday_datamart.exploratory.placeholder_recovery stage
-    #   ... run the Unstructured job: source_files/ -> output_files/ ...
-    python -m givingtuesday_datamart.exploratory.placeholder_recovery report
+    python -m givingtuesday_datamart.exploratory.placeholder_recovery transcribe --model alibaba/qwen3-vl-instruct
+    python -m givingtuesday_datamart.exploratory.placeholder_recovery report --results ~/.cache/irs_index/vlm/alibaba__qwen3-vl-instruct
 
 ``sample`` builds the stratified frame from GT's combined grants extract.
 The population is violently top-heavy — 22 filings carry $4.67B while 6,755
 carry $1.76B — so a uniform draw would spend 70% of the budget measuring
-noise. Bands A is a census; B, C and D are sampled and extrapolated.
+noise. Bands A is a census; B, C and D are sampled and extrapolated. It
+also writes the rows the XML itemises for the sampled filings (named Part
+XV lines, the expenditure-responsibility statement): those never need
+transcribing, and the attachment routinely leaves them out.
 
 Two classes are excluded, for different reasons. Three named
 patient-assistance programs (Genentech Patient Foundation, Boehringer
@@ -23,12 +26,19 @@ filing's own declaration. The exclusion is by EIN and by that flag, never by
 a name pattern: a name pattern also catches Amgen Foundation, Genentech
 Foundation and Ruth Lilly Foundation, which are ordinary grantmakers.
 
-``stage`` resolves each filing to its IRS PDF (see ``irs_source``) and uploads
-it keyed by object id, so results come back as ``<object_id>.pdf.json`` and
-join without a manifest.
+``stage`` resolves each filing to its IRS PDF (see ``irs_source``), caches
+it, and records where the filer's attachments start — the IRS-rendered
+pages before that point are the XML we already hold, and are never sent
+to a model. On this sample they are 62% of all pages.
 
-``report`` runs the selector over the returned JSON and prints
-dollar-weighted recovery per stratum — the number the whole exercise is for.
+``transcribe`` renders the attachment pages at 200 DPI and sends each one
+to a vision model through the gateway (see ``vlm_transcription``), one JSON
+file per page, so a rerun only pays for pages it has not seen.
+
+``report`` runs the selector over the results — a vision model's pages or,
+for the baseline, an Unstructured job's ``<object_id>.pdf.json`` — and
+prints dollar-weighted recovery per stratum, the number the whole exercise
+is for.
 """
 
 from __future__ import annotations
@@ -36,19 +46,22 @@ from __future__ import annotations
 import argparse
 import collections
 import csv
+import json
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from givingtuesday_datamart import irs_source
+from givingtuesday_datamart import irs_source, vlm_transcription
 from givingtuesday_datamart.attachment_grants import (
-    PLACEHOLDER, candidate_tables, coverage, diagnose, extract, load_elements)
+    PLACEHOLDER, XML_SOURCES, candidate_tables, coverage, diagnose, extract, extract_tables,
+    load_elements, page_tables, xml_tables)
 
 COMBINED_CSV = Path.home() / "Downloads" / "combined-grants-datamarts-gt_team_priority-20260915.csv"
 SAMPLE_CSV = Path("data/exploratory/placeholder_sample_100.csv")
-BUCKET = "zein-990pf-unstructured-source"
-SOURCE_PREFIX = "source_files"
-OUTPUT_PREFIX = "output_files"
+XML_ROWS_CSV = Path("data/exploratory/placeholder_sample_xml_rows.csv")
+MANIFEST_CSV = Path("data/exploratory/placeholder_staging.csv")
+CACHE = Path.home() / ".cache" / "irs_index"
 PF_SOURCES = ("990PF_P14_3A", "990PF_P14_3B")
 SEED = 20260921
 
@@ -61,26 +74,37 @@ CANARIES = {"451742989": "Siegel", "912073258": "Bezos"}
 STRATA = (("A", 1e8, float("inf"), None), ("B", 1e7, 1e8, 44),
           ("C", 1e6, 1e7, 22), ("D", 0.0, 1e6, 12))
 _OBJECT_ID = re.compile(r"(?<!\d)(\d{18})(?!\d)")
+_PAGE_FILE = re.compile(r"^p(\d+)\.json$")
 
 
-def _read_population() -> dict:
-    """Placeholder filings from the combined extract, one record per filing."""
+def _read_population() -> tuple[dict, dict]:
+    """Placeholder filings from the combined extract, one record per filing,
+    and — keyed the same way — the rows the XML itemises for every filing."""
     csv.field_size_limit(10 ** 9)
     per: dict = collections.defaultdict(
         lambda: {"amt": 0.0, "paid": 0.0, "future": 0.0, "rows": 0, "names": [], "filer": "",
                  "period": "", "status": collections.Counter()})
+    itemised: dict = collections.defaultdict(list)
     with COMBINED_CSV.open(newline="", encoding="utf-8", errors="replace") as handle:
         for row in csv.DictReader(handle):
-            if row["Source"] not in PF_SOURCES:
-                continue
-            if not PLACEHOLDER.search(row["recipient_name"] or ""):
+            if row["Source"] not in XML_SOURCES:
                 continue
             match = _OBJECT_ID.search(row["URL"] or "")
+            key = (row["FILEREIN"], row["TAXYEAR"], match.group(1) if match else "")
             try:
                 amount = float(row["total_grant_amount"] or 0)
             except ValueError:
                 amount = 0.0
-            record = per[(row["FILEREIN"], row["TAXYEAR"], match.group(1) if match else "")]
+            if row["Source"] not in PF_SOURCES or not PLACEHOLDER.search(row["recipient_name"] or ""):
+                itemised[key].append({
+                    "source": row["Source"], "recipient_name": row["recipient_name"],
+                    "address": " ".join(filter(None, ((row.get(k) or "").strip() for k in (
+                        "recipient_address_line1", "recipient_address_line2", "recipient_city",
+                        "recipient_state", "recipient_postal_code")))),
+                    "status": (row.get("recipient_foundation_status") or "").strip(),
+                    "purpose": (row.get("grant_purpose") or "").strip(), "amount": amount})
+                continue
+            record = per[key]
             record["amt"] += amount
             # Part XV line 3a (paid) and 3b (approved for future payment) are
             # separate declared totals and separate statements in the PDF.
@@ -91,13 +115,13 @@ def _read_population() -> dict:
             record["status"][(row["recipient_foundation_status"] or "").strip().upper()] += 1
             if row["recipient_name"] not in record["names"]:
                 record["names"].append(row["recipient_name"])
-    return per
+    return per, itemised
 
 
-def build_sample(out: Path) -> None:
+def build_sample(out: Path, xml_rows_out: Path) -> None:
     import random
 
-    population = _read_population()
+    population, itemised = _read_population()
     addressable = {
         key: value for key, value in population.items()
         if key[0] not in PATIENT_ASSISTANCE
@@ -110,7 +134,7 @@ def build_sample(out: Path) -> None:
     print(f"addressable{len(addressable):>6,} filings ${sum(v['amt'] for v in addressable.values())/1e9:.2f}B\n")
 
     rng = random.Random(SEED)
-    picked, summary = [], []
+    picked, summary, keys = [], [], []
     for label, low, high, take in STRATA:
         pool = sorted([(k, v) for k, v in addressable.items() if low <= v["amt"] < high],
                       key=lambda kv: -kv[1]["amt"])
@@ -123,6 +147,7 @@ def build_sample(out: Path) -> None:
         summary.append((label, len(pool), len(chosen),
                         sum(v["amt"] for _, v in pool), sum(v["amt"] for _, v in chosen)))
         for (ein, year, object_id), value in chosen:
+            keys.append((ein, year, object_id))
             picked.append({"stratum": label, "filerein": ein, "filer_name": value["filer"],
                            "taxyear": year, "taxperend": value["period"], "object_id": object_id,
                            "placeholder_amt": round(value["amt"], 2),
@@ -144,15 +169,24 @@ def build_sample(out: Path) -> None:
         print(f"  {label}  {pick_n:>3}/{pop_n:<5} ${pick_d/1e9:>6.2f}B of ${pop_d/1e9:>6.2f}B")
     print(f"\n{len(picked)} filings -> {out}")
 
+    rows = [{"object_id": key[2], **item} for key in keys for item in itemised.get(key, [])]
+    with xml_rows_out.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["object_id", "source", "recipient_name", "address",
+                                                    "status", "purpose", "amount"])
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"{len(rows)} XML-itemised rows for {len({r['object_id'] for r in rows})} of them -> {xml_rows_out}")
+
 
 def _fetch_pdf(object_id: str, cache: Path, local: Path) -> str:
     """Download one filing's image. Returns a staging status, never raises.
 
-    A filing can fail to reach OCR for reasons that have nothing to do with
-    OCR, and they must not be scored as extraction failures. TEOS lists no
-    image for some filings, and for others it lists a ``STATICFILEPATH`` the
-    IRS no longer serves — Schusterman's 2020 990-PF is indexed and returns a
-    302 to an error page. Both are concentrated in older tax years.
+    A filing can fail to reach transcription for reasons that have nothing
+    to do with it, and they must not be scored as extraction failures. TEOS
+    lists no image for some filings, and for others it lists a
+    ``STATICFILEPATH`` the IRS no longer serves — Schusterman's 2020 990-PF
+    is indexed and returns a 302 to an error page. Both are concentrated in
+    older tax years.
     """
     try:
         index_row = irs_source.lookup(object_id, cache)
@@ -176,14 +210,17 @@ def _fetch_pdf(object_id: str, cache: Path, local: Path) -> str:
     return last_error
 
 
-def stage(sample: Path, cache: Path, limit: int | None, manifest: Path) -> None:
-    import boto3
+def _read_manifest(manifest: Path) -> dict[str, dict]:
+    if not manifest.exists():
+        return {}
+    return {r["object_id"]: r for r in csv.DictReader(manifest.open())}
 
-    s3 = boto3.client("s3")
+
+def stage(sample: Path, cache: Path, limit: int | None, manifest: Path) -> None:
     rows = list(csv.DictReader(sample.open()))[:limit]
     pdf_dir = cache / "pdfs"
     pdf_dir.mkdir(parents=True, exist_ok=True)
-    results, counts = [], collections.Counter()
+    results = []
 
     for n, row in enumerate(rows, 1):
         object_id = row["object_id"]
@@ -193,61 +230,163 @@ def stage(sample: Path, cache: Path, limit: int | None, manifest: Path) -> None:
         else:
             status = _fetch_pdf(object_id, cache, local)
 
-        size = local.stat().st_size if local.exists() else 0
+        size, pages, start = 0, 0, None
         if status in ("staged", "cached"):
-            s3.upload_file(str(local), BUCKET, f"{SOURCE_PREFIX}/{object_id}.pdf")
-            print(f"  [{n}/{len(rows)}] {row['filer_name'][:32]:<32} {size/1e6:>6.1f} MB  {status}")
+            size = local.stat().st_size
+            widths = irs_source.page_widths(local)
+            pages, start = len(widths), irs_source.attachment_start(widths)
+            attached = pages - start + 1 if start else 0
+            print(f"  [{n}/{len(rows)}] {row['filer_name'][:32]:<32} {size/1e6:>6.1f} MB  {status:<7}"
+                  f" {pages:>4} pages, {attached:>4} attached")
         else:
             print(f"  [{n}/{len(rows)}] {row['filer_name'][:32]:<32} {'':>6}     {status}", file=sys.stderr)
-        counts[status] += 1
         results.append({"object_id": object_id, "filerein": row["filerein"],
                         "stratum": row["stratum"], "taxyear": row["taxyear"],
                         "placeholder_amt": row["placeholder_amt"],
-                        "status": status, "bytes": size})
+                        "status": status, "bytes": size, "pages": pages,
+                        "attachment_from": start or "",
+                        "attachment_pages": (pages - start + 1) if start else 0})
 
     manifest.parent.mkdir(parents=True, exist_ok=True)
     with manifest.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(results[0].keys()))
         writer.writeheader(); writer.writerows(results)
 
-    total_mb = sum(r["bytes"] for r in results) / 1e6
-    print(f"\n{'status':<26}{'n':>5}{'declared $M':>14}")
-    by = collections.defaultdict(lambda: [0, 0.0])
+    print(f"\n{'status':<26}{'n':>5}{'declared $M':>14}{'pages':>8}{'attached':>10}")
+    by = collections.defaultdict(lambda: [0, 0.0, 0, 0])
     for r in results:
-        by[r["status"]][0] += 1; by[r["status"]][1] += float(r["placeholder_amt"])
-    for status, (n, dollars) in sorted(by.items(), key=lambda kv: -kv[1][1]):
-        print(f"  {status:<24}{n:>5}{dollars/1e6:>14,.1f}")
-    print(f"\n{total_mb:,.0f} MB staged -> s3://{BUCKET}/{SOURCE_PREFIX}/")
+        b = by[r["status"]]
+        b[0] += 1; b[1] += float(r["placeholder_amt"]); b[2] += r["pages"]; b[3] += r["attachment_pages"]
+    for status, (n, dollars, pages, attached) in sorted(by.items(), key=lambda kv: -kv[1][1]):
+        print(f"  {status:<24}{n:>5}{dollars/1e6:>14,.1f}{pages:>8,}{attached:>10,}")
+    total_pages = sum(r["pages"] for r in results)
+    attached = sum(r["attachment_pages"] for r in results)
+    if total_pages:
+        print(f"\n{attached:,} of {total_pages:,} pages are the filer's attachments "
+              f"({attached/total_pages:.0%}); the rest is the IRS rendering the XML")
     print(f"manifest -> {manifest}")
 
 
-def report(sample: Path, results: Path, out: Path | None,
-           manifest: Path | None = None) -> None:
+def transcribe(sample: Path, manifest: Path, cache: Path, model: str, results: Path,
+               workers: int, limit: int | None, only: str | None) -> None:
+    """Every attachment page of every staged filing, through one model."""
+    staged = _read_manifest(manifest)
+    rows = [r for r in csv.DictReader(sample.open())
+            if staged.get(r["object_id"], {}).get("attachment_pages", "0") not in ("", "0")]
+    if only:
+        rows = [r for r in rows if r["object_id"] == only]
+    rows = rows[:limit]
+    api = vlm_transcription.client()
+
+    jobs = []                                   # (object_id, page, png, out)
+    for row in rows:
+        entry = staged[row["object_id"]]
+        first, last = int(entry["attachment_from"]), int(entry["pages"])
+        pngs = vlm_transcription.render(cache / "pdfs" / f"{row['object_id']}.pdf", first, last,
+                                        cache / f"pages{vlm_transcription.DPI}" / row["object_id"])
+        out_dir = results / row["object_id"]
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for page, png in zip(range(first, last + 1), pngs):
+            out = out_dir / f"p{page:03d}.json"
+            if not out.exists() or _failed(out):
+                jobs.append((row["object_id"], page, png, out))
+    print(f"{len(rows)} filings, {len(jobs)} pages to transcribe with {model} "
+          f"(pages already done are skipped; pages that errored are retried)")
+
+    tally = collections.Counter()
+
+    def run(job):
+        object_id, page, png, out = job
+        data = vlm_transcription.transcribe(api, model, png)
+        data["_model"] = model
+        out.write_text(json.dumps(data, indent=1))
+        usage = data.get("_usage") or {}
+        tally["pages"] += 1
+        tally["in"] += usage.get("in") or 0
+        tally["out"] += usage.get("out") or 0
+        tally["retried"] += int(data.get("_attempts", 1) > 1)
+        tally["errors"] += int("error" in data or "parse_error" in data)
+        tally["truncated"] += int(data.get("_finish") == "length")
+        tally["rows"] += len(data.get("rows") or [])
+        tally[vlm_transcription.total_check(data)] += 1
+        if tally["pages"] % 25 == 0 or tally["pages"] == len(jobs):
+            spent = vlm_transcription.cost(model, tally["in"], tally["out"])
+            print(f"  {tally['pages']}/{len(jobs)} pages, {tally['rows']:,} rows, "
+                  f"{tally['retried']} retried, {tally['errors']} errors, {tally['truncated']} truncated; "
+                  f"page totals matched {tally['matched']} / mismatch {tally['mismatch']} / none {tally['no_total']}"
+                  + (f"; ${spent:.2f}" if spent is not None else ""), flush=True)
+
+    with ThreadPoolExecutor(workers) as pool:
+        list(pool.map(run, jobs))
+    print(f"results -> {results}")
+
+
+def _failed(result: Path) -> bool:
+    try:
+        data = json.loads(result.read_text())
+    except (OSError, json.JSONDecodeError):
+        return True
+    return "error" in data or "parse_error" in data
+
+
+def _load_pages(folder: Path) -> dict[int, dict]:
+    pages = {}
+    for path in folder.iterdir():
+        match = _PAGE_FILE.match(path.name)
+        if match:
+            pages[int(match.group(1))] = json.loads(path.read_text())
+    return pages
+
+
+def report(sample: Path, results: Path, out: Path | None, manifest: Path,
+           xml_rows: Path | None) -> None:
     rows = list(csv.DictReader(sample.open()))
-    staged: dict[str, str] = {}
-    if manifest and manifest.exists():
-        staged = {r["object_id"]: r["status"] for r in csv.DictReader(manifest.open())}
+    staged = _read_manifest(manifest)
+    itemised: dict[str, list] = collections.defaultdict(list)
+    if xml_rows and xml_rows.exists():
+        for r in csv.DictReader(xml_rows.open()):
+            itemised[r["object_id"]].append(r)
+    model = results.name.replace("__", "/")
     by_stratum: dict = collections.defaultdict(
         lambda: {"n": 0, "declared": 0.0, "recovered": 0.0, "reconciled": 0,
                  "rows": 0, "near": 0.0, "outcomes": collections.Counter()})
+    pages_seen = collections.Counter()
     records = []
 
     for row in rows:
         declared = float(row["placeholder_amt"])
         paid, future = float(row["placeholder_paid"]), float(row["placeholder_future"])
-        path = results / f"{row['object_id']}.pdf.json"
-        staging = staged.get(row["object_id"], "")
-        result, covered = None, 0.0
+        targets = (paid, future, paid + future)
+        entry = staged.get(row["object_id"], {})
+        staging = entry.get("status", "")
+        unstructured = results / f"{row['object_id']}.pdf.json"
+        vlm_dir = results / row["object_id"]
+        result, covered, tables, page_stats = None, 0.0, None, ""
         if staging and staging not in ("staged", "cached"):
-            outcome = staging.split(":")[0]                  # never reached OCR
-        elif not path.exists():
-            outcome = "missing_result"
+            outcome = staging.split(":")[0]                  # never reached transcription
+        elif unstructured.exists():
+            tables = candidate_tables(load_elements(unstructured), targets)
+        elif entry.get("attachment_pages") == "0":
+            outcome = "no_attachment_pages"                  # absent by construction
+        elif vlm_dir.is_dir():
+            pages = _load_pages(vlm_dir)
+            expected = int(entry.get("attachment_pages") or 0)
+            checks = collections.Counter(vlm_transcription.total_check(p) for p in pages.values())
+            for p in pages.values():
+                usage = p.get("_usage") or {}
+                pages_seen["in"] += usage.get("in") or 0; pages_seen["out"] += usage.get("out") or 0
+                pages_seen["pages"] += 1
+                pages_seen["errors"] += int("error" in p or "parse_error" in p)
+            pages_seen.update({k: v for k, v in checks.items()})
+            page_stats = (f"{len(pages)}/{expected} pages; totals matched {checks['matched']}"
+                          f" mismatch {checks['mismatch']}")
+            tables = page_tables(pages, targets) + xml_tables(itemised.get(row["object_id"], ()), targets)
         else:
-            elements = load_elements(path)
-            result = extract(elements, paid, future)
+            outcome = "missing_result"
+        if tables is not None:
+            result = extract_tables(tables, paid, future)
             outcome = result.paid.outcome
             if outcome == "no_reconciling_run":
-                tables = candidate_tables(elements, (paid, future, declared))
                 outcome = diagnose(tables, declared)
                 covered = coverage(tables, paid)
         bucket = by_stratum[row["stratum"]]
@@ -256,10 +395,10 @@ def report(sample: Path, results: Path, out: Path | None,
         bucket["outcomes"][outcome] += 1
         if result is not None and result.recovered:
             bucket["reconciled"] += result.paid.reconciled
-            bucket["recovered"] += result.recovered   # credit the declared amount, not the OCR sum
+            bucket["recovered"] += result.recovered   # credit the declared amount, not the transcribed sum
             bucket["rows"] += len(result.rows)
         if 0.9 <= covered < 1.1:
-            bucket["near"] += paid      # the list is there; OCR lost a few percent of its rows
+            bucket["near"] += paid      # the list is there; transcription lost a few percent of its rows
         parts = result.parts if result else ()
         records.append({
             "stratum": row["stratum"], "filerein": row["filerein"],
@@ -271,11 +410,13 @@ def report(sample: Path, results: Path, out: Path | None,
             "recovered": result.recovered if result else 0.0,
             "coverage": round(covered, 4) if covered else "",
             "grant_rows": len(result.rows) if result else 0,
+            "xml_rows": sum(1 for p in parts if p.reconciled for r in p.rows if r.page is None),
             "labelled": "|".join("Y" if p.labelled else "n" for p in parts if p.reconciled),
             "total_stated": "|".join("Y" if p.total_stated else "n" for p in parts if p.reconciled),
             "error_pct": "|".join(f"{p.error * 100:.3f}" for p in parts if p.reconciled),
             "pages": "|".join(f"{p.pages[0]}-{p.pages[-1]}" for p in parts if p.reconciled and p.pages),
             "amount_headers": "|".join(h for p in parts if p.reconciled for h in p.amount_headers),
+            "page_stats": page_stats,
         })
 
     print(f"{'stratum':<9}{'n':>4}{'recon':>7}{'rate':>7}{'declared $M':>13}{'recovered $M':>14}{'grants':>9}")
@@ -292,7 +433,7 @@ def report(sample: Path, results: Path, out: Path | None,
     if total_declared:
         print(f"\ndollar-weighted recovery on the sample: {100*total_recovered/total_declared:.1f}%")
         near = sum(b["near"] for b in by_stratum.values())
-        print(f"present but 90-110% covered (OCR row loss, not selection): ${near/1e6:,.1f}M "
+        print(f"present but 90-110% covered (row loss, not selection): ${near/1e6:,.1f}M "
               f"({100*near/total_declared:.1f}%)")
 
     print("\noutcomes (paid list):")
@@ -301,6 +442,13 @@ def report(sample: Path, results: Path, out: Path | None,
         everything.update(b["outcomes"])
     for outcome, count in everything.most_common():
         print(f"  {outcome:<22} {count:>4}")
+
+    if pages_seen["pages"]:
+        spent = vlm_transcription.cost(model, pages_seen["in"], pages_seen["out"])
+        print(f"\n{model}: {pages_seen['pages']:,} pages, {pages_seen['errors']} errors; page totals "
+              f"matched {pages_seen['matched']} / mismatch {pages_seen['mismatch']} / none {pages_seen['no_total']}; "
+              f"tokens in {pages_seen['in']:,} out {pages_seen['out']:,}"
+              + (f"; ${spent:.2f}" if spent is not None else ""))
 
     # Extrapolate to the full population using each stratum's own recovery rate.
     pop = {r["stratum"]: (int(r["stratum_pop"]), float(r["stratum_pop_dollars"])) for r in rows}
@@ -323,26 +471,44 @@ def main() -> None:
 
     p = sub.add_parser("sample", help="build the stratified frame")
     p.add_argument("--out", type=Path, default=SAMPLE_CSV)
+    p.add_argument("--xml-rows", type=Path, default=XML_ROWS_CSV)
 
-    p = sub.add_parser("stage", help="fetch the IRS PDFs and upload them to S3")
+    p = sub.add_parser("stage", help="fetch the IRS PDFs and find where the attachments start")
     p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
-    p.add_argument("--cache", type=Path, default=Path.home() / ".cache" / "irs_index")
+    p.add_argument("--cache", type=Path, default=CACHE)
     p.add_argument("--limit", type=int, default=None)
-    p.add_argument("--manifest", type=Path, default=Path("data/exploratory/placeholder_staging.csv"))
+    p.add_argument("--manifest", type=Path, default=MANIFEST_CSV)
 
-    p = sub.add_parser("report", help="score the returned Unstructured results")
+    p = sub.add_parser("transcribe", help="send the attachment pages to a vision model")
+    p.add_argument("--model", required=True, help="gateway model id, e.g. alibaba/qwen3-vl-instruct")
     p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
-    p.add_argument("--results", type=Path, required=True, help="directory of <object_id>.pdf.json")
+    p.add_argument("--manifest", type=Path, default=MANIFEST_CSV)
+    p.add_argument("--cache", type=Path, default=CACHE)
+    p.add_argument("--results", type=Path, default=None,
+                   help="per-page JSON goes here (default <cache>/vlm/<model with / as __>)")
+    p.add_argument("--workers", type=int, default=8)
+    p.add_argument("--limit", type=int, default=None)
+    p.add_argument("--only", default=None, help="a single object id")
+
+    p = sub.add_parser("report", help="score the results of one engine")
+    p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
+    p.add_argument("--results", type=Path, required=True,
+                   help="directory of <object_id>/pNNN.json (vision model) or <object_id>.pdf.json (Unstructured)")
     p.add_argument("--out", type=Path, default=None)
-    p.add_argument("--manifest", type=Path, default=Path("data/exploratory/placeholder_staging.csv"))
+    p.add_argument("--manifest", type=Path, default=MANIFEST_CSV)
+    p.add_argument("--xml-rows", type=Path, default=XML_ROWS_CSV)
 
     args = parser.parse_args()
     if args.command == "sample":
-        build_sample(args.out)
+        build_sample(args.out, args.xml_rows)
     elif args.command == "stage":
         stage(args.sample, args.cache, args.limit, args.manifest)
+    elif args.command == "transcribe":
+        results = args.results or args.cache / "vlm" / args.model.replace("/", "__")
+        transcribe(args.sample, args.manifest, args.cache, args.model, results,
+                   args.workers, args.limit, args.only)
     else:
-        report(args.sample, args.results, args.out, args.manifest)
+        report(args.sample, args.results, args.out, args.manifest, args.xml_rows)
 
 
 if __name__ == "__main__":

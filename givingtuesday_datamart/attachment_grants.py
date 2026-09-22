@@ -6,8 +6,14 @@ reading "SEE Attachment 22" whose amount is the filer's entire grant total
 e-file XML genuinely has no list — but the IRS's own PDF image does, because
 the filer attached it. OCR the image and the grants come back.
 
-This module owns the step after OCR: given an Unstructured result for one
-filing, decide **which tables are the grant list** and return their rows.
+This module owns the step after transcription: given the tables found in
+one filing, decide **which of them are the grant list** and return their
+rows. Tables come from three producers — ``candidate_tables`` (Unstructured
+OCR elements), ``page_tables`` (a vision model's per-page JSON) and
+``xml_tables`` (rows the XML itemises: named Part XV lines and the
+expenditure-responsibility statement, which the filer's attachment routinely
+omits — Cohen's lists $6.5M on paper and $85M in the statement) — and
+``extract_tables`` reconciles whichever mix it is given.
 
 Nothing labels the list reliably. The XML says "SEE Attachment 22" and the
 PDF says "STATEMENT 22"; the next filer says "SEE ATTACHMENT C" and
@@ -48,7 +54,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 # Ordered by preference. Fair market value must beat book value: a non-cash
 # section lists both, and book value is the cost basis, not the gift.
@@ -180,24 +186,27 @@ class CandidateTable:
     rows: tuple[GrantRow, ...]
     totals: tuple[float, ...]
     context: str = ""
+    kind: str = ""      # evidence from outside the page text: "paid" | "future" | "veto" | ""
 
     @property
     def vetoed(self) -> bool:
         """Does the heading, or the column header, say this is a revenue,
         asset or expense schedule? (The form's "Part II Balance Sheets" sits
         in the header row, not above the table.)"""
-        return bool(NON_GRANT_CONTEXT.search(self.context)) or any(NON_GRANT_CONTEXT.search(h) for h in self.header)
+        return (self.kind == "veto" or bool(NON_GRANT_CONTEXT.search(self.context))
+                or any(NON_GRANT_CONTEXT.search(h) for h in self.header))
 
     @property
     def labelled(self) -> bool:
         """Does the heading or a column name say grants, with nothing saying otherwise?"""
         if self.vetoed:
             return False
-        return bool(GRANT_CONTEXT.search(self.context)) or any(GRANT_HEADER.search(h) for h in self.header)
+        return (self.kind in ("paid", "future") or bool(GRANT_CONTEXT.search(self.context))
+                or any(GRANT_HEADER.search(h) for h in self.header))
 
     @property
     def future(self) -> bool:
-        return bool(FUTURE_PAYMENT.search(self.context))
+        return self.kind == "future" or bool(FUTURE_PAYMENT.search(self.context))
 
     @property
     def group(self) -> str:
@@ -425,7 +434,7 @@ def candidate_tables(elements: Sequence[dict],
             amount = parse_money(row[amount_ix]) if amount_ix < len(row) else None
             if amount is None:
                 continue
-            if _is_total_row(row) or any(abs(amount - t) <= max(1.0, t * 1e-6) for t in targets if t):
+            if _is_total_row(row) or _is_target(amount, targets):
                 totals.append(amount)
                 continue
             if amount == 0:
@@ -558,15 +567,115 @@ def select(tables: Sequence[CandidateTable], declared: float, target: str = "pai
     return Extraction(outcome="no_reconciling_run", target=target, declared=declared)
 
 
-def extract(elements: Sequence[dict], paid: float, future: float = 0.0,
-            tolerance: float = DEFAULT_TOLERANCE) -> Recovery:
+def _amount(value) -> float | None:
+    """A model's amount field: a number, or a string with $ and commas."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    return parse_money(str(value).strip())
+
+
+def _is_target(amount: float, targets: Sequence[float]) -> bool:
+    return any(abs(amount - t) <= max(1.0, t * 1e-6) for t in targets if t)
+
+
+# What a vision model's page label says about the table on it. An
+# expenditure-responsibility statement lists grants too, so it stays a paid
+# candidate — the subset search decides whether it belongs in the sum.
+PAGE_KINDS = {"grants_paid_list": "paid", "grants_future_list": "future",
+              "expenditure_responsibility": "paid"}
+
+
+def page_tables(pages: Mapping[int, dict], targets: Sequence[float] = ()) -> list[CandidateTable]:
+    """One table per transcribed page, from a vision model's JSON.
+
+    ``pages`` maps the original page number to the model's response:
+    ``page_kind``, ``heading``, ``rows`` (name, address, status, purpose,
+    amount) and ``totals``. The heading is the context, exactly as an OCR
+    heading would be; the kind is a second, independent label.
+    """
+    found: list[CandidateTable] = []
+    for page in sorted(pages):
+        data = pages[page] or {}
+        rows: list[GrantRow] = []
+        totals: list[float] = []
+        for item in data.get("rows") or []:
+            if not isinstance(item, dict):
+                continue
+            amount = _amount(item.get("amount"))
+            if amount is None:
+                continue
+            name = " ".join(str(item.get("name") or "").split())
+            if not _LETTERS.search(name) or _is_total_row((name,)) or _is_target(amount, targets):
+                totals.append(amount)
+                continue
+            if amount <= 0 or is_pointer(name) or (len(name.split()) <= 4 and _POINTER.search(name)):
+                continue
+            cells = tuple(" ".join(str(item.get(k) or "").split())
+                          for k in ("name", "address", "status", "purpose", "amount"))
+            rows.append(GrantRow(page, name, amount, cells))
+        for item in data.get("totals") or []:
+            amount = _amount(item.get("amount")) if isinstance(item, dict) else None
+            if amount is not None:
+                totals.append(amount)
+        if not rows:
+            continue
+        kind = str(data.get("page_kind") or "")
+        context = " ".join(str(data.get("heading") or "").split())
+        if kind == "expenditure_responsibility":
+            context = f"{context} expenditure responsibility".strip()   # its own statement group
+        found.append(CandidateTable(page=page, header=(), amount_header="amount",
+                                    rows=tuple(rows), totals=tuple(totals),
+                                    context=context, kind=PAGE_KINDS.get(kind, "")))
+    return found
+
+
+XML_SOURCES = {
+    "990PF_P14_3A": ("paid", "XML Part XV line 3a itemised rows"),
+    "990PF_P14_3B": ("future", "XML Part XV line 3b approved for future payment"),
+    "990PF_EXPENDITURE_RESP": ("paid", "XML Part VII-B expenditure responsibility statement"),
+}
+
+
+def xml_tables(rows: Iterable[Mapping[str, str]], targets: Sequence[float] = ()) -> list[CandidateTable]:
+    """The rows the XML itemises, one table per source.
+
+    These are exact — no transcription — and they are what the attachment
+    leaves out: the placeholder filer that also names a few grants in Part
+    XV, and the expenditure-responsibility statement (Part VII-B line 5c).
+    ``rows`` carry ``source``, ``recipient_name``, ``amount`` and, when
+    known, address, status and purpose. Pointer rows are the placeholders
+    themselves and are dropped.
+    """
+    grouped: dict[str, list[GrantRow]] = defaultdict(list)
+    for row in rows:
+        source = row.get("source") or ""
+        if source not in XML_SOURCES:
+            continue
+        name = " ".join((row.get("recipient_name") or "").split())
+        amount = _amount(row.get("amount"))
+        if amount is None or amount <= 0 or not _LETTERS.search(name):
+            continue
+        if is_pointer(name) or PLACEHOLDER.search(name) or _is_target(amount, targets):
+            continue
+        cells = tuple(" ".join((row.get(k) or "").split())
+                      for k in ("recipient_name", "address", "status", "purpose", "amount"))
+        grouped[source].append(GrantRow(None, name, amount, cells))
+    return [CandidateTable(page=None, header=(), amount_header="amount", rows=tuple(found),
+                           totals=(), context=XML_SOURCES[source][1], kind=XML_SOURCES[source][0])
+            for source, found in grouped.items() if found]
+
+
+def extract_tables(tables: Sequence[CandidateTable], paid: float, future: float = 0.0,
+                   tolerance: float = DEFAULT_TOLERANCE) -> Recovery:
     """Recover the paid list, and the future-payment list where one is declared.
 
     The two are reconciled separately. Only if the paid target fails on its
     own is the combined total tried against every statement — some filers
     head both lists identically — and the result is marked ``combined``.
     """
-    tables = candidate_tables(elements, targets=(paid, future, paid + future))
+    tables = sorted(tables, key=lambda table: (table.page or 0))
     paid_result = select(tables, paid, "paid", tolerance)
     future_result = select(tables, future, "future", tolerance) if future else None
     if not paid_result.reconciled and future and not (future_result and future_result.reconciled):
@@ -574,6 +683,13 @@ def extract(elements: Sequence[dict], paid: float, future: float = 0.0,
         if combined.reconciled:
             return Recovery(paid=combined)
     return Recovery(paid=paid_result, future=future_result)
+
+
+def extract(elements: Sequence[dict], paid: float, future: float = 0.0,
+            tolerance: float = DEFAULT_TOLERANCE) -> Recovery:
+    """``extract_tables`` over an Unstructured result."""
+    return extract_tables(candidate_tables(elements, targets=(paid, future, paid + future)),
+                          paid, future, tolerance)
 
 
 def load_elements(path: str | Path) -> list[dict]:
