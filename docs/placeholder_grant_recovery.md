@@ -125,8 +125,19 @@ had none. No sampled filing ever had two images to choose between.
 ### The PDFs are images
 
 Every page is a CCITT fax-encoded bitonal scan. No fonts, no text layer,
-zero extractable characters. Resolution is 264–328 DPI, which is good for
-OCR. **So this is an OCR problem, not a parsing problem.**
+zero extractable characters, at 300 DPI, which is good for OCR. **So this
+is an OCR problem, not a parsing problem.**
+
+**Only the attachments need OCR, and the boundary is free.** Each image is
+two documents stapled together: the IRS's rendering of the XML (which we
+already hold as data) and then whatever the filer attached. The IRS renders
+its pages at a fixed 2246 px width cropped to content; the filer's pages are
+full letter pages (2550×3300) or odd landscape sizes. `pdfimages -list`
+reads this without rendering, and pypdf cuts the pages out without
+re-encoding. On the 85 cached PDFs the IRS-rendered region is 53% of all
+pages — 40% in band A, 90% in band D — and every reconciled list sits
+inside the attachment region. It is also where every false positive in
+Part 7 came from.
 
 ---
 
