@@ -54,13 +54,16 @@ from pathlib import Path
 
 from givingtuesday_datamart import irs_source, vlm_transcription
 from givingtuesday_datamart.attachment_grants import (
-    PLACEHOLDER, XML_SOURCES, candidate_tables, coverage, diagnose, extract_tables, load_elements,
-    page_tables, xml_tables)
+    PLACEHOLDER, XML_SOURCES, candidate_tables, coverage, diagnose, extract_tables, is_pointer,
+    load_elements, page_tables, xml_tables)
 
 COMBINED_CSV = Path.home() / "Downloads" / "combined-grants-datamarts-gt_team_priority-20260915.csv"
 SAMPLE_CSV = Path("data/exploratory/placeholder_sample_100.csv")
 XML_ROWS_CSV = Path("data/exploratory/placeholder_sample_xml_rows.csv")
 MANIFEST_CSV = Path("data/exploratory/placeholder_staging.csv")
+EXPANDED = {"sample": Path("data/exploratory/placeholder_sample_expanded.csv"),
+            "xml_rows": Path("data/exploratory/placeholder_sample_expanded_xml_rows.csv"),
+            "manifest": Path("data/exploratory/placeholder_staging_expanded.csv")}
 CACHE = Path.home() / ".cache" / "irs_index"
 PF_SOURCES = ("990PF_P14_3A", "990PF_P14_3B")
 SEED = 20260921
@@ -73,13 +76,22 @@ PATIENT_ASSISTANCE = {
 CANARIES = {"451742989": "Siegel", "912073258": "Bezos"}
 STRATA = (("A", 1e8, float("inf"), None), ("B", 1e7, 1e8, 44),
           ("C", 1e6, 1e7, 22), ("D", 0.0, 1e6, 12))
+# The expanded frame: band B becomes a census, C and D grow; A already is
+# one. Drawn from the broadened classifier's population, on top of the
+# original 100, which are kept exactly as drawn.
+EXPANSION = {"B": None, "C": 100, "D": 50}
 _OBJECT_ID = re.compile(r"(?<!\d)(\d{18})(?!\d)")
 _PAGE_FILE = re.compile(r"^p(\d+)\.json$")
 
 
-def _read_population() -> tuple[dict, dict]:
+def _read_population(pointer=None) -> tuple[dict, dict]:
     """Placeholder filings from the combined extract, one record per filing,
-    and — keyed the same way — the rows the XML itemises for every filing."""
+    and — keyed the same way — the rows the XML itemises for every filing.
+
+    ``pointer`` decides which recipient names are placeholders: the frozen
+    ``PLACEHOLDER`` pattern the 100-filing frame was drawn with (default),
+    or ``is_pointer`` for the broadened classifier."""
+    pointer = pointer or PLACEHOLDER.search
     csv.field_size_limit(10 ** 9)
     per: dict = collections.defaultdict(
         lambda: {"amt": 0.0, "paid": 0.0, "future": 0.0, "rows": 0, "names": [], "filer": "",
@@ -95,7 +107,7 @@ def _read_population() -> tuple[dict, dict]:
                 amount = float(row["total_grant_amount"] or 0)
             except ValueError:
                 amount = 0.0
-            if row["Source"] not in PF_SOURCES or not PLACEHOLDER.search(row["recipient_name"] or ""):
+            if row["Source"] not in PF_SOURCES or not pointer(row["recipient_name"] or ""):
                 itemised[key].append({
                     "source": row["Source"], "recipient_name": row["recipient_name"],
                     "address": " ".join(filter(None, ((row.get(k) or "").strip() for k in (
@@ -118,15 +130,36 @@ def _read_population() -> tuple[dict, dict]:
     return per, itemised
 
 
-def build_sample(out: Path, xml_rows_out: Path) -> None:
+def _addressable(population: dict) -> dict:
+    return {key: value for key, value in population.items()
+            if key[0] not in PATIENT_ASSISTANCE and value["status"].most_common(1)[0][0] != "I"}
+
+
+def _row(label, key, value, pool, classifier):
+    ein, year, object_id = key
+    return {"stratum": label, "filerein": ein, "filer_name": value["filer"],
+            "taxyear": year, "taxperend": value["period"], "object_id": object_id,
+            "placeholder_amt": round(value["amt"], 2),
+            "placeholder_paid": round(value["paid"], 2),
+            "placeholder_future": round(value["future"], 2),
+            "placeholder_rows": value["rows"],
+            "placeholder_text": " || ".join(value["names"][:2]),
+            "stratum_pop": len(pool),
+            "stratum_pop_dollars": round(sum(v["amt"] for _, v in pool), 2),
+            "is_canary": ein in CANARIES, **({"classifier": classifier} if classifier else {})}
+
+
+def build_sample(out: Path, xml_rows_out: Path, expand: bool = False) -> None:
+    """The 100-filing frame, or with ``expand`` the 500-filing one on top of it.
+
+    The base draw is repeated exactly, so the original 100 regenerate
+    unchanged. The extra filings are drawn afterwards, from the broadened
+    classifier's population, with the population columns restated for it.
+    """
     import random
 
     population, itemised = _read_population()
-    addressable = {
-        key: value for key, value in population.items()
-        if key[0] not in PATIENT_ASSISTANCE
-        and value["status"].most_common(1)[0][0] != "I"
-    }
+    addressable = _addressable(population)
     excluded = sum(v["amt"] for k, v in population.items() if k not in addressable)
     print(f"population {len(population):,} filings ${sum(v['amt'] for v in population.values())/1e9:.2f}B")
     print(f"excluded   {len(population)-len(addressable):,} filings ${excluded/1e9:.2f}B "
@@ -146,18 +179,32 @@ def build_sample(out: Path, xml_rows_out: Path) -> None:
             chosen = forced + rng.sample(rest, max(0, min(take - len(forced), len(rest))))
         summary.append((label, len(pool), len(chosen),
                         sum(v["amt"] for _, v in pool), sum(v["amt"] for _, v in chosen)))
-        for (ein, year, object_id), value in chosen:
-            keys.append((ein, year, object_id))
-            picked.append({"stratum": label, "filerein": ein, "filer_name": value["filer"],
-                           "taxyear": year, "taxperend": value["period"], "object_id": object_id,
-                           "placeholder_amt": round(value["amt"], 2),
-                           "placeholder_paid": round(value["paid"], 2),
-                           "placeholder_future": round(value["future"], 2),
-                           "placeholder_rows": value["rows"],
-                           "placeholder_text": " || ".join(value["names"][:2]),
-                           "stratum_pop": len(pool),
-                           "stratum_pop_dollars": round(sum(v["amt"] for _, v in pool), 2),
-                           "is_canary": ein in CANARIES})
+        for key, value in chosen:
+            keys.append(key)
+            picked.append(_row(label, key, value, pool, "v1" if expand else ""))
+
+    if expand:
+        # Only now, so the RNG state behind the base draw is untouched.
+        wide, itemised = _read_population(is_pointer)
+        wide = _addressable(wide)
+        print(f"broadened classifier: {len(wide):,} addressable filings "
+              f"${sum(v['amt'] for v in wide.values())/1e9:.2f}B\n")
+        already = set(keys)
+        summary = []
+        for label, low, high, _ in STRATA:
+            pool = sorted([(k, v) for k, v in wide.items() if low <= v["amt"] < high],
+                          key=lambda kv: -kv[1]["amt"])
+            base = [r for r in picked if r["stratum"] == label]
+            for r in base:                       # restate the population for the new frame
+                r["stratum_pop"], r["stratum_pop_dollars"] = len(pool), round(sum(v["amt"] for _, v in pool), 2)
+            take = EXPANSION.get(label)
+            rest = [kv for kv in pool if kv[0] not in already]
+            extra = rest if take is None else rng.sample(rest, max(0, min(take - len(base), len(rest))))
+            for key, value in extra:
+                keys.append(key); already.add(key)
+                picked.append(_row(label, key, value, pool, "v2"))
+            summary.append((label, len(pool), len(base) + len(extra), sum(v["amt"] for _, v in pool),
+                            sum(float(r["placeholder_amt"]) for r in picked if r["stratum"] == label)))
 
     picked.sort(key=lambda r: (r["stratum"], -r["placeholder_amt"]))
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -524,8 +571,10 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("sample", help="build the stratified frame")
-    p.add_argument("--out", type=Path, default=SAMPLE_CSV)
-    p.add_argument("--xml-rows", type=Path, default=XML_ROWS_CSV)
+    p.add_argument("--out", type=Path, default=None)
+    p.add_argument("--xml-rows", type=Path, default=None)
+    p.add_argument("--expand", action="store_true",
+                   help="the expanded frame: band B in full, C to 100, D to 50, on top of the 100 (610 filings)")
 
     p = sub.add_parser("stage", help="fetch the IRS PDFs and find where the attachments start")
     p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
@@ -561,7 +610,9 @@ def main() -> None:
         compare([(name, Path(path)) for name, path in (item.split("=", 1) for item in args.reports)], args.out)
         return
     if args.command == "sample":
-        build_sample(args.out, args.xml_rows)
+        build_sample(args.out or (EXPANDED["sample"] if args.expand else SAMPLE_CSV),
+                     args.xml_rows or (EXPANDED["xml_rows"] if args.expand else XML_ROWS_CSV),
+                     args.expand)
     elif args.command == "stage":
         stage(args.sample, args.cache, args.limit, args.manifest)
     elif args.command == "transcribe":
