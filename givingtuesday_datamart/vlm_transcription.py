@@ -16,10 +16,15 @@ The prompt is versioned, and every stored page carries the version that
 produced it. v2 (the bake-off's) made rows independent of the page kind —
 v1 let a model that labelled a page "other" return no rows. v3 came out of
 the 100-filing sample: it says what a heading is (Gemini put the filer
-masthead there and Qwen a recipient line), keeps a contact person inside
-their organisation's row (Gemini listed Claude Moore's contacts as
-grantees, doubling the page), and asks for one row per recipient however
-many printed lines it wraps onto.
+masthead there and Qwen a recipient line) and keeps a contact person
+inside their organisation's row (Gemini listed Claude Moore's contacts as
+grantees, doubling the page). v3 also said a name wrapping onto a second
+line is still one row — and Gemini then read two adjacent recipients as
+one wrapped name on Wyss's p033, after which every amount on the page sat
+one row too high and the page sum barely moved. v4 anchors rows on the
+amount column instead: every printed amount is a row, and a text line
+with no amount belongs to the row above it. On the six pages tried it
+read Wyss p033 exactly under both models and kept v3's contact handling.
 
 The sample also showed that Qwen's empty answers were not the prompt's
 doing: under ``response_format=json_object`` it returned no rows for 401
@@ -47,8 +52,12 @@ PRICES: dict[str, tuple[float, float]] = {
 LIST_KINDS = ("grants_paid_list", "grants_future_list")
 MAX_TOKENS = 8000            # a dense page is 2–3K tokens of JSON; doubled on truncation
 ATTEMPTS = 3
+# Whether to ask for response_format=json_object first. Qwen answers a
+# dense page with an empty list under it (83% of the sample's pages under
+# prompt v3 needed the fallback), so for Qwen the first call goes without.
+JSON_MODE = {"alibaba/qwen3-vl-instruct": False}
 
-PROMPT_VERSION = "v3"
+PROMPT_VERSION = "v4"
 PROMPT = """This is one scanned page from an attachment to an IRS Form 990-PF. Transcribe it completely.
 
 Return ONLY a JSON object with this shape:
@@ -63,9 +72,11 @@ Rules:
 - rows: one entry for EVERY printed line that names a recipient and shows a dollar amount, in page order.
   Transcribe the rows whatever the page kind is; page_kind is a separate label and must never cause rows
   to be left out. Do not summarise, do not stop early, do not invent rows, do not repeat a row.
-- One recipient is one row. A name or address that wraps onto several printed lines is still one row.
-  A person's name printed with an organisation (a contact, attention or c/o line) belongs in that
-  organisation's address field: never in name, never as a row of its own.
+- The amount column defines the rows: every printed amount is one row, paired with the recipient name
+  printed on its line. A text line with no amount of its own is never a row: a name or address that wraps
+  onto a second line, or a person's name printed with an organisation (a contact, attention or c/o line),
+  belongs to the row above it (the person goes in address). Two recipients with two amounts are two rows,
+  however similar their names.
 - heading: the list title printed above the rows, such as "Part XV line 3a - Grants and contributions
   paid during the year". A filer's name, EIN, date or page number is not the heading, nor is a recipient
   line. Empty if the page prints no title.
@@ -74,8 +85,9 @@ Rules:
   or contributions paid; other only for a page that is not a list of recipients. A page that continues
   a list from an earlier page, with no title of its own, is still a list, not other.
 - totals: lines labelled total, subtotal, grand total or carried forward go here, never in rows.
-- amount: a number without $ or commas. When a line shows several money columns, use the grant amount
-  (for non-cash grants the fair market value, not book value or cost basis).
+- amount: a number without $ or commas, keeping the decimal point where it is printed: $838,000.00 is
+  838000, never 8383000. When a line shows several money columns, use the grant amount (for non-cash
+  grants the fair market value, not book value or cost basis).
 - Strings never contain a raw line break; use a space instead.
 - If the page is rotated, read it rotated. Empty rows list only if the page truly has no recipient lines."""
 
@@ -201,12 +213,12 @@ def transcribe(client, model: str, png: Path) -> dict:
     A transport error is retried after a pause (on top of the SDK's own).
     Output cut off at the token limit is asked for again with twice the
     room. A page the model labelled a grant list but gave no rows, or
-    stopped mid-row on, is asked for again without JSON mode — that mode,
-    not the page, is what made Qwen answer 401 dense pages with nothing.
-    The fullest parsed answer is returned, with ``_attempts`` set to the
-    number of calls made.
+    stopped mid-row on, is asked for again, without JSON mode from then
+    on — that mode, not the page, is what made Qwen answer 401 dense pages
+    with nothing. The fullest parsed answer is returned, with
+    ``_attempts`` set to the number of calls made.
     """
-    max_tokens, json_mode = MAX_TOKENS, True
+    max_tokens, json_mode = MAX_TOKENS, JSON_MODE.get(model, True)
     best: dict = {}
     attempt = 0
     for attempt in range(1, ATTEMPTS + 1):
@@ -223,7 +235,7 @@ def transcribe(client, model: str, png: Path) -> dict:
         if "parse_error" in data:
             continue
         short = (not data.get("rows") and data.get("page_kind") in LIST_KINDS) or data.get("_partial")
-        if short and json_mode:
+        if short and attempt < ATTEMPTS:
             json_mode = False
             continue
         break

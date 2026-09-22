@@ -49,22 +49,28 @@ def no_sleep(monkeypatch):
 
 def test_an_empty_list_page_is_asked_again_without_json_mode(png):
     client = _Client([(_answer([]), "stop"), (_answer(_rows(5)), "stop")])
-    data = vlm.transcribe(client, "alibaba/qwen3-vl-instruct", png)
+    data = vlm.transcribe(client, "google/gemini-3.5-flash-lite", png)
     assert client.json_modes == [True, False]
     assert len(data["rows"]) == 5 and data["_attempts"] == 2
     assert data["_json_mode"] is False and data["_prompt"] == vlm.PROMPT_VERSION
 
 
+def test_qwen_is_never_asked_in_json_mode(png):
+    client = _Client([(_answer(_rows(2)), "stop")])
+    data = vlm.transcribe(client, "alibaba/qwen3-vl-instruct", png)
+    assert client.json_modes == [False] and data["_attempts"] == 1
+
+
 def test_a_page_that_is_not_a_list_is_taken_at_its_word(png):
     client = _Client([(_answer([], kind="other"), "stop")])
-    data = vlm.transcribe(client, "alibaba/qwen3-vl-instruct", png)
+    data = vlm.transcribe(client, "google/gemini-3.5-flash-lite", png)
     assert data["rows"] == [] and data["_attempts"] == 1 and client.json_modes == [True]
 
 
-def test_the_fullest_answer_is_kept_when_the_retry_is_worse(png):
-    client = _Client([(_answer(_rows(4), truncated=True), "stop"), (_answer([]), "stop")])
+def test_the_fullest_answer_is_kept_when_the_retries_are_worse(png):
+    client = _Client([(_answer(_rows(4), truncated=True), "stop"), (_answer([]), "stop"), (_answer([]), "stop")])
     data = vlm.transcribe(client, "alibaba/qwen3-vl-instruct", png)
-    assert data["_partial"] and len(data["rows"]) == 3 and data["_attempts"] == 2
+    assert data["_partial"] and len(data["rows"]) == 3 and data["_attempts"] == 3
 
 
 def test_amounts_written_as_printed_still_parse():
