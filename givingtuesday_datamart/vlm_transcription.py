@@ -48,6 +48,23 @@ DPI = 200
 PRICES: dict[str, tuple[float, float]] = {
     "alibaba/qwen3-vl-instruct": (0.20, 0.88),
     "google/gemini-3.5-flash-lite": (0.30, 2.50),
+    # third-reader candidates, gateway list prices 2026-09-22
+    "google/gemini-3.8-flash": (0.75, 3.75),
+    "openai/gpt-5.6-terra": (2.00, 12.00),
+    "openai/gpt-5.6-luna": (0.20, 1.20),
+    "anthropic/claude-sonnet-5": (2.00, 10.00),
+}
+# Request fields a model needs beyond the shared ones. The GPT-5 line
+# reasons by default, and in the bake-off gpt-5-mini answered the same
+# page with 13 rows, then none, then 13; transcription wants the least
+# reasoning the model allows.
+REQUEST_EXTRAS: dict[str, dict] = {
+    "openai/gpt-5.6-terra": {"reasoning_effort": "none"},      # terra rejects "minimal"; luna accepts it
+    "openai/gpt-5.6-luna": {"reasoning_effort": "minimal"},
+    # Sonnet 5 otherwise spends the whole output budget thinking on a dense
+    # page and returns no text at all (three of 83 ground-truth pages, at
+    # 8K, 16K and 32K tokens); with thinking off it read all three.
+    "anthropic/claude-sonnet-5": {"reasoning_effort": "none"},
 }
 LIST_KINDS = ("grants_paid_list", "grants_future_list")
 MAX_TOKENS = 8000            # a dense page is 2–3K tokens of JSON; doubled on truncation
@@ -183,6 +200,8 @@ def _ask(client, model: str, png: Path, max_tokens: int, json_mode: bool = True)
     )
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
+    if model in REQUEST_EXTRAS:
+        kwargs["extra_body"] = REQUEST_EXTRAS[model]
     started = time.time()
     try:
         response = client.chat.completions.create(**kwargs)

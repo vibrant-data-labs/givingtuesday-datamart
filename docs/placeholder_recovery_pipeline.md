@@ -148,6 +148,30 @@ that is about $36 with Qwen3-VL instruct and $74 with Gemini 3.5 Flash
 Lite; Unstructured ($0.015 a page after 10,000 free) would have been
 about $150.
 
+### 3b · Agree — the page gate
+
+**Input:** two readings of every page. **Output:** one accepted reading
+per page, or a flag.
+
+Decided on the ground truth (see *Third reader* below). Qwen3-VL
+instruct and Gemini 3.5 Flash Lite read every page. A page they agree
+on — the same (name, amount) pairs, at least one row — is accepted: that
+was exactly right on 107 of 107 checked pages. A disputed page, or one
+both returned empty, goes to Gemini 3.8 Flash; if it matches either base
+reading the page is accepted. What is still open goes to Claude Sonnet
+5, thinking off, and is accepted if it matches any earlier reading. A
+page no two readers agree on is flagged and not loaded. Agreement counts
+only between different models: a model read twice repeats its own
+mistakes (Gemini wrong on 6 of 57 self-agreements, Qwen on 14 of 51).
+
+On the 83 ground-truth pages this accepts 58 rightly, 2 wrongly and
+flags 23; the two wrong accepts are future-payment schedules with three
+money columns, where three readers agreed on the approved amount and
+the declared figure is the balance. On paid pages no policy accepted a
+wrong page. Cost on the expanded frame, at the measured 52% dispute
+rate: about $360, against $190 for 3.8 Flash alone (52 right, 30
+flagged) and $84 for the base pair alone.
+
 ### 4 · Select — the reconciliation gate
 
 **Input:** the per-page JSON, the XML-itemised rows, the targets from
@@ -502,13 +526,45 @@ either cross-model pair alone. So stage 3b accepts a page only when two
 *different* models agree, the third reader must be a different model
 again, and a majority of two reads from one model counts for nothing.
 
-Two questions remain open. Whether the multi-column dense pages read
-better in horizontal strips has not been tried; the ground truth for
-Wells Fargo 2021's four pages is the test bed for it. And Gemini 3.8
-Flash, the proposed third reader, has been scored only on the bake-off's
-14 pages, not against this set — and it shares a family with Flash Lite,
-so whether its errors are independent is exactly what the set should
-test before it is trusted as the tie-breaker.
+**Third reader.** Four candidates read the 83 pages under v4, about
+$10 in all (`placeholder_ground_truth.py tiebreak` and `policies`):
+
+| candidate | precision | recall | pages exact | repeats Flash Lite's error | $/page |
+|---|---|---|---|---|---|
+| Claude Sonnet 5, thinking off | 97.5% | 96.9% | 67 / 83 | 0 of 29 | $0.053 |
+| Gemini 3.8 Flash | 94.2% | 94.0% | 59 / 83 | 0 of 29 | $0.022 |
+| GPT 5.6 Terra | 82.3% | 80.9% | 31 / 82 | 1 of 29 | $0.036 |
+| GPT 5.6 Luna | 79.1% | 77.6% | 26 / 83 | 0 of 29 | $0.003 |
+
+Two things the table settles. The family worry about 3.8 Flash did not
+materialise: on the 29 pages Flash Lite got wrong it never returned
+Flash Lite's reading. And the OpenAI models are the weakest readers here
+at any size, so family independence is not the same thing as accuracy.
+Sonnet needs its thinking turned off — with it on, three dense pages
+came back empty at 8K, 16K and 32K output tokens — and the GPT models
+need reasoning effort at its minimum, which Terra spells "none".
+
+Simulated as stage 3b on the 83 pages, with Qwen and Flash Lite as the
+base pair (46 of the 83 are disputes; the sample is enriched for them):
+
+| design | accepted right | accepted wrong | flagged | expanded frame |
+|---|---|---|---|---|
+| dispute → 3.8 Flash | 52 | 1 | 30 | $191 |
+| dispute → Sonnet 5 | 52 | 1 | 30 | $342 |
+| dispute → 3.8 Flash, then Sonnet 5 if still open | 58 | 2 | 23 | $359 |
+| Flash Lite + 3.8 Flash base, dispute → Sonnet 5 | 57 | 3 | 23 | $525 |
+
+The sequential design is the one adopted: 3.8 Flash resolves 16 of the
+46 disputes at a fifth of Sonnet's price, and Sonnet then resolves
+another 6 of the remaining 30. On the 23 pages still flagged, Sonnet's
+own reading was right on 16 — an unverified single strong reading. Whether
+to load those with a lower-confidence tag or leave them out is an open
+policy decision, not a measurement.
+
+One question remains open: whether the multi-column dense pages read
+better in horizontal strips has not been tried, and Wells Fargo 2021's
+four pages are the test bed for it. Sonnet read all four exactly at full
+page, so the question may be moot.
 
 ## Order of operations
 

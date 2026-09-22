@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import collections
 import csv
+import itertools
 import json
 import random
 import re
@@ -55,7 +56,14 @@ READERS = {
     "gemini v4": "google__gemini-3.5-flash-lite-v4",
     "qwen v4 again": "alibaba__qwen3-vl-instruct-v4b",   # the same pages, same prompt, a second time
     "gemini v4 again": "google__gemini-3.5-flash-lite-v4b",
+    # third-reader candidates, the ground-truth pages only
+    "gemini 3.8 flash": "google__gemini-3.8-flash-v4",
+    "gpt 5.6 luna": "openai__gpt-5.6-luna-v4",
+    "gpt 5.6 terra": "openai__gpt-5.6-terra-v4",
+    "sonnet 5": "anthropic__claude-sonnet-5-v4",
 }
+BASE = ("qwen v4", "gemini v4")          # the two readers 3b runs on every page
+CANDIDATES = ("gemini 3.8 flash", "gpt 5.6 luna", "gpt 5.6 terra", "sonnet 5")
 # The reader pairs whose agreement is a candidate acceptance signal: two
 # models, and the same model read twice. The second kind is the control —
 # a model agreeing with itself is not evidence, as ``score`` shows.
@@ -529,6 +537,128 @@ def score() -> None:
               f"${total:,.0f} | {', '.join(f'${float(p):,.0f}' for p in printed) or '-'} | ${paid:,.0f} | {total / paid:.4f} |")
 
 
+def tiebreak() -> None:
+    """How each third-reader candidate would do in stage 3b.
+
+    On the checked pages where the two base readers disagree (or both
+    return no rows), a candidate's reading is compared with each base
+    reading: a match accepts that reading, no match flags the page. The
+    table gives, per candidate, how many of those pages it would accept
+    rightly, accept wrongly, and flag — and, as the independence check,
+    how often it repeats a base reader's mistake on the pages where that
+    reader was wrong.
+    """
+    pages = {(r["object_id"], int(r["page"])): r for r in csv.DictReader(PAGES_CSV.open())}
+    truth = {key: rs for key, rs in _truth().items() if "SEEDED" not in rs[0]["note"] and key in pages}
+    stats = collections.defaultdict(collections.Counter)
+    for key, records in truth.items():
+        want = collections.Counter(_truth_pairs(records))
+        base = {name: _reading(READERS[name], *key) for name in BASE}
+        base = {name: collections.Counter(_pairs(_rows(data))) for name, data in base.items() if data is not None}
+        if len(base) < 2:
+            continue
+        q, g = base["qwen v4"], base["gemini v4"]
+        disputed = q != g or not q
+        for name in CANDIDATES:
+            data = _reading(READERS[name], *key)
+            if data is None:
+                continue
+            c = collections.Counter(_pairs(_rows(data)))
+            s = stats[name]
+            s["pages"] += 1
+            s["own exact"] += c == want
+            s["own matched"] += sum((c & want).values()); s["own got"] += sum(c.values()); s["want"] += sum(want.values())
+            for other, reading in (("gemini", g), ("qwen", q)):
+                if reading != want:
+                    s[f"{other} wrong"] += 1
+                    s[f"repeats {other}"] += c == reading
+            if not disputed:
+                continue
+            s["disputed"] += 1
+            if c and (c == g or c == q):
+                s["accept right" if c == want else "accept wrong"] += 1
+            else:
+                s["flag"] += 1
+                s["flag, candidate alone right"] += c == want
+    print("| candidate | pages | precision | recall | exact | disputed pages | accepts right | accepts wrong | flags | flagged but candidate right | repeats Flash Lite's error | repeats Qwen's error |")
+    print("|---|---|---|---|---|---|---|---|---|---|---|---|")
+    for name in CANDIDATES:
+        s = stats.get(name)
+        if not s:
+            continue
+        print(f"| {name} | {s['pages']} | {s['own matched'] / max(s['own got'], 1):.1%} | {s['own matched'] / max(s['want'], 1):.1%} | "
+              f"{s['own exact']}/{s['pages']} | {s['disputed']} | {s['accept right']} | {s['accept wrong']} | {s['flag']} | "
+              f"{s['flag, candidate alone right']} | {s['repeats gemini']}/{s['gemini wrong']} | "
+              f"{s['repeats qwen']}/{s['qwen wrong']} |")
+
+
+COST_PER_PAGE = {"qwen v4": 0.0024, "gemini v4": 0.0066, "gemini 3.8 flash": 0.022, "sonnet 5": 0.053}
+POLICIES = {
+    "A  Qwen + Flash Lite; dispute -> 3.8 Flash": (("qwen v4", "gemini v4"), (("gemini 3.8 flash",),)),
+    "B  Qwen + Flash Lite; dispute -> Sonnet 5": (("qwen v4", "gemini v4"), (("sonnet 5",),)),
+    "C  Qwen + Flash Lite; dispute -> 3.8 Flash, then Sonnet 5 if still open": (("qwen v4", "gemini v4"), (("gemini 3.8 flash",), ("sonnet 5",))),
+    "D  Flash Lite + 3.8 Flash; dispute -> Sonnet 5": (("gemini v4", "gemini 3.8 flash"), (("sonnet 5",),)),
+    "E  Flash Lite + Sonnet 5; dispute -> 3.8 Flash": (("gemini v4", "sonnet 5"), (("gemini 3.8 flash",),)),
+}
+
+
+def policies(frame_pages: int, dispute_rate: float) -> None:
+    """How each stage-3b design would do on the checked pages, and what it
+    would cost on a frame of ``frame_pages`` pages of which ``dispute_rate``
+    are disputed by the base pair.
+
+    Two base readers read every page; a page they agree on (same pairs,
+    at least one row) is accepted. A disputed page goes to the next stage,
+    and is accepted as soon as any two readers agree; a page no two
+    readers agree on is flagged. The sample here is enriched for
+    disputes, so the cost column scales each stage's escalation share to
+    the frame's dispute rate rather than the sample's.
+    """
+    pages = {(r["object_id"], int(r["page"])): r for r in csv.DictReader(PAGES_CSV.open())}
+    truth = {key: rs for key, rs in _truth().items() if "SEEDED" not in rs[0]["note"] and key in pages}
+    tally = collections.defaultdict(collections.Counter)
+    escalated = collections.defaultdict(collections.Counter)
+    disputed_pages = collections.Counter()
+    for key, records in truth.items():
+        want = collections.Counter(_truth_pairs(records))
+        readings = {}
+        for name in READERS:
+            data = _reading(READERS[name], *key)
+            if data is not None:
+                readings[name] = collections.Counter(_pairs(_rows(data)))
+        for label, (base, stages) in POLICIES.items():
+            if any(n not in readings for n in base):
+                tally[label]["unreadable"] += 1
+                continue
+            read = {n: readings[n] for n in base}
+            first, second = (readings[n] for n in base)
+            if first == second and first:
+                tally[label]["right" if first == want else "wrong"] += 1
+                continue
+            disputed_pages[label] += 1
+            verdict = "flag"
+            for stage in stages:
+                for n in stage:
+                    escalated[label][n] += 1
+                    if n in readings:
+                        read[n] = readings[n]
+                agreed = next((read[x] for x, y in itertools.combinations(read, 2) if read[x] == read[y] and read[x]), None)
+                if agreed is not None:
+                    verdict = "right" if agreed == want else "wrong"
+                    break
+            tally[label][verdict] += 1
+    print(f"{len(truth)} checked pages; cost estimated for {frame_pages:,} pages at a {dispute_rate:.0%} dispute rate\n")
+    print("| policy | accepted right | accepted wrong | flagged | unreadable | escalations here | frame cost |")
+    print("|---|---|---|---|---|---|---|")
+    for label, (base, stages) in POLICIES.items():
+        c, e = tally[label], escalated[label]
+        base_cost = frame_pages * sum(COST_PER_PAGE[n] for n in base)
+        scale = frame_pages * dispute_rate / max(disputed_pages[label], 1)
+        stage_cost = sum(e[n] * scale * COST_PER_PAGE[n] for n in e)
+        print(f"| {label} | {c['right']} | {c['wrong']} | {c['flag']} | {c['unreadable']} | "
+              + ", ".join(f"{n} {e[n]}" for n in e) + f" | ${base_cost + stage_cost:,.0f} |")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -554,7 +684,19 @@ def main() -> None:
     p.add_argument("--rotate", default="auto", help="degrees counter-clockwise before cutting, or auto (tesseract decides)")
     p.add_argument("--out-dir", type=Path, default=Path("/tmp/gt_crops"))
     sub.add_parser("score")
+    sub.add_parser("tiebreak", help="how each third-reader candidate would do on the disputed pages")
+    p = sub.add_parser("policies", help="how each stage-3b design would do, and cost on a frame")
+    p.add_argument("--frame-pages", type=int, default=9347, help="the expanded frame's attachment pages")
+    p.add_argument("--dispute-rate", type=float, default=0.52,
+                   help="share of pages the base pair disputes: measured 67%% on the sample's pages under v3 "
+                        "(87%% on J&J's 836, 49%% elsewhere), blended for the expanded frame's mix")
     args = parser.parse_args()
+    if args.command == "tiebreak":
+        tiebreak()
+        return
+    if args.command == "policies":
+        policies(args.frame_pages, args.dispute_rate)
+        return
     if args.command == "pick":
         pick(args.out, args.per_cell, args.seed)
     elif args.command == "add":

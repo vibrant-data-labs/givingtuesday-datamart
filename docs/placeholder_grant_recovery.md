@@ -253,8 +253,28 @@ version 4. For Qwen version 4 is a small real gain.
 The repeat read settled one more thing. Two different models agreeing on
 a page were right 107 times in 107. The same model read twice agreed
 with itself on 57 pages and was wrong on 6 of them. A model repeats its
-own mistakes, so agreement only counts between different models, and
-the third reader must be a third model.
+own mistakes, so agreement only counts between different models.
+
+Four candidates for the third reader then read the same 83 pages:
+
+| candidate | rows right | pages exact | cost per page |
+|---|---|---|---|
+| Claude Sonnet 5, thinking off | 97% | 67 of 83 | 5.3 cents |
+| Gemini 3.8 Flash | 94% | 59 of 83 | 2.2 cents |
+| GPT 5.6 Terra | 82% | 31 of 82 | 3.6 cents |
+| GPT 5.6 Luna | 79% | 26 of 83 | 0.3 cents |
+
+Neither Gemini 3.8 Flash nor Sonnet ever repeated Flash Lite's mistake,
+so both are independent enough. The design adopted sends a disputed
+page to 3.8 Flash first, and only what is still open to Sonnet. On the
+83 pages that accepts 58 rightly, 2 wrongly and flags 23. The two wrong
+ones are future-payment schedules where three readers chose the
+approved column and the declared figure is the balance column; no paid
+page was accepted wrongly. On the expanded frame this costs about $360.
+
+One decision is open: on the flagged pages, Sonnet alone was right 16
+times in 23. Those readings could be loaded with a lower-confidence
+mark, or left out.
 
 Projected across all 9,518 addressable filings at a single read's rate:
 $7B to $8B.
@@ -310,8 +330,9 @@ Reading the 9,347 attachment pages with both models costs about $110.
 ## Next steps
 
 1. Run both models on every page. Accept a page when they agree on its
-   names and amounts. Send the rest to a third model. A page no two
-   readers agree on is flagged, not loaded.
+   names and amounts. Send the rest to Gemini 3.8 Flash, and what is
+   still open to Claude Sonnet 5. A page no two readers agree on is
+   flagged, not loaded. Decided on the ground truth; see below.
 2. ~~Carry a grant heading onto heading-less continuation pages.~~ Done.
    On the stored pages alone it moved Qwen from 35 to 36 filings and
    Gemini from 38 to 40.
