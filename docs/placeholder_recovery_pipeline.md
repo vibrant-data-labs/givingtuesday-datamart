@@ -188,10 +188,12 @@ per-token rates on the day; Unstructured is $0.015 a page.
 What it showed:
 
 - **Yes, a vision model replaces Unstructured for attachment pages.**
-  Qwen3-VL instruct at 200 DPI reproduces the Siegel list to the dollar
-  and the dense Wells Fargo page to the cent, at an eighth of the price.
-  Gemini 3.5 Flash Lite does the same at a quarter; Gemini 3.8 Flash is
-  the most accurate overall at Unstructured's price.
+  Qwen3-VL instruct and Gemini 3.5 Flash Lite, both at 200 DPI, reproduce
+  the Siegel list to the dollar and the dense Wells Fargo page to the
+  cent, at an eighth and a quarter of the price. They are identical on 11
+  of the 14 pages; Qwen added no phantom row on the dense page and never
+  truncated, Gemini handled the non-cash page better. Gemini 3.8 Flash is
+  the most accurate overall, at Unstructured's price.
 - **Resolution is not optional.** At 130 DPI Qwen misread two of twenty
   amounts on the Wells Fargo page (200 as 2,000; a leading 1 as 2). At
   200 DPI both went away, for 50% more input tokens.
@@ -221,10 +223,16 @@ B run.
 
 1. Ground-truth set and a matcher pass on the 4,760 rows already
    recovered. Together they say whether the output is product-grade.
-2. Wire stage 2 into `stage`, and stage 3 as a VLM call (Qwen3-VL
-   instruct at 200 DPI through the gateway, retry on empty or truncated
-   output, page total checked against the rows). Rerun the 100-filing
-   sample through it and compare to the Unstructured results.
+2. Wire stage 2 into `stage`, and stage 3 as a VLM call at 200 DPI
+   through the gateway, with a retry on empty or truncated output and the
+   page total checked against the rows. Run the 100-filing sample through
+   **both** Qwen3-VL instruct and Gemini 3.5 Flash Lite (about 2,200
+   attachment pages; $4 and $8) and let filing-level reconciliation choose:
+   on the 14 bake-off pages they are identical on 11, Qwen is cleaner on
+   the dense page and never truncated, Gemini is better on the non-cash
+   page, and 14 pages cannot rank them. Qwen's open weights are the
+   tie-breaker if it comes to one — it can run on Baseten or our own GPU
+   with no data leaving our control.
 3. Band B in full with the broadened classifier.
 4. Decide the coverage policy; re-OCR band A's failing pages.
 5. C and D once the per-page price is in hand.
