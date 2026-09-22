@@ -624,8 +624,12 @@ page, so the question may be moot.
    staging alone settled two things: all 38 404s are images the IRS
    generated in 2022, and 40% of tax-year-2020 filings have no usable
    PDF against 5–7% for 2022–2023.
-4. Decide the coverage policy; re-OCR band A's failing pages.
-5. C and D once the per-page price is in hand.
+4. The storage layer — filing images in S3 with a `filing_images`
+   table, a `page_readings` cache with a parallel bulk cache-or-run,
+   and `page_verdicts` under a versioned policy — per
+   [placeholder_storage_spec.md](placeholder_storage_spec.md), one
+   session per part. Then the 1,000-filing run on it.
+5. Decide the flagged-page policy before that run's load.
 6. Send GT the findings list; report the 2022 image batch to the IRS.
 
 ## Open decisions
