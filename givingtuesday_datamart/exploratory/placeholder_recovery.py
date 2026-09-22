@@ -7,7 +7,7 @@ cheap part (the selector) changes.
     python -m givingtuesday_datamart.exploratory.placeholder_recovery sample
     python -m givingtuesday_datamart.exploratory.placeholder_recovery stage
     python -m givingtuesday_datamart.exploratory.placeholder_recovery transcribe --model alibaba/qwen3-vl-instruct
-    python -m givingtuesday_datamart.exploratory.placeholder_recovery report --results ~/.cache/irs_index/vlm/alibaba__qwen3-vl-instruct
+    python -m givingtuesday_datamart.exploratory.placeholder_recovery report --results ~/.cache/irs_index/vlm/alibaba__qwen3-vl-instruct-v3
 
 ``sample`` builds the stratified frame from GT's combined grants extract.
 The population is violently top-heavy — 22 filings carry $4.67B while 6,755
@@ -33,7 +33,9 @@ to a model. On this sample they are 62% of all pages.
 
 ``transcribe`` renders the attachment pages at 200 DPI and sends each one
 to a vision model through the gateway (see ``vlm_transcription``), one JSON
-file per page, so a rerun only pays for pages it has not seen.
+file per page, so a rerun only pays for pages it has not seen. Results
+land in a folder named for the model and the prompt version, so a prompt
+revision is read into its own folder and scored against the last one.
 
 ``report`` runs the selector over the results — a vision model's pages or,
 for the baseline, an Unstructured job's ``<object_id>.pdf.json`` — and
@@ -354,6 +356,7 @@ def transcribe(sample: Path, manifest: Path, cache: Path, model: str, results: P
         tally["in"] += usage.get("in") or 0
         tally["out"] += usage.get("out") or 0
         tally["retried"] += int(data.get("_attempts", 1) > 1)
+        tally["no_json"] += int(data.get("_json_mode") is False)
         tally["errors"] += int("error" in data or "parse_error" in data)
         tally["truncated"] += int(data.get("_finish") == "length")
         tally["rows"] += len(data.get("rows") or [])
@@ -361,7 +364,8 @@ def transcribe(sample: Path, manifest: Path, cache: Path, model: str, results: P
         if tally["pages"] % 25 == 0 or tally["pages"] == len(jobs):
             spent = vlm_transcription.cost(model, tally["in"], tally["out"])
             print(f"  {tally['pages']}/{len(jobs)} pages, {tally['rows']:,} rows, "
-                  f"{tally['retried']} retried, {tally['errors']} errors, {tally['truncated']} truncated; "
+                  f"{tally['retried']} retried ({tally['no_json']} answered without JSON mode), "
+                  f"{tally['errors']} errors, {tally['truncated']} truncated; "
                   f"page totals matched {tally['matched']} / mismatch {tally['mismatch']} / none {tally['no_total']}"
                   + (f"; ${spent:.2f}" if spent is not None else ""), flush=True)
 
@@ -395,7 +399,7 @@ def report(sample: Path, results: Path, out: Path | None, manifest: Path,
     if xml_rows and xml_rows.exists():
         for r in csv.DictReader(xml_rows.open()):
             itemised[r["object_id"]].append(r)
-    model = results.name.replace("__", "/")
+    model = re.sub(r"-v\d+$", "", results.name).replace("__", "/")   # <model>-<prompt version>
     by_stratum: dict = collections.defaultdict(
         lambda: {"n": 0, "declared": 0.0, "recovered": 0.0, "reconciled": 0,
                  "rows": 0, "near": 0.0, "outcomes": collections.Counter()})
@@ -588,7 +592,7 @@ def main() -> None:
     p.add_argument("--manifest", type=Path, default=MANIFEST_CSV)
     p.add_argument("--cache", type=Path, default=CACHE)
     p.add_argument("--results", type=Path, default=None,
-                   help="per-page JSON goes here (default <cache>/vlm/<model with / as __>)")
+                   help="per-page JSON goes here (default <cache>/vlm/<model with / as __>-<prompt version>)")
     p.add_argument("--workers", type=int, default=8)
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--only", default=None, help="a single object id")
@@ -616,7 +620,7 @@ def main() -> None:
     elif args.command == "stage":
         stage(args.sample, args.cache, args.limit, args.manifest)
     elif args.command == "transcribe":
-        results = args.results or args.cache / "vlm" / args.model.replace("/", "__")
+        results = args.results or args.cache / "vlm" / f"{args.model.replace('/', '__')}-{vlm_transcription.PROMPT_VERSION}"
         transcribe(args.sample, args.manifest, args.cache, args.model, results,
                    args.workers, args.limit, args.only)
     else:

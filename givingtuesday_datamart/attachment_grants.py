@@ -589,6 +589,10 @@ def _is_target(amount: float, targets: Sequence[float]) -> bool:
 # candidate — the subset search decides whether it belongs in the sum.
 PAGE_KINDS = {"grants_paid_list": "paid", "grants_future_list": "future",
               "expenditure_responsibility": "paid"}
+# A heading that tells the selector something: grants, future payment, a
+# veto, or a grant column. A filer masthead, a page number or a recipient
+# line copied into the heading field tells it nothing.
+_HEADING_SIGNALS = (GRANT_CONTEXT, FUTURE_PAYMENT, NON_GRANT_CONTEXT, GRANT_HEADER)
 
 
 def page_tables(pages: Mapping[int, dict], targets: Sequence[float] = ()) -> list[CandidateTable]:
@@ -598,8 +602,20 @@ def page_tables(pages: Mapping[int, dict], targets: Sequence[float] = ()) -> lis
     ``page_kind``, ``heading``, ``rows`` (name, address, status, purpose,
     amount) and ``totals``. The heading is the context, exactly as an OCR
     heading would be; the kind is a second, independent label.
+
+    A list that runs onto a page with no title of its own continues the
+    list before it, and the models cannot tell a paid continuation from a
+    future one — both called Kenan's second future-payment page a paid
+    list. So a page whose heading says nothing, and which the model labels
+    a list, inherits the previous page's heading and kind, as the OCR path
+    does — unless the previous page closed its list with a total equal to a
+    declared amount (``targets``): the page after that total opens a new
+    statement and keeps its own label. A page the model calls ``other``
+    never inherits; a heading-less fee schedule after the grant list stays
+    unlabelled and the subset search decides.
     """
     found: list[CandidateTable] = []
+    carried: tuple[str, str] | None = None     # (context, kind) a continuation page may inherit
     for page in sorted(pages):
         data = pages[page] or {}
         rows: list[GrantRow] = []
@@ -623,15 +639,20 @@ def page_tables(pages: Mapping[int, dict], targets: Sequence[float] = ()) -> lis
             amount = _amount(item.get("amount")) if isinstance(item, dict) else None
             if amount is not None:
                 totals.append(amount)
-        if not rows:
-            continue
-        kind = str(data.get("page_kind") or "")
+        label = str(data.get("page_kind") or "")
+        kind = PAGE_KINDS.get(label, "")
         context = " ".join(str(data.get("heading") or "").split())
-        if kind == "expenditure_responsibility":
+        if label == "expenditure_responsibility":
             context = f"{context} expenditure responsibility".strip()   # its own statement group
-        found.append(CandidateTable(page=page, header=(), amount_header="amount",
-                                    rows=tuple(rows), totals=tuple(totals),
-                                    context=context, kind=PAGE_KINDS.get(kind, "")))
+        own = label == "expenditure_responsibility" or any(s.search(context) for s in _HEADING_SIGNALS)
+        if kind and not own and carried:
+            context, kind = carried
+        table = CandidateTable(page=page, header=(), amount_header="amount", rows=tuple(rows),
+                               totals=tuple(totals), context=context, kind=kind)
+        if rows:
+            found.append(table)
+        closed = any(_is_target(total, targets) for total in totals)
+        carried = (context, "future" if table.future else "paid") if table.labelled and not closed else None
     return found
 
 

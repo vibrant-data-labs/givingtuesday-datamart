@@ -12,9 +12,19 @@ Pages are rendered at 200 DPI: 300 costs more tokens for nothing on a
 bitonal scan, and 130 lost rows on the dense pages. Calls go through the
 Vercel AI Gateway (OpenAI-compatible), keyed by ``VERCEL_AI_GATEWAY_API_KEY``.
 
-The prompt is the bake-off's second version, verbatim: rows are transcribed
-whatever the page kind is — the first version let a model that labelled a
-page "other" return no rows for it.
+The prompt is versioned, and every stored page carries the version that
+produced it. v2 (the bake-off's) made rows independent of the page kind —
+v1 let a model that labelled a page "other" return no rows. v3 came out of
+the 100-filing sample: it says what a heading is (Gemini put the filer
+masthead there and Qwen a recipient line), keeps a contact person inside
+their organisation's row (Gemini listed Claude Moore's contacts as
+grantees, doubling the page), and asks for one row per recipient however
+many printed lines it wraps onto.
+
+The sample also showed that Qwen's empty answers were not the prompt's
+doing: under ``response_format=json_object`` it returned no rows for 401
+dense list pages, in five seconds each, and read every one of them without
+JSON mode. ``transcribe`` retries an empty or truncated list page that way.
 """
 
 from __future__ import annotations
@@ -38,11 +48,12 @@ LIST_KINDS = ("grants_paid_list", "grants_future_list")
 MAX_TOKENS = 8000            # a dense page is 2–3K tokens of JSON; doubled on truncation
 ATTEMPTS = 3
 
+PROMPT_VERSION = "v3"
 PROMPT = """This is one scanned page from an attachment to an IRS Form 990-PF. Transcribe it completely.
 
 Return ONLY a JSON object with this shape:
 {"page_kind": "grants_paid_list" | "grants_future_list" | "expenditure_responsibility" | "other",
- "heading": "<heading or title text printed on the page, or empty>",
+ "heading": "<the title of the list printed above the rows on this page, or empty>",
  "rows": [{"name": "<recipient name exactly as printed>", "address": "<address if printed>",
            "status": "<foundation status code such as PC, if printed>", "purpose": "<purpose text if printed>",
            "amount": <number>}],
@@ -51,10 +62,21 @@ Return ONLY a JSON object with this shape:
 Rules:
 - rows: one entry for EVERY printed line that names a recipient and shows a dollar amount, in page order.
   Transcribe the rows whatever the page kind is; page_kind is a separate label and must never cause rows
-  to be left out. Do not summarise, do not stop early, do not invent rows.
+  to be left out. Do not summarise, do not stop early, do not invent rows, do not repeat a row.
+- One recipient is one row. A name or address that wraps onto several printed lines is still one row.
+  A person's name printed with an organisation (a contact, attention or c/o line) belongs in that
+  organisation's address field: never in name, never as a row of its own.
+- heading: the list title printed above the rows, such as "Part XV line 3a - Grants and contributions
+  paid during the year". A filer's name, EIN, date or page number is not the heading, nor is a recipient
+  line. Empty if the page prints no title.
+- page_kind: grants_future_list when the title says approved for future payment, grants payable or
+  line 3b; expenditure_responsibility for a Part VII-B line 5c statement; grants_paid_list for grants
+  or contributions paid; other only for a page that is not a list of recipients. A page that continues
+  a list from an earlier page, with no title of its own, is still a list, not other.
 - totals: lines labelled total, subtotal, grand total or carried forward go here, never in rows.
 - amount: a number without $ or commas. When a line shows several money columns, use the grant amount
   (for non-cash grants the fair market value, not book value or cost basis).
+- Strings never contain a raw line break; use a space instead.
 - If the page is rotated, read it rotated. Empty rows list only if the page truly has no recipient lines."""
 
 _JSON = re.compile(r"\{.*\}", re.S)
@@ -164,24 +186,34 @@ def _ask(client, model: str, png: Path, max_tokens: int, json_mode: bool = True)
     data["_seconds"] = round(time.time() - started, 1)
     data["_finish"] = choice.finish_reason
     data["_max_tokens"] = max_tokens
+    data["_json_mode"] = json_mode
+    data["_prompt"] = PROMPT_VERSION
     return data
 
 
+def _rows(data: dict) -> int:
+    return len(data.get("rows") or []) if "error" not in data and "parse_error" not in data else -1
+
+
 def transcribe(client, model: str, png: Path) -> dict:
-    """One page, with the retries the bake-off showed are needed.
+    """One page, with the retries the bake-off and the sample showed are needed.
 
     A transport error is retried after a pause (on top of the SDK's own).
     Output cut off at the token limit is asked for again with twice the
-    room. A response that parsed but returned no rows for a page it
-    labelled as a grant list is asked for once more — the empty answer is
-    stochastic, not a property of the page. The last attempt is returned
-    whatever it holds, with ``_attempts`` on it.
+    room. A page the model labelled a grant list but gave no rows, or
+    stopped mid-row on, is asked for again without JSON mode — that mode,
+    not the page, is what made Qwen answer 401 dense pages with nothing.
+    The fullest parsed answer is returned, with ``_attempts`` set to the
+    number of calls made.
     """
-    max_tokens, last = MAX_TOKENS, {}
+    max_tokens, json_mode = MAX_TOKENS, True
+    best: dict = {}
+    attempt = 0
     for attempt in range(1, ATTEMPTS + 1):
-        data = _ask(client, model, png, max_tokens)
-        data["_attempts"] = attempt
-        last = data
+        data = _ask(client, model, png, max_tokens, json_mode)
+        if (not best or _rows(data) > _rows(best)
+                or (_rows(data) == _rows(best) and best.get("_partial") and not data.get("_partial"))):
+            best = data
         if "error" in data:
             time.sleep(3 * attempt)
             continue
@@ -190,10 +222,13 @@ def transcribe(client, model: str, png: Path) -> dict:
             continue
         if "parse_error" in data:
             continue
-        if not data.get("rows") and data.get("page_kind") in LIST_KINDS and attempt == 1:
+        short = (not data.get("rows") and data.get("page_kind") in LIST_KINDS) or data.get("_partial")
+        if short and json_mode:
+            json_mode = False
             continue
-        return data
-    return last
+        break
+    best["_attempts"] = attempt
+    return best
 
 
 def rows_sum(data: dict) -> float:

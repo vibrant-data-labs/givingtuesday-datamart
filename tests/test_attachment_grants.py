@@ -251,6 +251,33 @@ def test_page_kind_is_evidence_when_the_heading_says_nothing():
     assert recovery.future.reconciled and recovery.future.pages == (40,)
 
 
+def test_a_continuation_page_inherits_the_list_before_it_until_a_total_closes_it():
+    """Kenan 2021: the paid list closes with its total on p127; p128 opens the
+    future list under a masthead heading; p129 has no heading and both models
+    called it paid. p129 must join p128, and p128 must not join p127."""
+    pages = {127: _page("grants_paid_list", "", [("Alpha Trust", 1000), ("Beta House", 2000), ("Gamma Fund", 3000)],
+                        totals=[("TOTAL", 6000)]),
+             128: _page("grants_future_list", "KENAN CHARITABLE TRUST EIN 13-6192029",
+                        [("Delta Center", 100), ("Epsilon Clinic", 200), ("Zeta Library", 300)]),
+             129: _page("grants_paid_list", "", [("Eta Hospital", 400), ("Theta School", 500)])}
+    tables = page_tables(pages, targets=(6000, 1500))
+    assert [t.future for t in tables] == [False, True, True]
+    assert tables[2].group == tables[1].group
+    recovery = extract_tables(tables, paid=6000, future=1500)
+    assert recovery.paid.reconciled and recovery.paid.pages == (127,)
+    assert recovery.future.reconciled and recovery.future.pages == (128, 129)
+
+
+def test_a_page_the_model_calls_other_never_inherits():
+    """Waldheim 2022: a heading-less fee schedule follows the grant list."""
+    pages = {21: _page("grants_paid_list", "Grants and Contributions Paid During the Year",
+                       [("Alpha Trust", 1000), ("Beta House", 2000), ("Gamma Fund", 3000)]),
+             22: _page("other", "", [("Lewis Rice LLC", 7992), ("Lewis Rice LLC", 3741), ("Lewis Rice LLC", 4711)])}
+    grants, fees = page_tables(pages, targets=(6000,))
+    assert grants.labelled and not fees.labelled and not fees.vetoed
+    assert extract_tables([grants, fees], paid=6000).paid.pages == (21,)
+
+
 def test_xml_rows_close_the_gap_the_attachment_leaves():
     """Cohen 2020: the attachment lists $6.5M, the expenditure-responsibility
     statement in the XML holds the $85M, and only together do they reconcile."""
