@@ -225,7 +225,7 @@ def _page(kind, heading, rows, totals=()):
     """A vision model's response for one page, as ``page_tables`` reads it."""
     return {"page_kind": kind, "heading": heading,
             "rows": [{"name": n, "address": "", "status": "PC", "purpose": "", "amount": a} for n, a in rows],
-            "totals": [{"label": l, "amount": a} for l, a in totals]}
+            "totals": [{"label": label, "amount": a} for label, a in totals]}
 
 
 def test_page_tables_keep_totals_and_pointers_out_of_the_rows():

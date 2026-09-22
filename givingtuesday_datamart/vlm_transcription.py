@@ -58,6 +58,9 @@ Rules:
 - If the page is rotated, read it rotated. Empty rows list only if the page truly has no recipient lines."""
 
 _JSON = re.compile(r"\{.*\}", re.S)
+# An amount written as it was printed — "$151,000.00", "1,500000.0" — is not
+# JSON; quoting it lets the page parse and leaves the value to _amount().
+_BARE_AMOUNT = re.compile(r'("amount"\s*:\s*)\$?\s?([\d][\d,]*(?:\.\d+)?)"?(?=\s*[,}\]])')
 
 
 def client(timeout: float = 240.0):
@@ -88,6 +91,53 @@ def render(pdf: Path, first: int, last: int, out_dir: Path, dpi: int = DPI) -> l
     return [wanted[page] for page in sorted(wanted)]
 
 
+def _parse(text: str) -> dict:
+    """The JSON object in a response. Long pages come back with raw newlines
+    inside address and purpose strings, which strict JSON rejects, so the
+    lenient parse is tried second. A response that still fails keeps its
+    full text under ``parse_error`` so it can be repaired without a recall."""
+    match = _JSON.search(text)
+    if not match:
+        return {"parse_error": text}
+    body = match.group(0)
+    for candidate, strict in ((body, True), (body, False), (_BARE_AMOUNT.sub(r'\1"\2"', body), False)):
+        try:
+            data = json.loads(candidate, strict=strict)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            return data
+    # Some models stop mid-row on a dense page and report a normal finish
+    # (Qwen on Johnson & Johnson's matching-gift pages). Keep the rows that
+    # were complete and say so: a partial page can never reconcile a filing
+    # by itself, but its rows are real and the flag keeps the lineage honest.
+    body = _BARE_AMOUNT.sub(r'\1"\2"', body)
+    for cut in reversed([m.end() for m in re.finditer(r"\}", body)][-60:]):
+        try:
+            data = json.loads(body[:cut] + "]}", strict=False)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict) and isinstance(data.get("rows"), list):
+            data["_partial"] = True
+            return data
+    return {"parse_error": text}
+
+
+def repair(result: Path) -> bool:
+    """Re-parse a stored response that failed before; True if it parses now,
+    complete or partial (a recall of a page the model keeps stopping on is
+    not worth another attempt)."""
+    data = json.loads(result.read_text())
+    if "parse_error" not in data:
+        return True
+    fixed = _parse(data["parse_error"])
+    if "parse_error" in fixed:
+        return False
+    fixed.update({k: v for k, v in data.items() if k.startswith("_")})
+    result.write_text(json.dumps(fixed, indent=1))
+    return True
+
+
 def _ask(client, model: str, png: Path, max_tokens: int, json_mode: bool = True) -> dict:
     image = base64.b64encode(png.read_bytes()).decode()
     kwargs = dict(
@@ -108,13 +158,7 @@ def _ask(client, model: str, png: Path, max_tokens: int, json_mode: bool = True)
         return {"error": f"{type(exc).__name__}: {str(exc)[:300]}", "_seconds": round(time.time() - started, 1)}
     choice = response.choices[0]
     text = choice.message.content or ""
-    match = _JSON.search(text)
-    try:
-        data = json.loads(match.group(0)) if match else {}
-    except json.JSONDecodeError:
-        data = {"parse_error": text[:300]}
-    if not isinstance(data, dict):
-        data = {"parse_error": text[:300]}
+    data = _parse(text)
     usage = response.usage
     data["_usage"] = {"in": getattr(usage, "prompt_tokens", None), "out": getattr(usage, "completion_tokens", None)}
     data["_seconds"] = round(time.time() - started, 1)

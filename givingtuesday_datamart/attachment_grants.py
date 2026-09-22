@@ -568,12 +568,16 @@ def select(tables: Sequence[CandidateTable], declared: float, target: str = "pai
 
 
 def _amount(value) -> float | None:
-    """A model's amount field: a number, or a string with $ and commas."""
+    """A model's amount field: a number, or a string with $ and commas
+    (models also write "1,500000.0"; commas are dropped, not trusted)."""
     if isinstance(value, bool) or value is None:
         return None
     if isinstance(value, (int, float)):
         return float(value)
-    return parse_money(str(value).strip())
+    text = re.sub(r"[$,\s]", "", str(value))
+    if not re.fullmatch(r"\d+(?:\.\d+)?", text):
+        return None
+    return float(text)
 
 
 def _is_target(amount: float, targets: Sequence[float]) -> bool:

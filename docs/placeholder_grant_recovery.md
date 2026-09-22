@@ -38,6 +38,15 @@ independent piece of evidence. On the same 100 filings it now stands at:
 - **Unreachable — $2,372M (39.1%).** The IRS serves no PDF ($1,181M), or the
   PDF has no grants section in it ($1,191M).
 
+*Later the same day:* the OCR step was replaced by a vision model reading
+only the attachment pages (see
+[placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md)). On
+the same 100 filings and the same selector, Qwen3-VL instruct reconciles 35
+filings (44.0%) for $3.57 and Gemini 3.5 Flash Lite 38 (44.3%) for $12.37;
+48 filings (52.4%) reconcile under one or the other. The 25.6% backlog
+above falls to 5–7%. The numbers in the rest of this document are the OCR
+baseline those runs were measured against.
+
 ---
 
 ## Part 1: what GT delivered, and what it answers
@@ -128,16 +137,33 @@ Every page is a CCITT fax-encoded bitonal scan. No fonts, no text layer,
 zero extractable characters, at 300 DPI, which is good for OCR. **So this
 is an OCR problem, not a parsing problem.**
 
-**Only the attachments need OCR, and the boundary is free.** Each image is
-two documents stapled together: the IRS's rendering of the XML (which we
-already hold as data) and then whatever the filer attached. The IRS renders
-its pages at a fixed 2246 px width cropped to content; the filer's pages are
-full letter pages (2550×3300) or odd landscape sizes. `pdfimages -list`
-reads this without rendering, and pypdf cuts the pages out without
-re-encoding. On the 85 cached PDFs the IRS-rendered region is 53% of all
-pages — 40% in band A, 90% in band D — and every reconciled list sits
-inside the attachment region. It is also where every false positive in
-Part 7 came from.
+**Only the attachments need transcribing, and the boundary is free.** Each
+image is two documents stapled together: the IRS's rendering of the XML
+(which we already hold as data) and then whatever the filer attached. The
+IRS renders at five fixed image widths — 2246 px for form pages; 2259,
+2440, 3062 and 3081 for the wide supporting statements — cropped to
+content; the filer's pages are full letter pages (2550×3300) or whatever
+their scanner produced. `pdfimages -list` reads this without rendering
+(`irs_source.attachment_start`). On the 85 cached PDFs the IRS-rendered
+region is 62% of all pages — 50% in band A, 60% in B, 93% in C, 99% in D —
+and 26 of the 85 have no attachment at all, which is "list absent" before
+any model runs. (An earlier draft said 53%; it counted the wide statements
+as the filer's.) It is also where every false positive in Part 7 came from.
+
+Every reconciled list sits inside the attachment region, with two
+exceptions worth understanding. The OCR reconciliations of Cohen 2020 and
+Anschutz 2022 were the attachment's list *plus* the IRS-rendered
+**expenditure-responsibility statement**: Unstructured had lost the
+attachment page carrying Cohen's $85M to Cohen Veterans Network, and the
+statement — the same grants, itemised in Part VII-B — filled the hole to
+the dollar. Those rows are in the XML (GT's extract carries them as
+`990PF_EXPENDITURE_RESP`; 16 of the 100 sampled filings have some, and 6
+more name a few Part XV grants beside the placeholder), so the cut costs
+nothing: the selector takes the XML's itemised rows as exact tables
+(`attachment_grants.xml_tables`) alongside the transcribed pages, and the
+subset search decides whether they belong in the sum. A vision model reads
+Cohen's page correctly and reconciles from the attachment alone; Hall 2023
+is where the XML rows close the gap.
 
 ---
 
@@ -499,18 +525,23 @@ filers. Neither scales; both are worth doing for band A.
 |---|---|
 | `givingtuesday_datamart/irs_source.py` | object id → IRS PDF + XML; RETURN_ID pinning |
 | `givingtuesday_datamart/attachment_grants.py` | table selection, evidence gating, paid/future reconciliation |
-| `givingtuesday_datamart/exploratory/placeholder_recovery.py` | `sample` / `stage` / `report` |
-| `tests/test_attachment_grants.py` | 21 tests: two real OCR results plus one synthetic case per guard the audit added |
+| `givingtuesday_datamart/vlm_transcription.py` | attachment pages → a vision model's page JSON, with the retries and the repairs |
+| `givingtuesday_datamart/exploratory/placeholder_recovery.py` | `sample` / `stage` / `transcribe` / `report` / `compare` |
+| `tests/test_attachment_grants.py` | 38 tests: two real OCR results, one synthetic case per guard the audit added, the page-JSON and XML-row producers, the page cut |
 | `data/exploratory/placeholder_sample_100.csv` | the frame, with paid and future targets (regenerates, seed 20260921) |
-| `data/exploratory/placeholder_staging.csv` | which filings reached OCR and why the others did not |
-| `s3://zein-990pf-unstructured-source/` | `source_files/` PDFs, `output_files/` parses (the only copy) |
+| `data/exploratory/placeholder_sample_xml_rows.csv` | the rows the XML itemises for the sampled filings |
+| `data/exploratory/placeholder_staging.csv` | which filings have a PDF, and where each one's attachments start |
+| `data/exploratory/placeholder_report_{unstructured,qwen3_vl,gemini_lite}.csv` | per-filing outcomes under each engine; `placeholder_engine_differences.csv` where they differ |
+| `s3://zein-990pf-unstructured-source/output_files/` | the Unstructured parses behind the OCR baseline (the only copy) |
+| `~/.cache/irs_index/` | PDFs, 200 DPI page renders, and each model's per-page JSON (`vlm/<model>/<object_id>/pNNN.json`) |
 
 ```bash
 python -m givingtuesday_datamart.exploratory.placeholder_recovery sample
 python -m givingtuesday_datamart.exploratory.placeholder_recovery stage
-#   ... run the Unstructured job: source_files/ -> output_files/ ...
-aws s3 sync s3://zein-990pf-unstructured-source/output_files/ <dir>/
-python -m givingtuesday_datamart.exploratory.placeholder_recovery report --results <dir> --out detail.csv
+python -m givingtuesday_datamart.exploratory.placeholder_recovery transcribe --model alibaba/qwen3-vl-instruct --workers 40
+python -m givingtuesday_datamart.exploratory.placeholder_recovery report --results ~/.cache/irs_index/vlm/alibaba__qwen3-vl-instruct --out qwen.csv
+python -m givingtuesday_datamart.exploratory.placeholder_recovery compare unstructured=baseline.csv qwen=qwen.csv
+# the OCR baseline: aws s3 sync s3://zein-990pf-unstructured-source/output_files/ <dir>/ ; report --results <dir>
 ```
 
 ## Caveats

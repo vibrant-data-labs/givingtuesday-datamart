@@ -54,8 +54,8 @@ from pathlib import Path
 
 from givingtuesday_datamart import irs_source, vlm_transcription
 from givingtuesday_datamart.attachment_grants import (
-    PLACEHOLDER, XML_SOURCES, candidate_tables, coverage, diagnose, extract, extract_tables,
-    load_elements, page_tables, xml_tables)
+    PLACEHOLDER, XML_SOURCES, candidate_tables, coverage, diagnose, extract_tables, load_elements,
+    page_tables, xml_tables)
 
 COMBINED_CSV = Path.home() / "Downloads" / "combined-grants-datamarts-gt_team_priority-20260915.csv"
 SAMPLE_CSV = Path("data/exploratory/placeholder_sample_100.csv")
@@ -278,7 +278,7 @@ def transcribe(sample: Path, manifest: Path, cache: Path, model: str, results: P
     rows = rows[:limit]
     api = vlm_transcription.client()
 
-    jobs = []                                   # (object_id, page, png, out)
+    jobs, repaired = [], 0                      # (object_id, page, png, out)
     for row in rows:
         entry = staged[row["object_id"]]
         first, last = int(entry["attachment_from"]), int(entry["pages"])
@@ -288,10 +288,12 @@ def transcribe(sample: Path, manifest: Path, cache: Path, model: str, results: P
         out_dir.mkdir(parents=True, exist_ok=True)
         for page, png in zip(range(first, last + 1), pngs):
             out = out_dir / f"p{page:03d}.json"
+            if out.exists() and _failed(out) and vlm_transcription.repair(out):
+                repaired += 1
             if not out.exists() or _failed(out):
                 jobs.append((row["object_id"], page, png, out))
-    print(f"{len(rows)} filings, {len(jobs)} pages to transcribe with {model} "
-          f"(pages already done are skipped; pages that errored are retried)")
+    print(f"{len(rows)} filings, {len(jobs)} pages to transcribe with {model} (pages already done "
+          f"are skipped; {repaired} stored responses re-parsed; pages that errored are retried)")
 
     tally = collections.Counter()
 
@@ -361,7 +363,7 @@ def report(sample: Path, results: Path, out: Path | None, manifest: Path,
         staging = entry.get("status", "")
         unstructured = results / f"{row['object_id']}.pdf.json"
         vlm_dir = results / row["object_id"]
-        result, covered, tables, page_stats = None, 0.0, None, ""
+        result, covered, tables, page_stats, page_errors = None, 0.0, None, "", 0
         if staging and staging not in ("staged", "cached"):
             outcome = staging.split(":")[0]                  # never reached transcription
         elif unstructured.exists():
@@ -378,8 +380,9 @@ def report(sample: Path, results: Path, out: Path | None, manifest: Path,
                 pages_seen["pages"] += 1
                 pages_seen["errors"] += int("error" in p or "parse_error" in p)
             pages_seen.update({k: v for k, v in checks.items()})
-            page_stats = (f"{len(pages)}/{expected} pages; totals matched {checks['matched']}"
-                          f" mismatch {checks['mismatch']}")
+            page_errors = sum(1 for p in pages.values() if "error" in p or "parse_error" in p)
+            page_stats = (f"{len(pages)}/{expected} pages, {page_errors} failed; totals matched "
+                          f"{checks['matched']} mismatch {checks['mismatch']}")
             tables = page_tables(pages, targets) + xml_tables(itemised.get(row["object_id"], ()), targets)
         else:
             outcome = "missing_result"
@@ -416,6 +419,7 @@ def report(sample: Path, results: Path, out: Path | None, manifest: Path,
             "error_pct": "|".join(f"{p.error * 100:.3f}" for p in parts if p.reconciled),
             "pages": "|".join(f"{p.pages[0]}-{p.pages[-1]}" for p in parts if p.reconciled and p.pages),
             "amount_headers": "|".join(h for p in parts if p.reconciled for h in p.amount_headers),
+            "page_errors": page_errors,     # a reconciled list with failed pages is short by construction
             "page_stats": page_stats,
         })
 
@@ -465,6 +469,56 @@ def report(sample: Path, results: Path, out: Path | None, manifest: Path,
         print(f"per-filing detail -> {out}")
 
 
+def compare(reports: list[tuple[str, Path]], out: Path | None) -> None:
+    """Filing-level reconciliation across engines: the number that chooses.
+
+    Each report is a ``report --out`` CSV. Prints reconciled filings and
+    dollars per band for every engine, the union ("either"), and each
+    filing whose outcome differs between engines.
+    """
+    detail = {name: {r["object_id"]: r for r in csv.DictReader(path.open())} for name, path in reports}
+    names = [name for name, _ in reports]
+    ids = list(detail[names[0]])
+    bands = sorted({detail[names[0]][i]["stratum"] for i in ids})
+
+    def credited(name, object_id):
+        return float(detail[name][object_id]["recovered"] or 0)
+
+    print(f"{'band':<6}" + "".join(f"{n:>22}" for n in names) + f"{'either':>22}")
+    for band in bands + ["ALL"]:
+        chosen = [i for i in ids if band == "ALL" or detail[names[0]][i]["stratum"] == band]
+        cells = []
+        for name in names:
+            n = sum(1 for i in chosen if detail[name][i]["outcome"] == "reconciled")
+            cells.append(f"{n:>4} / ${sum(credited(name, i) for i in chosen)/1e6:>9,.1f}M")
+        n = sum(1 for i in chosen if any(detail[m][i]["outcome"] == "reconciled" for m in names))
+        dollars = sum(max(credited(m, i) for m in names) for i in chosen)
+        cells.append(f"{n:>4} / ${dollars/1e6:>9,.1f}M")
+        print(f"{band:<6}" + "".join(f"{c:>22}" for c in cells))
+    declared = sum(float(detail[names[0]][i]["declared"]) for i in ids)
+    print("\ndollar-weighted recovery: " + ", ".join(
+        f"{name} {100*sum(credited(name, i) for i in ids)/declared:.1f}%" for name in names)
+        + f", either {100*sum(max(credited(m, i) for m in names) for i in ids)/declared:.1f}%")
+
+    print(f"\nfilings whose outcome differs ({' | '.join(names)}):")
+    rows = []
+    for i in ids:
+        outcomes = [detail[m][i]["outcome"] for m in names]
+        if len(set(outcomes)) > 1:
+            r = detail[names[0]][i]
+            rows.append({"stratum": r["stratum"], "filer_name": r["filer_name"], "taxyear": r["taxyear"],
+                         "object_id": i, "declared": r["declared"],
+                         **{f"{m}_outcome": detail[m][i]["outcome"] for m in names},
+                         **{f"{m}_coverage": detail[m][i]["coverage"] for m in names}})
+            print(f"  {r['stratum']} {r['filer_name'][:34]:<34} {r['taxyear']} ${float(r['declared'])/1e6:>8,.1f}M  "
+                  + " | ".join(f"{o:<18}" for o in outcomes))
+    if out and rows:
+        with out.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
+            writer.writeheader(); writer.writerows(rows)
+        print(f"differences -> {out}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -498,7 +552,14 @@ def main() -> None:
     p.add_argument("--manifest", type=Path, default=MANIFEST_CSV)
     p.add_argument("--xml-rows", type=Path, default=XML_ROWS_CSV)
 
+    p = sub.add_parser("compare", help="filing-level reconciliation across engines")
+    p.add_argument("reports", nargs="+", metavar="NAME=CSV", help="report --out files, e.g. qwen=data/exploratory/x.csv")
+    p.add_argument("--out", type=Path, default=None)
+
     args = parser.parse_args()
+    if args.command == "compare":
+        compare([(name, Path(path)) for name, path in (item.split("=", 1) for item in args.reports)], args.out)
+        return
     if args.command == "sample":
         build_sample(args.out, args.xml_rows)
     elif args.command == "stage":

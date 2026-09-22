@@ -2,8 +2,10 @@
 
 *Sketch, September 21, 2026. Builds on
 [placeholder_grant_recovery.md](placeholder_grant_recovery.md), which holds
-the evidence for every choice below. This is the shape of the thing to
-build; nothing here is wired up yet beyond stages 1, 3 and 4.*
+the evidence for every choice below. Stages 1–4 are wired up for the
+100-filing sample (`placeholder_recovery.py`: `sample`, `stage`,
+`transcribe`, `report`); stage 0 exists as SQL; stages 5 and 6 are not
+built.*
 
 ## The shape
 
@@ -12,21 +14,20 @@ flowchart LR
     DB[(datamart<br/>privategrants_current<br/>basic_fields_pf)]
     C0[0 · classify<br/>pointer rows ≥ 50% of declared]
     C1[1 · resolve<br/>object id → TEOS image + XML]
-    C2[2 · cut<br/>keep attachment pages only]
-    S3a[(s3 source_files)]
-    C3[3 · transcribe<br/>VLM at 200 DPI]
-    S3b[(s3 output_files)]
+    C2[2 · cut<br/>attachment pages only]
+    C3[3 · transcribe<br/>VLM at 200 DPI, JSON per page]
     C4[4 · select<br/>evidence-gated reconciliation]
     C5[5 · accept + load<br/>privategrants_recovered]
     M[matcher<br/>name + address → EIN]
     R[6 · report + gates]
-    DB --> C0 --> C1 --> C2 --> S3a --> C3 --> S3b --> C4 --> C5 --> M
+    DB --> C0 --> C1 --> C2 --> C3 --> C4 --> C5 --> M
+    DB -- XML-itemised rows<br/>(named Part XV, expenditure responsibility) --> C4
     C4 --> R
     C1 -. no image / 404 .-> Q[queue: ProPublica,<br/>state registry, IRS report]
     C2 -. no attachment pages .-> R
 ```
 
-Each stage writes one table or one S3 prefix, keyed on the IRS object id,
+Each stage writes one table or one directory of files, keyed on the IRS object id,
 and never modifies an upstream one. Anything can be rerun from its input.
 
 ## Stages
@@ -70,47 +71,75 @@ for the largest (NY is CAPTCHA-gated), and one batch report to the IRS.
 ### 2 · Cut — send only the attachments
 
 **Input:** the staged PDF.
-**Output:** a subset PDF in `s3://…/source_files/<object_id>.pdf`, and a
-page map (subset page → original page) in the manifest.
+**Output:** in the manifest, the page the filer's attachments start on
+and how many there are (`attachment_from`, `attachment_pages`).
 
-Every TEOS image is the IRS's rendering of the XML followed by the filer's
-attachments. The IRS renders at a fixed 2246 px width, cropped; attachments
-are full 2550×3300 pages or landscape sizes. `pdfimages -list` reads the
-boundary without rendering and pypdf cuts without re-encoding. This is 53%
-of pages on the sample (90% in band D), and it removes the exact pages
-every false positive came from. A filing with zero attachment pages never
-reaches OCR: it is *absent* by construction.
+Every TEOS image is the IRS's rendering of the XML followed by the
+filer's attachments. The IRS renders at five fixed image widths (2246 px
+form pages; 2259, 2440, 3062 and 3081 px supporting statements), cropped
+to content; attachments are full 2550×3300 pages or whatever the scanner
+produced. `pdfimages -list` reads the boundary without rendering
+(`irs_source.attachment_start`), and only the pages after it are rendered
+for the model. On the sample that is 1,782 of 4,746 pages (38%): half the
+pages in bands A and B, 7% in C, 1% in D. Twenty-six of the 85 staged
+filings have no attachment page at all and are *absent* by construction —
+no model call, no false positive from the form's own money tables.
+
+The cut removes one thing the OCR selector had been leaning on: the
+IRS-rendered **expenditure-responsibility statement**. Two OCR
+reconciliations (Cohen 2020, Anschutz 2022) were the attachment's list
+*plus* that statement — Unstructured had lost the attachment's own page
+carrying the $85M to Cohen Veterans Network, and the statement filled the
+hole. Those rows are in the XML — GT's extract has them as
+`990PF_EXPENDITURE_RESP`, and a few placeholder filers also name some
+Part XV grants — so stage 4 takes the XML's itemised rows as exact tables
+beside the transcribed pages, and the subset search decides whether they
+belong in the sum. `sample` writes them for the 100 filings
+(`placeholder_sample_xml_rows.csv`: 116 rows across 26 filings); in
+production they come from `privategrants_current`. With the models reading
+the attachment correctly, Cohen and Anschutz reconcile from the attachment
+alone; Hall 2023 is the filing where the XML rows closed the gap.
 
 ### 3 · Transcribe
 
-A vision model reads each attachment page at 200 DPI and returns JSON:
-the page's kind (paid list, future list, expenditure responsibility,
-other), its heading, one row per recipient line, and the totals printed
-on it. The bake-off below is why this replaces Unstructured's OCR job:
-the best open model is exact on the clean and the dense rotated lists at
-an eighth of the price, and it hands the selector two things OCR never
-did — a label for every page and the page's own stated total, which is a
-gate at page level before the filing-level one.
+**Input:** the attachment pages, rendered at 200 DPI.
+**Output:** one JSON file per page — its kind (paid list, future list,
+expenditure responsibility, other), its heading, one row per recipient
+line (name, address, status, purpose, amount) and the totals printed on
+it — plus token usage, finish reason and attempt count.
 
-Volumes after the cut, at the sample's ~37 attachment pages per filing in
-bands A–B and 2–6 in C–D:
+[`vlm_transcription.py`](../givingtuesday_datamart/vlm_transcription.py)
+through the Vercel AI Gateway, prompt fixed at the bake-off's second
+version. Three retries, each for a failure the bake-off showed: a
+transport error waits and asks again (on top of the SDK's own); output cut
+off at the token limit is re-asked with twice the room; a page the model
+labelled a grant list but returned no rows for is asked once more, because
+the empty answer was stochastic. Every page also gets a **page-level
+check**: do its rows sum to a total printed on it? Matched pages need no
+further look; a mismatch is a flag, not a verdict, since printed totals
+are often cumulative.
 
-| band | filings | attachment pages | note |
-|---|---|---|---|
-| A | 22 | done | census |
-| B | 442 | ~16,000 | 44 done |
-| C | 2,299 | ~14,000 | |
-| D | 6,755 | ~14,000 | |
+Volumes after the cut, from the sample's attachment pages per filing
+(30.7 in band A, 30.6 in B, 1.9 in C, 0.3 in D):
 
-About 45,000 pages for the whole population, ten times the sample. Uncut
-it would have been ten times that again. At Qwen3-VL's gateway price that
-is roughly $80; at Gemini 3.5 Flash Lite's about $170; Unstructured
-($0.015 a page after 10,000 free) would have been about $525.
+| band | filings | attachment pages |
+|---|---|---|
+| A | 22 | 584 (done) |
+| B | 442 | ~13,500 |
+| C | 2,299 | ~4,300 |
+| D | 6,755 | ~2,000 |
+
+About 20,000 pages for the whole population, eleven times the sample.
+Uncut it would have been 2.6 times that; the earlier estimate of 45,000
+counted the wide IRS statements as attachments. At the gateway's prices
+that is about $36 with Qwen3-VL instruct and $74 with Gemini 3.5 Flash
+Lite; Unstructured ($0.015 a page after 10,000 free) would have been
+about $150.
 
 ### 4 · Select — the reconciliation gate
 
-**Input:** `output_files/<object_id>.pdf.json`, the targets from the XML,
-the page map.
+**Input:** the per-page JSON, the XML-itemised rows, the targets from
+the XML, the page map.
 **Output:** `pf_recovery_results` — per filing and per target (paid,
 future): outcome, extracted sum, error, evidence (labelled / names),
 whether a stated total matched, coverage, pages in original numbering,
@@ -118,6 +147,12 @@ selector version.
 
 [`attachment_grants.py`](../givingtuesday_datamart/attachment_grants.py)
 as rebuilt: a run needs reconciliation *and* a second class of evidence.
+Three producers feed one selector: `candidate_tables` (Unstructured
+elements, the baseline), `page_tables` (a model's page JSON — the heading
+is the context exactly as an OCR heading was, and the page kind is a
+second, independent label) and `xml_tables` (the itemised rows, exact,
+one table per source); `extract_tables` reconciles whatever mix it is
+given.
 Paid and future reconcile separately. Failures are diagnosed — list
 present, partial, absent — and *present* carries a coverage number, since
 the largest failure class is a labelled list that OCR returned at 90–110%
@@ -215,24 +250,100 @@ What it showed:
   page-level gate the OCR path never had.
 
 Not measured here: name accuracy against ground truth (the reference is
-Unstructured's rows), behaviour on 800-page filings, and gateway rate
-limits at 45,000 pages. Those belong to the ground-truth set and the band
-B run.
+Unstructured's rows). Behaviour on an 800-page filing and gateway
+throughput were measured on the sample run below.
+
+## The sample through both models
+
+The whole 100-filing sample, every attachment page (1,782), through both
+finalists at 200 DPI, scored by the same selector as the Unstructured
+baseline. Per-filing detail is in `data/exploratory/placeholder_report_*.csv`
+and the filing-by-filing differences in `placeholder_engine_differences.csv`
+(`placeholder_recovery.py compare`).
+
+| band | Unstructured | Qwen3-VL instruct | Gemini 3.5 Flash Lite | either model |
+|---|---|---|---|---|
+| A (22) | 10 / $1,326M | 14 / $2,357M | 13 / $2,276M | 15 / $2,536M |
+| B (44) | 15 / $505M | 12 / $294M | 16 / $391M | 23 / $617M |
+| C (22) | 3 / $10M | 7 / $20M | 7 / $20M | 8 / $26M |
+| D (12) | 1 / $0.0M | 2 / $0.3M | 2 / $0.3M | 2 / $0.3M |
+| **all** | **29 / 30.4%** | **35 / 44.0%** | **38 / 44.3%** | **48 / 52.4%** |
+
+Reconciled filings and declared dollars credited; percentages are of the
+sample's $6,064M. The present-but-90–110% backlog fell from 24.7% of
+dollars under Unstructured to 5.3% (Qwen) and 7.2% (Gemini).
+
+| | Qwen3-VL instruct | Gemini 3.5 Flash Lite |
+|---|---|---|
+| cost, 1,782 pages | $3.57 ($0.0020/page) | $12.37 ($0.0069/page) |
+| tokens per page | 4,460 (2,830 in / 1,630 out) | 4,030 (1,430 in / 2,610 out) |
+| latency per page | median 33 s, p90 70 s | median 8 s, p90 10 s |
+| throughput | 41 pages/min at 40 workers | 80 pages/min at 12 workers |
+| pages needing a retry | 485 (mostly an empty first answer on a list page) | 22 |
+| pages left partial | 55, all Johnson & Johnson | 1 |
+| rows transcribed | 51,894 | 86,205 |
+
+Gemini's row count is higher because it splits multi-line entries and, on
+one filing, lists a contact name under each organisation as its own row.
+
+What it showed:
+
+- **Both models beat OCR by the same margin on the same filings.** The
+  three Schusterman years, Wells Fargo 2020, King Street, Offield, Milias,
+  Reynolds, Waldheim, Lola Wright and Paul Pigott move from
+  *present-but-short* (or *absent*) to reconciled under both. Cohen and
+  Anschutz reconcile from the attachment alone; Hall 2023 reconciles under
+  Qwen with the XML's two expenditure-responsibility rows added, which is
+  the case stage 2 anticipated.
+- **They fail on different filings, so the union is worth 8 points.**
+  Thirteen filings reconcile under exactly one model (Wells Fargo 2021 and
+  Hall 2023 only under Qwen; Wyss 2023, Roberts, King Street 2021, Aviv,
+  Humana, Pacific Life, Edelman only under Gemini). Two passes at $16 a
+  sample are still a tenth of Unstructured's price, and page-level
+  agreement between them is the obvious next gate.
+- **Seven OCR reconciliations are lost under one or both models**, all as
+  *present* at 96–113% coverage: Bezos 2022 (non-cash, the known hard
+  page), Kenan 2021 (dense 62-row pages, both misread amounts), Pritzker
+  2023, Siegel 2022 (Gemini duplicated two rows on one page), Pritzker
+  Traubert 2022 (one $200K row doubled), Eden Hall 2023, Claude Moore
+  2021 (Gemini emitted the contact person under each grantee as a second
+  row). Each is a transcription-shape error the page's own printed total
+  exposes: Siegel, Pritzker Traubert and Claude Moore all print the
+  declared total on their last page and the rows come in 1–12% off it.
+- **Pages the models label wrongly are continuation pages.** Kenan's
+  future-payment list runs onto a page with no heading, and both models
+  called that page a paid list; the selector's paid target then fails.
+  The OCR path carried the previous page's heading forward for exactly
+  this; the page-JSON path needs the same rule.
+- **JSON breaks in predictable ways.** Gemini writes amounts as printed
+  (`$151,000.00`, `1,500000.0`) inside otherwise valid JSON on 9 pages;
+  Qwen stops mid-row on 55 of Johnson & Johnson's 836 matching-gift pages
+  while reporting a normal finish. The parser now quotes bare amounts and
+  salvages the complete rows of a truncated response, flagged `_partial`,
+  so neither needs a recall; the J&J filing stays *present* at 88–97%
+  under every engine.
+- **The 26 filings with no attachment pages cost nothing** and account
+  for most of the baseline's *list absent* outcomes, confirmed rather than
+  inferred.
 
 ## Order of operations
 
 1. Ground-truth set and a matcher pass on the 4,760 rows already
    recovered. Together they say whether the output is product-grade.
-2. Wire stage 2 into `stage`, and stage 3 as a VLM call at 200 DPI
-   through the gateway, with a retry on empty or truncated output and the
-   page total checked against the rows. Run the 100-filing sample through
-   **both** Qwen3-VL instruct and Gemini 3.5 Flash Lite (about 2,200
-   attachment pages; $4 and $8) and let filing-level reconciliation choose:
-   on the 14 bake-off pages they are identical on 11, Qwen is cleaner on
-   the dense page and never truncated, Gemini is better on the non-cash
-   page, and 14 pages cannot rank them. Qwen's open weights are the
-   tie-breaker if it comes to one — it can run on Baseten or our own GPU
-   with no data leaving our control.
+2. ~~Wire stage 2 into `stage`, stage 3 as a VLM call at 200 DPI, and run
+   the sample through both Qwen3-VL instruct and Gemini 3.5 Flash Lite.~~
+   Done (see the section above): 44.0% and 44.3% against OCR's 30.4%,
+   52.4% for the union, $3.57 and $12.37 for 1,782 pages. Filing-level
+   reconciliation did not choose — they fail on different filings — so
+   the next step is the pair: transcribe every page with both, accept a
+   page where the two agree on its amounts, and send the disagreeing
+   pages (about a fifth) to Gemini 3.8 Flash or to a second Qwen pass.
+   Alongside: carry a grant heading forward onto heading-less continuation
+   pages in `page_tables`, as `candidate_tables` already does; and a
+   prompt revision that returns one section per list on a page and keeps a
+   contact name inside its grantee's row. Qwen's open weights remain the
+   reason to prefer it where the two tie — it can run on Baseten or our
+   own GPU with no data leaving our control.
 3. Band B in full with the broadened classifier.
 4. Decide the coverage policy; re-OCR band A's failing pages.
 5. C and D once the per-page price is in hand.
