@@ -272,9 +272,11 @@ ones are future-payment schedules where three readers chose the
 approved column and the declared figure is the balance column; no paid
 page was accepted wrongly. On the expanded frame this costs about $360.
 
-One decision is open: on the flagged pages, Sonnet alone was right 16
-times in 23. Those readings could be loaded with a lower-confidence
-mark, or left out.
+One decision is open: on the 23 flagged pages, where all four readers
+differ, Sonnet alone was right 11 times. Those readings could be loaded
+with a lower-confidence mark, or left out. Giving Sonnet its full
+reasoning budget on those pages changed nothing, at twice the price and
+several times the wait, so there is no further reader to try.
 
 Projected across all 9,518 addressable filings at a single read's rate:
 $7B to $8B.

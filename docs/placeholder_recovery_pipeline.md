@@ -556,10 +556,20 @@ base pair (46 of the 83 are disputes; the sample is enriched for them):
 
 The sequential design is the one adopted: 3.8 Flash resolves 16 of the
 46 disputes at a fifth of Sonnet's price, and Sonnet then resolves
-another 6 of the remaining 30. On the 23 pages still flagged, Sonnet's
-own reading was right on 16 — an unverified single strong reading. Whether
-to load those with a lower-confidence tag or leave them out is an open
-policy decision, not a measurement.
+another 6 of the remaining 30. On the 23 pages still flagged — the ones
+where all four readers differ — Sonnet's own reading was right on 11, an
+unverified single reading. Whether to load those with a lower-confidence
+tag or leave them out is an open policy decision, not a measurement.
+
+Reasoning does not move it. The flagged pages were re-read by Sonnet at
+maximum reasoning effort with a 64K output budget: on the 21 that
+finished, exact on 11 both ways, 898 rows matched against 897, better on
+one page and worse on two, and Kenan p127 came back 16 of 48 both times
+after 31,000 reasoning tokens. The shifts are layout errors, not
+reasoning errors. It cost $0.12 a page against $0.05, ran two to four
+times slower, and the two densest non-cash pages did not finish in 15
+minutes each. There is no fifth reader to add; the flagged pages are a
+policy decision.
 
 One question remains open: whether the multi-column dense pages read
 better in horizontal strips has not been tried, and Wells Fargo 2021's
