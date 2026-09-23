@@ -19,7 +19,7 @@ from givingtuesday_datamart import page_verdicts as pv
 from givingtuesday_datamart import vlm_transcription as vlm
 
 QWEN, GEMINI, FLASH, SONNET = pv.POLICY_V1["base"] + pv.POLICY_V1["escalation"]
-LEAVE_OUT = pv.with_flagged(pv.POLICY_V1, "leave_out")
+LEAVE_OUT = pv.with_flagged(pv.POLICY_V2, "leave_out")
 SINGLE = {"version": "single-qwen-v4", "base": [QWEN], "escalation": [], "prompt_version": "v4", "flagged": "load_single"}
 
 
@@ -61,7 +61,7 @@ def _store_reading(stores, oid, page, model, rows=None, *, prompt_version="v4", 
     return row
 
 
-def _agree(stores, pages, client=None, tmp_path=None, policy=pv.POLICY_V1, **kwargs):
+def _agree(stores, pages, client=None, tmp_path=None, policy=pv.POLICY_V2, **kwargs):
     filings, readings, verdicts = stores
     kwargs.setdefault("s3", _S3())
     return pv.agree(verdicts, pages, policy, client=client if client is not None else _Client([]),
@@ -93,10 +93,10 @@ def test_agreed_when_both_base_readers_return_the_same_pairs(stores, tmp_path):
     assert result.mix() == {"agreed": 2, "escalated": 0, "flagged": 0, "unreadable": 0, "no_verdict": 0}
     for page in (3, 4):
         verdict = _verdict(result, page)
-        assert verdict == pv.Verdict(OID, page, filings.rows[OID].sha256, "v1", "agreed", QWEN, pr.request_hash(QWEN),
+        assert verdict == pv.Verdict(OID, page, filings.rows[OID].sha256, "v2", "agreed", QWEN, pr.request_hash(QWEN),
                                      [QWEN, GEMINI], 2, verdict.decided_at)
         assert verdict.decided_at.tzinfo is not None
-    assert sorted(verdicts.rows) == [(OID, 3, filings.rows[OID].sha256, "v1"), (OID, 4, filings.rows[OID].sha256, "v1")]
+    assert sorted(verdicts.rows) == [(OID, 3, filings.rows[OID].sha256, "v2"), (OID, 4, filings.rows[OID].sha256, "v2")]
     assert verdicts.commits == [2] and result.bought == {QWEN: {"pages": 0, "in": 0, "out": 0, "dollars": 0.0},
                                                         GEMINI: {"pages": 0, "in": 0, "out": 0, "dollars": 0.0}}
 
@@ -153,7 +153,7 @@ def test_flagged_under_load_single_names_the_last_escalation_reading_and_under_l
     result = _agree(stores, _pages(3), tmp_path=tmp_path, policy=LEAVE_OUT)
     left = _verdict(result, 3)
     assert (left.verdict, left.accepted_model, left.accepted_hash, left.matched_models) == ("flagged", None, None, [])
-    assert left.policy_version == "v1-leave_out" and left.readers_consulted == 4
+    assert left.policy_version == "v2-leave_out" and left.readers_consulted == 4
     assert len(stores[2].rows) == 2                                  # one row per version
 
 
@@ -259,13 +259,13 @@ def test_a_new_policy_version_reads_nothing_new_and_writes_beside_the_old_rows(s
     _store_reading(stores, OID, 4, QWEN, _rows(3)); _store_reading(stores, OID, 4, GEMINI, _rows(3))
     first = _agree(stores, _pages(3, 4), tmp_path=tmp_path)
     before = dict(stores[2].rows)
-    reversed_order = {**pv.POLICY_V1, "version": "v2", "escalation": [SONNET, FLASH]}
+    reversed_order = {**pv.POLICY_V2, "version": "v3", "escalation": [SONNET, FLASH]}
     client = _Client([])
     second = _agree(stores, _pages(3, 4), client, tmp_path, policy=reversed_order)
     assert client.json_modes == [] and second.written == 2 and len(stores[1].rows) == 6
     assert _verdict(first, 3).matched_models == [QWEN, FLASH] and _verdict(second, 3).matched_models == [GEMINI, SONNET]
     assert all(stores[2].rows[key] is row for key, row in before.items())
-    assert sorted(key[3] for key in stores[2].rows) == ["v1", "v1", "v2", "v2"]
+    assert sorted(key[3] for key in stores[2].rows) == ["v2", "v2", "v3", "v3"]
     unchanged = _agree(stores, _pages(3, 4), tmp_path=tmp_path)
     assert unchanged.written == 0 and stores[2].commits == [1, 1, 1, 1]     # one flush per stage that decided
     assert _verdict(unchanged, 3).decided_at == _verdict(first, 3).decided_at
@@ -276,18 +276,18 @@ def test_a_flagged_rule_override_is_a_version_of_its_own_and_leaves_the_register
         _store_reading(stores, OID, 3, model, _rows(n))
     _store_reading(stores, OID, 4, QWEN, _rows(3)); _store_reading(stores, OID, 4, GEMINI, _rows(3))
     first = _agree(stores, _pages(3, 4), tmp_path=tmp_path)
-    overridden = pv.with_flagged(pv.POLICY_V1, "leave_out")
-    assert overridden["version"] == "v1-leave_out" and overridden["flagged"] == "leave_out"
+    overridden = pv.with_flagged(pv.POLICY_V2, "leave_out")
+    assert overridden["version"] == "v2-leave_out" and overridden["flagged"] == "leave_out"
     assert {k: v for k, v in overridden.items() if k not in ("version", "flagged")} == \
-        {k: v for k, v in pv.POLICY_V1.items() if k not in ("version", "flagged")}
-    assert pv.with_flagged(pv.POLICY_V1, "load_single") is pv.POLICY_V1 and pv.with_flagged(pv.POLICY_V1, None) is pv.POLICY_V1
+        {k: v for k, v in pv.POLICY_V2.items() if k not in ("version", "flagged")}
+    assert pv.with_flagged(pv.POLICY_V2, "load_single") is pv.POLICY_V2 and pv.with_flagged(pv.POLICY_V2, None) is pv.POLICY_V2
     with pytest.raises(ValueError, match="flagged rule"):
-        pv.with_flagged(pv.POLICY_V1, "drop")
+        pv.with_flagged(pv.POLICY_V2, "drop")
     second = _agree(stores, _pages(3, 4), tmp_path=tmp_path, policy=overridden)
     assert second.written == 2 and stores[2].commits == [1, 1, 1, 1]           # its own rows, the v1 rows untouched
-    assert _verdict(second, 3).policy_version == "v1-leave_out" and _verdict(second, 3).accepted_model is None
+    assert _verdict(second, 3).policy_version == "v2-leave_out" and _verdict(second, 3).accepted_model is None
     assert _verdict(first, 3).accepted_model == SONNET and stores[2].rows[_verdict(first, 3).key] is _verdict(first, 3)
-    assert sorted(key[3] for key in stores[2].rows) == ["v1", "v1", "v1-leave_out", "v1-leave_out"]
+    assert sorted(key[3] for key in stores[2].rows) == ["v2", "v2", "v2-leave_out", "v2-leave_out"]
 
 
 def test_a_single_reader_policy_agrees_with_itself_on_every_page_it_can_read(stores, tmp_path):
@@ -309,6 +309,30 @@ def test_a_single_reader_policy_agrees_with_itself_on_every_page_it_can_read(sto
         _agree(stores, _pages(3, 6), client, tmp_path, policy=v3)
     with pytest.raises(LookupError, match="buys nothing"):
         _agree(stores, _pages(3, 6), client, tmp_path, policy=SINGLE, buy=False)
+    assert client.json_modes == []
+
+
+def test_v1_pins_the_flash_readings_it_was_decided_on_and_v2_reads_at_todays_effort(stores, tmp_path):
+    """POLICY_V1 was decided with 3.8 Flash at its default reasoning effort;
+    the setting has since moved to "low". v1 names the readings under the
+    settings it was decided on and buys nothing under them; v2 reads under
+    today's, whose hash is the one the low-effort readings are stored under."""
+    pinned = {"json_mode": True, "extras": {}}
+    assert pv.reader_hash(pv.POLICY_V1, FLASH) == pr.settings_hash(pinned) != pr.request_hash(FLASH)
+    assert pv.reader_hash(pv.POLICY_V2, FLASH) == pr.request_hash(FLASH)
+    assert pr.request_hash(FLASH).startswith("a1beaaa22be2")
+    assert pv.reader_hash(pv.POLICY_V1, QWEN) == pv.reader_hash(pv.POLICY_V2, QWEN) == pr.request_hash(QWEN)
+    _store_reading(stores, OID, 3, QWEN, _rows(3)); _store_reading(stores, OID, 3, GEMINI, _rows(2))
+    _store_reading(stores, OID, 3, FLASH, _rows(3), settings=pinned)        # the reading v1 was decided on
+    client = _Client([])
+    first = _agree(stores, _pages(3), client, tmp_path, policy=pv.POLICY_V1)
+    assert (_verdict(first, 3).verdict, _verdict(first, 3).accepted_hash) == ("escalated", pr.settings_hash(pinned))
+    assert client.json_modes == [] and all(spent["pages"] == 0 for spent in first.bought.values())
+    _store_reading(stores, OID, 4, QWEN, _rows(3)); _store_reading(stores, OID, 4, GEMINI, _rows(2))   # a dispute, no Flash reading
+    with pytest.raises(LookupError, match="not today's"):                   # v1 cannot buy under its settings
+        _agree(stores, _pages(4), client, tmp_path, policy=pv.POLICY_V1)
+    with pytest.raises(LookupError, match="buys nothing"):                  # v2 would buy; a stored-only run refuses
+        _agree(stores, _pages(3), client, tmp_path, policy=pv.POLICY_V2, buy=False)
     assert client.json_modes == []
 
 
@@ -359,7 +383,7 @@ def test_load_policy_takes_a_registered_version_or_a_json_file(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _decided(stores, tmp_path, policy=pv.POLICY_V1):
+def _decided(stores, tmp_path, policy=pv.POLICY_V2):
     """One page of each kind: p3 agreed, p4 escalated, p5 flagged, p6 unreadable."""
     _store_reading(stores, OID, 3, QWEN, _rows(2), heading="qwen"); _store_reading(stores, OID, 3, GEMINI, _rows(2), heading="gemini")
     _store_reading(stores, OID, 4, QWEN, _rows(3), heading="qwen"); _store_reading(stores, OID, 4, GEMINI, _rows(2), heading="gemini")
@@ -371,7 +395,7 @@ def _decided(stores, tmp_path, policy=pv.POLICY_V1):
     return _agree(stores, _pages(3, 4, 5, 6), tmp_path=tmp_path, policy=policy)
 
 
-def _accepted(stores, pages, policy=pv.POLICY_V1):
+def _accepted(stores, pages, policy=pv.POLICY_V2):
     filings, readings, verdicts = stores
     return pv.accepted_readings(verdicts, pages, policy, filing_store=filings, reading_store=readings)
 
@@ -398,7 +422,7 @@ def test_accepted_readings_keeps_only_verdicts_on_the_current_image(stores, tmp_
     result = _decided(stores, tmp_path)
     old = stores[0].rows[OID].sha256
     _seed(stores[0], tmp_path, OID, payload=b"%PDF-1.4 re-issued")
-    assert _accepted(stores, _pages(3, 4, 5, 6)) == {} and stores[2].rows[(OID, 3, old, "v1")] is _verdict(result, 3)
+    assert _accepted(stores, _pages(3, 4, 5, 6)) == {} and stores[2].rows[(OID, 3, old, "v2")] is _verdict(result, 3)
     _seed(stores[0], tmp_path, OID)                                   # the original image again
     assert sorted(_accepted(stores, _pages(3, 4, 5, 6))) == _pages(3, 4, 5, 6)
     del stores[1].rows[pr.reading_key(OID, 3, old, QWEN)]             # a verdict whose reading is gone: logged, None
@@ -434,11 +458,11 @@ def test_the_scorer_counts_right_wrong_flagged_and_unreadable_verdicts_against_t
              (OID, 6): _truth_rows(6, _rows(1)),                      # unreadable
              (OID, 7): _truth_rows(7, _rows(1))}                      # no verdict
     filings, readings, verdicts = stores
-    tally = gt.verdicts(pv.POLICY_V1, session=verdicts, filing_store=filings, reading_store=readings, truth=truth)
+    tally = gt.verdicts(pv.POLICY_V2, session=verdicts, filing_store=filings, reading_store=readings, truth=truth)
     assert tally == {"right": 1, "wrong": 1, "flagged": 1, "flagged, accepted reading right": 1, "unreadable": 1,
                      "no verdict": 1}
     out = capsys.readouterr().out
-    assert "| v1 | 1 | 1 | 1 | 1 | 1 | 1 of 1 |" in out and f"accepted wrongly: {OID} p004 (escalated, {GEMINI} = {FLASH})" in out
+    assert "| v2 | 1 | 1 | 1 | 1 | 1 | 1 of 1 |" in out and f"accepted wrongly: {OID} p004 (escalated, {GEMINI} = {FLASH})" in out
     assert f"flagged     {SONNET:<32}    1" in out
     leave_out = _decided(stores, tmp_path, policy=LEAVE_OUT)
     tally = gt.verdicts(LEAVE_OUT, session=verdicts, filing_store=filings, reading_store=readings, truth=truth)

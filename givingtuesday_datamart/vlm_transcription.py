@@ -65,6 +65,19 @@ REQUEST_EXTRAS: dict[str, dict] = {
     # page and returns no text at all (three of 83 ground-truth pages, at
     # 8K, 16K and 32K tokens); with thinking off it read all three.
     "anthropic/claude-sonnet-5": {"reasoning_effort": "none"},
+    # Gemini 3.8 Flash thinks by default and the gateway bills it as output:
+    # 5,524 output tokens a page on the 83 ground-truth pages for 7,270
+    # characters of answer. At "low" (Zein, 2026-09-23) it reads the same
+    # pages at 2,126 tokens a page — $0.0093 against $0.0220, 12 s median
+    # against 26 — and no worse: 62 pages exact against 59, 96.5% / 96.3%
+    # precision and recall against 94.2% / 94.0%, 17 of 46 disputes
+    # resolved against 16, one call a page. Never "none" or "minimal" for
+    # a Google model: they map to an unbounded thinking budget — "none" on
+    # the same pages gave 12,835 tokens a page, 7 pages at the 32K limit,
+    # 56 s median and no gain in accuracy; one page at "minimal" 7,993
+    # tokens and three attempts. POLICY_V1's verdicts were decided at the
+    # default and pin it; POLICY_V2 reads at "low".
+    "google/gemini-3.8-flash": {"reasoning_effort": "low"},
 }
 LIST_KINDS = ("grants_paid_list", "grants_future_list")
 MAX_TOKENS = 8000            # a dense page is 2–3K tokens of JSON; doubled on truncation
