@@ -11,9 +11,10 @@ pipeline. Two parts, meant to be built in separate sessions:
   reads what is missing in parallel, and `page_verdicts` derived from
   readings under a versioned policy.
 
-Vibrant Data Labs, 2026-09-22. Status: spec, nothing built. Background
-and the measurements every decision below rests on are in
-[placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md);
+Vibrant Data Labs, 2026-09-22. Status: Part A built and its criteria
+run (the pipeline doc's *Order of operations*, item 4); Part B is
+spec. Background and the measurements every decision below rests on
+are in [placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md);
 the short report is [placeholder_grant_recovery.md](placeholder_grant_recovery.md).
 
 ## Problem statement
@@ -87,6 +88,7 @@ fresh session should not reopen them.
 | page comparison key | name lower-cased, non-alphanumerics stripped, first 14 characters; amount exact | what the ground-truth scorer uses |
 | flagged pages | load Sonnet's single reading, marked `flagged` | Zein, 2026-09-22; Sonnet alone right on 11 of 23, maximum reasoning changed nothing |
 | PDF retention | indefinite | Zein, 2026-09-22; ~300 GB for the population is cheap against re-fetching, and the IRS loses images |
+| retries | `no_teos_image` never without `refetch`; `pdf_unavailable` and the rest three attempts | Zein, 2026-09-22; TEOS's listing is definitive on the day, the 2022 404 batch may come back |
 | tables | raw `CREATE TABLE IF NOT EXISTS`, no migration tool | the repo's convention (`ingestion.py`, `canonical/build.py`) |
 | tests | no database in unit tests: a store interface with a Postgres implementation and an in-memory one, plus the fake client | the repo's convention — the client tests build on a `sqlite://` engine that never connects |
 
@@ -105,7 +107,7 @@ Reuse these; do not rewrite them.
 | `attachment_grants.page_tables` | page JSON → selector tables |
 | `_internal/db.get_session(config)` | transactional session; `ingestion.datamart_config()` builds the config |
 | `exploratory/placeholder_ground_truth.py` | the scorer; `POLICIES`, `PAIRS`, `_pairs`, `_key` define comparison and the policy shapes |
-| `~/.cache/irs_index/pdfs/*.pdf` | ~700 fetched PDFs for the 610-filing frame, to upload once |
+| `~/.cache/irs_index/pdfs/*.pdf` | the 517 fetched PDFs of the 610-filing frame, 1.15 GB; uploaded by the Part A backfill |
 | `~/.cache/irs_index/vlm/<folder>/<oid>/pNNN.json` | readings to backfill: `<model>` = prompt v2, `-v3`, `-v4`; candidates `google__gemini-3.8-flash-v4`, `anthropic__claude-sonnet-5-v4`, `openai__gpt-5.6-*-v4` |
 | `data/exploratory/placeholder_staging*.csv`, `placeholder_404_images_expanded.csv`, `placeholder_unreachable.csv` | fetch statuses to backfill into `filing_images` |
 
@@ -161,10 +163,21 @@ CREATE INDEX IF NOT EXISTS filing_images_status ON filing_images (status);
 
 `status` values, the ones `_fetch_pdf` already produces plus the
 post-fetch outcomes: `fetched`, `no_attachment` (fetched, zero filer
-pages), `no_teos_image`, `pdf_unavailable:<http code>`, `not_a_pdf`,
-`lookup_failed:<exception>`. One row per filing; a re-fetch that returns
-a different `sha256` updates the row, and the old hash's readings stay
-in `page_readings` untouched.
+pages), `no_teos_image`, `pdf_unavailable:<http code>`, `not_a_pdf`
+(the bytes served, or poppler reading them, say so),
+`lookup_failed:<exception>` (not in any index CSV), and three that are
+ours rather than the IRS's: `teos_failed:<exception>` (the TEOS listing
+itself failed), `widths_failed:<exception>` (poppler failed, as opposed
+to rejecting the file), `upload_failed:<exception>` (S3, credentials or
+disk after a good download). `no_teos_image` is permanent — TEOS's own
+listing said so, and an image that appears later is a `refetch`, not a
+retry; every other failure is re-tried until it has three attempts, a
+404 among them because the 2022 batch may come back. The backfill
+re-does only its own `upload_failed` and `widths_failed` rows. One row
+per filing; a re-fetch that returns a different
+`sha256` updates the row, and the old hash's readings stay in
+`page_readings` untouched. A fetched row that fails a re-fetch keeps its
+status and its object; only `attempts` and `last_error` move.
 
 ### Behaviour
 
@@ -186,17 +199,17 @@ readings go through this, never through TEOS again.
 
 ### Acceptance criteria
 
-- [ ] Fetching the 610-filing frame twice makes zero TEOS requests and
+- [x] Fetching the 610-filing frame twice makes zero TEOS requests and
   zero uploads the second time.
-- [ ] The 93 no-PDF and 144 no-attachment filings in
+- [x] The 93 no-PDF and 144 no-attachment filings in
   `placeholder_staging_expanded.csv` are reproduced by a `status` query,
   and the 38 rows of `placeholder_404_images_expanded.csv` by
   `status LIKE 'pdf_unavailable%' AND image_generated BETWEEN '2022-01-01' AND '2022-12-31'`.
-- [ ] `attachment_from` and `attachment_pages` match the staging CSVs on
+- [x] `attachment_from` and `attachment_pages` match the staging CSVs on
   every fetched filing.
-- [ ] A one-off backfill loads the ~700 cached PDFs and both staging
+- [x] A one-off backfill loads the ~700 cached PDFs and both staging
   CSVs without a network fetch.
-- [ ] A row's `sha256` equals the SHA-256 of the object at `s3_key`.
+- [x] A row's `sha256` equals the SHA-256 of the object at `s3_key`.
 
 ## Part B — Model reading cache
 
