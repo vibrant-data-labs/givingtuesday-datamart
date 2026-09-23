@@ -559,9 +559,14 @@ default's on 64 of 83 and, where they differ, the truth siding with
 `low` on 5 pages and the default on 2. `low` is the default from that
 date and `POLICY_V2` reads under it; the verdicts above are v1's, at
 the default effort, and v1 pins those readings. One caveat on
-every dollar figure here: a row's `usage` is the kept attempt's, so the
-retry ladder's other calls are not counted — about 800 of the
-rehearsal's 5,844 calls, roughly $4 on top of the $63 the rows report.
+every dollar figure here: the rows were stored while a row's `usage`
+was the kept attempt's tokens, so the retry ladder's other calls are
+not in them — about 800 of the rehearsal's 5,844 calls, roughly $4 on
+top of the $63 the rows report, a 6% understatement. From 2026-09-23
+`transcribe` sums the tokens of every call it makes for a page, so a
+row's `usage` is what the page cost (Zein's call); the rows stored
+before that date — the sample's v2, v3 and v4 reads, the rehearsal's —
+keep the kept attempt's.
 
 **Filings that changed outcome against the v3 single reads** (15 of the
 100; `compare`): v1 gains Kenan 2021, Roberts 2022, Eden Hall 2023,
@@ -1050,9 +1055,10 @@ page, so the question may be moot.
    before the run was about $80 (base pair $15, 3.8 Flash on ~1,150
    disputes $25, Sonnet on ~750 still open $40). The real run took
    **118 minutes of wall time and $63.07** by the rows' `usage` (the
-   kept attempt's tokens; the retry ladder's other calls, about 800 of
-   the 5,844, add roughly $4 the rows do not see), in two parts,
-   because it was stopped once by hand (below). Every gateway call — 5,844 across the
+   kept attempt's tokens, as `usage` was stored until 2026-09-23; the
+   retry ladder's other calls, about 800 of the 5,844, add roughly $4
+   the rows do not see — from that date `usage` is every call's tokens
+   summed), in two parts, because it was stopped once by hand (below). Every gateway call — 5,844 across the
    five stages — was answered HTTP 200: no 429, no timeout, no error row,
    no page at `max_errors`, no render or S3 failure, nothing for
    `reparse` to recover, `no_verdict` empty at the end, so no third run
