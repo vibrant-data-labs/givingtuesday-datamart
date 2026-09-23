@@ -405,4 +405,13 @@ criteria pass.
 
 **Session 4 — the 1,000-filing run.** Top up bands C and D, fetch, run
 the stages, report by band, and update the two documents. Budget about
-$400 in model cost and a day of wall time.
+$400 in model cost and a day of wall time. It can run on the EC2 box
+once Parts A and B exist, since every artifact is then in S3 or the
+database; before that it must not, or the readings split across
+machines. The box needs `poppler-utils` from the system package manager
+(`pdftoppm` and `pdfimages` are not pip-installable; `pdf2image` still
+needs it and `pypdfium2` cannot give the page widths the attachment cut
+reads), the Python environment, the gateway key in the environment, an
+instance role with read and write on the bucket, about 15 GB of disk
+for the PDF cache, and a tmux or nohup session. The JSON backfill runs
+from the laptop first, where the existing readings live.
