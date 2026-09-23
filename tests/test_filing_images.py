@@ -333,6 +333,7 @@ def test_a_pdf_poppler_cannot_read_is_not_a_pdf_and_is_not_uploaded(teos, tmp_pa
     store, s3 = fi.MemoryStore(), _S3()
     assert _fetch(store, [OID], tmp_path, s3) == {OID: "not_a_pdf"}
     assert s3.puts == [] and "xref" in store.rows[OID].last_error and store.rows[OID].s3_key is None
+    assert not fi.pdf_path(tmp_path, OID).exists() and list(tmp_path.glob("pdfs/*")) == []   # nothing left in the cache
 
 
 def test_a_missing_pdfimages_stops_before_any_request(teos, tmp_path, staging, monkeypatch):
@@ -353,6 +354,7 @@ def test_poppler_failing_is_retryable_unlike_poppler_rejecting_the_file(teos, tm
     monkeypatch.setattr(irs_source, "page_widths", lambda path: (_ for _ in ()).throw(OSError(28, "No space left on device")))
     assert _fetch(store, [OID], tmp_path, s3) == {OID: "widths_failed:OSError"}
     assert s3.puts == [] and "No space left" in store.rows[OID].last_error and store.rows[OID].attempts == 1
+    assert list(tmp_path.glob("pdfs/*")) == []
     monkeypatch.setattr(irs_source, "page_widths", working)
     assert _fetch(store, [OID], tmp_path, s3) == {OID: "fetched"} and store.rows[OID].attempts == 2
 
@@ -589,6 +591,12 @@ def test_status_report_survives_postgres_returning_decimal_sums():
 # ---------------------------------------------------------------------------
 # small pieces
 # ---------------------------------------------------------------------------
+
+
+def test_attachment_span_is_the_one_rule_for_where_the_filer_starts():
+    assert fi.attachment_span([IRS, WIDE, FILER, 1700]) == (3, 2)
+    assert fi.attachment_span([IRS, IRS]) == (None, 0) and fi.attachment_span([]) == (None, 0)
+    assert fi.attachment_span([FILER]) == (1, 1)
 
 
 def test_tax_year_is_the_year_the_period_begins():

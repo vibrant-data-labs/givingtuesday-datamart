@@ -264,8 +264,7 @@ def stage(sample: Path, cache: Path, limit: int | None, manifest: Path) -> None:
         if status in ("staged", "cached"):
             size = local.stat().st_size
             widths = irs_source.page_widths(local)
-            pages, start = len(widths), irs_source.attachment_start(widths)
-            attached = pages - start + 1 if start else 0
+            pages, (start, attached) = len(widths), filing_images.attachment_span(widths)
             print(f"  [{n}/{len(rows)}] {row['filer_name'][:32]:<32} {size/1e6:>6.1f} MB  {status:<7}"
                   f" {pages:>4} pages, {attached:>4} attached")
         else:

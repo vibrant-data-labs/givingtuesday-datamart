@@ -315,11 +315,38 @@ def pdf_path(cache_dir: Path, object_id: str) -> Path:
     return cache_dir / "pdfs" / f"{object_id}.pdf"
 
 
-def _write_atomic(path: Path, payload: bytes) -> None:
+def _stage(path: Path, payload: bytes) -> Path:
+    """Write the payload beside ``path`` under a pid-tagged name; the caller
+    moves it into place once it is known to be a PDF."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     tmp.write_bytes(payload)
-    tmp.replace(path)
+    return tmp
+
+
+def _write_atomic(path: Path, payload: bytes) -> None:
+    _stage(path, payload).replace(path)
+
+
+def attachment_span(widths: Sequence[int]) -> tuple[int | None, int]:
+    """Where the filer's pages start (1-based) and how many there are;
+    ``(None, 0)`` when every page is the IRS's rendering."""
+    start = irs_source.attachment_start(widths)
+    return start, (len(widths) - start + 1 if start else 0)
+
+
+def _describe(row: FilingImage, payload: bytes, widths: Sequence[int], key: str,
+              fetched_at: datetime) -> FilingImage:
+    """The fetched fields, in one place: what the object is, where it is,
+    and where the filer's pages start."""
+    start, attached = attachment_span(widths)
+    row.status = "fetched" if start else "no_attachment"
+    row.last_error = None
+    row.fetched_at = fetched_at
+    row.s3_key, row.sha256, row.bytes = key, hashlib.sha256(payload).hexdigest(), len(payload)
+    row.pages, row.page_widths = len(widths), list(widths)
+    row.attachment_from, row.attachment_pages = start, attached
+    return row
 
 
 def _upload(s3, bucket: str, key: str, payload: bytes, digest: bytes) -> None:
@@ -350,31 +377,27 @@ def _fetch_one(filing: Filing, prior: FilingImage | None, *, cache_dir: Path,
         return _failed(row, prior, got.status, got.error)
 
     payload = got.payload
-    local = pdf_path(cache_dir, filing.object_id)
     key = f"{prefix}/{filing.object_id}.pdf"
     try:
-        _write_atomic(local, payload)
+        # The widths are read from the staged file, and it enters the cache
+        # directory only once poppler has read it: stage (still live) treats
+        # any non-empty file there as a PDF.
+        tmp = _stage(pdf_path(cache_dir, filing.object_id), payload)
         try:
-            widths = irs_source.page_widths(local)
+            widths = irs_source.page_widths(tmp)
         except subprocess.CalledProcessError as exc:      # poppler rejected the bytes
+            tmp.unlink(missing_ok=True)
             return _failed(row, prior, "not_a_pdf", f"pdfimages: {exc.stderr or exc}"[:500])
         except Exception as exc:                          # noqa: BLE001 — poppler itself failed
+            tmp.unlink(missing_ok=True)
             return _failed(row, prior, f"widths_failed:{type(exc).__name__}", str(exc)[:500])
-        digest = hashlib.sha256(payload)
-        _upload(s3, bucket, key, payload, digest.digest())
+        tmp.replace(pdf_path(cache_dir, filing.object_id))
+        _upload(s3, bucket, key, payload, hashlib.sha256(payload).digest())
     except Exception as exc:                              # noqa: BLE001
         # S3, credentials, disk: nothing about the filing. The row records
         # the attempt and stays retryable; the run goes on.
         return _failed(row, prior, f"upload_failed:{type(exc).__name__}", str(exc)[:500])
-
-    start = irs_source.attachment_start(widths)
-    row.status = "fetched" if start else "no_attachment"
-    row.fetched_at = datetime.now(timezone.utc)
-    row.s3_key, row.sha256, row.bytes = key, digest.hexdigest(), len(payload)
-    row.pages, row.page_widths = len(widths), list(widths)
-    row.attachment_from = start
-    row.attachment_pages = len(widths) - start + 1 if start else 0
-    return row
+    return _describe(row, payload, widths, key, datetime.now(timezone.utc))
 
 
 def _failed(row: FilingImage, prior: FilingImage | None, status: str, error: str | None) -> FilingImage:
@@ -566,27 +589,20 @@ def _backfill_one(staged: dict, *, pdf_dir: Path, bucket: str, prefix: str, s3) 
                       index_year=None, teos_url=None, image_generated=None, status="fetched", attempts=1)
     try:
         payload = local.read_bytes()
-        digest = hashlib.sha256(payload)
         try:
             widths = irs_source.page_widths(local)
         except subprocess.CalledProcessError as exc:
             return _failed(row, None, "not_a_pdf", f"pdfimages: {exc.stderr or exc}"[:500])
         except Exception as exc:                          # noqa: BLE001
             return _failed(row, None, f"widths_failed:{type(exc).__name__}", str(exc)[:500])
-        _upload(s3, bucket, key, payload, digest.digest())
+        _upload(s3, bucket, key, payload, hashlib.sha256(payload).digest())
     except Exception as exc:                              # noqa: BLE001
         return _failed(row, None, f"upload_failed:{type(exc).__name__}", str(exc)[:500])
-    start = irs_source.attachment_start(widths)
-    attached = len(widths) - start + 1 if start else 0
+    start, attached = attachment_span(widths)
     if (str(start or ""), str(attached)) != (staged["attachment_from"], staged["attachment_pages"]):
         logger.warning("%s: pdf says attachment_from=%s pages=%s, staging CSV says %s/%s", object_id,
                        start, attached, staged["attachment_from"], staged["attachment_pages"])
-    row.status = "fetched" if start else "no_attachment"
-    row.fetched_at = datetime.fromtimestamp(local.stat().st_mtime, tz=timezone.utc)
-    row.s3_key, row.sha256, row.bytes = key, digest.hexdigest(), len(payload)
-    row.pages, row.page_widths = len(widths), list(widths)
-    row.attachment_from, row.attachment_pages = start, attached
-    return row
+    return _describe(row, payload, widths, key, datetime.fromtimestamp(local.stat().st_mtime, tz=timezone.utc))
 
 
 def backfill(session, *, staging_csvs: Sequence[Path] = STAGING_CSVS,
