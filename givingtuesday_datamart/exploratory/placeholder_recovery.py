@@ -373,13 +373,22 @@ def transcribe(session, sample: Path, policy: dict, cache: Path, limit: int | No
     for stored readings) and stores the verdicts under the policy version.
     ``limit`` keeps the first filings that have pages; ``only`` one filing.
     The stores and clients are for tests; returns what ``agree`` decided."""
+    # The frame CSV names the filings; ``only`` narrows it to one object id.
     rows = csv.DictReader(sample.open())
     ids = [row["object_id"] for row in rows if not only or row["object_id"] == only]
+    # ``_store`` wraps a datamart session or an in-memory test store in the
+    # same interface, so nothing below needs to know which it was given.
     filings = filing_images._store(filing_store if filing_store is not None else session)
+    # Every attachment page of every fetched filing, as (object_id, page)
+    # pairs. Filings not fetched, or with no attachment, are left out.
     pages = frame_pages(filings, ids)
     if limit is not None:
+        # The first ``limit`` filings that have pages, in frame order
+        # (dict.fromkeys keeps one entry per id, in first-seen order).
         keep = set(list(dict.fromkeys(oid for oid, _ in pages))[:limit])
         pages = [page for page in pages if page[0] in keep]
+    # A one-line picture of the policy for the log, e.g.
+    # "qwen3-vl-instruct + gemini-3.5-flash-lite -> gemini-3.8-flash -> claude-sonnet-5".
     readers = " + ".join(policy["base"])
     if policy["escalation"]:
         readers += " -> " + " -> ".join(policy["escalation"])
@@ -387,9 +396,15 @@ def transcribe(session, sample: Path, policy: dict, cache: Path, limit: int | No
     print(f"{filings_with_pages} filings, {len(pages)} attachment pages; "
           f"policy {policy['version']}: {readers}, prompt {policy['prompt_version']}, "
           f"flagged pages {policy.get('flagged', 'load_single')}")
+    # ``agree`` does the work: it reads each page through the readers the
+    # policy needs (stored readings are reused; with ``buy=False`` a missing
+    # one raises instead of being bought), decides a verdict per page and
+    # writes the verdicts under the policy version.
     result = agree(session, pages, policy, max_errors=max_errors, cache_dir=cache, buy=buy,
                    filing_store=filings, reading_store=reading_store, client=client, s3=s3)
     print(summary(result))
+    # Pages that got no verdict because a reader failed on them this run;
+    # a second transcribe reads them again.
     for (oid, page), why in sorted(result.no_verdict.items()):
         print(f"  no verdict {oid} p{page:03d}: {why}")
     return result
@@ -408,22 +423,32 @@ def estimate(session, sample: Path, policy: dict, cap: float | None = COST_CAP, 
     the projection by reader and in total and returns the total; past ``cap``
     it stops with a message, so a run stops before it spends.
     """
+    # The same session-or-store wrapping as ``transcribe``.
     filings = filing_images._store(filing_store if filing_store is not None else session)
     readings = page_readings._store(reading_store if reading_store is not None else session)
     rows = csv.DictReader(sample.open())
     ids = [row["object_id"] for row in rows if not only or row["object_id"] == only]
     pages = frame_pages(filings, ids)
+    # The filing rows themselves, for each PDF's sha256: a reading is keyed
+    # on the image it was read from, so looking one up needs the hash.
     images = filings.get({oid for oid, _ in pages})
     total_pages = len(pages)
 
     # the pages each reader is expected to see
+    # A base reader sees every page. The first escalation reader sees the
+    # pages the base pair disputes, DISPUTE_RATE of them (one base reader
+    # means no pair and no disputes). Each escalation reader after that sees
+    # what the reader before it left unresolved. What the last one leaves is
+    # flagged, not read again.
     expected: dict[str, float] = {model: float(total_pages) for model in policy["base"]}
     entering = total_pages * DISPUTE_RATE if len(policy["base"]) > 1 else 0.0
     for model in policy["escalation"]:
         expected[model] = entering
-        entering *= 1 - RESOLVE_RATES.get(model, 0.0)
+        entering *= 1 - RESOLVE_RATES.get(model, 0.0)     # what this reader leaves open
     flagged = entering
 
+    # The header line: "... 52% disputed by the base pair, gemini-3.8-flash
+    # resolves 39%, claude-sonnet-5 resolves 33%".
     rates = ", ".join(f"{model.split('/')[-1]} resolves {rate:.0%}"
                       for model, rate in RESOLVE_RATES.items() if model in policy["escalation"])
     filings_with_pages = len({oid for oid, _ in pages})
@@ -433,12 +458,20 @@ def estimate(session, sample: Path, policy: dict, cap: float | None = COST_CAP, 
     print(f"  {'reader':<32}{'expects':>9}{'stored':>8}{'to buy':>8}{'$/page':>8}{'$':>9}")
     total = 0.0
     for model, want in expected.items():
+        # The readings the table already holds for this reader on these
+        # pages, under the policy's settings for it. The settings are part
+        # of the key: a Qwen reading taken with json_mode on is a different
+        # reading from one taken without, and only the policy's own count.
         settings = reader_settings(policy, model)
         keys = [reading_key(oid, page, images[oid].sha256, model, policy["prompt_version"],
                             settings=settings) for oid, page in pages]
         stored = readings.get(keys).values()
+        # A row with a response is a reading. A row without one is an error
+        # row (the reader failed on the page), and the page must still be bought.
         have = sum(1 for row in stored if row.response is not None)
         buy = max(0.0, want - have)
+        # No price for a model means an unknown reader: shown as "?" at $0,
+        # so the table still prints rather than the gate failing.
         price = PER_PAGE.get(model)
         dollars = buy * price if price is not None else 0.0
         total += dollars
@@ -448,6 +481,7 @@ def estimate(session, sample: Path, policy: dict, cap: float | None = COST_CAP, 
     share = flagged / total_pages if total_pages else 0
     cap_text = f" against a cap of ${cap:,.0f}" if cap is not None else ""
     print(f"about {flagged:,.0f} pages flagged ({share:.0%}); projection ${total:,.0f}{cap_text}")
+    # The gate itself: past the cap the run stops here, before any spend.
     if cap is not None and total > cap:
         _stop(f"the projection ${total:,.0f} passes the cap of ${cap:,.0f}: "
               "stop and ask before spending")
@@ -456,34 +490,55 @@ def estimate(session, sample: Path, policy: dict, cap: float | None = COST_CAP, 
 
 # ---------------------------------------------------------------------------
 # run: the whole frame in one command
+#
+# The section reads in this order: a few small helpers for the log (the
+# timestamp, banners, the stop path, mirroring the pane into run.log); the
+# ``_Stores`` bundle every stage reads through; one function per
+# prerequisite; one function per stage; and ``run`` itself, which calls them
+# in order under a banner each, so run.log reads as the seven stages the
+# ``run`` docstring lists.
 # ---------------------------------------------------------------------------
 
 
 def _utc() -> str:
+    # The timestamp on every line the run prints, e.g. 2026-09-23T22:37:46Z.
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _banner(text: str) -> None:
+    # A stage boundary: a blank line, then the time and the text between
+    # === marks, so ``grep ===`` on run.log lists the stages and their times.
     print(f"\n[{_utc()}] === {text} ===", flush=True)
 
 
 def _note(text: str) -> None:
+    # A timestamped line inside a stage. ``flush=True`` so it reaches the
+    # pane and run.log at once, not when a buffer happens to fill.
     print(f"[{_utc()}] {text}", flush=True)
 
 
 def _elapsed(since: float) -> str:
+    # "1h02m03s" since a ``time.monotonic()`` reading; monotonic so a clock
+    # adjustment on the box cannot make a stage look shorter than it was.
     seconds = int(time.monotonic() - since)
     return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m{seconds % 60:02d}s"
 
 
 def _stop(message: str) -> NoReturn:
     """The run stops here, with the reason on the pane and in the log."""
+    # SystemExit unwinds through ``run``'s ExitStack, so the log file, the
+    # stdout mirror and the datamart session are all closed on the way out,
+    # and the process exits 1 with the message as the last line of the pane.
     print(f"\n[{_utc()}] STOPPED: {message}", flush=True)
     raise SystemExit(1)
 
 
 class _Tee:
     """What is printed goes to the pane and to run.log both."""
+
+    # ``print`` writes to ``sys.stdout``. ``_mirror_output`` swaps in a _Tee
+    # over the real stdout and the log file, so each write lands in both.
+    # ``write`` and ``flush`` are all that ``print`` ever calls.
 
     def __init__(self, *streams) -> None:
         self.streams = streams
@@ -500,12 +555,22 @@ class _Tee:
 
 def _mirror_output(stack: contextlib.ExitStack, path: Path) -> None:
     """Everything printed or logged from here on goes to the pane and to ``path``."""
+    # Append mode: a run resumed with the same --logs directory adds to the
+    # same run.log rather than replacing it.
     log = stack.enter_context(path.open("a"))
+    # From here on every ``print`` (this module's and the library's) goes to
+    # the pane and to the file.
     stack.enter_context(contextlib.redirect_stdout(_Tee(sys.stdout, log)))
+    # The ``logging`` module is a separate channel: page_readings,
+    # page_verdicts, filing_images and boto log through it, and ``main``'s
+    # basicConfig already shows those lines on the pane. This handler copies
+    # them into run.log too, in the same format.
     handler = logging.StreamHandler(log)
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s",
                                            datefmt="%H:%M:%S"))
     logging.getLogger().addHandler(handler)
+    # Everything entered on the stack is undone when ``run`` exits, in
+    # reverse order: the handler removed, stdout restored, the file closed.
     stack.callback(logging.getLogger().removeHandler, handler)
 
 
@@ -513,6 +578,11 @@ def _mirror_output(stack: contextlib.ExitStack, path: Path) -> None:
 class _Stores:
     """What every stage reads through. The real run builds them from the
     datamart session; a test injects in-memory stores and a fake client."""
+
+    # The library functions the stages call (``fetch_filings``, ``agree``,
+    # ``read_pages``, ``estimate``) each accept a session or a store per
+    # table. Bundling the five here means a stage takes one argument, and
+    # ``run`` builds the bundle once, right after the datamart opens.
 
     filings: filing_images.FilingImageStore
     readings: object            # a session or a page_readings store
@@ -526,6 +596,9 @@ class _Stores:
 
 def _instance_type() -> str | None:
     """The EC2 instance type from the metadata service, or None off EC2."""
+    # The metadata service answers only on EC2 and only with a token first
+    # (IMDSv2): a PUT for a 60-second token, then a GET with it. One-second
+    # timeouts, so on a laptop, where nothing listens, this fails fast.
     token_request = urllib.request.Request(
         "http://169.254.169.254/latest/api/token", method="PUT",
         headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"})
@@ -540,21 +613,27 @@ def _instance_type() -> str | None:
 
 
 def _describe_host() -> None:
+    # The first line after the opening banner: which machine ran this.
     instance = _instance_type()
     ec2 = f", EC2 {instance}" if instance else ""
     print(f"host: {socket.gethostname()}, {os.cpu_count()} cores{ec2}")
 
 
 def _check_poppler() -> None:
+    # Both poppler tools are needed: pdftoppm renders pages to PNGs for the
+    # readers, pdfimages finds where the filer's attachment starts at fetch.
     for tool in ("pdftoppm", "pdfimages"):
         if shutil.which(tool) is None:
             _stop(f"{tool} is not on PATH: install poppler-utils (apt, dnf) or poppler (brew)")
+    # ``pdftoppm -v`` prints its version to stderr; take whichever stream has it.
     poppler = subprocess.run(["pdftoppm", "-v"], capture_output=True, text=True)
     version = (poppler.stderr or poppler.stdout).strip().splitlines()
     print(f"poppler: {version[0] if version else '?'}")
 
 
 def _check_gateway_key() -> None:
+    # The same two names ``vlm_transcription.client`` reads; the runbook's
+    # frame.env sets the first. Only its length is printed, never the key.
     key = os.environ.get("VERCEL_AI_GATEWAY_API_KEY") or os.environ.get("AI_GATEWAY_API_KEY")
     if not key:
         _stop("VERCEL_AI_GATEWAY_API_KEY is not set")
@@ -564,17 +643,22 @@ def _check_gateway_key() -> None:
 def _open_datamart(stack: contextlib.ExitStack):
     """A session on the datamart from the config in the environment, with one
     query to prove it answers."""
+    # Imported here, as ``main`` does, so the commands that never touch the
+    # datamart (sample, stage) and the tests import this module without
+    # sqlalchemy or a config being involved.
     from sqlalchemy import text
 
     from givingtuesday_datamart._internal.db import get_session
     from givingtuesday_datamart.ingestion import datamart_config
     try:
-        config = datamart_config()
+        config = datamart_config()          # the config.ini GT_DATAMART_CONFIG_PATH names
         postgres = config["postgres"]
     except Exception as exc:                              # noqa: BLE001 — no config.ini
         _stop("the datamart config is not in the environment: GT_DATAMART_CONFIG_PATH must "
               f"name a config.ini with a [postgres] section ({type(exc).__name__}: {exc})")
+    # Entered on the stack, so the session closes when ``run`` exits.
     session = stack.enter_context(get_session(config=config))
+    # One cheap query proves the connection works and the table is there.
     try:
         count, = session.execute(text("SELECT count(*) FROM filing_images")).one()
     except Exception as exc:                              # noqa: BLE001
@@ -586,6 +670,8 @@ def _open_datamart(stack: contextlib.ExitStack):
 
 
 def _check_teos(ein: str) -> None:
+    # The same GET that fetch makes for a filer's return list, on one EIN:
+    # proves HTTPS egress to apps.irs.gov from this host before fetch needs it.
     url = irs_source.TEOS_RETURNS.format(ein=ein)
     started = time.monotonic()
     try:
@@ -597,6 +683,10 @@ def _check_teos(ein: str) -> None:
 
 
 def _check_bucket(s3) -> None:
+    # head_bucket proves the credentials can see the bucket; a put and a
+    # delete prove they can write, which fetch needs for the PDFs it uploads.
+    # The key sits under irs/_run_check/, apart from the PDFs under irs/pdf/,
+    # and carries the host and the time so two boxes never touch one object.
     bucket = filing_images.BUCKET
     key = f"{WRITE_CHECK_PREFIX}/{socket.gethostname()}-{_utc()}"
     try:
@@ -610,6 +700,8 @@ def _check_bucket(s3) -> None:
 
 
 def _check_disk(cache: Path) -> None:
+    # The cache holds the PDFs and the rendered PNGs. mkdir first, so on a
+    # fresh box ``disk_usage`` has a path to ask about.
     cache.mkdir(parents=True, exist_ok=True)
     free_gb = shutil.disk_usage(cache).free / 1024 ** 3
     if free_gb < MIN_FREE_GB:
@@ -622,6 +714,10 @@ def _check_disk(cache: Path) -> None:
 
 def _fetch(stores: _Stores, rows: list[dict], cache: Path) -> None:
     """``fetch_filings`` on the frame; the log says first how many it will try."""
+    # Count what fetch_filings will actually request before it runs, so the
+    # log states up front how many TEOS requests to expect. A filing is
+    # retryable when it has no row yet, or its last attempt failed for a
+    # reason that is not permanent and it has attempts left (MAX_ATTEMPTS).
     ids = [row["object_id"] for row in rows]
     prior = stores.filings.get(ids)
     to_fetch = sum(filing_images._retryable(prior.get(oid)) for oid in ids)
@@ -631,10 +727,16 @@ def _fetch(stores: _Stores, rows: list[dict], cache: Path) -> None:
     else:
         _note(f"every one of the {len(ids)} filings is fetched, permanent or out of attempts: "
               "0 TEOS requests")
+    # A ``Filing`` carries the EIN and tax year with the object id; the TEOS
+    # lookup needs them, and the CSV may lack either, hence the fallbacks.
     filings = [filing_images.Filing(row["object_id"], row.get("filerein") or None,
                                     int(row["taxyear"]) if row.get("taxyear") else None)
                for row in rows]
+    # fetch_filings: TEOS for the PDF's URL, the download, the attachment cut
+    # (pdfimages), the upload to S3 and the filing_images row; it returns
+    # each filing's status afterwards, whether fetched this time or before.
     statuses = filing_images.fetch_filings(stores.filings, filings, cache_dir=cache, s3=stores.s3)
+    # e.g. "the frame by status: fetched 992, no_teos_image 8"
     counts = collections.Counter(statuses.values()).most_common()
     print("the frame by status: " + ", ".join(f"{status} {n}" for status, n in counts))
 
@@ -645,12 +747,21 @@ def _stored_only(stores: _Stores, pages: list, policy: dict, cache: Path,
     readings (no call is made); returns None when every reading is stored, in
     which case the pass must have bought nothing and written nothing."""
     try:
+        # ``buy=False``: stored readings only. When a reader has no reading
+        # for some page, ``read_pages`` raises LookupError before any render
+        # or gateway call, naming the reader and listing the first pages.
         result = agree(stores.verdicts, pages, policy, max_errors=max_errors, cache_dir=cache,
                        client=stores.client, filing_store=stores.filings,
                        reading_store=stores.readings, s3=stores.s3, buy=False)
     except LookupError as exc:
+        # Keep the description ("N pages have no reading of <model> ..."),
+        # drop the page list that follows ": [".
         return str(exc).split(": [")[0]
     print(summary(result))
+    # It got through, so every reading was stored and nothing can have been
+    # bought; and the verdicts already on the table under this policy are
+    # the same decisions, so nothing should have been written either. Either
+    # count above zero means the tables are not what they should be: stop.
     bought = sum(spent["pages"] for spent in result.bought.values())
     if bought or result.written:
         _stop(f"the stored-only pass bought {bought} pages and wrote {result.written} verdict "
@@ -664,6 +775,8 @@ def _smoke(stores: _Stores, rows: list[dict], policy: dict, cache: Path, max_err
     """The frame's first fetched filing rendered and read through the first
     base reader at one worker: its PNGs must exist, its rows must be
     readings, and a page with a grants table must have parsed one."""
+    # The first filing in frame order that is fetched (a PDF with a hash on
+    # the row) and has an attachment; the smoke reads that filing's pages.
     ids = [row["object_id"] for row in rows]
     images = stores.filings.get(ids)
     fetched = [oid for oid in ids
@@ -672,14 +785,22 @@ def _smoke(stores: _Stores, rows: list[dict], policy: dict, cache: Path, max_err
         _stop("no fetched filing with attachment pages in the frame; nothing to read")
     first = fetched[0]
     row = images[first]
+    # The attachment is one contiguous span of pages: attachment_pages of
+    # them, starting at attachment_from.
     first_page = row.attachment_from
     last_page = row.attachment_from + row.attachment_pages - 1
     pages = [(first, page) for page in range(first_page, last_page + 1)]
+    # The first base reader (Qwen under v2), at one worker so the reader's
+    # log is a plain sequence of pages.
     model = policy["base"][0]
     _banner(f"smoke: {first} (the frame's first fetched filing, pages {first_page}-{last_page}) "
             f"rendered and read through {model} at one worker")
     started = time.monotonic()
 
+    # Render explicitly first, so a render failure is reported as one before
+    # any reader is called. ``materialise`` puts the PDF on local disk (from
+    # the cache when its hash matches the row, else from S3); ``render`` runs
+    # pdftoppm over the span and returns the PNG paths it expects to exist.
     png_dir = page_readings.page_dir(cache, first)
     try:
         pdf = filing_images.materialise(row, cache, s3=stores.s3)
@@ -692,16 +813,23 @@ def _smoke(stores: _Stores, rows: list[dict], policy: dict, cache: Path, max_err
               f"{missing[:3]}")
     print(f"{len(pngs)} PNGs under {png_dir}")
 
+    # The read itself. ``read_pages`` renders too, but skips pages whose PNG
+    # exists; it reuses any reading already stored and buys the rest.
     got = read_pages(stores.readings, pages, model, workers=1,
                      prompt_version=policy["prompt_version"], max_errors=max_errors,
                      cache_dir=cache, client=stores.client, filing_store=stores.filings,
                      s3=stores.s3, settings=policy.get("settings", {}).get(model))
+    # Every page must have come back with a reading: none failed this run,
+    # none skipped for being at max_errors before it.
     if got.failed or got.skipped or len(got.responses) != len(pages):
         errors = "; ".join(f"p{page:03d}: {(reading.last_error or '')[:100]}"
                            for (_, page), reading in list(got.failed.items())[:3])
         _stop(f"{first} through {model}: {len(got.responses)} of {len(pages)} pages read, "
               f"{len(got.failed)} error rows, {len(got.skipped)} skipped at {max_errors} "
               f"errors: {errors}")
+    # Each reading is the reader's parsed JSON: a page_kind, and on a
+    # grants-table page the rows it read. At least one page must be a grants
+    # table with rows, or the reader is not returning what the pipeline needs.
     responses = list(got.responses.values())
     kinds = collections.Counter(response.get("page_kind") for response in responses)
     tables = sum(1 for response in responses
@@ -710,6 +838,8 @@ def _smoke(stores: _Stores, rows: list[dict], policy: dict, cache: Path, max_err
         _stop(f"no page of {first} parsed as a grants table with rows; page kinds seen: "
               f"{dict(kinds)}")
 
+    # What the smoke cost and how fast it went. "bought" is below the page
+    # count when some readings were already stored (a resumed run).
     rows_read = sum(len(response.get("rows") or []) for response in responses)
     dollars = vlm_transcription.cost(model, got.bought["in"], got.bought["out"]) or 0.0
     seconds_a_page = (time.monotonic() - started) / len(pages)
@@ -728,19 +858,32 @@ def _base_readers(models: list[str], sample: Path, cache: Path, logs: Path,
     each; this waits for them, then re-raises."""
     children = []
     for model in models:
-        name = model.split("/")[-1]
+        name = model.split("/")[-1]                       # "qwen3-vl-instruct": the log's name
+        # The reader's worker count from page_verdicts.WORKERS (Qwen 40,
+        # Flash Lite 12); the default for a model not listed there.
         workers = WORKERS.get(model, page_verdicts.DEFAULT_WORKERS)
+        # The same command a person would type by hand: the page_readings
+        # CLI on the frame CSV, with the model and the worker count.
+        # ``sys.executable`` is this interpreter, so the child runs in the
+        # same venv with the same environment (the key, the config path).
         command = [sys.executable, "-m", "givingtuesday_datamart.page_readings",
                    "--cache", str(cache), "read", str(sample), "--model", model,
                    "--workers", str(workers), "--max-errors", str(max_errors)]
         log_path = logs / f"{name}.log"
         _note(f"{name}: {' '.join(command)} > {log_path}")
+        # Append mode, bytes: the child writes its stdout and stderr (merged)
+        # straight into the file, and a resumed run adds to the same file.
         log = log_path.open("ab")
         child = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
         children.append((name, child, log))
     try:
+        # Block until every child has exited; each one's exit code by name.
         codes = {name: child.wait() for name, child, _ in children}
     except KeyboardInterrupt:
+        # Ctrl-C in the pane sends SIGINT to the whole foreground process
+        # group, so each child got it too and is running its own stop path
+        # (cancel the queued pages, record the ones in flight). Wait for them
+        # to finish that, then let the interrupt carry on up through ``run``.
         _note("stop: the readers are cancelling their queued pages and recording the ones in "
               "flight")
         for _, child, _ in children:
@@ -749,6 +892,8 @@ def _base_readers(models: list[str], sample: Path, cache: Path, logs: Path,
     finally:
         for _, _, log in children:
             log.close()
+    # A reader that exited non-zero: the tail of its log on the pane, then
+    # stop. Its stored readings are kept, so the same command resumes it.
     failed = [name for name, code in codes.items() if code]
     for name in failed:
         _note(f"{name}: exited {codes[name]}; the last lines of its log:")
@@ -761,6 +906,8 @@ def _base_readers(models: list[str], sample: Path, cache: Path, logs: Path,
 
 def _transcribe(stores: _Stores, sample: Path, policy: dict, cache: Path, max_errors: int,
                 *, buy: bool) -> AgreeResult:
+    # ``transcribe`` above with the bundle unpacked into its keyword seams;
+    # the two Nones are ``limit`` and ``only``, so the whole frame is read.
     return transcribe(stores.verdicts, sample, policy, cache, None, None, max_errors, buy=buy,
                       filing_store=stores.filings, reading_store=stores.readings,
                       client=stores.client, s3=stores.s3)
@@ -798,27 +945,44 @@ def run(sample: Path, policy: dict, cache: Path, *, dry_run: bool = False,
     session and the status stage reads from it.
     """
     started = time.monotonic()
+    # The frame CSV, read once; every stage works from ``rows`` or ``ids``.
     rows = list(csv.DictReader(sample.open()))
     ids = [row["object_id"] for row in rows]
     version = policy["version"]
+    # One directory per run, named for its start time, holding run.log and a
+    # log per base reader; --logs names one instead (a resumed run can reuse it).
     if logs is None:
         logs = Path("logs") / f"run-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
     logs.mkdir(parents=True, exist_ok=True)
     cap_text = f"${cap:,.0f}" if cap is not None else "none"
 
+    # The ExitStack holds everything that must be undone at the end: the log
+    # file, the stdout mirror, the logging handler and the datamart session.
+    # They are released in reverse order on any exit: the normal return, the
+    # dry-run return, ``_stop``'s SystemExit, or a Ctrl-C.
     with contextlib.ExitStack() as stack:
         _mirror_output(stack, logs / "run.log")
 
         # 1. prerequisites
+        # The banner states every parameter of the run, so run.log describes
+        # itself. Then each check in turn; the first failure stops the run.
         dry_text = "; DRY RUN, stops after the cost gate" if dry_run else ""
         _banner(f"prerequisites: frame {sample}, {len(ids)} filings; cache {cache}; "
                 f"policy {version}; cap {cap_text}; logs {logs}{dry_text}")
         _describe_host()
         _check_poppler()
         _check_gateway_key()
+        # A test injects its stores and never opens a datamart. The real run
+        # has none injected, and opens the session here.
         session = None
         if filing_store is None:                          # the real run; a test injects stores
             session = _open_datamart(stack)
+        # The bundle every stage reads through. ``filing_images._store``
+        # wraps a session or a store in one interface; the readings and
+        # verdicts are wrapped the same way inside the functions that use
+        # them. The gateway client is built on first use by
+        # vlm_transcription; the S3 client comes from filing_images unless a
+        # test passes a fake.
         stores = _Stores(
             filings=filing_images._store(filing_store if filing_store is not None else session),
             readings=reading_store if reading_store is not None else session,
@@ -826,6 +990,8 @@ def run(sample: Path, policy: dict, cache: Path, *, dry_run: bool = False,
             client=client,
             s3=s3 if s3 is not None else filing_images._s3_client(),
         )
+        # TEOS is checked with the frame's first EIN (a real filer, so a real
+        # answer), the bucket through the S3 client just built.
         eins = [row["filerein"] for row in rows if row.get("filerein")]
         _check_teos(eins[0] if eins else "731312965")
         _check_bucket(stores.s3)
@@ -833,6 +999,8 @@ def run(sample: Path, policy: dict, cache: Path, *, dry_run: bool = False,
         _note(f"prerequisites met in {_elapsed(started)}")
 
         # 2. fetch
+        # Zero requests when every filing is already stored: the stage still
+        # runs, and its first log line says so.
         _banner("fetch: fetch_filings on the frame (stored filings make no request; failures "
                 f"retry to {filing_images.MAX_ATTEMPTS} attempts)")
         stage_started = time.monotonic()
@@ -843,16 +1011,26 @@ def run(sample: Path, policy: dict, cache: Path, *, dry_run: bool = False,
         _banner(f"cost gate: the stored-only pass under {version}, then the projection against "
                 f"the cap of {cap_text}")
         stage_started = time.monotonic()
+        # ``frame_pages``: every attachment page of every fetched filing, the
+        # unit every stage from here on works in.
         pages = frame_pages(stores.filings, ids)
         filings_with_pages = len({oid for oid, _ in pages})
         print(f"{filings_with_pages} filings with attachment pages, {len(pages):,} pages")
+        # The stored-only pass. On a fresh frame it stops at the first reader
+        # without readings, having bought nothing, and that is the expected
+        # answer; on a resumed run with everything stored it must get through
+        # buying and writing nothing.
         missing = _stored_only(stores, pages, policy, cache, max_errors)
         if missing:
             _note(f"stored-only stopped, no call made: {missing}")
+        # The projection: what the readers would buy today at PER_PAGE, less
+        # what is stored. Past the cap ``estimate`` stops the run itself.
         estimate(session, sample, policy, cap,
                  filing_store=stores.filings, reading_store=stores.readings)
         _note(f"cost gate passed in {_elapsed(stage_started)}")
         if dry_run:
+            # Nothing so far has cost anything; --dry-run ends the run before
+            # the smoke stage, the first that spends.
             _banner(f"dry run: stopping after the projection, nothing bought; "
                     f"{_elapsed(started)} in all; logs in {logs}")
             return
@@ -861,6 +1039,9 @@ def run(sample: Path, policy: dict, cache: Path, *, dry_run: bool = False,
         _smoke(stores, rows, policy, cache, max_errors)
 
         # 5. the base readers, as child processes
+        # Both base readers at once, each reading every attachment page of
+        # the frame it holds no reading for yet. Their output goes to
+        # logs/<reader>.log, so run.log carries only the boundaries.
         counts = ", ".join(f"{model} at {WORKERS.get(model, page_verdicts.DEFAULT_WORKERS)} "
                            "workers" for model in policy["base"])
         _banner(f"base readers in parallel: {counts}")
@@ -869,10 +1050,16 @@ def run(sample: Path, policy: dict, cache: Path, *, dry_run: bool = False,
         _note(f"base readers done in {_elapsed(stage_started)}")
 
         # 6. transcribe, again if needed, then the stored-only check
+        # With the base readings stored, ``transcribe`` buys only the
+        # escalation readers (3.8 Flash on the pages the base pair disputes,
+        # Sonnet on what 3.8 Flash leaves), then writes a verdict per page.
         _banner(f"transcribe --policy {version}: the escalation readers and the verdicts")
         stage_started = time.monotonic()
         result = _transcribe(stores, sample, policy, cache, max_errors, buy=True)
         _note(f"transcribe done in {_elapsed(stage_started)}")
+        # A page is left without a verdict when a reader failed on it this
+        # run (a gateway error, say). Error rows are read again on the next
+        # pass, so one more transcribe collects what a retry can.
         if result.no_verdict:
             _banner(f"second transcribe: {len(result.no_verdict)} pages were left without a "
                     "verdict (a reader failed on them this run); reading them again")
@@ -882,6 +1069,9 @@ def run(sample: Path, policy: dict, cache: Path, *, dry_run: bool = False,
                   f"{len(result.no_verdict)} pages still without a verdict")
         else:
             _note("no page was left without a verdict; no second transcribe needed")
+        # The final check: with everything stored, a stored-only pass must
+        # reproduce the verdicts without buying or writing. That proves the
+        # tables hold the whole run, which is what ``report`` reads from.
         _banner(f"final check: transcribe --policy {version} --stored-only must buy nothing "
                 "and write nothing")
         stage_started = time.monotonic()
@@ -893,6 +1083,8 @@ def run(sample: Path, policy: dict, cache: Path, *, dry_run: bool = False,
               "0 verdict rows written")
 
         # 7. status
+        # The two status reports query the tables, so they need the real
+        # session; a test, with stores injected, has none and skips them.
         _banner("status after the run")
         if session is not None:
             print(page_readings.status_report(session))
