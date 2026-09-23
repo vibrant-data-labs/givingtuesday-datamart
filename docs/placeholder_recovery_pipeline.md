@@ -176,7 +176,8 @@ wrong page. Cost on the expanded frame, at the measured 52% dispute
 rate: about $360, against $190 for 3.8 Flash alone (52 right, 30
 flagged) and $84 for the base pair alone. Run on the 100-filing sample as the
 rehearsal for the 1,000-filing run it cost $63 and projects the frame
-at about $330 (*Sample under POLICY_V1* below).
+at about $330; with 3.8 Flash at low reasoning effort (`POLICY_V2`, the
+run's policy) about $270 (*Sample under POLICY_V1* below).
 
 ### 4 · Select — the reconciliation gate
 
@@ -518,7 +519,10 @@ per-page prices (Qwen $0.0024, Flash Lite $0.0070, 3.8 Flash $0.0216,
 Sonnet $0.0459) **about $330: base pair $88, 3.8 Flash $105, Sonnet
 $136** — 9% under the *3b · Agree* section's $360, which used the
 scorer's per-page costs and a 52% dispute rate from the same
-re-weighting of v3.
+re-weighting of v3. That is v1 as run. Under `POLICY_V2`, 3.8 Flash at
+low reasoning effort (the *Ground truth* section's table: $0.0093 a
+page, 17 of 46 disputes resolved against 16, so the Sonnet stage is no
+larger), the Flash stage is **about $45 and the frame about $270**.
 
 **Per model** on the pages this run bought, from the rows' `usage`,
 `seconds` and `attempts`:
@@ -540,17 +544,21 @@ text — 7,270 against 7,200 characters a page, the same name, address and
 purpose lengths — so the difference is tokens the model spends before
 it answers, reported inside the completion count and billed; that, at
 1.5 times Flash Lite's output price, is why it costs three times as
-much a page. `reasoning_effort: none` does not remove them (tried on
-the 83 ground-truth pages under a request hash of its own, 2026-09-23,
-the only other read of the session): 3.8 Flash then answered 24 pages
-on the first call against 64 by default, the retry ladder re-asked the
-rest, 7 pages ran to the 32K-token limit and came back partial, output
-tokens a page went from 5,520 to 12,840, the cost from $0.022 to $0.050
-a page and the median latency from 26 s to 56 s — and the reading was
-no better: 96.6% precision and 91.1% recall against the truth versus
-94.2% / 94.0%, 58 of 83 pages exact against 59, the pairs identical to
-the default's on 61 of 83 (where they differ, the default is exact on
-4, thinking-off on 3, neither on 15). The default stays. One caveat on
+much a page. `reasoning_effort` moves them, one way or the other (both
+tried on the 83 ground-truth pages under a request hash each,
+2026-09-23; the *Ground truth* section's table). `none` makes it worse:
+3.8 Flash then answered 24 pages on the first call against 64 by
+default, the retry ladder re-asked the rest, 7 pages ran to the
+32K-token limit and came back partial, output tokens a page went from
+5,520 to 12,840, the cost from $0.022 to $0.050 a page and the median
+latency from 26 s to 56 s, for no gain (96.6% precision and 91.1%
+recall against 94.2% / 94.0%, 58 of 83 exact against 59). `low` makes
+it better on every axis: 2,130 tokens a page, $0.0093, 12 s median, one
+call a page, 62 of 83 exact, 96.5% / 96.3%, the pairs identical to the
+default's on 64 of 83 and, where they differ, the truth siding with
+`low` on 5 pages and the default on 2. `low` is the default from that
+date and `POLICY_V2` reads under it; the verdicts above are v1's, at
+the default effort, and v1 pins those readings. One caveat on
 every dollar figure here: a row's `usage` is the kept attempt's, so the
 retry ladder's other calls are not counted — about 800 of the
 rehearsal's 5,844 calls, roughly $4 on top of the $63 the rows report.
@@ -699,6 +707,8 @@ $10 in all (`placeholder_ground_truth.py tiebreak` and `policies`):
 |---|---|---|---|---|---|
 | Claude Sonnet 5, thinking off | 97.5% | 96.9% | 67 / 83 | 0 of 29 | $0.053 |
 | Gemini 3.8 Flash | 94.2% | 94.0% | 59 / 83 | 0 of 29 | $0.022 |
+| Gemini 3.8 Flash, reasoning effort low | 96.5% | 96.3% | 62 / 83 | 0 of 29 | $0.0093 |
+| Gemini 3.8 Flash, reasoning effort none | 96.6% | 91.1% | 58 / 83 | 0 of 29 | $0.050 |
 | GPT 5.6 Terra | 82.3% | 80.9% | 31 / 82 | 1 of 29 | $0.036 |
 | GPT 5.6 Luna | 79.1% | 77.6% | 26 / 83 | 0 of 29 | $0.003 |
 
@@ -709,6 +719,21 @@ at any size, so family independence is not the same thing as accuracy.
 Sonnet needs its thinking turned off — with it on, three dense pages
 came back empty at 8K, 16K and 32K output tokens — and the GPT models
 need reasoning effort at its minimum, which Terra spells "none".
+
+The two 3.8 Flash rows below the first were added on 2026-09-23, after
+the rehearsal run (the same 83 pages, a request hash each, about $5 in
+all): the model thinks by default and the gateway bills it as output,
+5,524 tokens a page for 7,270 characters of answer. At `reasoning_effort:
+low` it reads the same pages at 2,126 tokens a page — $0.0093 against
+$0.0220, 12 s median against 26 — and reads them better: 62 pages exact
+against 59, 17 of the 46 disputed pages resolved against 16, one call a
+page, still never Flash Lite's error. `low` is the setting in
+`REQUEST_EXTRAS` from that date and the policy that reads under it is
+`POLICY_V2`, the 1,000-filing run's; `POLICY_V1` pins the default-effort
+readings its verdicts were decided on. `none` (and `minimal`, one page
+probed) map to an unbounded thinking budget for a Google model: 12,835
+tokens a page, 7 pages run to the 32K limit and partial, 56 s median,
+and no gain.
 
 Simulated as stage 3b on the 83 pages, with Qwen and Flash Lite as the
 base pair (46 of the 83 are disputes; the sample is enriched for them):
@@ -1098,9 +1123,13 @@ page, so the question may be moot.
      2,954 still open, about 1,980 pages flagged (21%). Cost **about
      $330** at the measured per-page prices (base pair $88, 3.8 Flash
      $105, Sonnet $136), inside the spec's $300–430 and 9% under its
-     $360. Wall time at the worker counts as now set: Qwen 3.6 h,
-     Flash Lite 1.7 h, 3.8 Flash 1.7 h, Sonnet 1.0 h — **8 hours run
-     serially**, the base pair's 5.3 h inside goal 4's six. All four
+     $360 — for v1 as run; the run itself goes under `POLICY_V2`, 3.8
+     Flash at low reasoning effort, where the Flash stage is **about
+     $45 and the frame about $270**. Wall time at the worker counts as
+     now set: Qwen 3.6 h, Flash Lite 1.7 h, 3.8 Flash 1.7 h (about
+     half that at low effort, 12 s a page against 26), Sonnet 1.0 h —
+     **8 hours run serially under v1, about 7 under v2**, the base
+     pair's 5.3 h inside goal 4's six. All four
      counts are floors, not ceilings (Zein, 2026-09-23): nothing in
      5,844 calls found the gateway's limit, so the run may raise the
      base pair too and should watch the error rows if it does. The box

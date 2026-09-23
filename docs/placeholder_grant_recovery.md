@@ -28,8 +28,8 @@ in [placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md).
 - 39% of the dollars cannot be recovered this way. The IRS serves no PDF,
   or the PDF has no list in it.
 - Next step: the 1,000-filing run on the expanded frame (9,347 pages,
-  about $330 and 8 hours at the measured rates), then a matcher pass on
-  the recovered rows.
+  about $270 and 7 hours at the measured rates with the third reader at
+  low reasoning effort), then a matcher pass on the recovered rows.
 
 ## The problem
 
@@ -228,7 +228,9 @@ filings — 16 points of the 53.4%, Bezos 2023 and both Wells Fargo years
 among them — reconcile only through marked pages, whose single reading
 the ground truth puts right about half the time. Without them the gate
 gives 35 filings and 37.2%. The 9,347-page expanded frame projects to
-about $330 at the measured rates.
+about $270 at the measured rates, with the third reader at low
+reasoning effort — it read the ground-truth pages better that way at
+less than half the price ($330 as the sample was run).
 
 Two reads of the same page agree on every name and amount 89% to 97% of
 the time when the page has fewer than 25 rows. With 25 rows or more,
