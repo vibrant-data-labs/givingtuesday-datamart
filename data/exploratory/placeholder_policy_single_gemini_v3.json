@@ -1,0 +1,7 @@
+{
+  "version": "single-gemini-v3",
+  "base": ["google/gemini-3.5-flash-lite"],
+  "escalation": [],
+  "prompt_version": "v3",
+  "flagged": "load_single"
+}

@@ -1,0 +1,8 @@
+{
+  "version": "single-qwen-v3",
+  "base": ["alibaba/qwen3-vl-instruct"],
+  "escalation": [],
+  "prompt_version": "v3",
+  "flagged": "load_single",
+  "settings": {"alibaba/qwen3-vl-instruct": {"json_mode": true, "extras": {}}}
+}
