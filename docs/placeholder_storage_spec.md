@@ -12,9 +12,12 @@ pipeline. Two parts, meant to be built in separate sessions:
   readings under a versioned policy.
 
 Vibrant Data Labs, 2026-09-22. Status: Part A built and its criteria
-run (the pipeline doc's *Order of operations*, item 4); Part B is
-spec. Background and the measurements every decision below rests on
-are in [placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md);
+run; Part B's readings (`page_readings`, `read_pages`, the JSON backfill)
+built and the first four Part B criteria run (both in the pipeline doc's
+*Order of operations*, item 4); Part B's verdicts (`agree`,
+`page_verdicts`, the rewiring) are spec. Background and the measurements
+every decision below rests on are in
+[placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md);
 the short report is [placeholder_grant_recovery.md](placeholder_grant_recovery.md).
 
 ## Problem statement
@@ -328,13 +331,13 @@ shared module so the scorer and `agree` cannot drift.
 
 ### Acceptance criteria
 
-- [ ] `read_pages` on a batch already stored makes zero gateway calls;
+- [x] `read_pages` on a batch already stored makes zero gateway calls;
   on a batch half stored makes exactly the missing half.
-- [ ] A page stored under prompt `v4` is a miss under `v5` and a hit
+- [x] A page stored under prompt `v4` is a miss under `v5` and a hit
   under `v4` again.
-- [ ] Changing `filing_images.sha256` for a filing makes all its pages
+- [x] Changing `filing_images.sha256` for a filing makes all its pages
   misses; the old readings remain.
-- [ ] A page that has errored three times is skipped and listed, not
+- [x] A page that has errored three times is skipped and listed, not
   retried.
 - [ ] `agree` on the 83 ground-truth pages under `POLICY_V1` reproduces
   `placeholder_ground_truth.py policies` for design C: 58 right, 2
