@@ -761,7 +761,9 @@ page, so the question may be moot.
    unchanged, since nothing moved between readers. Gemini v4's one page
    that fell back out of JSON mode stays keyed with its run, as a live
    reading would be; keying per file would have made it a miss for
-   `agree`.
+   `agree`. The backfill now writes only rows the table lacks or holds
+   differently, so the idempotent re-run on the corrected table reads
+   every row back and writes nothing: 0 new, 0 changed, 0 written, 11 s.
 5. Decide the flagged-page policy before that run's load.
 6. Send GT the findings list; report the 2022 image batch to the IRS.
 
