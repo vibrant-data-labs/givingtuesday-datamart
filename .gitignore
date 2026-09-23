@@ -184,5 +184,5 @@ givingtuesday_datamart/exploratory/__marimo__/
 /*.pdf
 /*.xml
 
-# run_frame.sh stage logs (kept in scratch or on the box, not in git)
+# placeholder_recovery run: the stage logs (kept in scratch or on the box, not in git)
 logs/

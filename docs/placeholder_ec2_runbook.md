@@ -1,9 +1,10 @@
 # Placeholder recovery: the frame run on EC2
 
 The 1,000-filing run — the fetch, the two base readers, the escalation
-readers and the verdicts — runs on an EC2 box through one script,
-[`scripts/run_frame.sh`](../scripts/run_frame.sh), that a person runs once
-inside tmux. Everything the stages produce lands in S3 (the PDFs) or the
+readers and the verdicts — runs on an EC2 box through one command, the
+`run` subcommand of
+[`placeholder_recovery.py`](../givingtuesday_datamart/exploratory/placeholder_recovery.py),
+that a person runs once inside tmux. Everything the stages produce lands in S3 (the PDFs) or the
 datamart tables (`filing_images`, `page_readings`, `page_verdicts`), so the
 laptop and the box share state through them and nothing is ever copied
 between machines; the reports run from the laptop afterwards. The design
@@ -32,13 +33,12 @@ and [placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md).
    ```
 
 3. **Two environment variables**, in a file you `source` before starting
-   tmux (`~/frame.env`, mode 600; `PYTHON` there too saves activating the
-   venv):
+   tmux (`~/frame.env`, mode 600), with the venv activated there too:
 
    ```bash
    export VERCEL_AI_GATEWAY_API_KEY=...                  # the gateway key
    export GT_DATAMART_CONFIG_PATH=$HOME/config.ini      # [postgres] host, port, user, password
-   export PYTHON=$HOME/venv-frame/bin/python
+   source $HOME/venv-frame/bin/activate
    ```
 
    The `config.ini` needs only the `[postgres]` section; the database name
@@ -49,8 +49,8 @@ and [placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md).
    on `s3://givingtuesday-datamart` (`s3:ListBucket` on the bucket;
    `s3:GetObject`, `s3:PutObject` and `s3:DeleteObject` on `irs/*`): the
    readers download PDFs, the fetch stage uploads them, and the
-   prerequisites check writes and deletes a small object under
-   `irs/_run_frame_write_check/`. The box needs HTTPS egress to
+   prerequisites check does a head on the bucket and puts and deletes a
+   small object under `irs/_run_check/`. The box needs HTTPS egress to
    `apps.irs.gov` (TEOS, which the fetch stage calls and the check
    requests) and to the gateway. `~/.aws/credentials` works in place of the
    role, as on the laptop.
@@ -68,41 +68,44 @@ From the repo root, with the environment variables set:
 
 ```bash
 source ~/frame.env
-tmux -L frame new -s frame 'bash scripts/run_frame.sh data/exploratory/placeholder_sample_1000.csv /data/irs_index'
+tmux -L frame new -s frame 'python -m givingtuesday_datamart.exploratory.placeholder_recovery run --policy v2 --sample data/exploratory/placeholder_sample_1000.csv --cache /data/irs_index'
 ```
 
 `-L frame` starts a tmux server of its own, which inherits the shell's
 environment; a session opened on a server that is already running (the
 box runs one for the marimo playground) would not see the variables.
 
-The script checks every prerequisite first and stops at the first thing
-missing, with a message saying what. Then, each stage under a timestamped
-banner: **fetch** (`filing_images fetch`; the frame is fetched from the
-laptop already, so on the box it makes zero TEOS requests and says so); the
-**cost gate** (`transcribe --stored-only`, which names the pages without a
-reading and buys nothing, then `estimate`, the projection by reader at the
-measured per-page prices and the rehearsal's dispute and resolution rates;
-past $400 the run stops); **smoke** (`transcribe` on the frame's smallest
-fetched filing with pages, S3 to render to gateway to the tables); the two
-**base readers** as parallel processes (Qwen at 40 workers, Flash Lite at
-12); **transcribe** for the escalation readers and the verdicts; a **second
-transcribe** if any page was left without a verdict; the **final check**
-(`transcribe --stored-only` must buy nothing and write nothing); and the two
-**status** reports. Every stage logs to its own file under
-`logs/frame-<start time>/`, and `run_frame.log` there mirrors the pane. The
-pane closes when the script ends; the log has everything. Detach with
-`Ctrl-b d`, reattach with `tmux -L frame attach -t frame`.
+`run` checks every prerequisite first (poppler, with `pdftoppm -v` printed;
+the gateway key and the datamart config in the environment; an HTTPS
+request to TEOS; a head and a small put on the bucket; 15 GB free under
+the cache) and stops at the first thing missing, with a message saying
+what. Then, each stage under a timestamped banner: **fetch**
+(`fetch_filings` on the frame; the frame is fetched from the laptop
+already, so on the box it makes zero TEOS requests and says so); the
+**cost gate** (the stored-only pass, which names the pages without a
+reading and buys nothing, then the projection by reader at the measured
+per-page prices and the rehearsal's dispute and resolution rates; past
+$400 the run stops); **smoke** (the frame's first fetched filing rendered
+and read through Qwen at one worker: its PNGs must exist, its rows must be
+readings, a page with a grants table must have parsed one); the two **base
+readers** as child processes of the `page_readings` CLI (Qwen at 40
+workers, Flash Lite at 12), each with its own log; **transcribe** for the
+escalation readers and the verdicts, again if any page was left without a
+verdict; the **final check** (the stored-only pass must buy nothing and
+write nothing); and the two **status** reports. Everything printed goes to
+the pane and to `logs/run-<start time>/run.log`; the readers' logs sit
+beside it. The pane closes when the command ends; the log has everything.
+Detach with `Ctrl-b d`, reattach with `tmux -L frame attach -t frame`.
 
 `--dry-run` stops after the cost gate, so the projection can be committed
-from the laptop before the box runs the script for real:
+from the laptop before the box runs the command for real:
 
 ```bash
-bash scripts/run_frame.sh data/exploratory/placeholder_sample_1000.csv ~/.cache/irs_index --dry-run
+python -m givingtuesday_datamart.exploratory.placeholder_recovery run --policy v2 --sample data/exploratory/placeholder_sample_1000.csv --cache ~/.cache/irs_index --dry-run
 ```
 
-A third positional argument names another policy (`v1` was the laptop
-test's, since the sample is fully stored under it); `PYTHON=...` names an
-interpreter that is not the `python` on PATH; `COST_CAP=...` moves the cap.
+`--policy v1` was the laptop test's, since the sample is fully stored under
+it; `--cap` moves the cap; `--logs` the log directory.
 
 ## Monitor from the laptop
 
@@ -124,23 +127,25 @@ SELECT model, count(*) AS pages, count(*) FILTER (WHERE response IS NULL) AS err
 FROM page_readings WHERE read_at > now() - interval '1 hour' GROUP BY 1;
 ```
 
-On the box, `tail -f logs/frame-*/qwen.log` (or `flash_lite.log`,
-`transcribe.log`) follows a stage: `read_pages` logs a line every 25 pages
-with the rows, errors, partial pages and dollars so far.
+On the box, `tail -f logs/run-*/qwen3-vl-instruct.log` (or
+`gemini-3.5-flash-lite.log`) follows a base reader: `read_pages` logs a
+line every 25 pages with the rows, errors, partial pages and dollars so
+far; the later stages log to `run.log`.
 
 ## Stop, and start again
 
 **Ctrl-C in the pane is safe** (so is `tmux -L frame send-keys -t frame C-c` from
-another window, or `kill -INT` on the script's pid): the readers cancel the
-pages not yet started, record the results of the pages in flight (at most
-the workers' count, about a dollar), and the script stops with a banner.
-Do not `kill -9`: that loses the uncommitted chunk, up to 200 pages.
+another window): the readers are child processes in the pane's process
+group, so each gets the interrupt on its own main thread, cancels the
+pages not yet started and records the results of the pages in flight (at
+most the workers' count, about a dollar); `run` waits for them, then
+stops. Do not `kill -9`: that loses the uncommitted chunk, up to 200 pages.
 
 **Running the same command again resumes.** Every stage reads what the
 tables lack and nothing else, so a completed stage makes no gateway call,
 the base pair's verdicts are unchanged, and only the pages in flight at the
 stop are bought twice. That is also how a gateway refusal or a timeout is
-recovered: a page a reader failed on is listed as `no_verdict`, the script
+recovered: a page a reader failed on is listed as `no_verdict`, `run`
 runs `transcribe` a second time for them, and a re-run reads them again
 until they have three errors, after which the reader is absent for the page
 and the other readers decide it.
