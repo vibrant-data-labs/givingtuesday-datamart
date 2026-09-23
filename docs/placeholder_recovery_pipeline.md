@@ -736,6 +736,32 @@ page, so the question may be moot.
    the second counter was added), about $0.03. The 83 pages' PNGs were
    already in `pages200/` from the earlier runs, so the render pool was
    not exercised by hand, only by its test.
+
+   **Request settings corrected** (2026-09-23, from the review of PR
+   #44). The first backfill keyed every row on today's `request(model)`,
+   so the 1,782 Qwen v2 rows said `json_mode: false` while their answers
+   came back in JSON mode, and the Terra error row said
+   `reasoning_effort: none` while its message says `minimal`. The
+   backfill now keys each row on what its folder and file evidence.
+   `json_mode` is the run's first-call mode, read from the `_json_mode`
+   stamps: `transcribe` only ever falls back out of JSON mode, so one
+   answer in it proves the run asked for it (Qwen v3: 468 of its 1,782
+   did), no stamps is the v2 sample, which ran with it on, and every
+   answer out of it means the run did not ask (Qwen v4). `extras` are the
+   model's `REQUEST_EXTRAS`, which the runs used and the files do not
+   stamp. A file with no stamps at all never got an answer and evidences
+   nothing, so both fields are `null` under a hash of its own and no live
+   key inherits its strike. The re-run added 3,565 rows as new — Qwen v2
+   and v3, 1,782 each, and the Terra error — with 0 changed, in 24 s; the
+   3,565 superseded copies under today's hashes were then deleted by hand
+   (`DELETE FROM page_readings WHERE model = 'alibaba/qwen3-vl-instruct'
+   AND prompt_version IN ('v2', 'v3') AND request_hash = <today's Qwen
+   hash>`, and the one Terra row with `response IS NULL` under today's
+   Terra hash). 7,626 rows again, and the `status` table above is
+   unchanged, since nothing moved between readers. Gemini v4's one page
+   that fell back out of JSON mode stays keyed with its run, as a live
+   reading would be; keying per file would have made it a miss for
+   `agree`.
 5. Decide the flagged-page policy before that run's load.
 6. Send GT the findings list; report the 2022 image batch to the IRS.
 
