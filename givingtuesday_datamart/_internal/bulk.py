@@ -35,8 +35,12 @@ def upsert_as_done(store: Store[Row], futures: Sequence[Future], chunk: int) -> 
 
     Workers return rows rather than raising; one that raises anyway is
     logged and re-raised only after every other result has been collected
-    and committed. Whatever is buffered when the loop stops, for any
-    reason, is committed first.
+    and committed. When the loop stops for any other reason — an interrupt
+    in the wait, the caller raising — the jobs not yet started are
+    cancelled and whatever is buffered is committed: a pool's ``with``
+    exit otherwise runs every queued job to completion on the way out and
+    throws the results away, which for a reading pool is paying for pages
+    nobody stores (the rehearsal run: Ctrl-C with 800 pages queued).
     """
     buffer: list[Row] = []
     failures: list[Exception] = []
@@ -54,6 +58,10 @@ def upsert_as_done(store: Store[Row], futures: Sequence[Future], chunk: int) -> 
                 store.upsert(ready)
             yield row
     finally:
+        cancelled = sum(future.cancel() for future in futures)    # True only for a job not yet started
+        if cancelled:
+            logger.warning("stopping: %d queued jobs cancelled before they started; the ones in flight finish "
+                           "but are not recorded", cancelled)
         if buffer:
             store.upsert(buffer)
     if failures:

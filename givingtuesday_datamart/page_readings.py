@@ -543,24 +543,33 @@ def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
                     for oid, (first, last) in spans.items()}
         futures = [pool.submit(_read_one, client, model, rendered[page[0]], keys[page], settings, prior,
                                page_dir(cache_dir, page[0])) for page, prior in misses]
-        for row in upsert_as_done(store, futures, CHUNK):
-            page = (row.object_id, row.page)
-            tally["pages"] += 1
-            if row.response is None:
-                result.failed[page] = row
-                tally["errors"] += 1
-                logger.warning("%s p%03d error %d: %s", row.object_id, row.page, row.errors, (row.last_error or "")[:120])
-            else:
-                result.responses[page] = row.response
-                tally["rows"] += len(row.response.get("rows") or [])
-                tally["partial"] += int(row.partial)
-            tally["in"] += (row.usage or {}).get("in") or 0
-            tally["out"] += (row.usage or {}).get("out") or 0
-            if tally["pages"] % 25 == 0 or tally["pages"] == len(futures):
-                spent = vlm_transcription.cost(model, tally["in"], tally["out"])
-                logger.info("read_pages: %d/%d pages, %d rows, %d errors, %d partial%s", tally["pages"], len(futures),
-                            tally["rows"], tally["errors"], tally["partial"],
-                            f", ${spent:.2f}" if spent is not None else "")
+        try:
+            for row in upsert_as_done(store, futures, CHUNK):
+                page = (row.object_id, row.page)
+                tally["pages"] += 1
+                if row.response is None:
+                    result.failed[page] = row
+                    tally["errors"] += 1
+                    logger.warning("%s p%03d error %d: %s", row.object_id, row.page, row.errors, (row.last_error or "")[:120])
+                else:
+                    result.responses[page] = row.response
+                    tally["rows"] += len(row.response.get("rows") or [])
+                    tally["partial"] += int(row.partial)
+                tally["in"] += (row.usage or {}).get("in") or 0
+                tally["out"] += (row.usage or {}).get("out") or 0
+                if tally["pages"] % 25 == 0 or tally["pages"] == len(futures):
+                    spent = vlm_transcription.cost(model, tally["in"], tally["out"])
+                    logger.info("read_pages: %d/%d pages, %d rows, %d errors, %d partial%s", tally["pages"], len(futures),
+                                tally["rows"], tally["errors"], tally["partial"],
+                                f", ${spent:.2f}" if spent is not None else "")
+        finally:
+            # On the way out for any reason but completion (an interrupt in
+            # the wait, the caller raising) the renders not yet started are
+            # dropped with the reads ``upsert_as_done`` cancels; a filing's
+            # five-minute render is not worth finishing for pages nobody
+            # will read this run.
+            if sum(future.cancel() for future in rendered.values()):
+                logger.warning("stopping: the renders not yet started are cancelled")
     return result
 
 
