@@ -214,6 +214,32 @@ def test_a_page_a_reader_fails_on_this_run_gets_no_verdict_and_is_not_sent_on(st
     assert again.no_verdict == {} and _verdict(again, 5).verdict == "escalated" and again.written == 1
 
 
+def test_each_stage_is_written_when_decided_so_a_late_error_keeps_the_earlier_verdicts(stores, tmp_path, monkeypatch):
+    _store_reading(stores, OID, 3, QWEN, _rows(3)); _store_reading(stores, OID, 3, GEMINI, _rows(3))      # agreed
+    _store_reading(stores, OID, 4, QWEN, _rows(3)); _store_reading(stores, OID, 4, GEMINI, _rows(2))
+    _store_reading(stores, OID, 4, FLASH, _rows(2))                                                        # escalated
+    _store_reading(stores, OID, 5, QWEN, _rows(3)); _store_reading(stores, OID, 5, GEMINI, _rows(2))
+    _store_reading(stores, OID, 5, FLASH, _rows(4))                                                        # to Sonnet
+    real = pv.read_pages
+
+    def breaking(session, pages, model, **kwargs):
+        if model == SONNET:
+            raise RuntimeError("the pool worker itself broke")           # what upsert_as_done re-raises
+        return real(session, pages, model, **kwargs)
+
+    monkeypatch.setattr(pv, "read_pages", breaking)
+    with pytest.raises(RuntimeError, match="pool worker"):
+        _agree(stores, _pages(3, 4, 5), tmp_path=tmp_path)
+    kept = {key[1]: row for key, row in stores[2].rows.items()}
+    assert sorted(kept) == [3, 4] and stores[2].commits == [1, 1]         # the base stage, then Flash's
+    assert kept[3].verdict == "agreed" and kept[4].verdict == "escalated" and kept[4].matched_models == [GEMINI, FLASH]
+    monkeypatch.setattr(pv, "read_pages", real)
+    _store_reading(stores, OID, 5, SONNET, _rows(4))
+    again = _agree(stores, _pages(3, 4, 5), tmp_path=tmp_path)
+    assert again.written == 1 and _verdict(again, 5).verdict == "escalated" and stores[2].commits == [1, 1, 1]
+    assert _verdict(again, 3) is kept[3] and _verdict(again, 4) is kept[4]  # found unchanged, kept as stored
+
+
 def test_a_new_policy_version_reads_nothing_new_and_writes_beside_the_old_rows(stores, tmp_path):
     _store_reading(stores, OID, 3, QWEN, _rows(3)); _store_reading(stores, OID, 3, GEMINI, _rows(2))
     _store_reading(stores, OID, 3, FLASH, _rows(3)); _store_reading(stores, OID, 3, SONNET, _rows(2))
@@ -228,7 +254,7 @@ def test_a_new_policy_version_reads_nothing_new_and_writes_beside_the_old_rows(s
     assert all(stores[2].rows[key] is row for key, row in before.items())
     assert sorted(key[3] for key in stores[2].rows) == ["v1", "v1", "v2", "v2"]
     unchanged = _agree(stores, _pages(3, 4), tmp_path=tmp_path)
-    assert unchanged.written == 0 and stores[2].commits == [2, 2]
+    assert unchanged.written == 0 and stores[2].commits == [1, 1, 1, 1]     # one flush per stage that decided
     assert _verdict(unchanged, 3).decided_at == _verdict(first, 3).decided_at
 
 
@@ -245,7 +271,7 @@ def test_a_flagged_rule_override_is_a_version_of_its_own_and_leaves_the_register
     with pytest.raises(ValueError, match="flagged rule"):
         pv.with_flagged(pv.POLICY_V1, "drop")
     second = _agree(stores, _pages(3, 4), tmp_path=tmp_path, policy=overridden)
-    assert second.written == 2 and stores[2].commits == [2, 2]                 # its own rows, the v1 rows untouched
+    assert second.written == 2 and stores[2].commits == [1, 1, 1, 1]           # its own rows, the v1 rows untouched
     assert _verdict(second, 3).policy_version == "v1-leave_out" and _verdict(second, 3).accepted_model is None
     assert _verdict(first, 3).accepted_model == SONNET and stores[2].rows[_verdict(first, 3).key] is _verdict(first, 3)
     assert sorted(key[3] for key in stores[2].rows) == ["v1", "v1", "v1-leave_out", "v1-leave_out"]

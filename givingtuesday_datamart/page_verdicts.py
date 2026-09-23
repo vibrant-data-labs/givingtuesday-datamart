@@ -374,9 +374,14 @@ def agree(session, pages: Sequence[Page], policy: dict = POLICY_V1, *, workers: 
 
     A page a reader failed on this run while still under ``max_errors``
     gets no verdict this run and is not sent to later readers: it is
-    listed in ``no_verdict`` and a re-run reads it again. Verdicts are
-    upserted in chunks of 200, only where new or changed; a page's verdict
-    under another policy version is left alone.
+    listed in ``no_verdict`` and a re-run reads it again. Each stage's
+    decisions are written as soon as the stage is decided — after the base
+    pair, after each escalation reader, and at the end — in chunks of 200
+    and only where new or changed, so an error in a later stage (a worker
+    re-raised out of ``read_pages``, a miss under ``buy=False``, the
+    database) leaves the earlier stages' verdicts on the table and a re-run
+    finds them unchanged; a page's verdict under another policy version is
+    left alone.
 
     ``session`` is a SQLAlchemy session or a ``VerdictStore``;
     ``reading_store`` and ``filing_store`` the other two stores when not on
@@ -401,11 +406,36 @@ def agree(session, pages: Sequence[Page], policy: dict = POLICY_V1, *, workers: 
     result = AgreeResult()
     read: dict[Page, dict[str, Pairs]] = {page: {} for page in wanted}
     consulted: dict[Page, int] = dict.fromkeys(wanted, 0)
+    pending: list[Verdict] = []
 
     def decide(page: Page, kind: str, accepted: str | None = None, matched: Sequence[str] = ()) -> None:
         oid, number = page
-        result.verdicts[page] = Verdict(oid, number, images[oid].sha256, version, kind, accepted,
-                                        hashes[accepted] if accepted else None, list(matched), consulted[page])
+        verdict = Verdict(oid, number, images[oid].sha256, version, kind, accepted,
+                          hashes[accepted] if accepted else None, list(matched), consulted[page])
+        result.verdicts[page] = verdict
+        pending.append(verdict)
+
+    def flush(stage: str) -> None:
+        """Write what the stage decided: new or changed rows only, 200 a
+        statement; a verdict already on the table under the same decision
+        is kept as stored, with its ``decided_at``."""
+        if not pending:
+            return
+        existing = store.get(verdict.key for verdict in pending)
+        to_write = []
+        for verdict in pending:
+            stored = existing.get(verdict.key)
+            if stored is not None and _same(stored, verdict):
+                result.verdicts[verdict.page_key] = stored
+            else:
+                to_write.append(verdict)
+        for start in range(0, len(to_write), CHUNK):
+            store.upsert(to_write[start:start + CHUNK])
+        result.written += len(to_write)
+        logger.info("agree %s: %s decided %d pages; %d verdicts written (%d new, %d changed)", version, stage,
+                    len(pending), len(to_write), sum(v.key not in existing for v in to_write),
+                    sum(v.key in existing for v in to_write))
+        pending.clear()
 
     def consult(model: str, batch: list[Page]) -> ReadResult:
         got = read_pages(readings, batch, model, workers=workers.get(model, DEFAULT_WORKERS),
@@ -440,6 +470,7 @@ def agree(session, pages: Sequence[Page], policy: dict = POLICY_V1, *, workers: 
     logger.info("agree %s: %d pages, %d agreed by %s, %d disputed, %d unreadable, %d without a verdict this run",
                 version, len(wanted), len(open_pages) - len(disputed), " + ".join(base), len(disputed),
                 sum(v.verdict == "unreadable" for v in result.verdicts.values()), len(result.no_verdict))
+    flush("the base pair")
 
     for stage, model in enumerate(escalation):
         if not disputed:
@@ -459,6 +490,7 @@ def agree(session, pages: Sequence[Page], policy: dict = POLICY_V1, *, workers: 
         logger.info("agree %s: %s resolved %d of %d disputed pages", version, model, len(disputed) - len(still),
                     len(disputed))
         disputed = still
+        flush(model)
     for page in disputed:
         produced = [model for model in escalation if model in read[page]]
         if escalation and not produced:
@@ -467,22 +499,9 @@ def agree(session, pages: Sequence[Page], policy: dict = POLICY_V1, *, workers: 
             decide(page, "flagged", accepted=produced[-1])
         else:
             decide(page, "flagged")
-
-    existing = store.get(verdict.key for verdict in result.verdicts.values())
-    to_write = []
-    for page, verdict in result.verdicts.items():
-        stored = existing.get(verdict.key)
-        if stored is not None and _same(stored, verdict):
-            result.verdicts[page] = stored
-        else:
-            to_write.append(verdict)
-    for start in range(0, len(to_write), CHUNK):
-        store.upsert(to_write[start:start + CHUNK])
-    result.written = len(to_write)
-    mix = result.mix()
-    logger.info("agree %s: %s; %d verdicts written (%d new, %d changed)", version,
-                ", ".join(f"{k} {v}" for k, v in mix.items()), len(to_write),
-                sum(v.key not in existing for v in to_write), sum(v.key in existing for v in to_write))
+    flush("the last stage")
+    logger.info("agree %s: %s; %d verdicts written", version,
+                ", ".join(f"{k} {v}" for k, v in result.mix().items()), result.written)
     return result
 
 
