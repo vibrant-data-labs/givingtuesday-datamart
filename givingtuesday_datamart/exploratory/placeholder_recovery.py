@@ -7,6 +7,7 @@ cheap part (the selector) changes.
     python -m givingtuesday_datamart.exploratory.placeholder_recovery sample
     python -m givingtuesday_datamart.exploratory.placeholder_recovery sample --expand-1000
     python -m givingtuesday_datamart.exploratory.placeholder_recovery stage
+    python -m givingtuesday_datamart.exploratory.placeholder_recovery estimate --policy v2 --sample data/exploratory/placeholder_sample_1000.csv
     python -m givingtuesday_datamart.exploratory.placeholder_recovery transcribe --policy v1
     python -m givingtuesday_datamart.exploratory.placeholder_recovery report --policy v1 --out data/exploratory/placeholder_report_v1.csv
     python -m givingtuesday_datamart.exploratory.placeholder_recovery report --results ~/.cache/irs_index/unstructured
@@ -36,6 +37,11 @@ it, and records where the filer's attachments start — the IRS-rendered
 pages before that point are the XML we already hold, and are never sent
 to a model. On this sample they are 62% of all pages.
 
+``estimate`` is the cost gate ``scripts/run_frame.sh`` runs before it spends:
+what ``transcribe`` would buy today from each reader, less the readings the
+table holds, at the per-page prices and the dispute and resolution rates the
+rehearsal measured; past the cap it exits so the run stops before a call.
+
 ``transcribe`` decides every attachment page of the sample's fetched filings
 under a policy (``page_verdicts.agree``): each page is read by the policy's
 readers through ``page_readings.read_pages``, which reads only what the
@@ -60,13 +66,13 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from givingtuesday_datamart import filing_images, irs_source, vlm_transcription
+from givingtuesday_datamart import filing_images, irs_source, page_readings, vlm_transcription
 from givingtuesday_datamart.attachment_grants import (
     PLACEHOLDER, XML_SOURCES, candidate_tables, coverage, diagnose, extract_tables, is_pointer,
     load_elements, page_tables, xml_tables)
-from givingtuesday_datamart.page_readings import MAX_ERRORS, frame_pages
+from givingtuesday_datamart.page_readings import MAX_ERRORS, frame_pages, reading_key
 from givingtuesday_datamart.page_verdicts import (
-    FLAGGED_RULES, POLICIES, POLICY_V1, accepted_readings, agree, load_policy, summary, with_flagged)
+    FLAGGED_RULES, POLICIES, POLICY_V1, accepted_readings, agree, load_policy, reader_settings, summary, with_flagged)
 
 COMBINED_CSV = Path.home() / "Downloads" / "combined-grants-datamarts-gt_team_priority-20260915.csv"
 SAMPLE_CSV = Path("data/exploratory/placeholder_sample_100.csv")
@@ -102,6 +108,16 @@ EXPANSION_1000 = {"B": None, "C": 137, "D": 403}
 FRAMES = {"610": (EXPANSION,), "1000": (EXPANSION, EXPANSION_1000)}
 _OBJECT_ID = re.compile(r"(?<!\d)(\d{18})(?!\d)")
 VERDICT_KINDS = ("agreed", "escalated", "flagged", "unreadable", "no_verdict")
+# The cost gate's numbers (``estimate``), measured on the rehearsal and
+# re-weighted to the frame (the pipeline doc's *Sample under POLICY_V1*):
+# what a page bought from each reader cost, 3.8 Flash at reasoning effort
+# low; the share of pages the base pair disputes; and the share of what
+# reaches each escalation reader that it resolves. The cap is Session 4's.
+PER_PAGE = {"alibaba/qwen3-vl-instruct": 0.0024, "google/gemini-3.5-flash-lite": 0.0070,
+            "google/gemini-3.8-flash": 0.0093, "anthropic/claude-sonnet-5": 0.0459}
+DISPUTE_RATE = 0.52
+RESOLVE_RATES = {"google/gemini-3.8-flash": 0.39, "anthropic/claude-sonnet-5": 1 / 3}
+COST_CAP = 400.0
 
 
 def _read_population(pointer=None) -> tuple[dict, dict]:
@@ -332,6 +348,55 @@ def transcribe(session, sample: Path, policy: dict, cache: Path, limit: int | No
     print(summary(result))
     for (oid, page), why in sorted(result.no_verdict.items()):
         print(f"  no verdict {oid} p{page:03d}: {why}")
+
+
+def estimate(session, sample: Path, policy: dict, cap: float | None = COST_CAP, *, only: str | None = None,
+             filing_store=None, reading_store=None) -> float:
+    """The cost gate: what ``transcribe`` under ``policy`` would buy today and
+    what it would cost. Each reader is expected to see a share of the frame's
+    attachment pages — every page for a base reader, ``DISPUTE_RATE`` of them
+    for the first escalation reader, and for each later one what the reader
+    before it left open (``RESOLVE_RATES``) — less the readings the table
+    already holds for it under the policy's settings, priced at ``PER_PAGE``.
+    Every stored reading is credited, so where an escalation reader's stored
+    readings turn out not to be needed the projection is a little low. Prints
+    the projection by reader and in total and returns the total; past ``cap``
+    it exits with a message, so a run stops before it spends.
+    """
+    filings = filing_images._store(filing_store if filing_store is not None else session)
+    readings = page_readings._store(reading_store if reading_store is not None else session)
+    ids = [r["object_id"] for r in csv.DictReader(sample.open()) if not only or r["object_id"] == only]
+    pages = frame_pages(filings, ids)
+    images = filings.get({oid for oid, _ in pages})
+    n = len(pages)
+    expected: dict[str, float] = {model: float(n) for model in policy["base"]}
+    entering = n * DISPUTE_RATE if len(policy["base"]) > 1 else 0.0
+    for model in policy["escalation"]:
+        expected[model] = entering
+        entering *= 1 - RESOLVE_RATES.get(model, 0.0)
+    rates = ", ".join(f"{model.split('/')[-1]} resolves {rate:.0%}" for model, rate in RESOLVE_RATES.items()
+                      if model in policy["escalation"])
+    print(f"{len({oid for oid, _ in pages})} filings, {n:,} attachment pages under policy {policy['version']}; "
+          f"{DISPUTE_RATE:.0%} disputed by the base pair{', ' + rates if rates else ''}")
+    print(f"  {'reader':<32}{'expects':>9}{'stored':>8}{'to buy':>8}{'$/page':>8}{'$':>9}")
+    total = 0.0
+    for model, want in expected.items():
+        settings = reader_settings(policy, model)
+        keys = [reading_key(oid, page, images[oid].sha256, model, policy["prompt_version"], settings=settings)
+                for oid, page in pages]
+        have = sum(1 for row in readings.get(keys).values() if row.response is not None)
+        buy = max(0.0, want - have)
+        price = PER_PAGE.get(model)
+        dollars = buy * price if price is not None else 0.0
+        total += dollars
+        print(f"  {model:<32}{want:>9,.0f}{have:>8,}{buy:>8,.0f}"
+              f"{f'{price:.4f}' if price is not None else '?':>8}{dollars:>9.2f}")
+    print(f"  {'total':<32}{'':>33}{total:>9.2f}")
+    print(f"about {entering:,.0f} pages flagged ({entering / n if n else 0:.0%}); projection ${total:,.0f}"
+          + (f" against a cap of ${cap:,.0f}" if cap is not None else ""))
+    if cap is not None and total > cap:
+        sys.exit(f"the projection ${total:,.0f} passes the cap of ${cap:,.0f}: stop and ask before spending")
+    return total
 
 
 def report(session, sample: Path, out: Path | None, xml_rows: Path | None, *, policy: dict = POLICY_V1,
@@ -565,6 +630,12 @@ def main() -> None:
     p.add_argument("--max-errors", type=int, default=MAX_ERRORS)
     p.add_argument("--stored-only", action="store_true", help="buy nothing: a missing reading stops the run before any call")
 
+    p = sub.add_parser("estimate", help="the cost gate: what transcribe would buy today at the measured rates; exits past the cap")
+    p.add_argument("--policy", default="v1", help=f"a registered version ({', '.join(POLICIES)}) or a JSON file")
+    p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
+    p.add_argument("--only", default=None, help="a single object id")
+    p.add_argument("--cap", type=float, default=COST_CAP, help="dollars; zero or less for no cap")
+
     p = sub.add_parser("report", help="score one engine's pages through the selector")
     p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
     p.add_argument("--policy", default="v1", help="the verdicts to read: a registered version or a JSON file")
@@ -596,11 +667,13 @@ def main() -> None:
         from givingtuesday_datamart.ingestion import datamart_config
 
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
-        policy = with_flagged(load_policy(args.policy), args.flagged)
+        policy = with_flagged(load_policy(args.policy), getattr(args, "flagged", None))
         with get_session(config=datamart_config()) as session:
             if args.command == "transcribe":
                 transcribe(session, args.sample, policy, args.cache, args.limit, args.only, args.max_errors,
                            buy=not args.stored_only)
+            elif args.command == "estimate":
+                estimate(session, args.sample, policy, args.cap if args.cap > 0 else None, only=args.only)
             else:
                 report(session, args.sample, args.out, args.xml_rows, policy=policy, results=args.results)
 
