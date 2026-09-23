@@ -6,6 +6,7 @@ reading store, and a render that writes empty PNGs."""
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import subprocess
@@ -40,6 +41,20 @@ class _Render:
             (out_dir / f"p{page:03d}.png").write_bytes(b"")
             paths.append(out_dir / f"p{page:03d}.png")
         return paths
+
+
+class _S3:
+    """Serves what it is given, or raises; records every GET."""
+
+    def __init__(self, objects=None):
+        self.objects = dict(objects or {})
+        self.gets: list[str] = []
+
+    def get_object(self, *, Bucket, Key):
+        self.gets.append(Key)
+        if Key not in self.objects:
+            raise RuntimeError("An error occurred (NoSuchKey) when calling the GetObject operation")
+        return {"Body": io.BytesIO(self.objects[Key])}
 
 
 @pytest.fixture(autouse=True)
@@ -84,6 +99,9 @@ def _client(n, rows=3):
 
 
 def _read(store, filings, pages, client, tmp_path, model=QWEN, **kwargs):
+    """A fake S3 with nothing in it unless the test gives one: the seeded
+    PDFs are in the cache, so no test builds a boto3 client."""
+    kwargs.setdefault("s3", _S3())
     return pr.read_pages(store, pages, model, workers=4, cache_dir=tmp_path, client=client,
                          filing_store=filings, **kwargs)
 
@@ -282,21 +300,6 @@ def test_a_render_failure_is_an_error_per_page_of_that_filing_not_a_crash(filing
     assert len(store.rows) == 4
 
 
-class _S3:
-    """Serves what it is given, or raises; records every GET."""
-
-    def __init__(self, objects=None):
-        self.objects = dict(objects or {})
-        self.gets: list[str] = []
-
-    def get_object(self, *, Bucket, Key):
-        self.gets.append(Key)
-        if Key not in self.objects:
-            raise RuntimeError("An error occurred (NoSuchKey) when calling the GetObject operation")
-        import io
-        return {"Body": io.BytesIO(self.objects[Key])}
-
-
 def test_the_pdf_is_materialised_in_the_render_pool_from_s3_when_the_cache_misses(filings, render, tmp_path):
     cached = _seed(filings, tmp_path, OID)
     fetched = _seed(filings, tmp_path, OID2, payload=b"%PDF-1.4 only in S3")
@@ -308,6 +311,29 @@ def test_the_pdf_is_materialised_in_the_render_pool_from_s3_when_the_cache_misse
     assert s3.gets == [fetched.s3_key] and fi.pdf_path(tmp_path, OID2).read_bytes() == b"%PDF-1.4 only in S3"
     assert sorted(call[0] for call in render.calls) == sorted([fi.pdf_path(tmp_path, OID), fi.pdf_path(tmp_path, OID2)])
     assert cached.sha256 != fetched.sha256
+
+
+def test_the_s3_client_is_built_once_on_the_main_thread_and_shared_by_the_render_pool(filings, render, tmp_path, monkeypatch):
+    payload = {oid: f"%PDF-1.4 {oid} in S3".encode() for oid in (OID, OID2)}
+    rows = {oid: _seed(filings, tmp_path, oid, payload=payload[oid]) for oid in payload}
+    for oid in payload:
+        fi.pdf_path(tmp_path, oid).unlink()                 # both cold: two downloads
+    shared = _S3({rows[oid].s3_key: payload[oid] for oid in payload})
+    built: list[int] = []
+
+    def build(workers=8):
+        built.append(workers)
+        return shared
+
+    monkeypatch.setattr(fi, "_s3_client", build)
+    store, client = pr.MemoryStore(), _client(2)
+    result = pr.read_pages(store, [(OID, 3), (OID2, 3)], QWEN, workers=4, cache_dir=tmp_path, client=client,
+                           filing_store=filings)
+    assert len(result.responses) == 2 and built == [pr.RENDER_WORKERS]
+    assert sorted(shared.gets) == sorted(row.s3_key for row in rows.values())
+    stored = _Client([])
+    pr.read_pages(store, [(OID, 3), (OID2, 3)], QWEN, workers=4, cache_dir=tmp_path, client=stored, filing_store=filings)
+    assert built == [pr.RENDER_WORKERS] and stored.json_modes == []      # no misses, no client built
 
 
 def test_a_pdf_that_cannot_be_materialised_is_an_error_per_page_not_a_crash(filings, render, tmp_path, caplog):

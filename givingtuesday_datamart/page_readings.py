@@ -398,12 +398,13 @@ class FilingUnreadable(Exception):
     be materialised, or pdftoppm failed. The message is the pages' error."""
 
 
-def _render_filing(row: filing_images.FilingImage, first: int, last: int, cache_dir: Path, s3=None) -> list[Path]:
+def _render_filing(row: filing_images.FilingImage, first: int, last: int, cache_dir: Path, s3) -> list[Path]:
     """Runs in the render pool: the filing's PDF onto local disk (from the
-    cache when it hashes to the row, else S3), then its span of pages to
-    PNGs. Takes the row, never the session. A failure at either step is
-    logged once here and raised as ``FilingUnreadable`` for the filing's
-    read jobs to store as error rows."""
+    cache when it hashes to the row, else S3 through the client the main
+    thread built), then its span of pages to PNGs. Takes the row, never
+    the session. A failure at either step is logged once here and raised
+    as ``FilingUnreadable`` for the filing's read jobs to store as error
+    rows."""
     try:
         pdf = filing_images.materialise(row, cache_dir, s3=s3)
     except Exception as exc:                              # noqa: BLE001
@@ -512,6 +513,10 @@ def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
         first, last = spans.get(oid, (page, page))
         spans[oid] = (min(first, page), max(last, page))
     client = client if client is not None else vlm_transcription.client()
+    # Built here, once: boto3 documents constructing clients from the
+    # default session as not thread-safe, and on an empty cache the render
+    # workers would otherwise each build one through the unlocked lru_cache.
+    s3 = s3 if s3 is not None else filing_images._s3_client(RENDER_WORKERS)
     tally = {"pages": 0, "rows": 0, "errors": 0, "partial": 0, "in": 0, "out": 0}
     with ThreadPoolExecutor(max_workers=RENDER_WORKERS) as renders, ThreadPoolExecutor(max_workers=workers) as pool:
         rendered = {oid: renders.submit(_render_filing, images[oid], first, last, cache_dir, s3)
