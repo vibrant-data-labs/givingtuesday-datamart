@@ -133,7 +133,8 @@ class FilingImage:
 
 COLUMNS = tuple(f.name for f in fields(FilingImage))
 
-_SELECT = f"SELECT {', '.join(COLUMNS)} FROM filing_images WHERE object_id = ANY(:ids)"
+_SELECT_ALL = f"SELECT {', '.join(COLUMNS)} FROM filing_images"
+_SELECT = f"{_SELECT_ALL} WHERE object_id = ANY(:ids)"
 _UPSERT = (
     f"INSERT INTO filing_images ({', '.join(COLUMNS)}) "
     f"VALUES ({', '.join(':' + c for c in COLUMNS)}) "
@@ -168,6 +169,9 @@ class FilingImageStore(ABC):
     @abstractmethod
     def upsert(self, rows: Sequence[FilingImage]) -> None: ...
 
+    @abstractmethod
+    def all(self) -> list[FilingImage]: ...
+
 
 class PostgresStore(FilingImageStore):
     def __init__(self, session) -> None:
@@ -191,6 +195,10 @@ class PostgresStore(FilingImageStore):
         self.session.execute(text(_UPSERT), [asdict(row) for row in rows])
         self.session.commit()
 
+    def all(self) -> list[FilingImage]:
+        found = self.session.execute(text(_SELECT_ALL)).mappings().all()
+        return [FilingImage(**{c: row[c] for c in COLUMNS}) for row in found]
+
 
 class MemoryStore(FilingImageStore):
     """A dict, plus the size of every committed chunk, for tests."""
@@ -211,6 +219,9 @@ class MemoryStore(FilingImageStore):
         for row in rows:
             self.rows[row.object_id] = row
         self.commits.append(len(rows))
+
+    def all(self) -> list[FilingImage]:
+        return list(self.rows.values())
 
 
 def _store(session) -> FilingImageStore:
@@ -714,8 +725,7 @@ def status_report(session) -> str:
 def verify(session, *, bucket: str = BUCKET, workers: int = 8, s3=None) -> list[str]:
     """Download every stored object and hash it; return the ids whose object
     does not hash to the row's ``sha256`` (or is missing)."""
-    rows = [FilingImage(**{c: r[c] for c in COLUMNS}) for r in session.execute(text(
-        f"SELECT {', '.join(COLUMNS)} FROM filing_images WHERE s3_key IS NOT NULL")).mappings()]
+    rows = [row for row in _store(session).all() if row.s3_key]
     s3 = s3 if s3 is not None else _s3_client(workers)
 
     def check(row: FilingImage) -> tuple[str, bool]:

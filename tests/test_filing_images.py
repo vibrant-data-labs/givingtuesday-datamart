@@ -395,6 +395,19 @@ def test_local_pdf_refuses_unfetched_filings_and_corrupt_objects(teos, tmp_path)
     assert not fi.pdf_path(tmp_path, OID).exists()
 
 
+def test_verify_names_the_corrupt_and_the_missing_objects(teos, tmp_path):
+    ids = ["202300000000000001", "202300000000000002", "202300000000000003"]
+    for oid in ids:
+        teos.add(oid, [("20230501", PDF)])
+    store, s3 = fi.MemoryStore(), _S3()
+    _fetch(store, ids, tmp_path, s3)
+    assert fi.verify(store, bucket="b", s3=s3) == []
+    s3.objects[("b", f"irs/pdf/{ids[0]}.pdf")] = PDF2                 # corrupted in place
+    del s3.objects[("b", f"irs/pdf/{ids[2]}.pdf")]                    # gone
+    assert sorted(fi.verify(store, bucket="b", s3=s3, workers=2)) == [ids[0], ids[2]]
+    assert s3.gets.count(f"irs/pdf/{ids[1]}.pdf") == 2 and teos.requests == 6
+
+
 # ---------------------------------------------------------------------------
 # backfill
 # ---------------------------------------------------------------------------
@@ -529,6 +542,9 @@ class _Session:
         self.calls.append((clause.text, params))
         return _Result(self._rows)
 
+    def close(self):
+        pass
+
     def commit(self):
         self.commits += 1
 
@@ -563,6 +579,7 @@ def test_postgres_store_reads_by_id_array_and_rebuilds_rows():
     assert store.get(["1" * 18, "2" * 18]) == {"1" * 18: wanted}
     (sql, params), = session.calls
     assert "WHERE object_id = ANY(:ids)" in sql and params == {"ids": ["1" * 18, "2" * 18]}
+    assert store.all() == [wanted] and session.calls[-1][0].endswith("FROM filing_images")
 
 
 def test_postgres_store_creates_the_table_and_its_status_index():
