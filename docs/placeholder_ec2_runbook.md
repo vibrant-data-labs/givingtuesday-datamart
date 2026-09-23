@@ -140,6 +140,9 @@ group, so each gets the interrupt on its own main thread, cancels the
 pages not yet started and records the results of the pages in flight (at
 most the workers' count, about a dollar); `run` waits for them, then
 stops. Do not `kill -9`: that loses the uncommitted chunk, up to 200 pages.
+A render interrupted by the stop leaves a `tmp*/` directory under
+`<cache>/pages200/<filing>/`; its pages are rendered again on resume, and
+the directory is safe to delete whenever nothing is running.
 
 **Running the same command again resumes.** Every stage reads what the
 tables lack and nothing else, so a completed stage makes no gateway call,
