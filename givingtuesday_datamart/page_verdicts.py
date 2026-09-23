@@ -11,7 +11,9 @@ Part B of ``docs/placeholder_storage_spec.md``, the verdicts half. The
 policy and its numbers are the pipeline doc's *3b · Agree* and *Ground
 truth* sections.
 
-**The policy.** ``POLICY_V1``: two base readers read every page; a page
+**The policy.** ``POLICY_V1`` (as decided on the sample; 3.8 Flash at its
+default reasoning effort, pinned) and ``POLICY_V2`` (the same with 3.8 Flash
+at ``low``, the 1,000-filing run's): two base readers read every page; a page
 they agree on — the same (name key, amount) multiset, at least one row
 (``reading_pairs.agree_on``, the scorer's rule) — is ``agreed``. A
 disputed page goes to each escalation reader in turn and is ``escalated``
@@ -81,14 +83,42 @@ POLICY_V1 = {
     "escalation": ["google/gemini-3.8-flash", "anthropic/claude-sonnet-5"],
     "prompt_version": "v4",
     "flagged": "load_single",     # the last escalation reader's reading, marked; "leave_out" is the alternative
+    # v1 was decided with 3.8 Flash at its default reasoning effort (the
+    # sample, 2026-09-23). The setting has since moved to "low" (``REQUEST_EXTRAS``),
+    # so v1 pins the readings its verdicts name and, like any policy with
+    # settings of its own, can buy nothing: a re-run reproduces v1 from the
+    # table or stops.
+    "settings": {"google/gemini-3.8-flash": {"json_mode": True, "extras": {}}},
 }
-POLICIES = {"v1": POLICY_V1}
-# Worker counts that held on the sample; the escalation stages run as their own pools.
+# The same readers, prompt and flagged rule with 3.8 Flash at reasoning
+# effort "low" — today's ``REQUEST_EXTRAS``, so v2 reads at it and buys under
+# it (Zein, 2026-09-23: on the 83 ground-truth pages 62 pages exact against
+# 59 and 17 of 46 disputes resolved against 16, at $0.0093 a page against
+# $0.0220). The 1,000-filing run's policy.
+POLICY_V2 = {
+    "version": "v2",
+    "base": ["alibaba/qwen3-vl-instruct", "google/gemini-3.5-flash-lite"],
+    "escalation": ["google/gemini-3.8-flash", "anthropic/claude-sonnet-5"],
+    "prompt_version": "v4",
+    "flagged": "load_single",
+}
+POLICIES = {"v1": POLICY_V1, "v2": POLICY_V2}
+# Worker counts; the escalation stages run as their own pools. The base
+# pair's held on the sample's full reads (Qwen at 40 for 1,700 pages with
+# every call answered 200). The escalation readers' 8 came from the 83-page
+# ground-truth runs and was never a throughput test: at 8 workers 3.8 Flash
+# read 11–15 dense pages a minute on the rehearsal, a page's latency being
+# about 40 s, so the stage is latency-bound and scales with workers. Raised
+# to 24 for the second half of the rehearsal, where it read 46 a minute
+# with every call still answered 200; the pipeline doc has both rates. The
+# base pair's counts are the same kind of number — 40 and 12 held, nothing
+# says they are the ceiling — and the 1,000-filing run may raise them too
+# (Zein, 2026-09-23); the gateway's own limits are the thing to find.
 WORKERS = {
     "alibaba/qwen3-vl-instruct": 40,
     "google/gemini-3.5-flash-lite": 12,
-    "google/gemini-3.8-flash": 8,
-    "anthropic/claude-sonnet-5": 8,
+    "google/gemini-3.8-flash": 24,
+    "anthropic/claude-sonnet-5": 24,
 }
 
 DDL = (

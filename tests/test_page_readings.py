@@ -8,8 +8,10 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 import os
 import subprocess
+import time
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -20,6 +22,7 @@ from test_vlm_transcription import _Client, _answer, _rows
 
 from givingtuesday_datamart import filing_images as fi
 from givingtuesday_datamart import page_readings as pr
+from givingtuesday_datamart._internal import bulk
 from givingtuesday_datamart import vlm_transcription as vlm
 
 IRS, FILER = 2246, 2550
@@ -213,7 +216,7 @@ def test_an_error_result_increments_errors_and_keeps_the_stamps(filings, render,
     result = _read(store, filings, _pages(OID, 4), garbled, tmp_path)
     row = store.rows[pr.reading_key(OID, 4, image.sha256, QWEN)]
     assert row.errors == 1 and row.last_error == "not json at all" and row.response is None
-    assert row.usage == {"in": 10, "out": 15} and row.attempts == 3 and row.finish == "stop"
+    assert row.usage == {"in": 30, "out": 45} and row.attempts == 3 and row.finish == "stop"   # three calls' tokens
     assert sorted(result.failed) == _pages(OID, 4)
 
 
@@ -371,6 +374,56 @@ def test_render_runs_once_per_filing_for_the_span_asked_for(filings, render, tmp
         (fi.pdf_path(tmp_path, OID2), 4, 9, tmp_path / "pages200" / OID2),
         (fi.pdf_path(tmp_path, OID), 3, 5, tmp_path / "pages200" / OID),
     ]
+
+
+def test_the_render_pool_logs_one_render_time_per_filing(filings, render, tmp_path, caplog):
+    """The run log carries the render time of each filing's span, so the
+    empty-cache path can be measured from the log alone."""
+    _seed(filings, tmp_path, OID)
+    _seed(filings, tmp_path, OID2, pages=10, attachment_from=2)
+    with caplog.at_level(logging.INFO, logger="givingtuesday_datamart"):
+        _read(pr.MemoryStore(), filings, [(OID, 3), (OID2, 4), (OID, 5), (OID2, 9)], _client(4), tmp_path)
+    lines = sorted(r.getMessage() for r in caplog.records if r.getMessage().startswith("render:"))
+    assert len(lines) == 2
+    assert lines[0].startswith(f"render: {OID2} pages 4-9, 6 PNGs in ")
+    assert lines[1].startswith(f"render: {OID} pages 3-5, 3 PNGs in ")
+
+
+def test_an_interrupted_run_cancels_the_queued_renders_and_reads_and_records_the_reads_in_flight(filings, render, tmp_path, monkeypatch, caplog):
+    """Ctrl-C before the first page comes back, six filings queued on one
+    render worker and eight reads in flight: the five renders not yet
+    started and the sixteen reads behind them are cancelled; the four reads
+    waiting on the running render finish and are stored, and the four
+    waiting on a cancelled render fail fast and are logged — the run stops
+    within one render, buys nothing it does not store, and a resume does
+    not buy the stored four again."""
+    oids = [f"20240000000000000{i}" for i in range(6)]
+    for oid in oids:
+        _seed(filings, tmp_path, oid)
+    slow = render.__call__
+    monkeypatch.setattr(vlm, "render", lambda *args, **kwargs: (time.sleep(0.3), slow(*args, **kwargs))[1])
+    monkeypatch.setattr(pr, "RENDER_WORKERS", 1)
+
+    def interrupted(futures_):
+        deadline = time.monotonic() + 5
+        while sum(f.running() for f in futures_) < 8:
+            if time.monotonic() > deadline:
+                pytest.fail("the eight reads never started")
+            time.sleep(0.001)
+        raise KeyboardInterrupt
+        yield                                             # noqa: unreachable, makes this a generator
+
+    monkeypatch.setattr(bulk, "as_completed", interrupted)
+    store, client = pr.MemoryStore(), _client(24)
+    with pytest.raises(KeyboardInterrupt):
+        pr.read_pages(store, [(oid, page) for oid in oids for page in (3, 4, 5, 6)], QWEN, workers=8,
+                      cache_dir=tmp_path, client=client, filing_store=filings, s3=_S3())
+    assert len(render.calls) == 1 and render.calls[0][0] == fi.pdf_path(tmp_path, oids[0])
+    assert sorted(row.page for row in store.rows.values()) == [3, 4, 5, 6] and {row.object_id for row in store.rows.values()} == {oids[0]}
+    assert len(client.json_modes) == 4 and store.commits == [4]
+    assert "stopping: 16 queued jobs cancelled before they started; 8 in flight are waited for and recorded" in caplog.text
+    assert "stopping: the renders not yet started are cancelled" in caplog.text
+    assert caplog.text.count("a job in flight was cancelled underneath") == 4
 
 
 def test_unfetched_filings_and_pages_outside_the_pdf_raise_before_any_call(filings, render, tmp_path):

@@ -16,16 +16,20 @@ in [placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md).
 - We read those pages with a vision model. We keep a list only when it
   adds up to the declared total and looks like a grant list.
 - One read of the sample recovers 36 to 40 of 100 filings and 45% to 49%
-  of the dollars, for $4 to $12 in model cost. The sample has been read
-  four times (two models, two prompts); together the reads reach 45
-  filings and 53%.
+  of the dollars, for $4 to $12 in model cost. The page gate — two cheap
+  readers, a third and a fourth on the pages they dispute — recovers 47
+  filings and 53% for $63, with every accepted row backed by two readers
+  that agree; 12 of the 47 lean on pages no two readers agreed on,
+  loaded from the best reader and marked, and without those it is 35
+  filings and 37%.
 - Pages with 25 or more rows come out differently on every read. The
   page total hides it, because names shift against amounts while the sum
   barely moves.
 - 39% of the dollars cannot be recovered this way. The IRS serves no PDF,
   or the PDF has no list in it.
-- Next step: run both models on every page and accept pages where they
-  agree on names and amounts. Send the rest to a third model.
+- Next step: the 1,000-filing run on the expanded frame (9,347 pages,
+  about $270 and 7 hours at the measured rates with the third reader at
+  low reasoning effort), then a matcher pass on the recovered rows.
 
 ## The problem
 
@@ -203,10 +207,30 @@ By read:
 | Qwen3-VL, second read | 37 | 46.4% |
 | Gemini Flash Lite, second read | 40 | 48.9% |
 | any of the four | 45 | 52.9% |
+| the page gate (two readers agree, or a third, or a fourth; the rest loaded marked) | 47 | 53.4% |
+| the page gate with the marked pages left out | 35 | 37.2% |
 
 The number to quote is a single read's. The union grows with every read
 because dense pages come out differently each time, and a best-of-four
 chosen afterwards is not a method.
+
+The page gate is a method, and it was run on the whole sample on
+2026-09-23 for $63: Qwen and Flash Lite read every page, a page they
+agree on (same names, same amounts) is accepted, a disputed page goes to
+Gemini 3.8 Flash and then to Claude Sonnet 5 and is accepted when any
+two readers agree, and a page no two readers agree on is loaded from
+Sonnet's reading and marked. Two thirds of the pages are disputed (88%
+of Johnson & Johnson's 836, half of the rest); 3.8 Flash settles 55% of
+the disputes and Sonnet a third of what is left; 21% of pages end up
+marked. That gives 47 filings and 53.4% of the dollars, and every
+accepted row names the two readings that agreed on it. Twelve of the 47
+filings — 16 points of the 53.4%, Bezos 2023 and both Wells Fargo years
+among them — reconcile only through marked pages, whose single reading
+the ground truth puts right about half the time. Without them the gate
+gives 35 filings and 37.2%. The 9,347-page expanded frame projects to
+about $270 at the measured rates, with the third reader at low
+reasoning effort — it read the ground-truth pages better that way at
+less than half the price ($330 as the sample was run).
 
 Two reads of the same page agree on every name and amount 89% to 97% of
 the time when the page has fewer than 25 rows. With 25 rows or more,

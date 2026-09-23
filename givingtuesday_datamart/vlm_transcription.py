@@ -65,6 +65,19 @@ REQUEST_EXTRAS: dict[str, dict] = {
     # page and returns no text at all (three of 83 ground-truth pages, at
     # 8K, 16K and 32K tokens); with thinking off it read all three.
     "anthropic/claude-sonnet-5": {"reasoning_effort": "none"},
+    # Gemini 3.8 Flash thinks by default and the gateway bills it as output:
+    # 5,524 output tokens a page on the 83 ground-truth pages for 7,270
+    # characters of answer. At "low" (Zein, 2026-09-23) it reads the same
+    # pages at 2,126 tokens a page — $0.0093 against $0.0220, 12 s median
+    # against 26 — and no worse: 62 pages exact against 59, 96.5% / 96.3%
+    # precision and recall against 94.2% / 94.0%, 17 of 46 disputes
+    # resolved against 16, one call a page. Never "none" or "minimal" for
+    # a Google model: they map to an unbounded thinking budget — "none" on
+    # the same pages gave 12,835 tokens a page, 7 pages at the 32K limit,
+    # 56 s median and no gain in accuracy; one page at "minimal" 7,993
+    # tokens and three attempts. POLICY_V1's verdicts were decided at the
+    # default and pin it; POLICY_V2 reads at "low".
+    "google/gemini-3.8-flash": {"reasoning_effort": "low"},
 }
 LIST_KINDS = ("grants_paid_list", "grants_future_list")
 MAX_TOKENS = 8000            # a dense page is 2–3K tokens of JSON; doubled on truncation
@@ -235,13 +248,22 @@ def transcribe(client, model: str, png: Path) -> dict:
     stopped mid-row on, is asked for again, without JSON mode from then
     on — that mode, not the page, is what made Qwen answer 401 dense pages
     with nothing. The fullest parsed answer is returned, with
-    ``_attempts`` set to the number of calls made.
+    ``_attempts`` set to the number of calls made and ``_usage`` the tokens
+    of every call that answered, summed — what the page cost, not the kept
+    answer's size, which the answer itself gives (Zein, 2026-09-23; rows
+    stored before that date carry the kept call's tokens and understate
+    the spend by about 6% on the rehearsal run).
     """
     max_tokens, json_mode = MAX_TOKENS, JSON_MODE.get(model, True)
     best: dict = {}
+    spent: dict | None = None
     attempt = 0
     for attempt in range(1, ATTEMPTS + 1):
         data = _ask(client, model, png, max_tokens, json_mode)
+        if usage := data.get("_usage"):
+            spent = spent or {"in": 0, "out": 0}
+            spent["in"] += usage.get("in") or 0
+            spent["out"] += usage.get("out") or 0
         if (not best or _rows(data) > _rows(best)
                 or (_rows(data) == _rows(best) and best.get("_partial") and not data.get("_partial"))):
             best = data
@@ -259,6 +281,8 @@ def transcribe(client, model: str, png: Path) -> dict:
             continue
         break
     best["_attempts"] = attempt
+    if spent is not None:
+        best["_usage"] = spent
     return best
 
 

@@ -12,9 +12,14 @@ pipeline. Two parts, meant to be built in separate sessions:
   readings under a versioned policy.
 
 Vibrant Data Labs, 2026-09-22. Status: Parts A and B built and every
-criterion run by hand against the datamart (all three notes in the
-pipeline doc's *Order of operations*, item 4); the 1,000-filing run
-(Session 4) is next. Background and the measurements
+criterion run by hand against the datamart (the three built notes in the
+pipeline doc's *Order of operations*, item 4), and Session 4's dress
+rehearsal run on 2026-09-23 — the whole pipeline on the 100-filing sample
+under `POLICY_V1` from an empty cache, $63 and 118 minutes, every gateway
+call answered, projecting the 9,347-page frame at about $330 and 8 hours
+under v1 and about $270 and 7 hours under `POLICY_V2`, 3.8 Flash at low
+reasoning effort (the *Rehearsal run* note there and the *Sample under
+POLICY_V1* results); the 1,000-filing run itself, under v2, is next. Background and the measurements
 every decision below rests on are in
 [placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md);
 the short report is [placeholder_grant_recovery.md](placeholder_grant_recovery.md).
@@ -84,6 +89,7 @@ fresh session should not reopen them.
 | escalation | `google/gemini-3.8-flash`, then `anthropic/claude-sonnet-5` | 94% and 97.5% pair precision; neither repeats Flash Lite's errors |
 | prompt | `vlm_transcription.PROMPT`, version `v4` | inside run-to-run noise for Gemini, a small gain for Qwen |
 | per-model settings | `JSON_MODE`, `REQUEST_EXTRAS` in `vlm_transcription` | Qwen never in JSON mode; Sonnet and the GPT line at reasoning effort none |
+| 3.8 Flash reasoning effort | `low`; `POLICY_V2` reads under it, `POLICY_V1` pins the default-effort readings its verdicts name | Zein, 2026-09-23; on the 83 ground-truth pages 2,126 output tokens a page against 5,524, $0.0093 against $0.0220, 62 pages exact against 59, 96.5% / 96.3% precision and recall against 94.2% / 94.0%, 17 of 46 disputes resolved against 16; `none` and `minimal` map to an unbounded thinking budget for Google models (12,835 tokens a page, 7 pages at the 32K limit, no gain) |
 | agreement | equal (name key, amount) multisets, at least one row | amounts alone hide shifted names; two empty readings agreed once and were wrong |
 | same-model repeats | never count as agreement | Gemini wrong on 6 of 57 self-agreements, Qwen on 14 of 51 |
 | DPI | 200 | 130 misread digits; 300 costs more for nothing |
@@ -231,7 +237,7 @@ CREATE TABLE IF NOT EXISTS page_readings (
     request         jsonb NOT NULL,       -- {json_mode, extras}, for audit
     response        jsonb,                -- page_kind, heading, rows, totals; NULL on error
     partial         boolean NOT NULL DEFAULT false,
-    usage           jsonb,                -- {in, out, reasoning}
+    usage           jsonb,                -- {in, out}: every call's tokens summed (from 2026-09-23; the kept call's before)
     finish          text,
     attempts        integer,
     json_mode       boolean,
@@ -287,8 +293,11 @@ Copied from vdl-tools' `_bulk_get_cache_or_run`, with images:
    increments `errors` and sets `last_error` instead of `response`.
 5. Returns page → response for hits and successful misses.
 
-Worker counts that held on the sample: Qwen 40, Flash Lite 12, 3.8
-Flash and Sonnet 8; the escalation stages run as their own pools.
+Worker counts: Qwen 40, Flash Lite 12, 3.8 Flash and Sonnet 24; the
+escalation stages run as their own pools. The base pair's held on the
+sample's full reads; the escalation readers' 8 was raised to 24 on the
+rehearsal, where 3.8 Flash went from 12 to 46 pages a minute with every
+call still answered, and all four are floors rather than ceilings.
 
 ### `agree` and the policy
 
@@ -335,6 +344,12 @@ and a re-run reads it again. Verdicts are upserted under
 nothing; a policy change is a new version and only readers not yet
 stored cost anything. The comparison is `reading_pairs`, which the
 scorer imports too, so the two cannot drift.
+
+`POLICY_V2` (2026-09-23) is the same policy with 3.8 Flash at reasoning
+effort `low`, today's `REQUEST_EXTRAS`, so it reads and buys under that
+setting; `POLICY_V1` carries `settings` pinning 3.8 Flash to the
+default-effort readings its verdicts were decided on, and so can buy
+nothing — a re-run reproduces v1 from the table or stops.
 
 Two things the built code adds to the policy shape. A policy may carry
 `"settings": {model: {json_mode, extras}}` for readings stored under a
@@ -475,7 +490,11 @@ criteria pass.
 
 **Session 4 — the 1,000-filing run.** Top up bands C and D, fetch, run
 the stages, report by band, and update the two documents. Budget about
-$400 in model cost and a day of wall time. It can run on the EC2 box
+$400 in model cost and a day of wall time; the rehearsal on the sample
+projects about $330 and 8 hours for the 9,347 pages already staged under
+v1, and about $270 and 7 hours under `POLICY_V2` (3.8 Flash at low
+reasoning effort), which is the policy to run it under — `transcribe
+--policy v2` — at the worker counts as set. It can run on the EC2 box
 once Parts A and B exist, since every artifact is then in S3 or the
 database; before that it must not, or the readings split across
 machines. The box needs `poppler-utils` from the system package manager

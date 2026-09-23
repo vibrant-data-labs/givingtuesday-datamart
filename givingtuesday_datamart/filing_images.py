@@ -66,6 +66,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, fields, replace
@@ -566,12 +567,17 @@ def materialise(row: FilingImage, cache_dir: Path = CACHE, *, bucket: str = BUCK
     if path.exists() and hashlib.sha256(path.read_bytes()).hexdigest() == row.sha256:
         return path
     s3 = s3 if s3 is not None else _s3_client()
+    started = time.monotonic()
     payload = s3.get_object(Bucket=bucket, Key=row.s3_key)["Body"].read()
     digest = hashlib.sha256(payload).hexdigest()
     if digest != row.sha256:
         raise ValueError(f"s3://{bucket}/{row.s3_key} hashes to {digest[:12]}…, "
                          f"the row says {row.sha256[:12]}…")
     _write_atomic(path, payload)
+    # One line per download, so a run log says how many PDFs came from S3
+    # and how long they took (the empty-cache path the EC2 box runs).
+    logger.info("materialise: %s from s3://%s/%s, %.1f MB in %.1f s", row.object_id, bucket, row.s3_key,
+                len(payload) / 1e6, time.monotonic() - started)
     return path
 
 

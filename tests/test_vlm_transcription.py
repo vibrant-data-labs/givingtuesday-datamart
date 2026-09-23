@@ -55,6 +55,18 @@ def test_an_empty_list_page_is_asked_again_without_json_mode(png):
     assert data["_json_mode"] is False and data["_prompt"] == vlm.PROMPT_VERSION
 
 
+def test_usage_is_the_sum_over_every_call_made_for_the_page(png):
+    """Two calls (an empty list, then the page): ``_usage`` is both calls'
+    tokens, what the page cost, not the kept answer's alone."""
+    first, second = _answer([]), _answer(_rows(5))
+    client = _Client([(first, "stop"), (second, "stop")])
+    data = vlm.transcribe(client, "google/gemini-3.5-flash-lite", png)
+    assert data["_attempts"] == 2 and len(data["rows"]) == 5
+    assert data["_usage"] == {"in": 20, "out": len(first) + len(second)}
+    single = vlm.transcribe(_Client([(second, "stop")]), "google/gemini-3.5-flash-lite", png)
+    assert single["_usage"] == {"in": 10, "out": len(second)} and single["_attempts"] == 1
+
+
 def test_qwen_is_never_asked_in_json_mode(png):
     client = _Client([(_answer(_rows(2)), "stop")])
     data = vlm.transcribe(client, "alibaba/qwen3-vl-instruct", png)

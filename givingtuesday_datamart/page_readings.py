@@ -65,6 +65,7 @@ import math
 import re
 import shutil
 import subprocess
+import time
 from abc import ABC, abstractmethod
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field, fields, replace
@@ -99,7 +100,7 @@ DDL = (
         request         jsonb NOT NULL,       -- {json_mode, extras}, for audit
         response        jsonb,                -- page_kind, heading, rows, totals; NULL on error
         partial         boolean NOT NULL DEFAULT false,
-        usage           jsonb,                -- {in, out, reasoning}
+        usage           jsonb,                -- {in, out}: every call's tokens summed (from 2026-09-23; the kept call's before)
         finish          text,
         attempts        integer,
         json_mode       boolean,
@@ -408,10 +409,16 @@ def _render_filing(row: filing_images.FilingImage, first: int, last: int, cache_
         pdf = filing_images.materialise(row, cache_dir, s3=s3)
     except Exception as exc:                              # noqa: BLE001
         raise _unreadable(row.object_id, first, last, "pdf", exc) from exc
+    started = time.monotonic()
     try:
-        return vlm_transcription.render(pdf, first, last, page_dir(cache_dir, row.object_id))
+        pngs = vlm_transcription.render(pdf, first, last, page_dir(cache_dir, row.object_id))
     except Exception as exc:                              # noqa: BLE001
         raise _unreadable(row.object_id, first, last, "render", exc) from exc
+    # One line per filing, so a run log carries the render time of the
+    # empty-cache path (``materialise`` logs the S3 download the same way).
+    logger.info("render: %s pages %d-%d, %d PNGs in %.1f s", row.object_id, first, last, len(pngs),
+                time.monotonic() - started)
+    return pngs
 
 
 def _unreadable(object_id: str, first: int, last: int, stage: str, exc: BaseException) -> FilingUnreadable:
@@ -536,7 +543,18 @@ def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
                     for oid, (first, last) in spans.items()}
         futures = [pool.submit(_read_one, client, model, rendered[page[0]], keys[page], settings, prior,
                                page_dir(cache_dir, page[0])) for page, prior in misses]
-        for row in upsert_as_done(store, futures, CHUNK):
+        def stop() -> None:
+            # On the way out for any reason but completion (an interrupt in
+            # the wait, the caller raising): the renders not yet started
+            # are dropped before ``upsert_as_done`` waits for the reads in
+            # flight, so a read waiting on one of them fails fast instead of
+            # holding the stop through the render queue; a filing's
+            # five-minute render is not worth finishing for pages nobody
+            # will read this run.
+            if sum(future.cancel() for future in rendered.values()):
+                logger.warning("stopping: the renders not yet started are cancelled")
+
+        for row in upsert_as_done(store, futures, CHUNK, on_stop=stop):
             page = (row.object_id, row.page)
             tally["pages"] += 1
             if row.response is None:
