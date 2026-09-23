@@ -180,24 +180,63 @@ def _upsert_sql(n: int) -> str:
 
 
 def request(model: str) -> dict:
-    """The request settings a reading is made under, for audit: whether JSON
-    mode is asked for first, and the model's extra request fields."""
+    """The request settings a reading made today runs under, for audit:
+    whether JSON mode is asked for first, and the model's extra request
+    fields."""
     return {"json_mode": vlm_transcription.JSON_MODE.get(model, True),
             "extras": vlm_transcription.REQUEST_EXTRAS.get(model, {})}
 
 
-def request_hash(model: str, prompt_version: str = PROMPT_VERSION) -> str:
-    """SHA-256 of the canonical JSON (sorted keys, no whitespace) of
-    ``request(model)``. The max-tokens ladder does not key. ``prompt_version``
-    is a key column of its own and is not hashed; it is taken so that this
-    is the one function everything looks a (model, prompt) pair up with."""
-    canonical = json.dumps(request(model), sort_keys=True, separators=(",", ":"))
+def settings_hash(settings: dict) -> str:
+    """SHA-256 of the canonical JSON (sorted keys, no whitespace) of a
+    ``{json_mode, extras}`` settings dict. The max-tokens ladder does not key."""
+    canonical = json.dumps(settings, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+def request_hash(model: str, prompt_version: str = PROMPT_VERSION) -> str:
+    """``settings_hash`` of today's ``request(model)``. ``prompt_version`` is a
+    key column of its own and is not hashed; it is taken so that this is the
+    one function everything looks a (model, prompt) pair up with."""
+    return settings_hash(request(model))
+
+
 def reading_key(object_id: str, page: int, image_sha256: str, model: str,
-                prompt_version: str = PROMPT_VERSION, dpi: int = DPI) -> Key:
-    return (object_id, page, image_sha256, dpi, model, prompt_version, request_hash(model, prompt_version))
+                prompt_version: str = PROMPT_VERSION, dpi: int = DPI, *, settings: dict | None = None) -> Key:
+    """The primary key of a reading; under today's settings unless
+    ``settings`` says what the reading actually ran under."""
+    settings = request(model) if settings is None else settings
+    return (object_id, page, image_sha256, dpi, model, prompt_version, settings_hash(settings))
+
+
+UNEVIDENCED = {"json_mode": None, "extras": None}
+
+
+def asked_json_first(stamps: Iterable[bool | None]) -> bool:
+    """Whether a run asked for JSON mode first, from its files' ``_json_mode``
+    stamps (the mode each kept answer came back under). ``transcribe`` only
+    ever falls back out of JSON mode, so one answer in it proves the run
+    asked for it; a run whose every answer is out of it did not. No stamps
+    at all is the v2 sample, which ran with JSON mode on."""
+    stamps = list(stamps)
+    return any(stamp is True for stamp in stamps) or not any(stamp is False for stamp in stamps)
+
+
+def file_settings(model: str, data: dict, json_first: bool) -> dict:
+    """The request settings a stored JSON reading evidences, for the backfill.
+
+    ``json_mode`` is the run's first-call mode (``asked_json_first``), which
+    is what ``request`` records for a live reading, so a page that fell back
+    out of JSON mode keys with the rest of its run. ``extras`` are the
+    model's ``REQUEST_EXTRAS``, which the runs that produced the files used;
+    the files do not stamp them. A file with no stamps at all never got an
+    answer (a transport error, before ``_ask`` stamps anything), so it
+    evidences nothing: both fields are None, the row keeps a hash of its
+    own, and no live key inherits its strike.
+    """
+    if not any(stamp in data for stamp in ("_json_mode", "_usage", "_finish")):
+        return dict(UNEVIDENCED)
+    return {"json_mode": json_first, "extras": vlm_transcription.REQUEST_EXTRAS.get(model, {})}
 
 
 # ---------------------------------------------------------------------------
@@ -562,14 +601,15 @@ def backfill(session, *, vlm_dir: Path = VLM_DIR, dry_run: bool = False, filing_
     Sonnet maximum-reasoning folder are skipped and logged. Per file: the page
     from the filename, ``image_sha256`` from ``filing_images`` (a filing not
     in the table is listed under ``missing``, not a crash), ``dpi`` 200, the
-    stamps as ``reading_from_result`` reads them — ``_json_mode`` absent (the
-    v2 files carry only ``_attempts``, ``_finish``, ``_max_tokens``,
-    ``_model``, ``_seconds``, ``_usage``) means True, which is what v2 ran
-    with — ``read_at`` the file's mtime, and ``request``/``request_hash`` from
-    today's ``request_hash(model, prompt_version)``: for v2 and v3 that
-    records the current settings for those models, which is what the
-    pipeline will look up. Idempotent: a second run upserts identical rows
-    and reports zero changed. The folders are left where they are.
+    stamps as ``reading_from_result`` reads them, ``read_at`` the file's
+    mtime, and ``request``/``request_hash`` from what the folder and the
+    file evidence (``asked_json_first``, ``file_settings``): the v2 files
+    carry only ``_attempts``, ``_finish``, ``_max_tokens``, ``_model``,
+    ``_seconds``, ``_usage`` and ran with JSON mode on, and the v3 Qwen run
+    asked for it first too (468 of its answers came back in it), so those
+    rows are keyed apart from Qwen v4, which ran without it. Idempotent: a
+    second run upserts identical rows and reports zero changed. The folders
+    are left where they are.
 
     Returns ``{"readers": {(model, version): {files, rows, new, changed,
     errors}}, "skipped": {folder: reason}, "missing": [object_id…]}``; a dry
@@ -602,13 +642,16 @@ def backfill(session, *, vlm_dir: Path = VLM_DIR, dry_run: bool = False, filing_
         logger.error("backfill: %s is not a fetched filing_images row; its readings are not loaded", oid)
 
     for model, version, files in plan:
-        settings, rows = request(model), []
-        for path in files:
+        readings = {path: json.loads(path.read_text()) for path in files}
+        json_first = asked_json_first(data.get("_json_mode") for data in readings.values())
+        rows = []
+        for path, data in readings.items():
             oid, page = path.parent.name, int(_PAGE_FILE.match(path.name).group(1))
             if oid in missing:
                 continue
-            key = reading_key(oid, page, images[oid].sha256, model, version)
-            rows.append(reading_from_result(key, settings, json.loads(path.read_text()), json_mode_default=True,
+            settings = file_settings(model, data, json_first)
+            key = reading_key(oid, page, images[oid].sha256, model, version, settings=settings)
+            rows.append(reading_from_result(key, settings, data, json_mode_default=settings["json_mode"],
                                             read_at=datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)))
         existing = store.get(row.key for row in rows)
         summary = readers[(model, version)]

@@ -342,6 +342,7 @@ def vlm_dir(tmp_path):
     _write(root, "alibaba__qwen3-vl-instruct", "202000000000000000", 3, _reading(1, **v2))
     v3 = dict(v2, _json_mode=False, _prompt="v3", _attempts=2)
     _write(root, "alibaba__qwen3-vl-instruct-v3", OID, 3, _reading(3, **v3))
+    _write(root, "alibaba__qwen3-vl-instruct-v3", OID, 4, _reading(3, **dict(v3, _json_mode=True, _attempts=1)))
     v4 = dict(_usage={"in": 1763, "out": 2216}, _seconds=7.2, _finish="stop", _max_tokens=8000, _json_mode=True,
               _prompt="v4", _attempts=1, _model="openai/gpt-5.6-terra")
     _write(root, "openai__gpt-5.6-terra-v4", OID, 3, _reading(4, **v4))
@@ -356,7 +357,7 @@ def vlm_dir(tmp_path):
 def test_backfill_dry_run_counts_files_per_reader_and_touches_nothing(vlm_dir, filings, caplog):
     store = pr.MemoryStore()
     result = pr.backfill(store, vlm_dir=vlm_dir, dry_run=True, filing_store=filings)
-    assert result["readers"] == {(QWEN, "v2"): {"files": 3}, (QWEN, "v3"): {"files": 1},
+    assert result["readers"] == {(QWEN, "v2"): {"files": 3}, (QWEN, "v3"): {"files": 2},
                                  ("openai/gpt-5.6-terra", "v4"): {"files": 2}}
     assert sorted(result["skipped"]) == ["alibaba__qwen3-vl-instruct-v4b", "anthropic__claude-sonnet-5-max-v4"]
     assert "second read" in result["skipped"]["alibaba__qwen3-vl-instruct-v4b"]
@@ -371,29 +372,39 @@ def test_backfill_loads_the_folders_with_the_right_keys_and_stamps(vlm_dir, fili
     result = pr.backfill(store, vlm_dir=vlm_dir, filing_store=filings)
     assert result["readers"] == {
         (QWEN, "v2"): {"files": 3, "rows": 2, "new": 2, "changed": 0, "errors": 0},
-        (QWEN, "v3"): {"files": 1, "rows": 1, "new": 1, "changed": 0, "errors": 0},
+        (QWEN, "v3"): {"files": 2, "rows": 2, "new": 2, "changed": 0, "errors": 0},
         ("openai/gpt-5.6-terra", "v4"): {"files": 2, "rows": 2, "new": 2, "changed": 0, "errors": 1},
     }
     assert result["missing"] == ["202000000000000000"]
+    # The v2 and v3 Qwen runs asked for JSON mode first (v2 by record, v3
+    # because one answer came back in it), unlike Qwen today, so their rows
+    # are keyed under that setting; the stampless Terra error under none.
+    json_first = {"json_mode": True, "extras": {}}
+    assert json_first != pr.request(QWEN)
     assert sorted(store.rows) == sorted([
-        pr.reading_key(OID, 3, image.sha256, QWEN, "v2"), pr.reading_key(OID, 4, image.sha256, QWEN, "v2"),
-        pr.reading_key(OID, 3, image.sha256, QWEN, "v3"),
+        pr.reading_key(OID, 3, image.sha256, QWEN, "v2", settings=json_first),
+        pr.reading_key(OID, 4, image.sha256, QWEN, "v2", settings=json_first),
+        pr.reading_key(OID, 3, image.sha256, QWEN, "v3", settings=json_first),
+        pr.reading_key(OID, 4, image.sha256, QWEN, "v3", settings=json_first),
         pr.reading_key(OID, 3, image.sha256, "openai/gpt-5.6-terra", "v4"),
-        pr.reading_key(OID2, 70, image2.sha256, "openai/gpt-5.6-terra", "v4"),
+        pr.reading_key(OID2, 70, image2.sha256, "openai/gpt-5.6-terra", "v4", settings=pr.UNEVIDENCED),
     ])
 
-    v2 = store.rows[pr.reading_key(OID, 3, image.sha256, QWEN, "v2")]
-    assert v2.json_mode is True and v2.dpi == 200 and v2.request == pr.request(QWEN)
+    v2 = store.rows[pr.reading_key(OID, 3, image.sha256, QWEN, "v2", settings=json_first)]
+    assert v2.json_mode is True and v2.dpi == 200 and v2.request == json_first
     assert v2.response == {"page_kind": "grants_paid_list", "heading": "Part XV", "rows": _rows(2), "totals": []}
     assert (v2.usage, v2.seconds, v2.finish, v2.attempts, v2.partial) == ({"in": 2828, "out": 78}, 3.1, "stop", 1, False)
     assert v2.read_at == datetime.fromtimestamp(1_726_000_000, tz=timezone.utc)
-    assert store.rows[pr.reading_key(OID, 4, image.sha256, QWEN, "v2")].partial is True
-    v3 = store.rows[pr.reading_key(OID, 3, image.sha256, QWEN, "v3")]
-    assert v3.json_mode is False and v3.attempts == 2 and v3.prompt_version == "v3"
-    error = store.rows[pr.reading_key(OID2, 70, image2.sha256, "openai/gpt-5.6-terra", "v4")]
+    assert store.rows[pr.reading_key(OID, 4, image.sha256, QWEN, "v2", settings=json_first)].partial is True
+    fell_back = store.rows[pr.reading_key(OID, 3, image.sha256, QWEN, "v3", settings=json_first)]
+    assert fell_back.json_mode is False and fell_back.request == json_first and fell_back.attempts == 2
+    terra = store.rows[pr.reading_key(OID, 3, image.sha256, "openai/gpt-5.6-terra", "v4")]
+    assert terra.request == {"json_mode": True, "extras": {"reasoning_effort": "none"}} and terra.json_mode is True
+    error = store.rows[pr.reading_key(OID2, 70, image2.sha256, "openai/gpt-5.6-terra", "v4", settings=pr.UNEVIDENCED)]
     assert (error.errors, error.last_error, error.response) == (1, "BadRequestError: Error code: 400", None)
-    assert (error.attempts, error.seconds, error.usage, error.json_mode) == (3, 1.1, None, True)
-    assert store.commits == [2, 1, 2]
+    assert (error.attempts, error.seconds, error.usage, error.json_mode) == (3, 1.1, None, None)
+    assert error.request == {"json_mode": None, "extras": None}
+    assert store.commits == [2, 2, 2]
 
 
 def test_backfill_is_idempotent(vlm_dir, filings, tmp_path):
@@ -404,8 +415,18 @@ def test_backfill_is_idempotent(vlm_dir, filings, tmp_path):
     before = {key: replace(row) for key, row in store.rows.items()}
     result = pr.backfill(store, vlm_dir=vlm_dir, filing_store=filings)
     assert all(summary["new"] == 0 and summary["changed"] == 0 for summary in result["readers"].values())
-    assert store.rows == before and store.commits == [2, 1, 2, 2, 1, 2]
+    assert store.rows == before and store.commits == [2, 2, 2, 2, 2, 2]
     assert all(path.exists() for path in vlm_dir.glob("*/*/p*.json"))
+
+
+def test_a_run_asked_for_json_first_if_any_answer_came_back_in_it():
+    assert pr.asked_json_first([]) is True                          # v2: no stamps, ran with JSON mode on
+    assert pr.asked_json_first([False, False, None]) is False       # Qwen v4
+    assert pr.asked_json_first([True, False, False]) is True        # Qwen v3, Gemini v4: fell back on some pages
+    stamped = {"page_kind": "other", "rows": [], "_usage": {"in": 1, "out": 1}, "_finish": "stop", "_json_mode": False}
+    assert pr.file_settings(QWEN, stamped, json_first=True) == {"json_mode": True, "extras": {}}
+    assert pr.file_settings(SONNET, stamped, json_first=True) == {"json_mode": True, "extras": {"reasoning_effort": "none"}}
+    assert pr.file_settings(SONNET, {"error": "boom", "_seconds": 1.0, "_attempts": 3}, json_first=True) == pr.UNEVIDENCED
 
 
 def test_folder_names_map_to_reader_and_prompt_version():
