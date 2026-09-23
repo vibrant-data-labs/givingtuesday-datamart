@@ -98,6 +98,20 @@ class _S3:
         return {"Body": io.BytesIO(self.objects[(Bucket, Key)])}
 
 
+class _FlakyS3(_S3):
+    """Raises on the first ``failures`` puts, then behaves."""
+
+    def __init__(self, failures=1):
+        super().__init__()
+        self.failures = failures
+
+    def put_object(self, **kwargs):
+        if self.failures:
+            self.failures -= 1
+            raise RuntimeError("An error occurred (InternalError) when calling the PutObject operation")
+        super().put_object(**kwargs)
+
+
 @pytest.fixture
 def teos(monkeypatch):
     fake = _Teos()
@@ -241,6 +255,38 @@ def test_a_failed_refetch_leaves_the_fetched_row_and_its_object_alone(teos, tmp_
     assert fi.local_pdf(store, OID, tmp_path, bucket="b", s3=s3).read_bytes() == PDF
 
 
+def test_an_s3_failure_is_a_retryable_row_not_a_crash(teos, tmp_path):
+    ids = ["202300000000000001", "202300000000000002", "202300000000000003"]
+    for oid in ids:
+        teos.add(oid, [("20230501", PDF)])
+    store, s3 = fi.MemoryStore(), _FlakyS3(failures=1)
+    statuses = _fetch(store, ids, tmp_path, s3)
+    assert sorted(statuses.values()) == ["fetched", "fetched", "upload_failed:RuntimeError"]
+    failed = next(r for r in store.rows.values() if not r.fetched)
+    assert failed.attempts == 1 and failed.s3_key is None and failed.sha256 is None and "InternalError" in failed.last_error
+    before = len(s3.puts)
+    assert _fetch(store, ids, tmp_path, s3) == {oid: "fetched" for oid in ids}
+    assert len(s3.puts) == before + 1 and store.rows[failed.object_id].attempts == 2
+
+
+def test_a_worker_that_raises_does_not_lose_the_other_rows(teos, tmp_path, monkeypatch):
+    ids = ["202300000000000001", "202300000000000002", "202300000000000003"]
+    for oid in ids:
+        teos.add(oid, [("20230501", PDF)])
+    real = fi._fetch_one
+
+    def flaky(filing, prior, **kwargs):
+        if filing.object_id == ids[1]:
+            raise RuntimeError("a bug in the worker")
+        return real(filing, prior, **kwargs)
+
+    monkeypatch.setattr(fi, "_fetch_one", flaky)
+    store = fi.MemoryStore()
+    with pytest.raises(RuntimeError, match="a bug in the worker"):
+        _fetch(store, ids, tmp_path, _S3())
+    assert sorted(store.rows) == [ids[0], ids[2]] and all(r.fetched for r in store.rows.values())
+
+
 def test_rows_are_committed_in_chunks_of_fifty(teos, tmp_path):
     ids = [f"2023{n:014d}" for n in range(120)]
     for oid in ids:
@@ -369,6 +415,16 @@ def test_backfill_is_idempotent_and_dry_run_touches_nothing(teos, staging):
     fi.backfill(store, s3=s3, **staging)
     fi.backfill(store, s3=s3, **staging)
     assert len(s3.puts) == 2 and len(store.rows) == 4 and teos.requests == 0
+
+
+def test_backfill_records_an_s3_failure_and_carries_on(teos, staging):
+    store, s3 = fi.MemoryStore(), _FlakyS3(failures=1)
+    statuses = fi.backfill(store, s3=s3, **staging)
+    assert sorted(statuses.values()) == ["fetched", "no_teos_image", "pdf_unavailable:404", "upload_failed:RuntimeError"] or \
+        sorted(statuses.values()) == ["no_attachment", "no_teos_image", "pdf_unavailable:404", "upload_failed:RuntimeError"]
+    failed = next(r for r in store.rows.values() if r.status.startswith("upload_failed"))
+    assert failed.filerein and failed.taxyear == 2022 and failed.attempts == 1 and failed.s3_key is None
+    assert len(s3.puts) == 1 and teos.requests == 0
 
 
 def test_backfill_refuses_to_run_with_a_pdf_missing(teos, staging):

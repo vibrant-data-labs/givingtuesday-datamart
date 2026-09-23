@@ -329,26 +329,23 @@ def _fetch_one(filing: Filing, prior: FilingImage | None, *, cache_dir: Path,
         last_error=got.error,
     )
     if got.status != "fetched":
-        if row.fetched:
-            # A fetched row that fails a re-fetch keeps its status, its object
-            # and the URL that object came from; only the attempt is recorded.
-            row.teos_url, row.image_generated = base.teos_url, base.image_generated
-        else:
-            row.status = got.status
-        return row
+        return _failed(row, prior, got.status, got.error)
 
     payload = got.payload
     local = pdf_path(cache_dir, filing.object_id)
-    _write_atomic(local, payload)
-    try:
-        widths = irs_source.page_widths(local)
-    except Exception as exc:                              # noqa: BLE001
-        row.status, row.last_error = "not_a_pdf", f"pdfimages: {exc}"[:500]
-        return row
-
-    digest = hashlib.sha256(payload)
     key = f"{prefix}/{filing.object_id}.pdf"
-    _upload(s3, bucket, key, payload, digest.digest())
+    try:
+        _write_atomic(local, payload)
+        try:
+            widths = irs_source.page_widths(local)
+        except Exception as exc:                          # noqa: BLE001
+            return _failed(row, prior, "not_a_pdf", f"pdfimages: {exc}"[:500])
+        digest = hashlib.sha256(payload)
+        _upload(s3, bucket, key, payload, digest.digest())
+    except Exception as exc:                              # noqa: BLE001
+        # S3, credentials, disk: nothing about the filing. The row records
+        # the attempt and stays retryable; the run goes on.
+        return _failed(row, prior, f"upload_failed:{type(exc).__name__}", str(exc)[:500])
 
     start = irs_source.attachment_start(widths)
     row.status = "fetched" if start else "no_attachment"
@@ -357,6 +354,19 @@ def _fetch_one(filing: Filing, prior: FilingImage | None, *, cache_dir: Path,
     row.pages, row.page_widths = len(widths), list(widths)
     row.attachment_from = start
     row.attachment_pages = len(widths) - start + 1 if start else 0
+    return row
+
+
+def _failed(row: FilingImage, prior: FilingImage | None, status: str, error: str | None) -> FilingImage:
+    """Record a failed attempt. A row that was fetched before keeps its
+    status, its object and the URL that object came from; only attempts and
+    last_error move."""
+    row.last_error = error
+    if prior is not None and prior.fetched:
+        row.status = prior.status
+        row.teos_url, row.image_generated = prior.teos_url, prior.image_generated
+    else:
+        row.status = status
     return row
 
 
@@ -393,17 +403,33 @@ def _s3_client(workers: int = 8):
 
 def _upsert_as_done(store: FilingImageStore, futures: Sequence[Future],
                     chunk: int = CHUNK) -> Iterator[FilingImage]:
-    """Collect worker results on the main thread and commit every ``chunk``."""
+    """Collect worker results on the main thread and commit every ``chunk``.
+
+    Workers return rows rather than raising; one that raises anyway is
+    logged and re-raised only after every other result has been collected
+    and committed. Whatever is buffered when the loop stops, for any
+    reason, is committed first.
+    """
     buffer: list[FilingImage] = []
-    for future in as_completed(futures):
-        row = future.result()
-        buffer.append(row)
-        if len(buffer) >= chunk:
+    failures: list[Exception] = []
+    try:
+        for future in as_completed(futures):
+            try:
+                row = future.result()
+            except Exception as exc:                      # noqa: BLE001
+                logger.exception("a worker raised; its filing is not recorded this run")
+                failures.append(exc)
+                continue
+            buffer.append(row)
+            if len(buffer) >= chunk:
+                ready, buffer = buffer, []
+                store.upsert(ready)
+            yield row
+    finally:
+        if buffer:
             store.upsert(buffer)
-            buffer = []
-        yield row
-    if buffer:
-        store.upsert(buffer)
+    if failures:
+        raise failures[0]
 
 
 def fetch_filings(session, object_ids: Iterable[str | Filing], *, bucket: str = BUCKET,
@@ -486,25 +512,28 @@ def _backfill_one(staged: dict, prior: FilingImage | None, *, pdf_dir: Path, buc
     ``attachment_from`` is checked rather than trusted."""
     object_id = staged["object_id"]
     local = pdf_dir / f"{object_id}.pdf"
-    payload = local.read_bytes()
-    digest = hashlib.sha256(payload)
     key = f"{prefix}/{object_id}.pdf"
-    if not (prior and prior.sha256 == digest.hexdigest() and prior.s3_key == key):
-        _upload(s3, bucket, key, payload, digest.digest())
-    widths = irs_source.page_widths(local)
+    row = FilingImage(object_id=object_id, filerein=staged["filerein"], taxyear=int(staged["taxyear"]),
+                      index_year=None, teos_url=None, image_generated=None, status="fetched", attempts=1)
+    try:
+        payload = local.read_bytes()
+        digest = hashlib.sha256(payload)
+        if not (prior and prior.sha256 == digest.hexdigest() and prior.s3_key == key):
+            _upload(s3, bucket, key, payload, digest.digest())
+        widths = irs_source.page_widths(local)
+    except Exception as exc:                              # noqa: BLE001
+        return _failed(row, None, f"upload_failed:{type(exc).__name__}", str(exc)[:500])
     start = irs_source.attachment_start(widths)
     attached = len(widths) - start + 1 if start else 0
     if (str(start or ""), str(attached)) != (staged["attachment_from"], staged["attachment_pages"]):
         logger.warning("%s: pdf says attachment_from=%s pages=%s, staging CSV says %s/%s", object_id,
                        start, attached, staged["attachment_from"], staged["attachment_pages"])
-    return FilingImage(
-        object_id=object_id, filerein=staged["filerein"], taxyear=int(staged["taxyear"]),
-        index_year=None, teos_url=None, image_generated=None,
-        status="fetched" if start else "no_attachment", attempts=1, last_error=None,
-        fetched_at=datetime.fromtimestamp(local.stat().st_mtime, tz=timezone.utc),
-        s3_key=key, sha256=digest.hexdigest(), bytes=len(payload), pages=len(widths),
-        page_widths=list(widths), attachment_from=start, attachment_pages=attached,
-    )
+    row.status = "fetched" if start else "no_attachment"
+    row.fetched_at = datetime.fromtimestamp(local.stat().st_mtime, tz=timezone.utc)
+    row.s3_key, row.sha256, row.bytes = key, digest.hexdigest(), len(payload)
+    row.pages, row.page_widths = len(widths), list(widths)
+    row.attachment_from, row.attachment_pages = start, attached
+    return row
 
 
 def backfill(session, *, staging_csvs: Sequence[Path] = STAGING_CSVS,
