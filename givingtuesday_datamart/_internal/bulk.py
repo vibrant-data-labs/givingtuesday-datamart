@@ -1,5 +1,6 @@
-"""Two pieces the storage-layer modules share: collecting worker results into
-chunked commits, and one INSERT statement for many rows.
+"""Three pieces the storage-layer modules share: collecting worker results
+into chunked commits, one INSERT statement for many rows, and one SELECT
+for a batch of composite keys.
 
 ``filing_images`` and ``page_readings`` both run a thread pool whose workers
 return rows rather than raising, collect them on the main thread and upsert
@@ -7,7 +8,11 @@ them a chunk at a time. ``upsert_as_done`` is that loop; ``multi_row_insert``
 and ``multi_row_params`` are the one-statement upsert, because psycopg2's
 ``executemany`` sends one statement per row and a round trip each — the
 first backfill of 7,626 readings spent ten minutes waiting on the network
-that way.
+that way. ``keyed_select`` and ``keyed_params`` are the batch lookup
+``page_readings`` and ``page_verdicts`` share: the key columns go over as
+parallel arrays through ``unnest``, so the statement has one parameter per
+key column however many keys are looked up (a VALUES list would hit
+Postgres's 65,535-parameter limit at about 9,000 pages).
 """
 
 from __future__ import annotations
@@ -83,3 +88,19 @@ def multi_row_params(rows: Sequence[Mapping[str, Any]], columns: Sequence[str], 
                 value = json.dumps(value)
             params[f"{column}_{i}"] = value
     return params
+
+
+def keyed_select(table: str, columns: Sequence[str], key_columns: Sequence[str], key_types: Sequence[str]) -> str:
+    """``SELECT columns FROM table WHERE (key columns) IN (SELECT * FROM
+    unnest(CAST(:k1 AS t1[]), …))``: one statement for a batch of composite
+    keys, each key column bound once as an array of its ``key_types`` type.
+    A further condition appends as ``… AND column = :name``."""
+    arrays = ", ".join(f"CAST(:{c} AS {t}[])" for c, t in zip(key_columns, key_types))
+    return (f"SELECT {', '.join(columns)} FROM {table} WHERE ({', '.join(key_columns)}) IN ("
+            f"SELECT * FROM unnest({arrays}))")
+
+
+def keyed_params(keys: Sequence[Sequence[Any]], key_columns: Sequence[str]) -> dict[str, list]:
+    """The bind parameters for ``keyed_select``: one list per key column,
+    the keys' values in order."""
+    return {column: [key[i] for key in keys] for i, column in enumerate(key_columns)}

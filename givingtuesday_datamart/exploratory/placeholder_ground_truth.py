@@ -9,6 +9,7 @@ here on (name, amount) pairs against pages transcribed from the image.
     python -m givingtuesday_datamart.exploratory.placeholder_ground_truth show OID PAGE
     python -m givingtuesday_datamart.exploratory.placeholder_ground_truth crop OID PAGE 0.3 0.7
     python -m givingtuesday_datamart.exploratory.placeholder_ground_truth score
+    python -m givingtuesday_datamart.exploratory.placeholder_ground_truth verdicts --policy v1
 
 ``pick`` draws the page sample: six pages from each cell of density
 (rows on the page: under 10, 10–24, 25–49, 50 and up, with Johnson &
@@ -23,6 +24,10 @@ page at 300 DPI for the rows that need a closer look. ``score`` is the
 result: pair precision and recall per reader and density, whether
 agreement between readers is a safe acceptance signal, and the true sum
 of each fully-read near-miss filing against its declared total.
+``policies`` simulates each stage-3b design on the checked pages from the
+JSON folders; ``verdicts`` scores what ``page_verdicts.agree`` actually
+stored under a policy the same way, so the built gate can be checked
+against the design it implements.
 
 Names are compared on their first fourteen letters and digits, lower
 case, so spelling and punctuation differences between a hand transcription
@@ -41,6 +46,8 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+
+from givingtuesday_datamart import reading_pairs
 
 SAMPLE_CSV = Path("data/exploratory/placeholder_sample_100.csv")
 STAGING_CSV = Path("data/exploratory/placeholder_staging.csv")
@@ -78,15 +85,11 @@ SEED = 7
 TRUTH_FIELDS = ["object_id", "page", "n", "name", "amount", "note"]
 
 
-def _amount(value) -> float | None:
-    try:
-        return float(str(value).replace(",", "").replace("$", "").strip())
-    except ValueError:
-        return None
-
-
-def _key(name: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", str(name or "").lower())[:14]
+# The comparison — the name key, the amount parse, a reading's rows and its
+# keyed pairs — is ``reading_pairs``, shared with ``page_verdicts.agree`` so
+# the scorer and the gate cannot drift. The private names are kept as the
+# aliases the code below reads.
+_amount, _key, _rows, _pairs = reading_pairs.amount, reading_pairs.key, reading_pairs.rows, reading_pairs.keyed
 
 
 def _reading(reader_dir: str, oid: str, page: int) -> dict | None:
@@ -97,17 +100,6 @@ def _reading(reader_dir: str, oid: str, page: int) -> dict | None:
     if "error" in data or "parse_error" in data:
         return None
     return data
-
-
-def _rows(data: dict | None) -> list[tuple[str, float]]:
-    if not data:
-        return []
-    return [(str(r.get("name") or ""), a) for r in data.get("rows") or []
-            if isinstance(r, dict) and (a := _amount(r.get("amount"))) is not None]
-
-
-def _pairs(rows) -> list[tuple[str, float]]:
-    return [(_key(name), amount) for name, amount in rows]
 
 
 def _density(n: int) -> str:
@@ -659,6 +651,65 @@ def policies(frame_pages: int, dispute_rate: float) -> None:
               + ", ".join(f"{n} {e[n]}" for n in e) + f" | ${base_cost + stage_cost:,.0f} |")
 
 
+def checked_truth() -> dict[tuple[str, int], list[dict]]:
+    """The truth rows of the drawn pages that were checked against the image
+    (seeded pages left out): what ``policies`` and ``verdicts`` score."""
+    pages = {(r["object_id"], int(r["page"])) for r in csv.DictReader(PAGES_CSV.open())}
+    return {key: rs for key, rs in _truth().items() if "SEEDED" not in rs[0]["note"] and key in pages}
+
+
+def verdicts(policy: dict, *, session, filing_store=None, reading_store=None,
+             truth: dict[tuple[str, int], list[dict]] | None = None) -> collections.Counter:
+    """The verdicts ``page_verdicts.agree`` stored under a policy, on the
+    checked pages, scored as ``policies`` scores a design: an accepted
+    reading whose pairs equal the truth's is right, any other is wrong; a
+    flagged or unreadable page is counted as such; a checked page with no
+    verdict is listed. For the flagged pages, how many the reading a
+    ``load_single`` policy would load (the accepted one) has right, and the
+    pages accepted wrongly, for a look at the image. Prints the table and
+    returns the tally. ``session`` is the datamart session or a
+    ``VerdictStore``, with the other two stores injectable as
+    ``accepted_readings`` takes them; ``truth`` defaults to
+    ``checked_truth``."""
+    from givingtuesday_datamart.page_verdicts import accepted_readings
+
+    truth = checked_truth() if truth is None else truth
+    found = accepted_readings(session, list(truth), policy, filing_store=filing_store, reading_store=reading_store)
+    tally = collections.Counter()
+    decided = collections.Counter()
+    wrong = []
+    for key, records in sorted(truth.items()):
+        want = collections.Counter(_truth_pairs(records))
+        if key not in found:
+            tally["no verdict"] += 1
+            continue
+        verdict, response = found[key]
+        decided[(verdict.verdict, verdict.accepted_model or "-")] += 1
+        if verdict.verdict in ("agreed", "escalated"):
+            outcome = "right" if reading_pairs.pairs(response) == want else "wrong"
+            tally[outcome] += 1
+            if outcome == "wrong":
+                wrong.append((key, verdict))
+        elif verdict.verdict == "flagged":
+            tally["flagged"] += 1
+            tally["flagged, accepted reading right"] += int(response is not None and reading_pairs.pairs(response) == want)
+        else:
+            tally["unreadable"] += 1
+    readers = " + ".join(policy["base"]) + (" -> " + " -> ".join(policy["escalation"]) if policy["escalation"] else "")
+    print(f"{len(truth)} checked pages under policy {policy['version']} ({readers}, prompt {policy['prompt_version']}, "
+          f"flagged: {policy.get('flagged', 'load_single')})\n")
+    print("| policy | accepted right | accepted wrong | flagged | unreadable | no verdict | flagged pages the accepted reading has right |")
+    print("|---|---|---|---|---|---|---|")
+    print(f"| {policy['version']} | {tally['right']} | {tally['wrong']} | {tally['flagged']} | {tally['unreadable']} | "
+          f"{tally['no verdict']} | {tally['flagged, accepted reading right']} of {tally['flagged']} |")
+    print("\nverdicts by kind and accepted reading:")
+    for (kind, model), n in sorted(decided.items()):
+        print(f"  {kind:<11} {model:<32} {n:>4}")
+    for (oid, page), verdict in wrong:
+        print(f"  accepted wrongly: {oid} p{page:03d} ({verdict.verdict}, {' = '.join(verdict.matched_models)})")
+    return tally
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -690,7 +741,19 @@ def main() -> None:
     p.add_argument("--dispute-rate", type=float, default=0.52,
                    help="share of pages the base pair disputes: measured 67%% on the sample's pages under v3 "
                         "(87%% on J&J's 836, 49%% elsewhere), blended for the expanded frame's mix")
+    p = sub.add_parser("verdicts", help="score the verdicts page_verdicts.agree stored under a policy, as policies does")
+    p.add_argument("--policy", default="v1", help="a registered version or a JSON file with the policy")
+    p.add_argument("--flagged", default=None, choices=("load_single", "leave_out"),
+                   help="the verdicts an override of the flagged rule decided, under <version>-<rule>")
     args = parser.parse_args()
+    if args.command == "verdicts":
+        from givingtuesday_datamart._internal.db import get_session
+        from givingtuesday_datamart.ingestion import datamart_config
+        from givingtuesday_datamart.page_verdicts import load_policy, with_flagged
+
+        with get_session(config=datamart_config()) as session:
+            verdicts(with_flagged(load_policy(args.policy), args.flagged), session=session)
+        return
     if args.command == "tiebreak":
         tiebreak()
         return

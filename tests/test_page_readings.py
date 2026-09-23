@@ -391,6 +391,46 @@ def test_frame_pages_is_every_attachment_page_of_the_fetched_filings(filings, tm
     assert pr.frame_pages(filings, [OID, OID2, "202000000000000000", OID]) == _pages(OID, 4, 5, 6)
 
 
+def test_the_result_says_what_the_run_bought(filings, render, tmp_path):
+    _seed(filings, tmp_path, OID)
+    store = pr.MemoryStore()
+    first = _read(store, filings, _pages(OID, 3, 4), _client(2), tmp_path)
+    assert first.bought == {"pages": 2, "rows": 6, "errors": 0, "partial": 0, "in": 20, "out": 2 * len(_answer(_rows(3)))}
+    stored = _read(store, filings, _pages(OID, 3, 4), _Client([]), tmp_path)
+    assert stored.bought == {"pages": 0, "rows": 0, "errors": 0, "partial": 0, "in": 0, "out": 0}
+
+
+def test_readings_under_other_settings_are_looked_up_never_bought(filings, render, tmp_path):
+    image = _seed(filings, tmp_path, OID)
+    store = pr.MemoryStore()
+    json_first = {"json_mode": True, "extras": {}}                 # the sample's Qwen v3 rows, as backfilled
+    assert json_first != pr.request(QWEN)
+    stored = pr.PageReading(*pr.reading_key(OID, 3, image.sha256, QWEN, "v3", settings=json_first), request=json_first,
+                            response={"page_kind": "grants_paid_list", "heading": "", "rows": _rows(2), "totals": []})
+    store.upsert([stored])
+    client = _client(2)
+    result = _read(store, filings, _pages(OID, 3), client, tmp_path, prompt_version="v3", settings=json_first)
+    assert result.responses == {(OID, 3): stored.response} and client.json_modes == []
+    with pytest.raises(LookupError, match="not today's"):
+        _read(store, filings, _pages(OID, 3, 4), client, tmp_path, prompt_version="v3", settings=json_first)
+    assert client.json_modes == [] and render.calls == [] and len(store.rows) == 1
+    under_todays = _read(store, filings, _pages(OID, 3), client, tmp_path, prompt_version="v3")
+    assert len(client.json_modes) == 1 and len(under_todays.responses) == 1     # a different key: bought
+    assert sorted(key[6] for key in store.rows) == sorted([pr.settings_hash(json_first), pr.request_hash(QWEN)])
+
+
+def test_a_run_that_buys_nothing_raises_on_a_miss_before_any_render_or_call(filings, render, tmp_path):
+    _seed(filings, tmp_path, OID)
+    store = pr.MemoryStore()
+    _read(store, filings, _pages(OID, 3), _client(1), tmp_path)
+    client = _client(1)
+    result = _read(store, filings, _pages(OID, 3), client, tmp_path, buy=False)
+    assert len(result.responses) == 1 and client.json_modes == []
+    with pytest.raises(LookupError, match="buys nothing"):
+        _read(store, filings, _pages(OID, 3, 4), client, tmp_path, buy=False)
+    assert client.json_modes == [] and len(render.calls) == 1 and len(store.rows) == 1
+
+
 # ---------------------------------------------------------------------------
 # the request hash
 # ---------------------------------------------------------------------------

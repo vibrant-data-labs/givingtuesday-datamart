@@ -160,9 +160,13 @@ was exactly right on 107 of 107 checked pages. A disputed page, or one
 both returned empty, goes to Gemini 3.8 Flash; if it matches either base
 reading the page is accepted. What is still open goes to Claude Sonnet
 5, thinking off, and is accepted if it matches any earlier reading. A
-page no two readers agree on is flagged and not loaded. Agreement counts
-only between different models: a model read twice repeats its own
-mistakes (Gemini wrong on 6 of 57 self-agreements, Qwen on 14 of 51).
+page no two readers agree on is flagged; under the policy as built
+(`POLICY_V1` in [`page_verdicts.py`](../givingtuesday_datamart/page_verdicts.py),
+its `flagged` rule `load_single`) it is loaded from Sonnet's single
+reading with the verdict as the mark, and `leave_out` is the
+alternative. Agreement counts only between different models: a model
+read twice repeats its own mistakes (Gemini wrong on 6 of 57
+self-agreements, Qwen on 14 of 51).
 
 On the 83 ground-truth pages this accepts 58 rightly, 2 wrongly and
 flags 23; the two wrong accepts are future-payment schedules with three
@@ -764,7 +768,89 @@ page, so the question may be moot.
    `agree`. The backfill now writes only rows the table lacks or holds
    differently, so the idempotent re-run on the corrected table reads
    every row back and writes nothing: 0 new, 0 changed, 0 written, 11 s.
-5. Decide the flagged-page policy before that run's load.
+
+   **Part B verdicts built** (2026-09-23,
+   [`page_verdicts.py`](../givingtuesday_datamart/page_verdicts.py),
+   [`reading_pairs.py`](../givingtuesday_datamart/reading_pairs.py)).
+   The comparison the scorer used (`_key`, `_amount`, `_rows`, `_pairs`)
+   moved into `reading_pairs`, which the scorer and `agree` both import;
+   the scorer's `score` and `policies` output is byte-identical before
+   and after. The last three Part B criteria were run by hand against
+   the datamart with `chat.completions.create` and
+   `vlm_transcription.transcribe` wrapped in counters, and every `agree`
+   run with `buy=False`, which raises on a missing reading before any
+   call. **The session made zero gateway calls.**
+   - Criterion 5. `agree` on the 83 checked ground-truth pages under
+     `POLICY_V1`: all four readers' v4 readings were stored, 0 pages sent,
+     0 calls, 4.7 s. 37 pages agreed by the base pair, 46 disputed; 3.8
+     Flash resolved 16 of them, Sonnet 7 of the remaining 30; 23 flagged,
+     0 unreadable; 83 verdict rows written. The scorer's new `verdicts
+     --policy v1` scores them as `policies` scores design C: **58 right,
+     2 wrong, 23 flagged**, the two wrong accepts the same two
+     future-payment pages (202233189349104748 p054, 3.8 Flash = Sonnet;
+     202413199349104001 p043, Qwen = 3.8 Flash), and Sonnet's accepted
+     reading right on 11 of the 23 flagged. By accepted reading: Qwen 37
+     (agreed), 3.8 Flash 16 and Sonnet 7 (escalated), Sonnet 23 (flagged).
+   - Criterion 6. The folder-based `report` was run first, on the
+     100-filing sample for Qwen v3 and Flash Lite v3 (37 and 40 filings
+     reconciled, $2,816.7M and $2,965.9M, 46.4% and 48.9%
+     dollar-weighted). `agree` then ran under a single-reader policy for
+     each (`data/exploratory/placeholder_policy_single_qwen_v3.json`,
+     `..._gemini_v3.json`; the Qwen one names the `settings` its run
+     evidenced, `json_mode: true`, since today's Qwen setting is a
+     different key and a plain lookup would have tried to buy all 1,782
+     pages): 1,782 pages each, every one `agreed` with itself, 0 calls,
+     5.4 s and 6.1 s. The rewired `report --policy` on each gives **zero
+     differences** in `outcome` and `recovered` — and in every other
+     column the two CSVs share — across the 100 filings: the same
+     stratum table, 46.4% and 48.9%, projected $7.55B and $8.15B. Each
+     report takes about 2.5 minutes, nearly all of it the selector's
+     subset search, as before. The 3,564 verdict rows under the two
+     single-reader versions are left in the table beside v1.
+   - Criterion 7. Kenan 2023 (202321219349102697) p127, one of the 23
+     flagged: under `load_single` its v1 row is `flagged`,
+     `accepted_model = anthropic/claude-sonnet-5`, `accepted_hash`
+     Sonnet's request hash, `matched_models = {}`, `readers_consulted =
+     4`, and the join to `page_readings` on (object_id, page,
+     image_sha256, accepted_model, prompt version v4, accepted_hash)
+     finds Sonnet's 48-row reading — 16 of the 48 truth pairs right, the
+     number the ground-truth section gives for that page. `agree` with
+     the flagged rule overridden to `leave_out` runs under a version of
+     its own, `v1-leave_out` (83 rows, 3.6 s; a second run wrote 0): the
+     page's row there has both accepted columns NULL and
+     `accepted_readings` gives it no response, while its v1 row still
+     names Sonnet's reading. (The first run of this criterion, before the
+     review of PR #45, flipped v1 in place — 23 rows rewritten each way —
+     which is what the review ruled out.) No v1 verdict names a reading
+     the table does not hold.
+   - `status --policy v1`: agreed 37, escalated 23, flagged 23; by
+     accepted reading, Qwen 37 agreed, 3.8 Flash 16 escalated, Sonnet 7
+     escalated and 23 flagged.
+
+   **Review of PR #45** (2026-09-23, five findings, one commit each).
+   Three of them changed what `agree` does. A base reader out of
+   attempts on a page is now absent for that page rather than making it
+   `unreadable`: the page goes through the dispute path with the other
+   base reader and the escalation readers and is accepted on any two
+   that agree, and `unreadable` is reserved for a page fewer than two
+   readers could read (Zein: a base reader timing out three times on a
+   dense page must not kill a page three other readers can decide; the
+   spec's decisions table). Each stage's verdicts are written as soon as
+   the stage is decided, so an error out of a later consult leaves the
+   earlier stages' rows on the table. And a `--flagged` override runs
+   under `<version>-<rule>`, with `load_policy` refusing a file that
+   reuses a registered version, so one version never holds rows decided
+   under two policies. The batch key lookup moved into `_internal.bulk`
+   beside the upsert, and the scorer's `verdicts` takes a session and
+   stores, with a memory-store test of its counts. `agree` under v1 on
+   the 83 pages, `buy=False`, after the changes: 0 verdict rows written
+   (no page there had a reader out of attempts) and `verdicts --policy
+   v1` still 58 / 2 / 23, 11 of the 23 flagged right in Sonnet's
+   reading; 0 gateway calls.
+5. ~~Decide the flagged-page policy before that run's load.~~ Decided
+   (2026-09-22, the spec's decisions table): loaded from Sonnet's single
+   reading with the verdict as the mark, `POLICY_V1["flagged"] =
+   "load_single"`; `leave_out` is a flip of the rule, at no cost.
 6. Send GT the findings list; report the 2022 image batch to the IRS.
 
 ## Open decisions

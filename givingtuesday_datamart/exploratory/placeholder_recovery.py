@@ -6,8 +6,9 @@ cheap part (the selector) changes.
 
     python -m givingtuesday_datamart.exploratory.placeholder_recovery sample
     python -m givingtuesday_datamart.exploratory.placeholder_recovery stage
-    python -m givingtuesday_datamart.exploratory.placeholder_recovery transcribe --model alibaba/qwen3-vl-instruct
-    python -m givingtuesday_datamart.exploratory.placeholder_recovery report --results ~/.cache/irs_index/vlm/alibaba__qwen3-vl-instruct-v3
+    python -m givingtuesday_datamart.exploratory.placeholder_recovery transcribe --policy v1
+    python -m givingtuesday_datamart.exploratory.placeholder_recovery report --policy v1 --out data/exploratory/placeholder_report_v1.csv
+    python -m givingtuesday_datamart.exploratory.placeholder_recovery report --results ~/.cache/irs_index/unstructured
 
 ``sample`` builds the stratified frame from GT's combined grants extract.
 The population is violently top-heavy — 22 filings carry $4.67B while 6,755
@@ -31,16 +32,18 @@ it, and records where the filer's attachments start — the IRS-rendered
 pages before that point are the XML we already hold, and are never sent
 to a model. On this sample they are 62% of all pages.
 
-``transcribe`` renders the attachment pages at 200 DPI and sends each one
-to a vision model through the gateway (see ``vlm_transcription``), one JSON
-file per page, so a rerun only pays for pages it has not seen. Results
-land in a folder named for the model and the prompt version, so a prompt
-revision is read into its own folder and scored against the last one.
+``transcribe`` decides every attachment page of the sample's fetched filings
+under a policy (``page_verdicts.agree``): each page is read by the policy's
+readers through ``page_readings.read_pages``, which reads only what the
+table lacks, so a rerun pays for nothing it has seen, and the verdicts are
+stored under the policy version. ``stage``'s manifest is not consulted:
+the pages come from ``filing_images``.
 
-``report`` runs the selector over the results — a vision model's pages or,
-for the baseline, an Unstructured job's ``<object_id>.pdf.json`` — and
-prints dollar-weighted recovery per stratum, the number the whole exercise
-is for.
+``report`` runs the selector over the accepted readings — ``page_verdicts``
+joined to ``page_readings`` under a policy, with the verdict mix per
+filing beside the outcome — or, for the baseline, over an Unstructured
+job's ``<object_id>.pdf.json`` — and prints dollar-weighted recovery per
+stratum, the number the whole exercise is for.
 """
 
 from __future__ import annotations
@@ -48,16 +51,17 @@ from __future__ import annotations
 import argparse
 import collections
 import csv
-import json
 import re
 import sys
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from givingtuesday_datamart import filing_images, irs_source, vlm_transcription
 from givingtuesday_datamart.attachment_grants import (
     PLACEHOLDER, XML_SOURCES, candidate_tables, coverage, diagnose, extract_tables, is_pointer,
     load_elements, page_tables, xml_tables)
+from givingtuesday_datamart.page_readings import MAX_ERRORS, frame_pages
+from givingtuesday_datamart.page_verdicts import (
+    FLAGGED_RULES, POLICIES, POLICY_V1, accepted_readings, agree, load_policy, summary, with_flagged)
 
 COMBINED_CSV = Path.home() / "Downloads" / "combined-grants-datamarts-gt_team_priority-20260915.csv"
 SAMPLE_CSV = Path("data/exploratory/placeholder_sample_100.csv")
@@ -83,7 +87,7 @@ STRATA = (("A", 1e8, float("inf"), None), ("B", 1e7, 1e8, 44),
 # original 100, which are kept exactly as drawn.
 EXPANSION = {"B": None, "C": 100, "D": 50}
 _OBJECT_ID = re.compile(r"(?<!\d)(\d{18})(?!\d)")
-_PAGE_FILE = re.compile(r"^p(\d+)\.json$")
+VERDICT_KINDS = ("agreed", "escalated", "flagged", "unreadable", "no_verdict")
 
 
 def _read_population(pointer=None) -> tuple[dict, dict]:
@@ -240,12 +244,6 @@ def _fetch_pdf(object_id: str, cache: Path, local: Path) -> str:
     return "staged"
 
 
-def _read_manifest(manifest: Path) -> dict[str, dict]:
-    if not manifest.exists():
-        return {}
-    return {r["object_id"]: r for r in csv.DictReader(manifest.open())}
-
-
 def stage(sample: Path, cache: Path, limit: int | None, manifest: Path) -> None:
     rows = list(csv.DictReader(sample.open()))[:limit]
     pdf_dir = cache / "pdfs"
@@ -296,90 +294,53 @@ def stage(sample: Path, cache: Path, limit: int | None, manifest: Path) -> None:
     print(f"manifest -> {manifest}")
 
 
-def transcribe(sample: Path, manifest: Path, cache: Path, model: str, results: Path,
-               workers: int, limit: int | None, only: str | None) -> None:
-    """Every attachment page of every staged filing, through one model."""
-    staged = _read_manifest(manifest)
-    rows = [r for r in csv.DictReader(sample.open())
-            if staged.get(r["object_id"], {}).get("attachment_pages", "0") not in ("", "0")]
-    if only:
-        rows = [r for r in rows if r["object_id"] == only]
-    rows = rows[:limit]
-    api = vlm_transcription.client()
-
-    jobs, repaired = [], 0                      # (object_id, page, png, out)
-    for row in rows:
-        entry = staged[row["object_id"]]
-        first, last = int(entry["attachment_from"]), int(entry["pages"])
-        pngs = vlm_transcription.render(cache / "pdfs" / f"{row['object_id']}.pdf", first, last,
-                                        cache / f"pages{vlm_transcription.DPI}" / row["object_id"])
-        out_dir = results / row["object_id"]
-        out_dir.mkdir(parents=True, exist_ok=True)
-        for page, png in zip(range(first, last + 1), pngs):
-            out = out_dir / f"p{page:03d}.json"
-            if out.exists() and _failed(out) and vlm_transcription.repair(out):
-                repaired += 1
-            if not out.exists() or _failed(out):
-                jobs.append((row["object_id"], page, png, out))
-    print(f"{len(rows)} filings, {len(jobs)} pages to transcribe with {model} (pages already done "
-          f"are skipped; {repaired} stored responses re-parsed; pages that errored are retried)")
-
-    tally = collections.Counter()
-
-    def run(job):
-        object_id, page, png, out = job
-        data = vlm_transcription.transcribe(api, model, png)
-        data["_model"] = model
-        out.write_text(json.dumps(data, indent=1))
-        usage = data.get("_usage") or {}
-        tally["pages"] += 1
-        tally["in"] += usage.get("in") or 0
-        tally["out"] += usage.get("out") or 0
-        tally["retried"] += int(data.get("_attempts", 1) > 1)
-        tally["no_json"] += int(data.get("_json_mode") is False)
-        tally["errors"] += int("error" in data or "parse_error" in data)
-        tally["truncated"] += int(data.get("_finish") == "length")
-        tally["rows"] += len(data.get("rows") or [])
-        tally[vlm_transcription.total_check(data)] += 1
-        if tally["pages"] % 25 == 0 or tally["pages"] == len(jobs):
-            spent = vlm_transcription.cost(model, tally["in"], tally["out"])
-            print(f"  {tally['pages']}/{len(jobs)} pages, {tally['rows']:,} rows, "
-                  f"{tally['retried']} retried ({tally['no_json']} answered without JSON mode), "
-                  f"{tally['errors']} errors, {tally['truncated']} truncated; "
-                  f"page totals matched {tally['matched']} / mismatch {tally['mismatch']} / none {tally['no_total']}"
-                  + (f"; ${spent:.2f}" if spent is not None else ""), flush=True)
-
-    with ThreadPoolExecutor(workers) as pool:
-        list(pool.map(run, jobs))
-    print(f"results -> {results}")
+def transcribe(session, sample: Path, policy: dict, cache: Path, limit: int | None, only: str | None,
+               max_errors: int = MAX_ERRORS, buy: bool = True) -> None:
+    """Every attachment page of every fetched filing in the sample, decided
+    under ``policy``: ``frame_pages`` from ``filing_images``, then ``agree``,
+    which reads each page with the policy's readers (``read_pages``, a no-op
+    for stored readings) and stores the verdicts under the policy version.
+    ``limit`` keeps the first filings that have pages; ``only`` one filing."""
+    ids = [r["object_id"] for r in csv.DictReader(sample.open()) if not only or r["object_id"] == only]
+    pages = frame_pages(session, ids)
+    if limit is not None:
+        keep = set(list(dict.fromkeys(oid for oid, _ in pages))[:limit])
+        pages = [page for page in pages if page[0] in keep]
+    readers = " + ".join(policy["base"]) + (" -> " + " -> ".join(policy["escalation"]) if policy["escalation"] else "")
+    print(f"{len({oid for oid, _ in pages})} filings, {len(pages)} attachment pages; policy {policy['version']}: "
+          f"{readers}, prompt {policy['prompt_version']}, flagged pages {policy.get('flagged', 'load_single')}")
+    result = agree(session, pages, policy, max_errors=max_errors, cache_dir=cache, buy=buy)
+    print(summary(result))
+    for (oid, page), why in sorted(result.no_verdict.items()):
+        print(f"  no verdict {oid} p{page:03d}: {why}")
 
 
-def _failed(result: Path) -> bool:
-    try:
-        data = json.loads(result.read_text())
-    except (OSError, json.JSONDecodeError):
-        return True
-    return "error" in data or "parse_error" in data
+def report(session, sample: Path, out: Path | None, xml_rows: Path | None, *, policy: dict = POLICY_V1,
+           results: Path | None = None) -> None:
+    """Score one engine's pages through the selector, filing by filing.
 
-
-def _load_pages(folder: Path) -> dict[int, dict]:
-    pages = {}
-    for path in folder.iterdir():
-        match = _PAGE_FILE.match(path.name)
-        if match:
-            pages[int(match.group(1))] = json.loads(path.read_text())
-    return pages
-
-
-def report(sample: Path, results: Path, out: Path | None, manifest: Path,
-           xml_rows: Path | None) -> None:
+    The vision path is ``page_verdicts`` joined to ``page_readings`` under
+    ``policy`` (``accepted_readings``): the accepted reading of every page
+    with a verdict feeds ``page_tables``; a flagged page's rows are loaded
+    but counted apart (``flagged_rows``); a page with no accepted reading —
+    unreadable, flagged under ``leave_out``, or without a verdict yet —
+    feeds nothing. Each filing's verdict mix goes into the CSV beside its
+    outcome. ``results`` is the Unstructured baseline instead: a folder of
+    ``<object_id>.pdf.json``. Fetch outcomes come from ``filing_images``.
+    """
     rows = list(csv.DictReader(sample.open()))
-    staged = _read_manifest(manifest)
+    images = filing_images._store(session).get([r["object_id"] for r in rows])
     itemised: dict[str, list] = collections.defaultdict(list)
     if xml_rows and xml_rows.exists():
         for r in csv.DictReader(xml_rows.open()):
             itemised[r["object_id"]].append(r)
-    model = re.sub(r"-v\d+$", "", results.name).replace("__", "/")   # <model>-<prompt version>
+    accepted = {}
+    frame: dict[str, list[int]] = collections.defaultdict(list)
+    if results is None:
+        pages = frame_pages(session, [r["object_id"] for r in rows])
+        for oid, page in pages:
+            frame[oid].append(page)
+        accepted = accepted_readings(session, pages, policy)
     by_stratum: dict = collections.defaultdict(
         lambda: {"n": 0, "declared": 0.0, "recovered": 0.0, "reconciled": 0,
                  "rows": 0, "near": 0.0, "outcomes": collections.Counter()})
@@ -390,33 +351,37 @@ def report(sample: Path, results: Path, out: Path | None, manifest: Path,
         declared = float(row["placeholder_amt"])
         paid, future = float(row["placeholder_paid"]), float(row["placeholder_future"])
         targets = (paid, future, paid + future)
-        entry = staged.get(row["object_id"], {})
-        staging = entry.get("status", "")
-        unstructured = results / f"{row['object_id']}.pdf.json"
-        vlm_dir = results / row["object_id"]
-        result, covered, tables, page_stats, page_errors = None, 0.0, None, "", 0
-        if staging and staging not in ("staged", "cached"):
-            outcome = staging.split(":")[0]                  # never reached transcription
-        elif unstructured.exists():
-            tables = candidate_tables(load_elements(unstructured), targets)
-        elif entry.get("attachment_pages") == "0":
+        oid = row["object_id"]
+        image = images.get(oid)
+        result, covered, tables = None, 0.0, None
+        mix = {kind: 0 for kind in VERDICT_KINDS}
+        flagged_pages: set[int] = set()
+        if image is None:
+            outcome = "missing_result"                       # never fetched into the table
+        elif not image.fetched:
+            outcome = image.status.split(":")[0]             # never reached transcription
+        elif results is not None and (results / f"{oid}.pdf.json").exists():
+            tables = candidate_tables(load_elements(results / f"{oid}.pdf.json"), targets)
+        elif not image.attachment_from:
             outcome = "no_attachment_pages"                  # absent by construction
-        elif vlm_dir.is_dir():
-            pages = _load_pages(vlm_dir)
-            expected = int(entry.get("attachment_pages") or 0)
-            checks = collections.Counter(vlm_transcription.total_check(p) for p in pages.values())
-            for p in pages.values():
-                usage = p.get("_usage") or {}
-                pages_seen["in"] += usage.get("in") or 0; pages_seen["out"] += usage.get("out") or 0
-                pages_seen["pages"] += 1
-                pages_seen["errors"] += int("error" in p or "parse_error" in p)
-            pages_seen.update({k: v for k, v in checks.items()})
-            page_errors = sum(1 for p in pages.values() if "error" in p or "parse_error" in p)
-            page_stats = (f"{len(pages)}/{expected} pages, {page_errors} failed; totals matched "
-                          f"{checks['matched']} mismatch {checks['mismatch']}")
-            tables = page_tables(pages, targets) + xml_tables(itemised.get(row["object_id"], ()), targets)
-        else:
+        elif results is not None:
             outcome = "missing_result"
+        else:
+            readings: dict[int, dict] = {}
+            for page in frame[oid]:
+                verdict, response = accepted.get((oid, page), (None, None))
+                mix[verdict.verdict if verdict else "no_verdict"] += 1
+                if response is None:
+                    continue
+                readings[page] = response
+                if verdict.verdict == "flagged":
+                    flagged_pages.add(page)
+                pages_seen[vlm_transcription.total_check(response)] += 1
+            pages_seen.update(mix)
+            if mix["no_verdict"] == len(frame[oid]):
+                outcome = "missing_result"                   # agree has not run on this filing
+            else:
+                tables = page_tables(readings, targets) + xml_tables(itemised.get(oid, ()), targets)
         if tables is not None:
             result = extract_tables(tables, paid, future)
             outcome = result.paid.outcome
@@ -434,10 +399,12 @@ def report(sample: Path, results: Path, out: Path | None, manifest: Path,
         if 0.9 <= covered < 1.1:
             bucket["near"] += paid      # the list is there; transcription lost a few percent of its rows
         parts = result.parts if result else ()
+        flagged_rows = sum(1 for r in result.rows if r.page in flagged_pages) if result else 0
+        pages_seen["flagged_rows"] += flagged_rows
         records.append({
             "stratum": row["stratum"], "filerein": row["filerein"],
             "filer_name": row["filer_name"], "taxyear": row["taxyear"],
-            "object_id": row["object_id"], "declared": declared, "paid": paid, "future": future,
+            "object_id": oid, "declared": declared, "paid": paid, "future": future,
             "outcome": outcome,
             "future_outcome": result.future.outcome if (result and result.future) else "",
             "target": result.paid.target if result else "",
@@ -450,8 +417,8 @@ def report(sample: Path, results: Path, out: Path | None, manifest: Path,
             "error_pct": "|".join(f"{p.error * 100:.3f}" for p in parts if p.reconciled),
             "pages": "|".join(f"{p.pages[0]}-{p.pages[-1]}" for p in parts if p.reconciled and p.pages),
             "amount_headers": "|".join(h for p in parts if p.reconciled for h in p.amount_headers),
-            "page_errors": page_errors,     # a reconciled list with failed pages is short by construction
-            "page_stats": page_stats,
+            **mix,                          # the verdict mix over the filing's attachment pages
+            "flagged_rows": flagged_rows,   # loaded from a flagged page's single reading, marked
         })
 
     print(f"{'stratum':<9}{'n':>4}{'recon':>7}{'rate':>7}{'declared $M':>13}{'recovered $M':>14}{'grants':>9}")
@@ -478,12 +445,12 @@ def report(sample: Path, results: Path, out: Path | None, manifest: Path,
     for outcome, count in everything.most_common():
         print(f"  {outcome:<22} {count:>4}")
 
-    if pages_seen["pages"]:
-        spent = vlm_transcription.cost(model, pages_seen["in"], pages_seen["out"])
-        print(f"\n{model}: {pages_seen['pages']:,} pages, {pages_seen['errors']} errors; page totals "
-              f"matched {pages_seen['matched']} / mismatch {pages_seen['mismatch']} / none {pages_seen['no_total']}; "
-              f"tokens in {pages_seen['in']:,} out {pages_seen['out']:,}"
-              + (f"; ${spent:.2f}" if spent is not None else ""))
+    if results is None:
+        total = sum(pages_seen[kind] for kind in VERDICT_KINDS)
+        print(f"\npolicy {policy['version']}: {total:,} attachment pages; "
+              + ", ".join(f"{kind} {pages_seen[kind]:,}" for kind in VERDICT_KINDS)
+              + f"; rows loaded from flagged pages, marked: {pages_seen['flagged_rows']:,}; page totals matched "
+              f"{pages_seen['matched']} / mismatch {pages_seen['mismatch']} / none {pages_seen['no_total']}")
 
     # Extrapolate to the full population using each stratum's own recovery rate.
     pop = {r["stratum"]: (int(r["stratum_pop"]), float(r["stratum_pop_dollars"])) for r in rows}
@@ -566,23 +533,25 @@ def main() -> None:
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--manifest", type=Path, default=MANIFEST_CSV)
 
-    p = sub.add_parser("transcribe", help="send the attachment pages to a vision model")
-    p.add_argument("--model", required=True, help="gateway model id, e.g. alibaba/qwen3-vl-instruct")
+    p = sub.add_parser("transcribe", help="decide the attachment pages under a policy, reading what the table lacks")
+    p.add_argument("--policy", default="v1", help=f"a registered version ({', '.join(POLICIES)}) or a JSON file")
+    p.add_argument("--flagged", choices=FLAGGED_RULES, default=None,
+                   help="override the policy's flagged rule; the verdicts go under <version>-<rule>")
     p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
-    p.add_argument("--manifest", type=Path, default=MANIFEST_CSV)
     p.add_argument("--cache", type=Path, default=CACHE)
-    p.add_argument("--results", type=Path, default=None,
-                   help="per-page JSON goes here (default <cache>/vlm/<model with / as __>-<prompt version>)")
-    p.add_argument("--workers", type=int, default=8)
-    p.add_argument("--limit", type=int, default=None)
+    p.add_argument("--limit", type=int, default=None, help="the first N filings that have attachment pages")
     p.add_argument("--only", default=None, help="a single object id")
+    p.add_argument("--max-errors", type=int, default=MAX_ERRORS)
+    p.add_argument("--stored-only", action="store_true", help="buy nothing: a missing reading stops the run before any call")
 
-    p = sub.add_parser("report", help="score the results of one engine")
+    p = sub.add_parser("report", help="score one engine's pages through the selector")
     p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
-    p.add_argument("--results", type=Path, required=True,
-                   help="directory of <object_id>/pNNN.json (vision model) or <object_id>.pdf.json (Unstructured)")
+    p.add_argument("--policy", default="v1", help="the verdicts to read: a registered version or a JSON file")
+    p.add_argument("--flagged", choices=FLAGGED_RULES, default=None,
+                   help="read the verdicts an override of the flagged rule decided, under <version>-<rule>")
+    p.add_argument("--results", type=Path, default=None,
+                   help="the Unstructured baseline instead: a directory of <object_id>.pdf.json")
     p.add_argument("--out", type=Path, default=None)
-    p.add_argument("--manifest", type=Path, default=MANIFEST_CSV)
     p.add_argument("--xml-rows", type=Path, default=XML_ROWS_CSV)
 
     p = sub.add_parser("compare", help="filing-level reconciliation across engines")
@@ -599,12 +568,20 @@ def main() -> None:
                      args.expand)
     elif args.command == "stage":
         stage(args.sample, args.cache, args.limit, args.manifest)
-    elif args.command == "transcribe":
-        results = args.results or args.cache / "vlm" / f"{args.model.replace('/', '__')}-{vlm_transcription.PROMPT_VERSION}"
-        transcribe(args.sample, args.manifest, args.cache, args.model, results,
-                   args.workers, args.limit, args.only)
     else:
-        report(args.sample, args.results, args.out, args.manifest, args.xml_rows)
+        import logging
+
+        from givingtuesday_datamart._internal.db import get_session
+        from givingtuesday_datamart.ingestion import datamart_config
+
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
+        policy = with_flagged(load_policy(args.policy), args.flagged)
+        with get_session(config=datamart_config()) as session:
+            if args.command == "transcribe":
+                transcribe(session, args.sample, policy, args.cache, args.limit, args.only, args.max_errors,
+                           buy=not args.stored_only)
+            else:
+                report(session, args.sample, args.out, args.xml_rows, policy=policy, results=args.results)
 
 
 if __name__ == "__main__":
