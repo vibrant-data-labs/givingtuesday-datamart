@@ -7,6 +7,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import logging
 import subprocess
 import urllib.error
 from dataclasses import replace
@@ -285,13 +286,18 @@ def test_refetch_of_a_reissued_image_updates_the_hash(teos, tmp_path):
     assert s3.objects[("b", got.s3_key)] == PDF2 and got.pages == 2
 
 
-def test_a_failed_refetch_leaves_the_fetched_row_and_its_object_alone(teos, tmp_path):
+def test_a_failed_refetch_leaves_the_fetched_row_and_its_object_alone(teos, tmp_path, caplog):
     row = teos.add(OID, [("20230501", PDF)])
     store, s3 = fi.MemoryStore(), _S3()
     _fetch(store, [OID], tmp_path, s3)
     was = replace(store.rows[OID])
     teos.serve[_url(row, "20230501")] = 404                  # a transient 5xx or the 2022 batch: TEOS stops serving it
-    assert _fetch(store, [OID], tmp_path, s3, refetch=True) == {OID: "fetched"}
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="givingtuesday_datamart"):
+        assert _fetch(store, [OID], tmp_path, s3, refetch=True) == {OID: "fetched"}
+    lines = [(r.levelno, r.getMessage()) for r in caplog.records if OID in r.getMessage()]
+    assert len(lines) == 1 and lines[0][0] == logging.WARNING           # the failed attempt is warned, not logged as a fetch
+    assert "fetched (attempt 2)" in lines[0][1] and "404" in lines[0][1]
     got = store.rows[OID]
     assert got.status == "fetched" and got.sha256 == was.sha256 == hashlib.sha256(PDF).hexdigest()
     assert (got.s3_key, got.bytes, got.pages, got.page_widths, got.attachment_from, got.attachment_pages, got.fetched_at) == (

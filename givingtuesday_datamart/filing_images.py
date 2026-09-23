@@ -564,12 +564,15 @@ def fetch_filings(session, object_ids: Iterable[str | Filing], *, bucket: str = 
         for row in _upsert_as_done(store, futures):
             done += 1
             statuses[row.object_id] = row.status
-            if row.fetched:
-                logger.info("[%d/%d] %s %s: %d pages, %d attached, %.1f MB", done, len(todo),
-                            row.object_id, row.status, row.pages, row.attachment_pages, row.bytes / 1e6)
-            else:
+            if row.last_error:
+                # Any failed attempt, including one on a fetched row that
+                # kept its status and object: the status says what the row
+                # holds, the error says what this attempt did.
                 logger.warning("[%d/%d] %s %s (attempt %d): %s", done, len(todo), row.object_id,
                                row.status, row.attempts, row.last_error)
+            else:
+                logger.info("[%d/%d] %s %s: %d pages, %d attached, %.1f MB", done, len(todo),
+                            row.object_id, row.status, row.pages, row.attachment_pages, row.bytes / 1e6)
     return statuses
 
 
