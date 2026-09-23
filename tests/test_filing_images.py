@@ -40,6 +40,7 @@ class _Teos:
         self.serve: dict[str, object] = {}
         self.widths: dict[bytes, list[int]] = {}
         self.lookups: list[str] = []
+        self.index_passes: list[str] = []
         self.listings: list[str] = []
         self.gets: list[str] = []
 
@@ -54,6 +55,12 @@ class _Teos:
             if isinstance(served, bytes):
                 self.widths[served] = list(widths)
         return row
+
+    def index_rows(self, year, cache_dir=None):
+        """One index CSV: the rows added under that year, in insertion order."""
+        self.index_passes.append(year)
+        return (row for row in list(self.index.values())
+                if isinstance(row, irs_source.IndexRow) and row.index_year == year)
 
     def lookup(self, oid, cache_dir=None):
         self.lookups.append(oid)
@@ -123,7 +130,7 @@ def teos(monkeypatch):
     monkeypatch.setattr(irs_source, "lookup", fake.lookup)
     monkeypatch.setattr(irs_source, "images", fake.images)
     monkeypatch.setattr(irs_source, "_get", fake.get)
-    monkeypatch.setattr(irs_source, "index_rows", lambda year, cache_dir=None: iter(()))
+    monkeypatch.setattr(irs_source, "index_rows", fake.index_rows)
     monkeypatch.setattr(irs_source, "page_widths", fake.page_widths)
     monkeypatch.setattr(fi.shutil, "which", lambda cmd, *args, **kwargs: "/opt/homebrew/bin/pdfimages")
     return fake
@@ -161,6 +168,19 @@ def test_the_row_carries_hash_widths_and_attachment_start(teos, tmp_path):
     assert got.teos_url == _url(row, "20230501") and got.image_generated == date(2023, 5, 1)
     assert got.attempts == 1 and got.last_error is None and got.fetched_at is not None
     assert fi.pdf_path(tmp_path, OID).read_bytes() == PDF
+    assert teos.lookups == []                                # the frame's rows came from one index pass
+
+
+def test_the_frame_is_indexed_in_one_pass_per_year_own_years_first(teos, tmp_path):
+    teos.add("202400000000000001", index=_index("202400000000000001", year="2024"))
+    teos.add("202200000000000002", index=_index("202200000000000002", year="2021"))  # listed late, as Caterpillar was
+    found = fi._index_frame(["202400000000000001", "202200000000000002", "202400000000000009"], tmp_path)
+    assert sorted(found) == ["202200000000000002", "202400000000000001"]
+    assert teos.index_passes == ["2022", "2024", "2021", "2023", "2025", "2026"]
+    teos.index_passes.clear()
+    assert fi._index_frame(["202400000000000001"], tmp_path) and teos.index_passes == ["2024"]
+    assert fi.fetch_image("202400000000000009", tmp_path, index=found).status == "lookup_failed:LookupError"
+    assert teos.lookups == []
 
 
 def test_a_frame_row_supplies_the_ein_and_tax_year_over_the_index(teos, tmp_path):

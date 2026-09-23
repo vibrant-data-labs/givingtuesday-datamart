@@ -59,7 +59,7 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, fields, replace
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Iterable, Iterator, NamedTuple, Sequence
+from typing import Iterable, Iterator, Mapping, NamedTuple, Sequence
 
 from sqlalchemy import text
 
@@ -236,7 +236,8 @@ class Fetched(NamedTuple):
     error: str | None
 
 
-def fetch_image(object_id: str, cache_dir: Path = CACHE) -> Fetched:
+def fetch_image(object_id: str, cache_dir: Path = CACHE, *,
+                index: Mapping[str, irs_source.IndexRow] | None = None) -> Fetched:
     """Download one filing's image, newest TEOS image first with older ones
     as fallbacks.
 
@@ -246,9 +247,15 @@ def fetch_image(object_id: str, cache_dir: Path = CACHE) -> Fetched:
     ``STATICFILEPATH`` the IRS no longer serves — Schusterman's 2020 990-PF
     is indexed and returns a 302 to an error page. Both are concentrated in
     older tax years.
+
+    ``index`` is the frame's rows from ``_index_frame``; without it the
+    filing is looked up on its own, a scan of the index CSVs.
     """
     try:
-        row = irs_source.lookup(object_id, cache_dir)
+        if index is None:
+            row = irs_source.lookup(object_id, cache_dir)
+        elif (row := index.get(object_id)) is None:
+            raise LookupError(f"{object_id} not in index_{object_id[:4]}.csv or any other year")
     except Exception as exc:                              # noqa: BLE001 — not in any index CSV
         return Fetched(f"lookup_failed:{type(exc).__name__}", None, None, None, str(exc)[:500])
     try:
@@ -322,9 +329,9 @@ def _upload(s3, bucket: str, key: str, payload: bytes, digest: bytes) -> None:
 
 
 def _fetch_one(filing: Filing, prior: FilingImage | None, *, cache_dir: Path,
-               bucket: str, prefix: str, s3) -> FilingImage:
+               bucket: str, prefix: str, s3, index: Mapping[str, irs_source.IndexRow] | None = None) -> FilingImage:
     """Runs in a worker thread: TEOS, hash, widths, S3. Never the session."""
-    got = fetch_image(filing.object_id, cache_dir)
+    got = fetch_image(filing.object_id, cache_dir, index=index)
     index = got.row
     base = prior if prior is not None else FilingImage(
         object_id=filing.object_id, filerein="", taxyear=None, index_year=None,
@@ -408,6 +415,28 @@ def _warm_index(cache_dir: Path) -> None:
         next(irs_source.index_rows(year, cache_dir), None)
 
 
+def _index_frame(object_ids: Iterable[str], cache_dir: Path) -> dict[str, irs_source.IndexRow]:
+    """The frame's index rows in one pass per index CSV.
+
+    ``irs_source.lookup`` streams a 54–93 MB CSV per call — 0.6 s for a hit
+    in the id's own year, about 5 s for a miss over all six — and it is
+    CPU-bound under the GIL, so a pool of workers serialises on it. Reading
+    each CSV once for every id in the frame is about ten seconds in all.
+    The id's own year is read first, as ``lookup`` does, so a filing listed
+    twice resolves the same way; the pass stops when nothing is missing.
+    """
+    wanted = set(object_ids)
+    own = {oid[:4] for oid in wanted}
+    found: dict[str, irs_source.IndexRow] = {}
+    for year in sorted(irs_source.INDEX_YEARS, key=lambda y: (y not in own, y)):
+        if not wanted - found.keys():
+            break
+        for row in irs_source.index_rows(year, cache_dir):
+            if row.object_id in wanted and row.object_id not in found:
+                found[row.object_id] = row
+    return found
+
+
 def _s3_client(workers: int = 8):
     import boto3                                          # the ``ingest`` extra
     from botocore.config import Config
@@ -472,11 +501,13 @@ def fetch_filings(session, object_ids: Iterable[str | Filing], *, bucket: str = 
         return statuses
 
     _warm_index(cache_dir)
+    index = _index_frame((f.object_id for f in todo), cache_dir)
+    logger.info("fetch_filings: %d of %d filings found in the IRS index", len(index), len(todo))
     s3 = s3 if s3 is not None else _s3_client(workers)
     done = 0
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(_fetch_one, f, prior.get(f.object_id), cache_dir=cache_dir,
-                               bucket=bucket, prefix=prefix, s3=s3) for f in todo]
+                               bucket=bucket, prefix=prefix, s3=s3, index=index) for f in todo]
         for row in _upsert_as_done(store, futures):
             done += 1
             statuses[row.object_id] = row.status
