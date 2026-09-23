@@ -67,15 +67,16 @@ import shutil
 import subprocess
 import sys
 from abc import ABC, abstractmethod
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, fields, replace
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Iterable, Iterator, Mapping, NamedTuple, Sequence
+from typing import Iterable, Mapping, NamedTuple, Sequence
 
 from sqlalchemy import text
 
 from givingtuesday_datamart import irs_source
+from givingtuesday_datamart._internal.bulk import multi_row_insert, multi_row_params, upsert_as_done
 from givingtuesday_datamart._internal.logger import logger
 
 BUCKET = "givingtuesday-datamart"
@@ -150,12 +151,6 @@ COLUMNS = tuple(f.name for f in fields(FilingImage))
 
 _SELECT_ALL = f"SELECT {', '.join(COLUMNS)} FROM filing_images"
 _SELECT = f"{_SELECT_ALL} WHERE object_id = ANY(:ids)"
-_UPSERT = (
-    f"INSERT INTO filing_images ({', '.join(COLUMNS)}) "
-    f"VALUES ({', '.join(':' + c for c in COLUMNS)}) "
-    "ON CONFLICT (object_id) DO UPDATE SET "
-    + ", ".join(f"{c} = EXCLUDED.{c}" for c in COLUMNS if c != "object_id")
-)
 
 
 class Filing(NamedTuple):
@@ -205,9 +200,12 @@ class PostgresStore(FilingImageStore):
         return {row["object_id"]: FilingImage(**{c: row[c] for c in COLUMNS}) for row in found}
 
     def upsert(self, rows: Sequence[FilingImage]) -> None:
+        """One statement per chunk: psycopg2's ``executemany`` would send one
+        per row, a round trip each."""
         if not rows:
             return
-        self.session.execute(text(_UPSERT), [asdict(row) for row in rows])
+        self.session.execute(text(multi_row_insert("filing_images", COLUMNS, ("object_id",), len(rows))),
+                             multi_row_params([asdict(row) for row in rows], COLUMNS))
         self.session.commit()
 
     def all(self) -> list[FilingImage]:
@@ -497,37 +495,6 @@ def _s3_client(workers: int = 8):
     return boto3.client("s3", config=Config(max_pool_connections=workers + 4))
 
 
-def _upsert_as_done(store: FilingImageStore, futures: Sequence[Future],
-                    chunk: int = CHUNK) -> Iterator[FilingImage]:
-    """Collect worker results on the main thread and commit every ``chunk``.
-
-    Workers return rows rather than raising; one that raises anyway is
-    logged and re-raised only after every other result has been collected
-    and committed. Whatever is buffered when the loop stops, for any
-    reason, is committed first.
-    """
-    buffer: list[FilingImage] = []
-    failures: list[Exception] = []
-    try:
-        for future in as_completed(futures):
-            try:
-                row = future.result()
-            except Exception as exc:                      # noqa: BLE001
-                logger.exception("a worker raised; its filing is not recorded this run")
-                failures.append(exc)
-                continue
-            buffer.append(row)
-            if len(buffer) >= chunk:
-                ready, buffer = buffer, []
-                store.upsert(ready)
-            yield row
-    finally:
-        if buffer:
-            store.upsert(buffer)
-    if failures:
-        raise failures[0]
-
-
 def fetch_filings(session, object_ids: Iterable[str | Filing], *, bucket: str = BUCKET,
                   prefix: str = PREFIX, workers: int = 8, refetch: bool = False,
                   cache_dir: Path = CACHE, s3=None) -> dict[str, str]:
@@ -562,7 +529,7 @@ def fetch_filings(session, object_ids: Iterable[str | Filing], *, bucket: str = 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(_fetch_one, f, prior.get(f.object_id), cache_dir=cache_dir,
                                bucket=bucket, prefix=prefix, s3=s3, index=index) for f in todo]
-        for row in _upsert_as_done(store, futures):
+        for row in upsert_as_done(store, futures, CHUNK):
             done += 1
             statuses[row.object_id] = row.status
             if row.last_error:
@@ -718,7 +685,7 @@ def backfill(session, *, staging_csvs: Sequence[Path] = STAGING_CSVS,
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(_backfill_one, line, pdf_dir=pdf_dir, bucket=bucket, prefix=prefix, s3=s3)
                    for line in to_upload]
-        for n, row in enumerate(_upsert_as_done(store, futures), 1):
+        for n, row in enumerate(upsert_as_done(store, futures, CHUNK), 1):
             statuses[row.object_id] = row.status
             if n % CHUNK == 0 or n == len(futures):
                 logger.info("backfill: %d/%d PDFs done", n, len(futures))

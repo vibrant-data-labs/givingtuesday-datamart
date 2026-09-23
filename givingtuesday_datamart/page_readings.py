@@ -25,7 +25,8 @@ anyway so callers name the pair the pipeline looks up.
 **Reading.** ``read_pages`` is ``_bulk_get_cache_or_run`` from vdl-tools with
 images: one query for the batch's keys, then a thread pool of
 ``vlm_transcription.transcribe`` over the misses, the results upserted in
-chunks of 200 from the main thread (workers never touch the session). A
+chunks of 200 from the main thread (``_internal.bulk.upsert_as_done``, the
+collector ``filing_images`` uses; workers never touch the session). A
 result carrying ``error`` or ``parse_error`` increments ``errors`` and sets
 ``last_error`` instead of ``response``, keeping whatever stamps it has; a row
 at ``max_errors`` is skipped and listed, not read again. A success keeps a
@@ -64,15 +65,16 @@ import re
 import shutil
 import subprocess
 from abc import ABC, abstractmethod
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Iterator, Sequence
+from typing import Iterable, Sequence
 
 from sqlalchemy import text
 
 from givingtuesday_datamart import filing_images, vlm_transcription
+from givingtuesday_datamart._internal.bulk import multi_row_insert, multi_row_params, upsert_as_done
 from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart.filing_images import CACHE
 from givingtuesday_datamart.vlm_transcription import DPI, PROMPT_VERSION
@@ -157,24 +159,6 @@ _SELECT = (
     f"SELECT {', '.join(COLUMNS)} FROM page_readings WHERE ({', '.join(KEY_COLUMNS)}) IN ("
     "SELECT * FROM unnest(" + ", ".join(f"CAST(:{c} AS {t}[])" for c, t in zip(KEY_COLUMNS, _KEY_TYPES)) + "))"
 )
-_ON_CONFLICT = (
-    f"ON CONFLICT ({', '.join(KEY_COLUMNS)}) DO UPDATE SET "
-    + ", ".join(f"{c} = EXCLUDED.{c}" for c in COLUMNS if c not in KEY_COLUMNS)
-)
-
-
-def _upsert_sql(n: int) -> str:
-    """One INSERT for ``n`` rows, each row's values as ``:<column>_<i>``.
-
-    psycopg2's ``executemany`` sends one statement per row, a round trip
-    each, and the first backfill of 7,626 readings spent eleven minutes
-    almost entirely waiting on the network that way. A chunk of 200 rows is
-    3,600 parameters, well inside Postgres's 65,535.
-    """
-    rows = ", ".join(
-        "(" + ", ".join(f"CAST(:{c}_{i} AS jsonb)" if c in JSON_COLUMNS else f":{c}_{i}" for c in COLUMNS) + ")"
-        for i in range(n))
-    return f"INSERT INTO page_readings ({', '.join(COLUMNS)}) VALUES {rows} {_ON_CONFLICT}"
 
 
 # ---------------------------------------------------------------------------
@@ -279,15 +263,14 @@ class PostgresStore(PageReadingStore):
         return {row.key: row for row in rows}
 
     def upsert(self, rows: Sequence[PageReading]) -> None:
+        """One statement per chunk of 200 (3,600 parameters): psycopg2's
+        ``executemany`` sends one per row, and the first backfill of 7,626
+        readings spent ten minutes waiting on the network that way."""
         if not rows:
             return
-        params = {}
-        for i, row in enumerate(rows):
-            values = asdict(row)
-            for column in JSON_COLUMNS:
-                values[column] = None if values[column] is None else json.dumps(values[column])
-            params.update({f"{column}_{i}": values[column] for column in COLUMNS})
-        self.session.execute(text(_upsert_sql(len(rows))), params)
+        self.session.execute(
+            text(multi_row_insert("page_readings", COLUMNS, KEY_COLUMNS, len(rows), json_columns=JSON_COLUMNS)),
+            multi_row_params([asdict(row) for row in rows], COLUMNS, json_columns=JSON_COLUMNS))
         self.session.commit()
 
 
@@ -442,37 +425,6 @@ def _read_one(client, model: str, rendered: Future, key: Key, request_settings: 
     return reading_from_result(key, request_settings, data, prior)
 
 
-def _upsert_as_done(store: PageReadingStore, futures: Sequence[Future],
-                    chunk: int = CHUNK) -> Iterator[PageReading]:
-    """Collect worker results on the main thread and commit every ``chunk``.
-
-    Workers return rows rather than raising; one that raises anyway is
-    logged and re-raised only after every other result has been collected
-    and committed. Whatever is buffered when the loop stops, for any
-    reason, is committed first.
-    """
-    buffer: list[PageReading] = []
-    failures: list[Exception] = []
-    try:
-        for future in as_completed(futures):
-            try:
-                row = future.result()
-            except Exception as exc:                      # noqa: BLE001
-                logger.exception("a worker raised; its page is not recorded this run")
-                failures.append(exc)
-                continue
-            buffer.append(row)
-            if len(buffer) >= chunk:
-                ready, buffer = buffer, []
-                store.upsert(ready)
-            yield row
-    finally:
-        if buffer:
-            store.upsert(buffer)
-    if failures:
-        raise failures[0]
-
-
 def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
                prompt_version: str = PROMPT_VERSION, max_errors: int = MAX_ERRORS,
                cache_dir: Path = CACHE, client=None, filing_store=None, s3=None) -> ReadResult:
@@ -543,7 +495,7 @@ def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
                     for oid, (first, last) in spans.items()}
         futures = [pool.submit(_read_one, client, model, rendered[page[0]], keys[page], settings, prior,
                                page_dir(cache_dir, page[0])) for page, prior in misses]
-        for row in _upsert_as_done(store, futures):
+        for row in upsert_as_done(store, futures, CHUNK):
             page = (row.object_id, row.page)
             tally["pages"] += 1
             if row.response is None:

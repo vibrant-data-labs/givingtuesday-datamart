@@ -580,16 +580,17 @@ def _row(oid, **overrides):
     return fi.FilingImage(**values)
 
 
-def test_postgres_store_upserts_one_chunk_in_one_statement_and_commits():
+def test_postgres_store_upserts_one_chunk_in_one_multi_row_statement_and_commits():
     session = _Session()
     store = fi.PostgresStore(session)
     store.upsert([_row("1" * 18), _row("2" * 18, status="no_attachment", attachment_from=None)])
     (sql, params), = session.calls
     assert sql.startswith("INSERT INTO filing_images (object_id, filerein, ") and "ON CONFLICT (object_id) DO UPDATE SET" in sql
+    assert sql.count("VALUES") == 1 and sql.count("(:object_id_") == 2        # two rows, one statement
     assert all(f"{column} = EXCLUDED.{column}" in sql for column in fi.COLUMNS if column != "object_id")
     assert "object_id = EXCLUDED" not in sql
-    assert [p["object_id"] for p in params] == ["1" * 18, "2" * 18] and params[1]["attachment_from"] is None
-    assert session.commits == 1
+    assert (params["object_id_0"], params["object_id_1"]) == ("1" * 18, "2" * 18) and params["attachment_from_1"] is None
+    assert len(params) == 2 * len(fi.COLUMNS) and session.commits == 1
     store.upsert([])
     assert len(session.calls) == 1
 
