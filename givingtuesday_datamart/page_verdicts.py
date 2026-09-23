@@ -83,12 +83,18 @@ POLICY_V1 = {
     "flagged": "load_single",     # the last escalation reader's reading, marked; "leave_out" is the alternative
 }
 POLICIES = {"v1": POLICY_V1}
-# Worker counts that held on the sample; the escalation stages run as their own pools.
+# Worker counts; the escalation stages run as their own pools. The base
+# pair's held on the sample's full reads (Qwen at 40 for 1,700 pages with
+# every call answered 200). The escalation readers' 8 came from the 83-page
+# ground-truth runs and was never a throughput test: at 8 workers 3.8 Flash
+# read 11–15 dense pages a minute on the rehearsal, a page's latency being
+# about 40 s, so the stage is latency-bound and scales with workers. Raised
+# to 24 for the second half of the rehearsal; the pipeline doc has both rates.
 WORKERS = {
     "alibaba/qwen3-vl-instruct": 40,
     "google/gemini-3.5-flash-lite": 12,
-    "google/gemini-3.8-flash": 8,
-    "anthropic/claude-sonnet-5": 8,
+    "google/gemini-3.8-flash": 24,
+    "anthropic/claude-sonnet-5": 24,
 }
 
 DDL = (
