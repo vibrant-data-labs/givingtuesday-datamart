@@ -89,7 +89,11 @@ POLICIES = {"v1": POLICY_V1}
 # ground-truth runs and was never a throughput test: at 8 workers 3.8 Flash
 # read 11–15 dense pages a minute on the rehearsal, a page's latency being
 # about 40 s, so the stage is latency-bound and scales with workers. Raised
-# to 24 for the second half of the rehearsal; the pipeline doc has both rates.
+# to 24 for the second half of the rehearsal, where it read 46 a minute
+# with every call still answered 200; the pipeline doc has both rates. The
+# base pair's counts are the same kind of number — 40 and 12 held, nothing
+# says they are the ceiling — and the 1,000-filing run may raise them too
+# (Zein, 2026-09-23); the gateway's own limits are the thing to find.
 WORKERS = {
     "alibaba/qwen3-vl-instruct": 40,
     "google/gemini-3.5-flash-lite": 12,
