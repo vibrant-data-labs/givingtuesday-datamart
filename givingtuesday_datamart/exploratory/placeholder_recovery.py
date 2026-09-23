@@ -54,7 +54,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from givingtuesday_datamart import irs_source, vlm_transcription
+from givingtuesday_datamart import filing_images, irs_source, vlm_transcription
 from givingtuesday_datamart.attachment_grants import (
     PLACEHOLDER, XML_SOURCES, candidate_tables, coverage, diagnose, extract_tables, is_pointer,
     load_elements, page_tables, xml_tables)
@@ -228,35 +228,16 @@ def build_sample(out: Path, xml_rows_out: Path, expand: bool = False) -> None:
 
 
 def _fetch_pdf(object_id: str, cache: Path, local: Path) -> str:
-    """Download one filing's image. Returns a staging status, never raises.
-
-    A filing can fail to reach transcription for reasons that have nothing
-    to do with it, and they must not be scored as extraction failures. TEOS
-    lists no image for some filings, and for others it lists a
-    ``STATICFILEPATH`` the IRS no longer serves — Schusterman's 2020 990-PF
-    is indexed and returns a 302 to an error page. Both are concentrated in
-    older tax years.
-    """
-    try:
-        index_row = irs_source.lookup(object_id, cache)
-        images = irs_source.images(index_row)
-    except Exception as exc:                              # noqa: BLE001
-        return f"lookup_failed:{type(exc).__name__}"
-    if not images:
-        return "no_teos_image"
-    last_error = "pdf_unavailable"
-    for image in reversed(images):         # newest first; older ones are fallbacks
-        try:
-            payload = irs_source._get(image.url)
-        except Exception as exc:                          # noqa: BLE001
-            last_error = f"pdf_unavailable:{getattr(exc, 'code', type(exc).__name__)}"
-            continue
-        if payload[:4] != b"%PDF":
-            last_error = "not_a_pdf"
-            continue
-        local.write_bytes(payload)
-        return "staged"
-    return last_error
+    """Download one filing's image into ``local``. Returns a staging status,
+    never raises. The loop — newest TEOS image first, older ones as
+    fallbacks, and the status strings — lives in ``filing_images.fetch_image``
+    now that the storage layer owns fetching; this keeps ``stage`` working
+    on the same statuses until it is retired."""
+    got = filing_images.fetch_image(object_id, cache)
+    if got.status != "fetched":
+        return got.status
+    local.write_bytes(got.payload)
+    return "staged"
 
 
 def _read_manifest(manifest: Path) -> dict[str, dict]:
