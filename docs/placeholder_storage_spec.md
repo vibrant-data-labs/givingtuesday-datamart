@@ -12,9 +12,13 @@ pipeline. Two parts, meant to be built in separate sessions:
   readings under a versioned policy.
 
 Vibrant Data Labs, 2026-09-22. Status: Parts A and B built and every
-criterion run by hand against the datamart (all three notes in the
-pipeline doc's *Order of operations*, item 4); the 1,000-filing run
-(Session 4) is next. Background and the measurements
+criterion run by hand against the datamart (the three built notes in the
+pipeline doc's *Order of operations*, item 4), and Session 4's dress
+rehearsal run on 2026-09-23 — the whole pipeline on the 100-filing sample
+under `POLICY_V1` from an empty cache, $63 and 118 minutes, every gateway
+call answered, projecting the 9,347-page frame at about $330 and 8 hours
+(the *Rehearsal run* note there and the *Sample under POLICY_V1* results);
+the 1,000-filing run itself is next. Background and the measurements
 every decision below rests on are in
 [placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md);
 the short report is [placeholder_grant_recovery.md](placeholder_grant_recovery.md).
@@ -287,8 +291,11 @@ Copied from vdl-tools' `_bulk_get_cache_or_run`, with images:
    increments `errors` and sets `last_error` instead of `response`.
 5. Returns page → response for hits and successful misses.
 
-Worker counts that held on the sample: Qwen 40, Flash Lite 12, 3.8
-Flash and Sonnet 8; the escalation stages run as their own pools.
+Worker counts: Qwen 40, Flash Lite 12, 3.8 Flash and Sonnet 24; the
+escalation stages run as their own pools. The base pair's held on the
+sample's full reads; the escalation readers' 8 was raised to 24 on the
+rehearsal, where 3.8 Flash went from 12 to 46 pages a minute with every
+call still answered, and all four are floors rather than ceilings.
 
 ### `agree` and the policy
 
@@ -475,7 +482,9 @@ criteria pass.
 
 **Session 4 — the 1,000-filing run.** Top up bands C and D, fetch, run
 the stages, report by band, and update the two documents. Budget about
-$400 in model cost and a day of wall time. It can run on the EC2 box
+$400 in model cost and a day of wall time; the rehearsal on the sample
+projects about $330 and 8 hours for the 9,347 pages already staged, at
+the worker counts as set. It can run on the EC2 box
 once Parts A and B exist, since every artifact is then in S3 or the
 database; before that it must not, or the readings split across
 machines. The box needs `poppler-utils` from the system package manager

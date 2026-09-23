@@ -174,7 +174,9 @@ money columns, where three readers agreed on the approved amount and
 the declared figure is the balance. On paid pages no policy accepted a
 wrong page. Cost on the expanded frame, at the measured 52% dispute
 rate: about $360, against $190 for 3.8 Flash alone (52 right, 30
-flagged) and $84 for the base pair alone.
+flagged) and $84 for the base pair alone. Run on the 100-filing sample as the
+rehearsal for the 1,000-filing run it cost $63 and projects the frame
+at about $330 (*Sample under POLICY_V1* below).
 
 ### 4 · Select — the reconciliation gate
 
@@ -438,6 +440,153 @@ the reconciliation gate cannot see a shift — 0.5% of Wells Fargo's $299M
 is $1.5M of slack — so stage 3b must compare (name, amount) pairs, not
 amount lists, and the ground-truth set must score pairs. The ground-truth
 set, next, confirmed both.
+
+### Sample under POLICY_V1
+
+The same 1,782 pages decided by the page gate as built (`POLICY_V1`, the
+*3b · Agree* design: Qwen and Flash Lite read every page under prompt v4,
+disputes go to 3.8 Flash and then Sonnet 5, a page no two readers agree
+on is loaded from Sonnet's reading marked `flagged`), on 2026-09-23 as
+the dress rehearsal for the 1,000-filing run (the operational facts —
+wall time, throughput, the empty-cache path, the stop — are the
+*Rehearsal run* note under *Order of operations*, item 4). The base pair
+bought 1,699 pages each (the 83 ground-truth pages were stored), 3.8
+Flash 1,147, Sonnet 501; **$63.07 in all**, against a pre-run estimate of
+$80. Per-filing detail is `data/exploratory/placeholder_report_v1.csv`.
+
+| band | Unstructured | Qwen v3 | Gemini v3 | any of the four reads | **POLICY_V1** | v1, flagged pages left out |
+|---|---|---|---|---|---|---|
+| A (22) | 10 / $1,326M | 14 / $2,453M | 15 / $2,544M | 16 / $2,693M | **15 / $2,664M** | 11 / $1,851M |
+| B (44) | 15 / $505M | 14 / $344M | 16 / $402M | 20 / $492M | **21 / $542M** | 15 / $383M |
+| C (22) | 3 / $10M | 7 / $20M | 7 / $20M | 7 / $20M | **9 / $30M** | 7 / $20M |
+| D (12) | 1 / $0.0M | 2 / $0.3M | 2 / $0.3M | 2 / $0.3M | **2 / $0.3M** | 2 / $0.3M |
+| **all** | **29 / 30.4%** | **37 / 46.4%** | **40 / 48.9%** | **45 / 52.9%** | **47 / 53.4%** | **35 / 37.2%** |
+
+Reconciled filings and declared dollars credited, as in the table above
+(the v2 columns are there). The policy reaches 47 filings and 53.4% —
+above any single read and above the after-the-fact union of four, and
+this time as a method: every accepted page names the two readings that
+agreed on it, or is marked. The projected recovery across the addressable
+population is $10.37B. The last column is the same verdicts re-read under
+`leave_out` (`--flagged leave_out`, 13 s, no call): without the flagged
+pages 35 filings and 37.2%, so **the flagged rule is worth 12 filings and
+16 points on this sample**, and those 12 rest on Sonnet's single reading,
+which the ground truth puts right on 11 of 23 such pages. The
+reconciliation gate is what accepts them — the rows sum to the declared
+total within 0.5% — and it cannot see a shifted name against a right
+amount, so the mark matters; 5,976 of the 18,436 rows the report loads
+come from flagged pages, 4,990 of them Wells Fargo's two years (2021: 64
+of its 65 pages flagged, the tiny-print 61-row statements the ground
+truth found no base reader exact on).
+
+**The verdict mix**, by stratum and overall (`report --policy v1` and
+`page_verdicts status --policy v1`):
+
+| band | pages | agreed | escalated | flagged | rows from flagged pages |
+|---|---|---|---|---|---|
+| A | 584 | 263 | 188 | 133 | 5,314 |
+| B | 1,161 | 301 | 622 | 238 | 513 |
+| C | 34 | 22 | 5 | 7 | 149 |
+| D | 3 | 3 | 0 | 0 | 0 |
+| **all** | **1,782** | **589** | **815** | **378** | **5,976** |
+
+No page was `unreadable` and none was left without a verdict. By
+accepted reading: Qwen 589 (the agreed pages, the first base reader's
+by rule), 3.8 Flash 662, Sonnet 153 escalated and 378 flagged.
+
+**The dispute rate under v4**, and what each escalation stage resolved:
+
+| | pages | disputed by the base pair | 3.8 Flash resolved | Sonnet resolved | flagged |
+|---|---|---|---|---|---|
+| Johnson & Johnson 2021 (836 pages) | 836 | 735 (87.9%) | 507 (69% of disputes) | 50 (22% of the 228 still open) | 178 (21%) |
+| the other 58 filings | 946 | 458 (48.4%) | 155 (34%) | 103 (34% of 303) | 200 (21%) |
+| **all** | **1,782** | **1,193 (66.9%)** | **662 (55%)** | **153 (29% of 531)** | **378 (21%)** |
+
+The dispute rate is the v3 rate to the point — 67% / 87% / 49% under
+v3, 66.9% / 87.9% / 48.4% under v4 — so the prompt did not move it, and
+the 83-page ground-truth set (46 of 83 disputed, enriched for them) had
+the shape right. What the ground truth under-called is 3.8 Flash's
+share: it resolved 35% of the checked disputes (16 of 46) and 55% here,
+because J&J's dense single-column pages are disputes Qwen creates (305
+of J&J's 836 came back partial from Qwen, none from anyone else) and
+3.8 Flash matches Flash Lite on seven in ten of them; outside J&J the
+34% is the ground truth's number. Re-weighted to the 9,347-page frame,
+where J&J is 836 pages of 9,347 rather than of 1,782: a 52% dispute rate
+(4,856 pages), 3.8 Flash resolving 39%, Sonnet a third of the 2,954
+still open, about 1,980 pages flagged (21%), and at the measured
+per-page prices (Qwen $0.0024, Flash Lite $0.0070, 3.8 Flash $0.0216,
+Sonnet $0.0459) **about $330: base pair $88, 3.8 Flash $105, Sonnet
+$136** — 9% under the *3b · Agree* section's $360, which used the
+scorer's per-page costs and a 52% dispute rate from the same
+re-weighting of v3.
+
+**Per model** on the pages this run bought, from the rows' `usage`,
+`seconds` and `attempts`:
+
+| reader | pages bought | tokens a page (in / out) | $ a page | $ | median / p90 latency | calls a page | partial |
+|---|---|---|---|---|---|---|---|
+| Qwen3-VL instruct | 1,699 | 3,150 / 2,020 | $0.0024 | 4.09 | 48 s / 70 s | 1.40 | 303 |
+| Gemini 3.5 Flash Lite | 1,699 | 1,760 / 2,580 | $0.0070 | 11.88 | 7.9 s / 10.6 s | 1.00 | 1 |
+| Gemini 3.8 Flash | 1,147 | 1,760 / 5,400 | $0.0216 | 24.68 | 25.7 s / 38.3 s | 1.09 | 3 |
+| Claude Sonnet 5 | 501 | 5,630 / 3,460 | $0.0459 | 22.43 | 24.5 s / 41.7 s | 1.00 | 0 |
+
+Qwen's 1.40 calls a page is the retry ladder on J&J: 303 pages asked
+three times each because the model stopped mid-row at a normal finish,
+the fullest salvage kept and marked partial (355 such pages under v3, 55
+under v2; v4 is read without JSON mode from the first call, and the
+empty-list answers of v2 are gone). 3.8 Flash reports 1.8 times Flash
+Lite's output tokens on the same 1,147 pages while returning the same
+text — 7,270 against 7,200 characters a page, the same name, address and
+purpose lengths — so the difference is tokens the model spent thinking,
+which the gateway reports inside the completion count and bills; that,
+at 1.5 times Flash Lite's output price, is why it costs three times as
+much a page.
+
+**Filings that changed outcome against the v3 single reads** (15 of the
+100; `compare`): v1 gains Kenan 2021, Roberts 2022, Eden Hall 2023,
+Edelman 2023, Claude Moore 2021, Thome 2022 and Brown Dana 2022 over
+both v3 reads, and takes each read's own gains from the other — Wyss
+2023 and Siegel 2022 (Qwen's), Bezos 2023, Manton and King Street 2021
+(Gemini's); it loses Hall 2023 and Humana 2023, which Gemini v3 alone
+had. The three largest by declared amount:
+
+- **Bezos 2023, $157.0M** (Qwen v3 partial at 12% coverage, Gemini v3
+  reconciled, v1 reconciled). The non-cash filing, the bake-off's hard
+  page: fair market value beside book value. All six pages are
+  `flagged` — on the three dense pages every reader returns 43–47 rows
+  and a different sum, and on the two big pages (66–70 rows, $100M and
+  $39M) Qwen v4 returns nothing at all, as Qwen v3 did — and Sonnet's
+  five readings sum to $156.95M against $156.96M declared, 0.010% off,
+  so the filing reconciles from single readings and carries 243 marked
+  rows. Under `leave_out` it is *list absent*.
+- **Wyss 2023, $149.3M** (Qwen v3 reconciled, Gemini v3 present at
+  120%, v1 reconciled to the dollar). Twelve pages, 134 rows: five
+  agreed by the base pair; six escalated — 3.8 Flash matching Qwen on
+  two paid pages (p033 among them, the page the *second read* section
+  shows Gemini v3 merging two names on; under v4 three readers read it
+  the same) and Flash Lite on the three expenditure-responsibility
+  pages, where Qwen reads a different column, and Sonnet matching 3.8
+  Flash on the first page, where Flash Lite dropped a row; and one
+  flagged (p030: Qwen and Flash Lite return 21 rows and the same $10.52M
+  but not the same name keys, 3.8 Flash reads $9.85M, and Sonnet's 21
+  rows are loaded).
+- **Hall 2023, $101.7M** (Qwen v3 present at 126%, Gemini v3
+  reconciled at 0.28% error with the XML's two rows, v1 present at
+  315%). The canary whose line 3a is a list plus matching gifts plus
+  scholarships. Its five paid-list pages (24–49 rows each) are read
+  differently by every reader — no two of the four agree on any of
+  them, and Flash Lite v4 puts $884M on p037 where the others put
+  $8–27M — so all five are `flagged` and Sonnet's readings are loaded,
+  and they carry two of their own outliers ($27.5M on p037 and $84.0M on
+  p038 against $8–17M from the other three): the sum is 3.1 times the
+  target and no subset reconciles. The two future-list pages are agreed
+  or escalated, and p043 is one of the two ground-truth pages the
+  policy accepts wrongly (the approved amount, three readers agreeing).
+  Gemini v3's reconciliation of this filing was one draw of the lottery
+  the *second read* section describes, inside the 0.5% tolerance by
+  0.22 points; the gate's refusal to accept a page no two readers agree
+  on is working as designed here, and `load_single` then loads readings
+  the selector rightly cannot use.
 
 ## Ground truth
 
@@ -847,6 +996,103 @@ page, so the question may be moot.
    (no page there had a reader out of attempts) and `verdicts --policy
    v1` still 58 / 2 / 23, 11 of the 23 flagged right in Sonnet's
    reading; 0 gateway calls.
+   **Rehearsal run** (2026-09-23; Session 4's dress rehearsal: the whole
+   pipeline on the 100-filing sample under `POLICY_V1`, on the laptop
+   (Apple M2 Pro, 12 cores, 16 GB, poppler 24.04.0, Python 3.12), from an
+   empty cache directory, so every stage the 1,000-filing run uses ran
+   once at small scale; the results are the *Sample under POLICY_V1*
+   section). The dry run, `transcribe --policy v1 --stored-only --cache
+   <empty dir>`, stopped in 3.5 s with a `LookupError` naming the 1,699
+   pages without a Qwen v4 reading (1,782 less the 83 ground-truth
+   pages), no call made and the directory still empty; the estimate
+   before the run was about $80 (base pair $15, 3.8 Flash on ~1,150
+   disputes $25, Sonnet on ~750 still open $40). The real run took
+   **118 minutes of wall time and $63.07**, in two parts, because it was
+   stopped once by hand (below). Every gateway call — 5,844 across the
+   five stages — was answered HTTP 200: no 429, no timeout, no error row,
+   no page at `max_errors`, no render or S3 failure, nothing for
+   `reparse` to recover, `no_verdict` empty at the end, so no third run
+   was needed. Stage by stage:
+
+   | stage | pages sent | workers | wall | pages/min | calls | partial | $ |
+   |---|---|---|---|---|---|---|---|
+   | Qwen v4 | 1,699 | 40 | 39m45s | 42.7 | 2,385 | 303 | 4.09 |
+   | Flash Lite v4 | 1,699 | 12 | 18m02s | 94.2 | 1,702 | 1 | 11.88 |
+   | 3.8 Flash, first 400 disputes | 400 | 8 | 34m08s | 11.7 | 477 | 3 | 9.30 |
+   | 3.8 Flash, the other 747 | 747 | 24 | 16m07s | 46.3 | 778 | 0 | 15.38 |
+   | Sonnet 5, the 501 still open | 501 | 24 | 9m49s | 51.0 | 502 | 0 | 22.43 |
+
+   - **The empty-cache path.** The 55 PDFs the misses needed came from
+     S3 in the first three minutes (150 MB, 1.1 s each; Johnson &
+     Johnson's 44 MB in 18 s), materialised by the render pool as the
+     spec describes, and `pdftoppm` drew 1,743 PNGs (252 MB, 145 KB a
+     page) in 692 s of process time across the four render workers —
+     0.40 s a page, J&J's 836 pages 322 s in one process — all of it
+     overlapped with the reads: the first 75 Qwen pages took 77 s while
+     the first renders landed, and J&J's render finished at minute six
+     while the Qwen pool, working the frame in sample order, was still
+     about 300 pages short of its span (band A's pages come first). The
+     later stages found every PNG on disk (0.1 s of checks in all).
+     Peak memory of the run process was 301 MB with forty Qwen workers
+     and four renders in flight; a `report` peaks at 150–165 MB.
+   - **Latency and retries** (from the rows' `seconds` and `attempts`):
+     Qwen median 48 s a page, p90 70 s, 1.39 calls a page — 368 pages
+     asked more than once, 303 of them three times because Qwen stopped
+     mid-row at a normal finish and the fullest salvage was kept; every
+     one of them J&J's (305 of its 836 under v4, against 355 under v3
+     and 55 under v2), nothing partial anywhere else. Flash Lite 7.9 s
+     median, p90 10.6 s, 4 retries; 3.8 Flash 25.7 / 38.3 s, 117 pages
+     retried; Sonnet 24.5 / 41.7 s, 10 retried.
+   - **The stop, and what it found.** At 12:22 the 3.8 Flash stage was
+     stopped (SIGTERM, timed just after the 400th page's chunk of 200
+     had committed) to raise its worker count from 8 to 24, since the 8
+     was never a throughput test and the gateway had answered 40
+     concurrent Qwen calls for forty minutes without a refusal; the
+     stage went from 11.7 to 46.3 pages a minute, and Sonnet at 24 read
+     51 a minute. The restart resumed at page granularity as the spec's
+     goal 2 promises: both base readers 1,782 stored and 0 to read, the
+     base pair's verdicts unchanged with 0 written, 3.8 Flash 446 stored
+     and 747 to read; only the 8 pages in flight at the stop were bought
+     twice (about $0.17). Working out how to stop it showed a real bug
+     for the EC2 run: a Ctrl-C would have been worse than a kill, since
+     a thread pool's exit runs every queued job to completion on the way
+     out and throws the results away — 800 pages bought and not stored.
+     `upsert_as_done` now cancels the jobs not yet started when its loop
+     stops for any reason but completion and commits what it collected,
+     and `read_pages` drops the renders not yet started the same way
+     (tests in `test_bulk.py` and `test_page_readings.py`). Also added
+     for the run: `materialise` logs each S3 download and the render
+     pool logs each filing's render time, which is where the numbers
+     above come from.
+   - **Zero-cost checks after the run.** `transcribe --policy v1
+     --stored-only`: 0 pages bought, 0 verdict rows written, 10 s, 0
+     gateway calls. `page_readings status` before and after agrees with
+     the run's own `bought` to the cent (Qwen v4 $0.20 → $4.28, Flash
+     Lite v4 $0.55 → $12.42, 3.8 Flash v4 $1.83 → $26.52, Sonnet v4
+     $4.36 → $26.79). `verdicts --policy v1` on the ground-truth pages:
+     still 58 / 2 / 23, the same two wrong pages, 11 of 23 flagged right
+     in Sonnet's reading. The single-reader v3 reports re-run from the
+     tables reproduce the frozen v3 CSVs cell for cell.
+   - **What EC2 should expect for the 9,347-page frame at these rates.**
+     Re-weighting the measured v4 rates to the frame's composition (J&J
+     is 836 of its pages, not 836 of 1,782): a 52% dispute rate (4,856
+     pages), 3.8 Flash resolving 39% of them, Sonnet a third of the
+     2,954 still open, about 1,980 pages flagged (21%). Cost **about
+     $330** at the measured per-page prices (base pair $88, 3.8 Flash
+     $105, Sonnet $136), inside the spec's $300–430 and 9% under its
+     $360. Wall time at the worker counts as now set: Qwen 3.6 h,
+     Flash Lite 1.7 h, 3.8 Flash 1.7 h, Sonnet 1.0 h — **8 hours run
+     serially**, the base pair's 5.3 h inside goal 4's six. All four
+     counts are floors, not ceilings (Zein, 2026-09-23): nothing in
+     5,844 calls found the gateway's limit, so the run may raise the
+     base pair too and should watch the error rows if it does. The box
+     needs about 1.2 GB for the frame's PDFs and 1.4 GB for the PNGs,
+     well inside the spec's 15 GB; the S3 downloads and renders are
+     minutes against the hours of reading and pipeline with them; a
+     stop at any point loses at most the pages in flight, and a re-run
+     resumes from the tables. The one thing the rehearsal could not
+     exercise is a gateway refusal or a timeout: the error path exists
+     and is unit-tested, and `no_verdict` plus a re-run is the recovery.
 5. ~~Decide the flagged-page policy before that run's load.~~ Decided
    (2026-09-22, the spec's decisions table): loaded from Sonnet's single
    reading with the verdict as the mark, `POLICY_V1["flagged"] =
