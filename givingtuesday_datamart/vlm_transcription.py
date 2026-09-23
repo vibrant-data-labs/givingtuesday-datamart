@@ -38,7 +38,9 @@ import base64
 import json
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
@@ -144,14 +146,26 @@ def render(pdf: Path, first: int, last: int, out_dir: Path, dpi: int = DPI) -> l
     missing = [page for page, path in wanted.items() if not path.exists()]
     if missing:
         # pdftoppm names files <prefix>-<page>.png, zero-padded to the document's
-        # width. The prefix carries the pid so two runs sharing a cache never
-        # rename each other's half-written files; the final rename is atomic.
-        prefix = out_dir / f"tmp{os.getpid()}"
-        subprocess.run(["pdftoppm", "-r", str(dpi), "-gray", "-png", "-f", str(min(missing)),
-                        "-l", str(max(missing)), str(pdf), str(prefix)], check=True, capture_output=True)
-        for produced in out_dir.glob(f"{prefix.name}-*.png"):
-            page = int(produced.stem.split("-")[-1])
-            produced.replace(wanted[page]) if page in wanted else produced.unlink()
+        # width. It writes into a directory of this call's own, so concurrent
+        # renders of the same filing (other chunks in this process, another
+        # process sharing the cache) never see each other's half-written
+        # files; the move into place is atomic, and the directory goes
+        # whatever happens. A shared prefix once let one chunk's cleanup
+        # unlink the PNGs another chunk was still writing.
+        tmp = Path(tempfile.mkdtemp(prefix="tmp", dir=out_dir))
+        try:
+            subprocess.run(["pdftoppm", "-r", str(dpi), "-gray", "-png", "-f", str(min(missing)),
+                            "-l", str(max(missing)), str(pdf), str(tmp / "p")], check=True, capture_output=True)
+            for produced in tmp.glob("p-*.png"):
+                page = int(produced.stem.split("-")[-1])
+                produced.replace(wanted[page]) if page in wanted else produced.unlink()
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+    absent = [page for page, path in wanted.items() if not path.exists()]
+    if absent:
+        # An error for the chunk's pages (a page the PDF does not have, a
+        # render killed underneath), not a FileNotFoundError from a reader.
+        raise RuntimeError(f"pdftoppm left no PNG for pages {absent[:5]} of {pdf.name}")
     return [wanted[page] for page in sorted(wanted)]
 
 
