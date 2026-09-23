@@ -18,9 +18,8 @@ readings where they are), the render (``dpi``), the reader (``model``,
 ``prompt_version``) and the request settings (``request_hash``: the SHA-256
 of the canonical JSON of ``{json_mode, extras}`` — ``vlm_transcription``'s
 ``JSON_MODE`` and ``REQUEST_EXTRAS`` for the model). The max-tokens ladder
-is a retry detail and does not key. ``prompt_version`` is its own key
-column, so ``request_hash`` does not fold it in; ``request_hash`` takes it
-anyway so callers name the pair the pipeline looks up.
+is a retry detail and does not key, and ``prompt_version`` is a key
+column of its own, so the hash covers only the settings.
 
 **Reading.** ``read_pages`` is ``_bulk_get_cache_or_run`` from vdl-tools with
 images: one query for the batch's keys, then a thread pool of
@@ -183,10 +182,9 @@ def settings_hash(settings: dict) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
-def request_hash(model: str, prompt_version: str = PROMPT_VERSION) -> str:
-    """``settings_hash`` of today's ``request(model)``. ``prompt_version`` is a
-    key column of its own and is not hashed; it is taken so that this is the
-    one function everything looks a (model, prompt) pair up with."""
+def request_hash(model: str) -> str:
+    """``settings_hash`` of today's ``request(model)``: what a reading made
+    now is keyed under. The prompt version is a key column of its own."""
     return settings_hash(request(model))
 
 

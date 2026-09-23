@@ -127,7 +127,7 @@ def test_the_row_carries_the_key_and_every_stamp(filings, render, tmp_path):
     store = pr.MemoryStore()
     _read(store, filings, _pages(OID, 3), _client(1), tmp_path)
     (row,) = store.rows.values()
-    assert row.key == (OID, 3, image.sha256, 200, QWEN, "v4", pr.request_hash(QWEN, "v4"))
+    assert row.key == (OID, 3, image.sha256, 200, QWEN, "v4", pr.request_hash(QWEN))
     assert row.request == {"json_mode": False, "extras": {}}
     assert row.response == {"page_kind": "grants_paid_list", "heading": "", "rows": _rows(3), "totals": []}
     assert (row.partial, row.finish, row.attempts, row.json_mode) == (False, "stop", 1, False)
@@ -374,7 +374,6 @@ def test_the_request_hash_keys_json_mode_and_extras_not_max_tokens(monkeypatch):
     qwen, gemini, sonnet = pr.request_hash(QWEN), pr.request_hash(GEMINI), pr.request_hash(SONNET)
     assert len({qwen, gemini, sonnet}) == 3
     assert pr.request(SONNET) == {"json_mode": True, "extras": {"reasoning_effort": "none"}}
-    assert pr.request_hash(QWEN, "v5") == qwen                # the prompt version is its own key column
     monkeypatch.setattr(vlm, "MAX_TOKENS", vlm.MAX_TOKENS * 2)
     assert (pr.request_hash(QWEN), pr.request_hash(SONNET)) == (qwen, sonnet)
     monkeypatch.setattr(vlm, "JSON_MODE", {})
