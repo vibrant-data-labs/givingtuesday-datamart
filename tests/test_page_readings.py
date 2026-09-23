@@ -421,6 +421,8 @@ def vlm_dir(tmp_path):
     _write(root, "alibaba__qwen3-vl-instruct-v4b", OID, 3, _reading(3, **v3))
     _write(root, "anthropic__claude-sonnet-5-max-v4", OID, 3, _reading(3, _usage={"in": 1, "out": 1}))
     (root / "alibaba__qwen3-vl-instruct" / OID / "notes.txt").write_text("not a page")
+    (root / "openai__gpt-5.6-terra-v4" / OID / "p098.json").write_text("")               # a killed run's empty file
+    (root / "openai__gpt-5.6-terra-v4" / OID / "p099.json").write_text('{"page_kind": "grants_paid_list", "rows": [{"na')
     return root
 
 
@@ -428,11 +430,11 @@ def test_backfill_dry_run_counts_files_per_reader_and_touches_nothing(vlm_dir, f
     store = pr.MemoryStore()
     result = pr.backfill(store, vlm_dir=vlm_dir, dry_run=True, filing_store=filings)
     assert result["readers"] == {(QWEN, "v2"): {"files": 3}, (QWEN, "v3"): {"files": 2},
-                                 ("openai/gpt-5.6-terra", "v4"): {"files": 2}}
+                                 ("openai/gpt-5.6-terra", "v4"): {"files": 4}}
     assert sorted(result["skipped"]) == ["alibaba__qwen3-vl-instruct-v4b", "anthropic__claude-sonnet-5-max-v4"]
     assert "second read" in result["skipped"]["alibaba__qwen3-vl-instruct-v4b"]
     assert "maximum reasoning" in result["skipped"]["anthropic__claude-sonnet-5-max-v4"]
-    assert store.rows == {} and store.commits == [] and result["missing"] == []
+    assert store.rows == {} and store.commits == [] and result["missing"] == [] and result["unreadable"] == []
     assert "skipping alibaba__qwen3-vl-instruct-v4b" in caplog.text
 
 
@@ -443,9 +445,10 @@ def test_backfill_loads_the_folders_with_the_right_keys_and_stamps(vlm_dir, fili
     assert result["readers"] == {
         (QWEN, "v2"): {"files": 3, "rows": 2, "new": 2, "changed": 0, "errors": 0},
         (QWEN, "v3"): {"files": 2, "rows": 2, "new": 2, "changed": 0, "errors": 0},
-        ("openai/gpt-5.6-terra", "v4"): {"files": 2, "rows": 2, "new": 2, "changed": 0, "errors": 1},
+        ("openai/gpt-5.6-terra", "v4"): {"files": 4, "rows": 2, "new": 2, "changed": 0, "errors": 1},
     }
     assert result["missing"] == ["202000000000000000"]
+    assert result["unreadable"] == [str(vlm_dir / "openai__gpt-5.6-terra-v4" / OID / f"p{n:03d}.json") for n in (98, 99)]
     # The v2 and v3 Qwen runs asked for JSON mode first (v2 by record, v3
     # because one answer came back in it), unlike Qwen today, so their rows
     # are keyed under that setting; the stampless Terra error under none.
@@ -475,6 +478,17 @@ def test_backfill_loads_the_folders_with_the_right_keys_and_stamps(vlm_dir, fili
     assert (error.attempts, error.seconds, error.usage, error.json_mode) == (3, 1.1, None, None)
     assert error.request == {"json_mode": None, "extras": None}
     assert store.commits == [2, 2, 2]
+
+
+def test_a_corrupt_file_is_passed_over_and_listed_not_a_crash(vlm_dir, filings, tmp_path, caplog):
+    _seed(filings, tmp_path, OID)
+    _seed(filings, tmp_path, OID2, pages=80)
+    store = pr.MemoryStore()
+    result = pr.backfill(store, vlm_dir=vlm_dir, filing_store=filings)
+    assert len(result["unreadable"]) == 2 and all(path.endswith(("p098.json", "p099.json")) for path in result["unreadable"])
+    assert result["readers"][("openai/gpt-5.6-terra", "v4")]["rows"] == 2          # the good files still loaded
+    assert caplog.text.count("is not a JSON reading, passed over") == 2
+    assert not any(key[1] in (98, 99) for key in store.rows)
 
 
 def test_backfill_is_idempotent(vlm_dir, filings, tmp_path):

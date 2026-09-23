@@ -605,8 +605,11 @@ def backfill(session, *, vlm_dir: Path = VLM_DIR, dry_run: bool = False, filing_
     are left where they are.
 
     Returns ``{"readers": {(model, version): {files, rows, new, changed,
-    errors}}, "skipped": {folder: reason}, "missing": [object_id…]}``; a dry
-    run stops after counting files and touches no table.
+    errors}}, "skipped": {folder: reason}, "missing": [object_id…],
+    "unreadable": [path…]}`` — ``unreadable`` the files that are not JSON
+    (an empty or half-written file a killed run left), listed and passed
+    over rather than aborting the run; a dry run stops after counting files
+    and touches no table.
     """
     plan: list[tuple[str, str, list[Path]]] = []
     skipped: dict[str, str] = {}
@@ -623,7 +626,7 @@ def backfill(session, *, vlm_dir: Path = VLM_DIR, dry_run: bool = False, filing_
         plan.append((model, version, files))
     readers: dict[tuple[str, str], dict] = {(model, version): {"files": len(files)} for model, version, files in plan}
     if dry_run:
-        return {"readers": readers, "skipped": skipped, "missing": []}
+        return {"readers": readers, "skipped": skipped, "missing": [], "unreadable": []}
 
     store = _store(session)
     store.ensure_table()
@@ -634,8 +637,15 @@ def backfill(session, *, vlm_dir: Path = VLM_DIR, dry_run: bool = False, filing_
     for oid in missing:
         logger.error("backfill: %s is not a fetched filing_images row; its readings are not loaded", oid)
 
+    unreadable: list[str] = []
     for model, version, files in plan:
-        readings = {path: json.loads(path.read_text()) for path in files}
+        readings: dict[Path, dict] = {}
+        for path in files:
+            try:
+                readings[path] = json.loads(path.read_text())
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                logger.error("backfill: %s is not a JSON reading, passed over: %s", path, exc)
+                unreadable.append(str(path))
         json_first = asked_json_first(data.get("_json_mode") for data in readings.values())
         rows = []
         for path, data in readings.items():
@@ -655,7 +665,7 @@ def backfill(session, *, vlm_dir: Path = VLM_DIR, dry_run: bool = False, filing_
             store.upsert(rows[start:start + CHUNK])
         logger.info("backfill: %s %s: %d rows (%d new, %d changed, %d errors)", model, version, len(rows),
                     summary["new"], summary["changed"], summary["errors"])
-    return {"readers": readers, "skipped": skipped, "missing": missing}
+    return {"readers": readers, "skipped": skipped, "missing": missing, "unreadable": unreadable}
 
 
 # ---------------------------------------------------------------------------
@@ -739,6 +749,8 @@ def _print_backfill(result: dict) -> None:
     if result["missing"]:
         print(f"{len(result['missing'])} filings are not in filing_images; their readings were not loaded: "
               f"{result['missing'][:10]}")
+    for path in result["unreadable"]:
+        print(f"not a JSON reading, passed over: {path}")
 
 
 if __name__ == "__main__":
