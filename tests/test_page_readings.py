@@ -199,6 +199,36 @@ def test_an_error_result_increments_errors_and_keeps_the_stamps(filings, render,
     assert sorted(result.failed) == _pages(OID, 4)
 
 
+def test_a_stored_parse_failure_is_re_parsed_before_the_page_is_bought_again(filings, render, tmp_path):
+    image = _seed(filings, tmp_path, OID, pages=8)
+    store = pr.MemoryStore()
+    # A response the parser of the day rejected and today's accepts (the
+    # bare-amount rule), stored as the folders stored it: the whole text.
+    printed = ('{"page_kind": "grants_paid_list", "heading": "Part XV", '
+               '"rows": [{"name": "Alpha Trust", "address": "", "status": "PC", "purpose": "", "amount": $151,000.00}], '
+               '"totals": [{"label": "Total", "amount": $151,000.00}]}')
+
+    def error_row(page, text, errors):
+        return pr.PageReading(*pr.reading_key(OID, page, image.sha256, QWEN), request=pr.request(QWEN), errors=errors,
+                              last_error=text, usage={"in": 10, "out": 20}, finish="stop", attempts=3, json_mode=False,
+                              seconds=4.0, read_at=datetime(2026, 9, 21, tzinfo=timezone.utc))
+
+    store.upsert([error_row(3, printed, 1),                                   # parses today: recovered
+                  error_row(4, printed, 3),                                   # dead, but parses today: recovered too
+                  error_row(5, "TimeoutError: Request timed out.", 1),        # a transport error: a miss
+                  error_row(6, '{"error": {"message": "overloaded", "type": "server_error"}}', 1)])  # a gateway body: a miss
+    client = _client(2)
+    result = _read(store, filings, _pages(OID, 3, 4, 5, 6), client, tmp_path)
+    assert len(client.json_modes) == 2 and sorted(result.responses) == _pages(OID, 3, 4, 5, 6) and not result.skipped
+    recovered = store.rows[pr.reading_key(OID, 3, image.sha256, QWEN)]
+    assert recovered.response["rows"][0]["amount"] == "151,000.00" and recovered.response["totals"][0]["amount"] == "151,000.00"
+    assert (recovered.errors, recovered.last_error, recovered.partial) == (1, printed, False)
+    assert (recovered.usage, recovered.attempts, recovered.read_at) == ({"in": 10, "out": 20}, 3, datetime(2026, 9, 21, tzinfo=timezone.utc))
+    assert store.rows[pr.reading_key(OID, 4, image.sha256, QWEN)].errors == 3
+    assert store.rows[pr.reading_key(OID, 5, image.sha256, QWEN)].errors == 1 and store.commits == [4, 2, 2]
+    assert result.responses[(OID, 3)] == recovered.response
+
+
 def test_rows_are_committed_in_chunks_of_two_hundred(filings, render, tmp_path):
     _seed(filings, tmp_path, OID, pages=452)
     store = pr.MemoryStore()

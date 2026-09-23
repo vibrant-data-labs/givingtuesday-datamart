@@ -32,8 +32,10 @@ result carrying ``error`` or ``parse_error`` increments ``errors`` and sets
 at ``max_errors`` is skipped and listed, not read again. A success keeps a
 prior error row's ``errors`` and ``last_error``, so the row still says the
 page took two failed runs to read. ``last_error`` holds a parse failure's
-full text, as the JSON folders did, so ``vlm_transcription.repair`` can
-re-parse it without a recall.
+full text, as the JSON folders did, and ``read_pages`` re-parses it with
+today's ``_parse`` before buying the page again (``reparse``), so a parser
+fix recovers every page it applies to at no cost — the bare-amount rule
+did that for the sample from the folders.
 
 **Rendering.** PNGs go to ``<cache_dir>/pages<DPI>/<object_id>/pNNN.png``,
 the layout ``exploratory/placeholder_recovery.transcribe`` already uses, so
@@ -66,7 +68,7 @@ import shutil
 import subprocess
 from abc import ABC, abstractmethod
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -336,6 +338,20 @@ def reading_from_result(key: Key, request_settings: dict, data: dict, prior: Pag
     return row
 
 
+def reparse(row: PageReading) -> PageReading | None:
+    """A stored parse failure read again with today's parser: the row as a
+    success when the text now yields a page (``errors`` and ``last_error``
+    kept, so the row still says what happened; ``read_at`` kept, since the
+    model call is what it dates), else None. A transport error's message
+    never yields a page, and neither does a gateway error body."""
+    if row.response is not None or not row.last_error:
+        return None
+    data = vlm_transcription._parse(row.last_error)
+    if "parse_error" in data or "page_kind" not in data or not isinstance(data.get("rows"), list):
+        return None
+    return replace(row, response={k: data[k] for k in RESPONSE_KEYS if k in data}, partial=bool(data.get("_partial")))
+
+
 def _same(a: PageReading, b: PageReading) -> bool:
     """Equal as stored: ``seconds`` is a Postgres ``real``, so it comes back
     at float32 precision and is compared to that."""
@@ -433,8 +449,10 @@ def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
 
     1. Each page's ``image_sha256`` comes from ``filing_images``; a page of
        an unfetched filing raises ``LookupError`` and nothing is read.
-    2. One query finds the batch's rows. A row with a response is a hit; a
-       row at ``max_errors`` is skipped and listed; anything else is a miss.
+    2. One query finds the batch's rows. A row with a response is a hit. An
+       error row whose stored text parses today (``reparse``) becomes a hit
+       and is stored, at no cost, whatever its ``errors``. A row at
+       ``max_errors`` is skipped and listed; anything else is a miss.
     3. Misses are rendered in a pool of ``RENDER_WORKERS``, one job per
        filing: its PDF materialised from the cache or S3 (from the row read
        in step 1, never the session), then the span of its pages asked for
@@ -468,16 +486,23 @@ def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
     existing = store.get(keys.values())
     result = ReadResult()
     misses: list[tuple[Page, PageReading | None]] = []
+    reparsed: list[PageReading] = []
     for page, key in keys.items():
         row = existing.get(key)
         if row is not None and row.response is not None:
             result.responses[page] = row.response
+        elif row is not None and (fixed := reparse(row)) is not None:
+            reparsed.append(fixed)
+            result.responses[page] = fixed.response
         elif row is not None and row.errors >= max_errors:
             result.skipped[page] = row
         else:
             misses.append((page, row))
-    logger.info("read_pages: %s %s: %d pages, %d stored, %d to read, %d skipped at %d errors", model,
-                prompt_version, len(wanted), len(result.responses), len(misses), len(result.skipped), max_errors)
+    for start in range(0, len(reparsed), CHUNK):
+        store.upsert(reparsed[start:start + CHUNK])
+    logger.info("read_pages: %s %s: %d pages, %d stored (%d of them parse failures re-parsed at no cost), "
+                "%d to read, %d skipped at %d errors", model, prompt_version, len(wanted), len(result.responses),
+                len(reparsed), len(misses), len(result.skipped), max_errors)
     for (oid, page), row in result.skipped.items():
         logger.warning("%s p%03d skipped after %d errors: %s", oid, page, row.errors, (row.last_error or "")[:120])
     if not misses:
