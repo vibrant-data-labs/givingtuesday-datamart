@@ -31,7 +31,10 @@ with itself, which is how a stored full-sample read is scored.
 **The rows.** A verdict is keyed by the page, the image it was decided on
 (``filing_images.sha256``, as the readings are) and the policy version; a
 policy change is a new version and only readers not yet stored cost
-anything. ``accepted_hash`` is the accepted reading's ``request_hash``,
+anything. One version never holds rows decided under two policies: the
+CLIs' ``--flagged`` override runs under ``<version>-<rule>``
+(``with_flagged``), and ``load_policy`` refuses a file whose version is a
+registered policy's unless the dict is identical. ``accepted_hash`` is the accepted reading's ``request_hash``,
 so a loaded row joins back to its reading on (object_id, page,
 image_sha256, accepted_model, the policy's prompt version, accepted_hash)
 — ``accepted_readings`` is that join. A re-run writes only the verdicts
@@ -286,7 +289,24 @@ def load_policy(token: str) -> dict:
         raise ValueError(f"{token!r} is not a registered policy ({', '.join(POLICIES)}) or a file")
     policy = json.loads(path.read_text())
     check_policy(policy)
+    registered = POLICIES.get(policy["version"])
+    if registered is not None and registered != policy:
+        raise ValueError(f"{path} names version {policy['version']!r}, a registered policy, and differs from it; "
+                         f"a different policy is a different version")
     return policy
+
+
+def with_flagged(policy: dict, rule: str | None) -> dict:
+    """The policy with its flagged rule overridden, under a version of its
+    own — ``<version>-<rule>`` — so one version never holds rows decided
+    under two rules. The policy itself when ``rule`` is None or already its
+    rule. Both CLIs' ``--flagged`` goes through here, for deciding and for
+    reading the verdicts back."""
+    if rule is None or rule == policy.get("flagged", "load_single"):
+        return policy
+    if rule not in FLAGGED_RULES:
+        raise ValueError(f"the flagged rule is one of {FLAGGED_RULES}, not {rule!r}")
+    return {**policy, "flagged": rule, "version": f"{policy['version']}-{rule}"}
 
 
 def reader_settings(policy: dict, model: str) -> dict:
@@ -551,7 +571,7 @@ def main() -> None:
     run.add_argument("filings", nargs="+", help="frame CSV path(s) or object ids")
     run.add_argument("--policy", default="v1", help=f"a registered version ({', '.join(POLICIES)}) or a JSON file")
     run.add_argument("--flagged", choices=FLAGGED_RULES, default=None,
-                     help="override the policy's flagged rule; the version's flagged rows are rewritten under it")
+                     help="override the policy's flagged rule; the verdicts go under <version>-<rule>")
     run.add_argument("--stored-only", action="store_true", help="buy nothing: a miss stops the run before any call")
     run.add_argument("--max-errors", type=int, default=MAX_ERRORS)
 
@@ -565,11 +585,7 @@ def main() -> None:
 
     with get_session(config=datamart_config()) as session:
         if args.command == "agree":
-            policy = load_policy(args.policy)
-            if args.flagged and args.flagged != policy.get("flagged", "load_single"):
-                print(f"flagged rule {args.flagged} overrides {policy['version']}'s {policy.get('flagged', 'load_single')}: "
-                      f"the version's flagged rows are rewritten under it")
-                policy["flagged"] = args.flagged
+            policy = with_flagged(load_policy(args.policy), args.flagged)
             ids = [f.object_id for token in args.filings for f in filing_images._read_frame(token)]
             pages = page_readings.frame_pages(session, ids)
             result = agree(session, pages, policy, max_errors=args.max_errors, cache_dir=args.cache,

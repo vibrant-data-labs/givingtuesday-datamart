@@ -19,7 +19,7 @@ from givingtuesday_datamart import page_verdicts as pv
 from givingtuesday_datamart import vlm_transcription as vlm
 
 QWEN, GEMINI, FLASH, SONNET = pv.POLICY_V1["base"] + pv.POLICY_V1["escalation"]
-LEAVE_OUT = {**pv.POLICY_V1, "version": "v1-leave-out", "flagged": "leave_out"}
+LEAVE_OUT = pv.with_flagged(pv.POLICY_V1, "leave_out")
 SINGLE = {"version": "single-qwen-v4", "base": [QWEN], "escalation": [], "prompt_version": "v4", "flagged": "load_single"}
 
 
@@ -153,7 +153,7 @@ def test_flagged_under_load_single_names_the_last_escalation_reading_and_under_l
     result = _agree(stores, _pages(3), tmp_path=tmp_path, policy=LEAVE_OUT)
     left = _verdict(result, 3)
     assert (left.verdict, left.accepted_model, left.accepted_hash, left.matched_models) == ("flagged", None, None, [])
-    assert left.policy_version == "v1-leave-out" and left.readers_consulted == 4
+    assert left.policy_version == "v1-leave_out" and left.readers_consulted == 4
     assert len(stores[2].rows) == 2                                  # one row per version
 
 
@@ -232,17 +232,23 @@ def test_a_new_policy_version_reads_nothing_new_and_writes_beside_the_old_rows(s
     assert _verdict(unchanged, 3).decided_at == _verdict(first, 3).decided_at
 
 
-def test_a_flagged_rule_change_rewrites_only_the_flagged_rows(stores, tmp_path):
+def test_a_flagged_rule_override_is_a_version_of_its_own_and_leaves_the_registered_one_alone(stores, tmp_path):
     for model, n in ((QWEN, 1), (GEMINI, 2), (FLASH, 3), (SONNET, 4)):
         _store_reading(stores, OID, 3, model, _rows(n))
     _store_reading(stores, OID, 4, QWEN, _rows(3)); _store_reading(stores, OID, 4, GEMINI, _rows(3))
     first = _agree(stores, _pages(3, 4), tmp_path=tmp_path)
-    rewritten = _agree(stores, _pages(3, 4), tmp_path=tmp_path, policy={**pv.POLICY_V1, "flagged": "leave_out"})
-    assert rewritten.written == 1 and stores[2].commits == [2, 1]
-    assert _verdict(rewritten, 3).accepted_model is None and _verdict(rewritten, 3).verdict == "flagged"
-    assert _verdict(rewritten, 4) is _verdict(first, 4)
-    restored = _agree(stores, _pages(3, 4), tmp_path=tmp_path)
-    assert restored.written == 1 and _verdict(restored, 3).accepted_model == SONNET
+    overridden = pv.with_flagged(pv.POLICY_V1, "leave_out")
+    assert overridden["version"] == "v1-leave_out" and overridden["flagged"] == "leave_out"
+    assert {k: v for k, v in overridden.items() if k not in ("version", "flagged")} == \
+        {k: v for k, v in pv.POLICY_V1.items() if k not in ("version", "flagged")}
+    assert pv.with_flagged(pv.POLICY_V1, "load_single") is pv.POLICY_V1 and pv.with_flagged(pv.POLICY_V1, None) is pv.POLICY_V1
+    with pytest.raises(ValueError, match="flagged rule"):
+        pv.with_flagged(pv.POLICY_V1, "drop")
+    second = _agree(stores, _pages(3, 4), tmp_path=tmp_path, policy=overridden)
+    assert second.written == 2 and stores[2].commits == [2, 2]                 # its own rows, the v1 rows untouched
+    assert _verdict(second, 3).policy_version == "v1-leave_out" and _verdict(second, 3).accepted_model is None
+    assert _verdict(first, 3).accepted_model == SONNET and stores[2].rows[_verdict(first, 3).key] is _verdict(first, 3)
+    assert sorted(key[3] for key in stores[2].rows) == ["v1", "v1", "v1-leave_out", "v1-leave_out"]
 
 
 def test_a_single_reader_policy_agrees_with_itself_on_every_page_it_can_read(stores, tmp_path):
@@ -302,6 +308,11 @@ def test_load_policy_takes_a_registered_version_or_a_json_file(tmp_path):
     path.write_text(json.dumps({**SINGLE, "flagged": "drop"}))
     with pytest.raises(ValueError, match="flagged rule"):
         pv.load_policy(str(path))
+    path.write_text(json.dumps({**pv.POLICY_V1, "escalation": [SONNET, FLASH]}))   # a registered version, another policy
+    with pytest.raises(ValueError, match="registered policy, and differs"):
+        pv.load_policy(str(path))
+    path.write_text(json.dumps(pv.POLICY_V1))                                     # the same dict: fine
+    assert pv.load_policy(str(path)) == pv.POLICY_V1
 
 
 # ---------------------------------------------------------------------------

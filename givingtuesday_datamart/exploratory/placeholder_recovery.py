@@ -60,7 +60,8 @@ from givingtuesday_datamart.attachment_grants import (
     PLACEHOLDER, XML_SOURCES, candidate_tables, coverage, diagnose, extract_tables, is_pointer,
     load_elements, page_tables, xml_tables)
 from givingtuesday_datamart.page_readings import MAX_ERRORS, frame_pages
-from givingtuesday_datamart.page_verdicts import FLAGGED_RULES, POLICIES, POLICY_V1, accepted_readings, agree, load_policy, summary
+from givingtuesday_datamart.page_verdicts import (
+    FLAGGED_RULES, POLICIES, POLICY_V1, accepted_readings, agree, load_policy, summary, with_flagged)
 
 COMBINED_CSV = Path.home() / "Downloads" / "combined-grants-datamarts-gt_team_priority-20260915.csv"
 SAMPLE_CSV = Path("data/exploratory/placeholder_sample_100.csv")
@@ -535,7 +536,7 @@ def main() -> None:
     p = sub.add_parser("transcribe", help="decide the attachment pages under a policy, reading what the table lacks")
     p.add_argument("--policy", default="v1", help=f"a registered version ({', '.join(POLICIES)}) or a JSON file")
     p.add_argument("--flagged", choices=FLAGGED_RULES, default=None,
-                   help="override the policy's flagged rule; the version's flagged rows are rewritten under it")
+                   help="override the policy's flagged rule; the verdicts go under <version>-<rule>")
     p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
     p.add_argument("--cache", type=Path, default=CACHE)
     p.add_argument("--limit", type=int, default=None, help="the first N filings that have attachment pages")
@@ -546,6 +547,8 @@ def main() -> None:
     p = sub.add_parser("report", help="score one engine's pages through the selector")
     p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
     p.add_argument("--policy", default="v1", help="the verdicts to read: a registered version or a JSON file")
+    p.add_argument("--flagged", choices=FLAGGED_RULES, default=None,
+                   help="read the verdicts an override of the flagged rule decided, under <version>-<rule>")
     p.add_argument("--results", type=Path, default=None,
                    help="the Unstructured baseline instead: a directory of <object_id>.pdf.json")
     p.add_argument("--out", type=Path, default=None)
@@ -572,13 +575,9 @@ def main() -> None:
         from givingtuesday_datamart.ingestion import datamart_config
 
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
-        policy = load_policy(args.policy)
+        policy = with_flagged(load_policy(args.policy), args.flagged)
         with get_session(config=datamart_config()) as session:
             if args.command == "transcribe":
-                if args.flagged and args.flagged != policy.get("flagged", "load_single"):
-                    print(f"flagged rule {args.flagged} overrides {policy['version']}'s "
-                          f"{policy.get('flagged', 'load_single')}: the version's flagged rows are rewritten under it")
-                    policy["flagged"] = args.flagged
                 transcribe(session, args.sample, policy, args.cache, args.limit, args.only, args.max_errors,
                            buy=not args.stored_only)
             else:

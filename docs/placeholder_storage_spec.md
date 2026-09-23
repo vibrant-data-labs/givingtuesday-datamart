@@ -342,10 +342,12 @@ that must cost nothing. A single-reader policy (one base reader, no
 escalation) marks every page it can read `agreed` with itself; that is
 how a stored full-sample read is scored through `report`. A registered
 policy is named by version (`v1`); any other is a JSON file with the
-dict (`data/exploratory/placeholder_policy_single_*_v3.json`). The CLI's
-`--flagged` overrides the rule under the *same* version, rewriting that
-version's flagged rows (23 rows either way on the ground-truth pages);
-a different agreement policy is a different version.
+dict (`data/exploratory/placeholder_policy_single_*_v3.json`); a file
+whose version is a registered policy's is refused unless the dict is
+identical. The CLIs' `--flagged` overrides the rule under a version of
+its own, `<version>-<rule>` (`with_flagged`), for deciding and for
+reading back, so one version never holds rows decided under two
+policies.
 
 `accepted_readings(session, pages, policy)` is the join the load and the
 report use: the verdict on each page under the policy's version, decided
