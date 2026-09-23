@@ -18,8 +18,8 @@ Postgres's 65,535-parameter limit at about 9,000 pages).
 from __future__ import annotations
 
 import json
-from concurrent.futures import Future, as_completed
-from typing import Any, Iterator, Mapping, Protocol, Sequence, TypeVar
+from concurrent.futures import CancelledError, Future, as_completed
+from typing import Any, Callable, Iterator, Mapping, Protocol, Sequence, TypeVar
 
 from givingtuesday_datamart._internal.logger import logger
 
@@ -30,22 +30,31 @@ class Store(Protocol[Row]):
     def upsert(self, rows: Sequence[Row]) -> None: ...
 
 
-def upsert_as_done(store: Store[Row], futures: Sequence[Future], chunk: int) -> Iterator[Row]:
+def upsert_as_done(store: Store[Row], futures: Sequence[Future], chunk: int, *,
+                   on_stop: Callable[[], None] | None = None) -> Iterator[Row]:
     """Collect worker results on the main thread and commit every ``chunk``.
 
     Workers return rows rather than raising; one that raises anyway is
     logged and re-raised only after every other result has been collected
     and committed. When the loop stops for any other reason — an interrupt
     in the wait, the caller raising — the jobs not yet started are
-    cancelled and whatever is buffered is committed: a pool's ``with``
-    exit otherwise runs every queued job to completion on the way out and
-    throws the results away, which for a reading pool is paying for pages
-    nobody stores (the rehearsal run: Ctrl-C with 800 pages queued).
+    cancelled (a pool's ``with`` exit otherwise runs every queued job to
+    completion on the way out and throws the results away, which for a
+    reading pool is paying for pages nobody stores: the rehearsal run,
+    Ctrl-C with 800 pages queued), ``on_stop`` is called (``read_pages``
+    cancels the renders not yet started there, so a read in flight waiting
+    on one fails fast instead of waiting through the render queue), and
+    the results of the jobs in flight are collected: the pool's exit waits
+    for them regardless, so recording them costs nothing and a resume does
+    not buy them again. Whatever is buffered is then committed.
     """
     buffer: list[Row] = []
     failures: list[Exception] = []
+    collected: set[Future] = set()
+    completed = False
     try:
         for future in as_completed(futures):
+            collected.add(future)
             try:
                 row = future.result()
             except Exception as exc:                      # noqa: BLE001
@@ -57,11 +66,23 @@ def upsert_as_done(store: Store[Row], futures: Sequence[Future], chunk: int) -> 
                 ready, buffer = buffer, []
                 store.upsert(ready)
             yield row
+        completed = True
     finally:
-        cancelled = sum(future.cancel() for future in futures)    # True only for a job not yet started
-        if cancelled:
-            logger.warning("stopping: %d queued jobs cancelled before they started; the ones in flight finish "
-                           "but are not recorded", cancelled)
+        if not completed:
+            cancelled = sum(future.cancel() for future in futures)    # True only for a job not yet started
+            in_flight = [future for future in futures if future not in collected and not future.cancelled()]
+            logger.warning("stopping: %d queued jobs cancelled before they started; %d in flight are waited for "
+                           "and recorded", cancelled, len(in_flight))
+            if on_stop is not None:
+                on_stop()
+            for future in in_flight:
+                try:
+                    buffer.append(future.result())
+                except CancelledError:
+                    logger.warning("stopping: a job in flight was cancelled underneath (its render, say); "
+                                   "its row is not recorded")
+                except Exception:                         # noqa: BLE001
+                    logger.exception("stopping: a job in flight raised; its row is not recorded")
         if buffer:
             store.upsert(buffer)
     if failures:

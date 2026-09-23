@@ -37,10 +37,13 @@ def test_upsert_as_done_commits_in_chunks_and_raises_a_worker_failure_last(caplo
     assert "a worker raised; its row is not recorded this run" in caplog.text
 
 
-def test_upsert_as_done_cancels_the_queued_jobs_when_interrupted(monkeypatch, caplog):
+def test_upsert_as_done_cancels_the_queued_jobs_and_records_the_ones_in_flight_when_interrupted(monkeypatch, caplog):
     """Ctrl-C while waiting on the pool: the jobs not yet started are
-    cancelled and what was collected is committed, rather than the pool
-    running every queued job on the way out with the results thrown away."""
+    cancelled, the ones in flight are waited for (the pool's exit waits for
+    them anyway) and recorded, and everything collected is committed —
+    rather than the pool running every queued job on the way out with the
+    results thrown away, or the in-flight pages being bought again on
+    resume."""
     gate, started = threading.Semaphore(0), []
 
     def work(n):
@@ -50,9 +53,13 @@ def test_upsert_as_done_cancels_the_queued_jobs_when_interrupted(monkeypatch, ca
 
     def interrupted(futures_):
         for i, future in enumerate(as_completed(futures_)):
-            if i == 4:
+            if i == 4:                                    # job 4 is done and not yet yielded
+                deadline = time.monotonic() + 5
                 while len(started) < 6:                   # job 5 has been picked up and is in flight
+                    if time.monotonic() > deadline:
+                        pytest.fail("job 5 never started")
                     time.sleep(0.001)
+                threading.Timer(0.2, gate.release).start()    # job 5 finishes while the stop waits for it
                 raise KeyboardInterrupt
             yield future
             gate.release()                                # let the next job finish
@@ -64,10 +71,49 @@ def test_upsert_as_done_cancels_the_queued_jobs_when_interrupted(monkeypatch, ca
         gate.release()
         with pytest.raises(KeyboardInterrupt):
             list(bulk.upsert_as_done(store, futures, chunk=10))
-        gate.release()                                    # the job in flight finishes; nothing else runs
-    assert store.rows == [0, 1, 2, 3] and store.commits == [4]
+    assert store.rows == [0, 1, 2, 3, 4, 5] and store.commits == [6]
     assert started == [0, 1, 2, 3, 4, 5] and sum(f.cancelled() for f in futures) == 19
-    assert "stopping: 19 queued jobs cancelled before they started" in caplog.text
+    assert "stopping: 19 queued jobs cancelled before they started; 2 in flight are waited for and recorded" in caplog.text
+
+
+def test_upsert_as_done_calls_on_stop_before_waiting_and_logs_a_job_cancelled_underneath(monkeypatch, caplog):
+    """``on_stop`` runs before the in-flight results are waited for, and a
+    job whose own wait is cancelled by it is logged, not recorded."""
+    gate, hold, order = threading.Semaphore(0), threading.Semaphore(0), []
+    inner = ThreadPoolExecutor(1)
+    inner.submit(hold.acquire)                            # keeps ``victim`` pending until it is cancelled
+    victim = inner.submit(lambda: None)
+
+    def work(n):
+        if n == 1:
+            return victim.result()                        # raises CancelledError once on_stop cancels it
+        gate.acquire()
+        return n
+
+    def interrupted(futures_):
+        deadline = time.monotonic() + 5
+        while sum(f.running() for f in futures_) < 2:
+            if time.monotonic() > deadline:
+                pytest.fail("the two jobs never started")
+            time.sleep(0.001)
+        raise KeyboardInterrupt
+        yield                                             # noqa: unreachable, makes this a generator
+
+    def on_stop():
+        order.append(victim.cancel())                     # job 1 fails fast
+        gate.release()                                    # job 0 finishes and is recorded
+
+    monkeypatch.setattr(bulk, "as_completed", interrupted)
+    store = _Store()
+    with ThreadPoolExecutor(2) as pool:
+        futures = [pool.submit(work, n) for n in range(4)]
+        with pytest.raises(KeyboardInterrupt):
+            list(bulk.upsert_as_done(store, futures, chunk=10, on_stop=on_stop))
+    hold.release()
+    inner.shutdown()
+    assert order == [True] and store.rows == [0] and store.commits == [1]
+    assert "stopping: 2 queued jobs cancelled before they started; 2 in flight are waited for and recorded" in caplog.text
+    assert caplog.text.count("a job in flight was cancelled underneath") == 1
 
 
 def test_multi_row_insert_binds_each_row_by_index_and_casts_json_columns():
