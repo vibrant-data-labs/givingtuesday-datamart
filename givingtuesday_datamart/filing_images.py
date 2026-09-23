@@ -48,6 +48,7 @@ from __future__ import annotations
 import argparse
 import base64
 import csv
+import functools
 import hashlib
 import logging
 import os
@@ -460,7 +461,11 @@ def _index_frame(object_ids: Iterable[str], cache_dir: Path) -> dict[str, irs_so
     return found
 
 
+@functools.lru_cache(maxsize=None)
 def _s3_client(workers: int = 8):
+    """Built once per process and pool size: credential chain, region and
+    endpoint resolution cost about 100 ms, and Part B calls local_pdf once
+    per filing."""
     import boto3                                          # the ``ingest`` extra
     from botocore.config import Config
     return boto3.client("s3", config=Config(max_pool_connections=workers + 4))
