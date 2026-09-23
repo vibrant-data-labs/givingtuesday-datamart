@@ -42,6 +42,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from givingtuesday_datamart import reading_pairs
+
 SAMPLE_CSV = Path("data/exploratory/placeholder_sample_100.csv")
 STAGING_CSV = Path("data/exploratory/placeholder_staging.csv")
 PAGES_CSV = Path("data/exploratory/placeholder_gt_pages.csv")
@@ -78,15 +80,11 @@ SEED = 7
 TRUTH_FIELDS = ["object_id", "page", "n", "name", "amount", "note"]
 
 
-def _amount(value) -> float | None:
-    try:
-        return float(str(value).replace(",", "").replace("$", "").strip())
-    except ValueError:
-        return None
-
-
-def _key(name: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", str(name or "").lower())[:14]
+# The comparison — the name key, the amount parse, a reading's rows and its
+# keyed pairs — is ``reading_pairs``, shared with ``page_verdicts.agree`` so
+# the scorer and the gate cannot drift. The private names are kept as the
+# aliases the code below reads.
+_amount, _key, _rows, _pairs = reading_pairs.amount, reading_pairs.key, reading_pairs.rows, reading_pairs.keyed
 
 
 def _reading(reader_dir: str, oid: str, page: int) -> dict | None:
@@ -97,17 +95,6 @@ def _reading(reader_dir: str, oid: str, page: int) -> dict | None:
     if "error" in data or "parse_error" in data:
         return None
     return data
-
-
-def _rows(data: dict | None) -> list[tuple[str, float]]:
-    if not data:
-        return []
-    return [(str(r.get("name") or ""), a) for r in data.get("rows") or []
-            if isinstance(r, dict) and (a := _amount(r.get("amount"))) is not None]
-
-
-def _pairs(rows) -> list[tuple[str, float]]:
-    return [(_key(name), amount) for name, amount in rows]
 
 
 def _density(n: int) -> str:
