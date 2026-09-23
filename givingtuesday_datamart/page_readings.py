@@ -75,7 +75,7 @@ from typing import Iterable, Sequence
 from sqlalchemy import text
 
 from givingtuesday_datamart import filing_images, vlm_transcription
-from givingtuesday_datamart._internal.bulk import multi_row_insert, multi_row_params, upsert_as_done
+from givingtuesday_datamart._internal.bulk import keyed_params, keyed_select, multi_row_insert, multi_row_params, upsert_as_done
 from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart.filing_images import CACHE
 from givingtuesday_datamart.vlm_transcription import DPI, PROMPT_VERSION
@@ -152,14 +152,9 @@ KEY_COLUMNS = COLUMNS[:7]
 _KEY_TYPES = ("text", "integer", "text", "integer", "text", "text", "text")
 JSON_COLUMNS = ("request", "response", "usage")
 
-# One query for a batch of primary keys: the key columns arrive as seven
-# parallel arrays, so the statement has seven parameters however many keys
-# are looked up (a VALUES list would hit Postgres's 65,535-parameter limit
-# at about 9,000 pages).
-_SELECT = (
-    f"SELECT {', '.join(COLUMNS)} FROM page_readings WHERE ({', '.join(KEY_COLUMNS)}) IN ("
-    "SELECT * FROM unnest(" + ", ".join(f"CAST(:{c} AS {t}[])" for c, t in zip(KEY_COLUMNS, _KEY_TYPES)) + "))"
-)
+# One query for a batch of primary keys, seven parameters however many
+# keys (``_internal.bulk.keyed_select``).
+_SELECT = keyed_select("page_readings", COLUMNS, KEY_COLUMNS, _KEY_TYPES)
 
 
 # ---------------------------------------------------------------------------
@@ -257,8 +252,7 @@ class PostgresStore(PageReadingStore):
         wanted = list(dict.fromkeys(keys))
         if not wanted:
             return {}
-        params = {column: [key[i] for key in wanted] for i, column in enumerate(KEY_COLUMNS)}
-        found = self.session.execute(text(_SELECT), params).mappings().all()
+        found = self.session.execute(text(_SELECT), keyed_params(wanted, KEY_COLUMNS)).mappings().all()
         rows = [PageReading(**{c: row[c] for c in COLUMNS}) for row in found]
         return {row.key: row for row in rows}
 

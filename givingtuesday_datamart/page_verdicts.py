@@ -63,7 +63,7 @@ from typing import Iterable, Sequence
 from sqlalchemy import text
 
 from givingtuesday_datamart import filing_images, page_readings, vlm_transcription
-from givingtuesday_datamart._internal.bulk import multi_row_insert, multi_row_params
+from givingtuesday_datamart._internal.bulk import keyed_params, keyed_select, multi_row_insert, multi_row_params
 from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart.filing_images import CACHE
 from givingtuesday_datamart.page_readings import MAX_ERRORS, Page, ReadResult, read_pages, request, settings_hash
@@ -140,17 +140,12 @@ class Verdict:
 COLUMNS = tuple(f.name for f in fields(Verdict))
 KEY_COLUMNS = COLUMNS[:4]
 _KEY_TYPES = ("text", "integer", "text", "text")
-_SELECT_COLUMNS = f"SELECT {', '.join(COLUMNS)} FROM page_verdicts"
-# One query for a batch of keys, the key columns as parallel arrays (the
-# shape ``page_readings`` uses, for the same parameter-limit reason).
-_SELECT = (
-    f"{_SELECT_COLUMNS} WHERE ({', '.join(KEY_COLUMNS)}) IN ("
-    "SELECT * FROM unnest(" + ", ".join(f"CAST(:{c} AS {t}[])" for c, t in zip(KEY_COLUMNS, _KEY_TYPES)) + "))"
-)
-_SELECT_PAGES = (
-    f"{_SELECT_COLUMNS} WHERE (object_id, page) IN ("
-    "SELECT * FROM unnest(CAST(:object_id AS text[]), CAST(:page AS integer[]))) AND policy_version = :policy_version"
-)
+_PAGE_COLUMNS = ("object_id", "page")
+# One query for a batch of keys, or of pages under one version, the key
+# columns as parallel arrays (``_internal.bulk.keyed_select``, the shape
+# ``page_readings`` uses).
+_SELECT = keyed_select("page_verdicts", COLUMNS, KEY_COLUMNS, _KEY_TYPES)
+_SELECT_PAGES = keyed_select("page_verdicts", COLUMNS, _PAGE_COLUMNS, _KEY_TYPES[:2]) + " AND policy_version = :policy_version"
 
 
 # ---------------------------------------------------------------------------
@@ -189,16 +184,13 @@ class PostgresStore(VerdictStore):
         wanted = list(dict.fromkeys(keys))
         if not wanted:
             return {}
-        params = {column: [key[i] for key in wanted] for i, column in enumerate(KEY_COLUMNS)}
-        return {row.key: row for row in self._rows(_SELECT, params)}
+        return {row.key: row for row in self._rows(_SELECT, keyed_params(wanted, KEY_COLUMNS))}
 
     def for_pages(self, pages: Iterable[Page], policy_version: str) -> list[Verdict]:
         wanted = list(dict.fromkeys(pages))
         if not wanted:
             return []
-        params = {"object_id": [oid for oid, _ in wanted], "page": [page for _, page in wanted],
-                  "policy_version": policy_version}
-        return self._rows(_SELECT_PAGES, params)
+        return self._rows(_SELECT_PAGES, keyed_params(wanted, _PAGE_COLUMNS) | {"policy_version": policy_version})
 
     def _rows(self, sql: str, params: dict) -> list[Verdict]:
         found = self.session.execute(text(sql), params).mappings().all()

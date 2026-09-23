@@ -1,5 +1,5 @@
-"""``_internal.bulk``: the collector and the one-statement upsert both
-storage modules share, on their own."""
+"""``_internal.bulk``: the collector, the one-statement upsert and the
+batch key lookup the storage modules share, on their own."""
 
 from __future__ import annotations
 
@@ -44,3 +44,13 @@ def test_multi_row_insert_binds_each_row_by_index_and_casts_json_columns():
                                     {"k1": 2, "k2": "y", "a": 3.5, "j": None}], ("k1", "k2", "a", "j"), json_columns=("j",))
     assert params == {"k1_0": 1, "k2_0": "x", "a_0": None, "j_0": '{"b": [1, 2]}',
                       "k1_1": 2, "k2_1": "y", "a_1": 3.5, "j_1": None}
+
+
+def test_keyed_select_binds_each_key_column_once_as_an_array():
+    sql = bulk.keyed_select("t", ("k1", "k2", "a"), ("k1", "k2"), ("text", "integer"))
+    assert sql == ("SELECT k1, k2, a FROM t WHERE (k1, k2) IN ("
+                   "SELECT * FROM unnest(CAST(:k1 AS text[]), CAST(:k2 AS integer[])))")
+    assert bulk.keyed_params([("x", 1), ("y", 2), ("x", 3)], ("k1", "k2")) == {"k1": ["x", "y", "x"], "k2": [1, 2, 3]}
+    assert bulk.keyed_params([], ("k1", "k2")) == {"k1": [], "k2": []}
+    narrowed = bulk.keyed_select("t", ("k1", "a"), ("k1",), ("text",)) + " AND v = :v"
+    assert narrowed.endswith("unnest(CAST(:k1 AS text[]))) AND v = :v")
