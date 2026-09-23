@@ -216,7 +216,7 @@ def test_an_error_result_increments_errors_and_keeps_the_stamps(filings, render,
     result = _read(store, filings, _pages(OID, 4), garbled, tmp_path)
     row = store.rows[pr.reading_key(OID, 4, image.sha256, QWEN)]
     assert row.errors == 1 and row.last_error == "not json at all" and row.response is None
-    assert row.usage == {"in": 10, "out": 15} and row.attempts == 3 and row.finish == "stop"
+    assert row.usage == {"in": 30, "out": 45} and row.attempts == 3 and row.finish == "stop"   # three calls' tokens
     assert sorted(result.failed) == _pages(OID, 4)
 
 

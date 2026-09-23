@@ -248,13 +248,22 @@ def transcribe(client, model: str, png: Path) -> dict:
     stopped mid-row on, is asked for again, without JSON mode from then
     on — that mode, not the page, is what made Qwen answer 401 dense pages
     with nothing. The fullest parsed answer is returned, with
-    ``_attempts`` set to the number of calls made.
+    ``_attempts`` set to the number of calls made and ``_usage`` the tokens
+    of every call that answered, summed — what the page cost, not the kept
+    answer's size, which the answer itself gives (Zein, 2026-09-23; rows
+    stored before that date carry the kept call's tokens and understate
+    the spend by about 6% on the rehearsal run).
     """
     max_tokens, json_mode = MAX_TOKENS, JSON_MODE.get(model, True)
     best: dict = {}
+    spent: dict | None = None
     attempt = 0
     for attempt in range(1, ATTEMPTS + 1):
         data = _ask(client, model, png, max_tokens, json_mode)
+        if usage := data.get("_usage"):
+            spent = spent or {"in": 0, "out": 0}
+            spent["in"] += usage.get("in") or 0
+            spent["out"] += usage.get("out") or 0
         if (not best or _rows(data) > _rows(best)
                 or (_rows(data) == _rows(best) and best.get("_partial") and not data.get("_partial"))):
             best = data
@@ -272,6 +281,8 @@ def transcribe(client, model: str, png: Path) -> dict:
             continue
         break
     best["_attempts"] = attempt
+    if spent is not None:
+        best["_usage"] = spent
     return best
 
 

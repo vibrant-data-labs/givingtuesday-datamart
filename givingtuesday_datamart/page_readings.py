@@ -100,7 +100,7 @@ DDL = (
         request         jsonb NOT NULL,       -- {json_mode, extras}, for audit
         response        jsonb,                -- page_kind, heading, rows, totals; NULL on error
         partial         boolean NOT NULL DEFAULT false,
-        usage           jsonb,                -- {in, out, reasoning}
+        usage           jsonb,                -- {in, out}: every call's tokens summed (from 2026-09-23; the kept call's before)
         finish          text,
         attempts        integer,
         json_mode       boolean,
