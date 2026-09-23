@@ -1072,7 +1072,10 @@ page, so the question may be moot.
      $4.36 → $26.79). `verdicts --policy v1` on the ground-truth pages:
      still 58 / 2 / 23, the same two wrong pages, 11 of 23 flagged right
      in Sonnet's reading. The single-reader v3 reports re-run from the
-     tables reproduce the frozen v3 CSVs cell for cell.
+     tables reproduce the frozen v3 CSVs on every column the two share
+     (outcome, recovered, coverage, rows, pages…); the per-page columns
+     differ by design — the frozen files carry `page_errors` and
+     `page_stats`, the new ones the verdict mix and `flagged_rows`.
    - **What EC2 should expect for the 9,347-page frame at these rates.**
      Re-weighting the measured v4 rates to the frame's composition (J&J
      is 836 of its pages, not 836 of 1,782): a 52% dispute rate (4,856
