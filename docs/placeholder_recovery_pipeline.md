@@ -814,15 +814,39 @@ page, so the question may be moot.
      4`, and the join to `page_readings` on (object_id, page,
      image_sha256, accepted_model, prompt version v4, accepted_hash)
      finds Sonnet's 48-row reading — 16 of the 48 truth pairs right, the
-     number the ground-truth section gives for that page. `agree` under
-     v1 with `flagged = leave_out` rewrote exactly the 23 flagged rows
-     (3.2 s): the row then has both accepted columns NULL and
-     `accepted_readings` gives it no response. Restored to `load_single`,
-     23 rows rewritten again; a fourth run wrote 0 (idempotent). No v1
-     verdict names a reading the table does not hold.
+     number the ground-truth section gives for that page. `agree` with
+     the flagged rule overridden to `leave_out` runs under a version of
+     its own, `v1-leave_out` (83 rows, 3.6 s; a second run wrote 0): the
+     page's row there has both accepted columns NULL and
+     `accepted_readings` gives it no response, while its v1 row still
+     names Sonnet's reading. (The first run of this criterion, before the
+     review of PR #45, flipped v1 in place — 23 rows rewritten each way —
+     which is what the review ruled out.) No v1 verdict names a reading
+     the table does not hold.
    - `status --policy v1`: agreed 37, escalated 23, flagged 23; by
      accepted reading, Qwen 37 agreed, 3.8 Flash 16 escalated, Sonnet 7
      escalated and 23 flagged.
+
+   **Review of PR #45** (2026-09-23, five findings, one commit each).
+   Three of them changed what `agree` does. A base reader out of
+   attempts on a page is now absent for that page rather than making it
+   `unreadable`: the page goes through the dispute path with the other
+   base reader and the escalation readers and is accepted on any two
+   that agree, and `unreadable` is reserved for a page fewer than two
+   readers could read (Zein: a base reader timing out three times on a
+   dense page must not kill a page three other readers can decide; the
+   spec's decisions table). Each stage's verdicts are written as soon as
+   the stage is decided, so an error out of a later consult leaves the
+   earlier stages' rows on the table. And a `--flagged` override runs
+   under `<version>-<rule>`, with `load_policy` refusing a file that
+   reuses a registered version, so one version never holds rows decided
+   under two policies. The batch key lookup moved into `_internal.bulk`
+   beside the upsert, and the scorer's `verdicts` takes a session and
+   stores, with a memory-store test of its counts. `agree` under v1 on
+   the 83 pages, `buy=False`, after the changes: 0 verdict rows written
+   (no page there had a reader out of attempts) and `verdicts --policy
+   v1` still 58 / 2 / 23, 11 of the 23 flagged right in Sonnet's
+   reading; 0 gateway calls.
 5. ~~Decide the flagged-page policy before that run's load.~~ Decided
    (2026-09-22, the spec's decisions table): loaded from Sonnet's single
    reading with the verdict as the mark, `POLICY_V1["flagged"] =
