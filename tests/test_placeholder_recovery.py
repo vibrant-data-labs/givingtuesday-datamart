@@ -82,6 +82,9 @@ from test_vlm_transcription import _Client, _answer, _rows
 
 from givingtuesday_datamart import vlm_transcription as vlm
 
+BANNERS = ("=== prerequisites", "=== fetch", "=== cost gate", "=== smoke", "=== base readers", "=== transcribe",
+           "=== final check", "=== status", "=== done in")
+
 
 class _S3Write(_S3):
     """The reading tests' fake, plus the bucket checks ``run`` makes."""
@@ -115,18 +118,21 @@ class _Popen:
 
 
 @pytest.fixture
-def box(monkeypatch, tmp_path):
-    """A host that passes the prerequisites: poppler, the key, disk, IMDS off."""
+def box(monkeypatch):
+    """A host that passes the prerequisites — poppler, the key, disk, TEOS,
+    IMDS — with the render and the reader processes faked at the module edges."""
     monkeypatch.setenv("VERCEL_AI_GATEWAY_API_KEY", "k" * 60)
     monkeypatch.setattr(rec.shutil, "which", lambda cmd, *args, **kwargs: f"/usr/bin/{cmd}")
     monkeypatch.setattr(rec.subprocess, "run",
                         lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, "", "pdftoppm version 24.04.0\n"))
     monkeypatch.setattr(rec.shutil, "disk_usage", lambda path: SimpleNamespace(total=1, used=0, free=100 * 1024 ** 3))
     monkeypatch.setattr(rec, "_instance_type", lambda: "t3.xlarge")
+    monkeypatch.setattr(rec.irs_source, "_get", lambda url, headers=None: b"{}")
     monkeypatch.setattr(vlm.time, "sleep", lambda seconds: None)
-    render = _Render()
-    monkeypatch.setattr(vlm, "render", render)
-    return render
+    fake = SimpleNamespace(render=_Render(), popen=_Popen())
+    monkeypatch.setattr(vlm, "render", fake.render)
+    monkeypatch.setattr(rec.subprocess, "Popen", fake.popen)
+    return fake
 
 
 def _frame_csv(tmp_path):
@@ -135,15 +141,16 @@ def _frame_csv(tmp_path):
     return sample
 
 
-def _run(stores, sample, tmp_path, *, client=None, popen=None, **kwargs):
+def _run(stores, sample, tmp_path, *, client=None, **kwargs):
     filings, readings, verdicts = stores
-    popen = popen or _Popen()
-    outcome = rec.run(sample, pv.POLICY_V2, tmp_path, session=SimpleNamespace(), filing_store=filings,
-                      reading_store=readings, verdict_store=verdicts, client=client or _Client([]), s3=_S3Write(),
-                      sts=SimpleNamespace(get_caller_identity=lambda: {"Arn": "arn:aws:iam::1:role/frame"}),
-                      teos=lambda url: b"{}", popen=popen, reports=lambda: print("status: fake"),
-                      logs=tmp_path / "logs", **kwargs)
-    return outcome, popen
+    rec.run(sample, pv.POLICY_V2, tmp_path, filing_store=filings, reading_store=readings, verdict_store=verdicts,
+            client=client or _Client([]), s3=_S3Write(), logs=tmp_path / "logs", **kwargs)
+
+
+def _banners(out):
+    """The stage banners in the order printed."""
+    found = sorted((out.index(b), b) for b in BANNERS if b in out)
+    return [b for _, b in found]
 
 
 @pytest.fixture
@@ -164,38 +171,35 @@ def run_stores(tmp_path):
 def test_run_drives_every_stage_and_ends_with_a_stored_only_check_that_buys_nothing(run_stores, box, tmp_path, capsys):
     sample = _frame_csv(tmp_path)
     client = _Client([(_answer(_rows(3)), "stop")] * 4)          # the smoke's four Qwen pages
-    outcome, popen = _run(run_stores, sample, tmp_path, client=client)
+    _run(run_stores, sample, tmp_path, client=client)
     out = capsys.readouterr().out
-    assert outcome["stages"] == ["prerequisites", "fetch", "cost gate", "smoke", "base readers", "transcribe",
-                                 "final check", "status"]
+    assert _banners(out) == list(BANNERS)
     assert "poppler: pdftoppm version 24.04.0" in out and "EC2 t3.xlarge" in out and "gateway key: set (60" in out
-    assert "TEOS: https://apps.irs.gov/teos/details/returnsSearch/731312965 answered" in out
-    assert "head ok, a small object put and deleted" in out and "as arn:aws:iam::1:role/frame" in out
+    assert "TEOS: https://apps.irs.gov/teos/details/returnsSearch/731312965 answered 2 bytes" in out
+    assert "head ok, a small object put and deleted" in out
     assert "every one of the 1 filings is fetched, permanent or out of attempts: 0 TEOS requests" in out
     assert "stored-only stopped, no call made: 4 pages have no reading of alibaba/qwen3-vl-instruct v4" in out
-    assert "projection $" in out and outcome["projected"] > 0
+    assert "projection $" in out
     # the smoke renders the filing itself, then read_pages renders again (a no-op on disk: the PNGs exist)
-    assert box.calls[0] == (fi.pdf_path(tmp_path, OID), 3, 6, pr.page_dir(tmp_path, OID)) and len(box.calls) == 2
-    assert outcome["smoke"] == {"object_id": OID, "pages": 4, "bought": 4, "dollars": pytest.approx(outcome["smoke"]["dollars"])}
-    assert len(client.json_modes) == 4 and "4 grants-table pages with rows" in out
-    assert [c[c.index("--model") + 1] for c in popen.commands] == [QWEN, GEMINI]
-    assert [c[c.index("--workers") + 1] for c in popen.commands] == ["40", "12"]
-    assert all(c[:3] == [__import__("sys").executable, "-m", "givingtuesday_datamart.page_readings"] for c in popen.commands)
+    assert box.render.calls[0] == (fi.pdf_path(tmp_path, OID), 3, 6, pr.page_dir(tmp_path, OID)) and len(box.render.calls) == 2
+    assert "smoke: 4 pages, 4 bought" in out and "4 grants-table pages with rows" in out and len(client.json_modes) == 4
+    assert [c[c.index("--model") + 1] for c in box.popen.commands] == [QWEN, GEMINI]
+    assert [c[c.index("--workers") + 1] for c in box.popen.commands] == ["40", "12"]
+    assert all(c[:3] == [__import__("sys").executable, "-m", "givingtuesday_datamart.page_readings"] for c in box.popen.commands)
     assert (tmp_path / "logs" / "qwen3-vl-instruct.log").read_bytes() == b"fake reader\n"
-    assert outcome["verdicts"] == {"agreed": 4, "escalated": 0, "flagged": 0, "unreadable": 0, "no_verdict": 0}
+    assert sorted(v.verdict for v in run_stores[2].rows.values()) == ["agreed"] * 4
     assert "no page was left without a verdict" in out
     assert "final check passed" in out and "0 pages bought, 0 verdict rows written" in out
-    assert "status: fake" in out and "=== done in" in out
-    assert (tmp_path / "logs" / "run.log").read_text().count("===") >= 8
+    assert (tmp_path / "logs" / "run.log").read_text().count("] === ") == len(BANNERS)
 
 
 def test_run_dry_run_stops_after_the_cost_gate_and_reads_nothing(run_stores, box, tmp_path, capsys):
-    sample = _frame_csv(tmp_path)
     client = _Client([])
-    outcome, popen = _run(run_stores, sample, tmp_path, client=client, dry_run=True)
-    assert outcome["stages"] == ["prerequisites", "fetch", "cost gate"]
-    assert "dry run: stopping after the projection, nothing bought" in capsys.readouterr().out
-    assert popen.commands == [] and client.json_modes == [] and box.calls == [] and run_stores[2].rows == {}
+    _run(run_stores, _frame_csv(tmp_path), tmp_path, client=client, dry_run=True)
+    out = capsys.readouterr().out
+    assert _banners(out) == ["=== prerequisites", "=== fetch", "=== cost gate"]
+    assert "dry run: stopping after the projection, nothing bought" in out
+    assert box.popen.commands == [] and client.json_modes == [] and box.render.calls == [] and run_stores[2].rows == {}
 
 
 def test_run_stops_at_the_cost_cap(run_stores, box, tmp_path, capsys):
@@ -218,11 +222,13 @@ def test_run_stops_at_the_first_missing_prerequisite(run_stores, box, tmp_path, 
     assert "2 GB free under" in capsys.readouterr().out
 
 
-def test_run_stops_when_a_base_reader_exits_non_zero(run_stores, box, tmp_path, capsys):
+def test_run_stops_when_a_base_reader_exits_non_zero(run_stores, box, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(rec.subprocess, "Popen", _Popen(code=1))
     client = _Client([(_answer(_rows(3)), "stop")] * 4)
     with pytest.raises(SystemExit):
-        _run(run_stores, _frame_csv(tmp_path), tmp_path, client=client, popen=_Popen(code=1))
+        _run(run_stores, _frame_csv(tmp_path), tmp_path, client=client)
     out = capsys.readouterr().out
+    assert "qwen3-vl-instruct: exited 1" in out and "gemini-3.5-flash-lite: exited 1" in out
     assert "qwen3-vl-instruct, gemini-3.5-flash-lite exited non-zero" in out and "run the same command again to resume" in out
 
 

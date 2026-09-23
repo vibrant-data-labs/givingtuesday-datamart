@@ -82,7 +82,7 @@ import time
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, NoReturn, Sequence
+from typing import NoReturn, Sequence
 
 from givingtuesday_datamart import filing_images, irs_source, page_readings, page_verdicts, vlm_transcription
 from givingtuesday_datamart.attachment_grants import (
@@ -433,22 +433,6 @@ def estimate(session, sample: Path, policy: dict, cap: float | None = COST_CAP, 
 # ---------------------------------------------------------------------------
 
 
-class _Tee:
-    """Everything printed goes to the pane and to ``run.log``."""
-
-    def __init__(self, *streams) -> None:
-        self.streams = streams
-
-    def write(self, text: str) -> int:
-        for stream in self.streams:
-            stream.write(text)
-        return len(text)
-
-    def flush(self) -> None:
-        for stream in self.streams:
-            stream.flush()
-
-
 def _utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -472,6 +456,22 @@ def _stop(message: str) -> NoReturn:
     raise SystemExit(1)
 
 
+class _Tee:
+    """What is printed goes to the pane and to run.log both."""
+
+    def __init__(self, *streams) -> None:
+        self.streams = streams
+
+    def write(self, text: str) -> int:
+        for stream in self.streams:
+            stream.write(text)
+        return len(text)
+
+    def flush(self) -> None:
+        for stream in self.streams:
+            stream.flush()
+
+
 def _instance_type() -> str | None:
     """The EC2 instance type from the metadata service, or None off EC2."""
     try:
@@ -485,331 +485,250 @@ def _instance_type() -> str | None:
         return None
 
 
-def _reader_command(sample: Path, cache: Path, model: str, workers: int, max_errors: int) -> list[str]:
-    """The ``page_readings read`` CLI for one base reader, in this interpreter."""
-    return [sys.executable, "-m", "givingtuesday_datamart.page_readings", "--cache", str(cache), "read", str(sample),
-            "--model", model, "--workers", str(workers), "--max-errors", str(max_errors)]
-
-
-def _status(session, version: str) -> None:
-    print(page_readings.status_report(session))
-    print()
-    print(page_verdicts.status_report(session, version))
-
-
 def run(sample: Path, policy: dict, cache: Path, *, dry_run: bool = False, cap: float | None = COST_CAP,
-        logs: Path | None = None, workers: dict[str, int] = WORKERS, max_errors: int = MAX_ERRORS,
-        bucket: str = filing_images.BUCKET, min_free: int = MIN_FREE_BYTES, session=None, filing_store=None,
-        reading_store=None, verdict_store=None, client=None, s3=None, sts=None, teos: Callable | None = None,
-        popen: Callable = subprocess.Popen, reports: Callable | None = None) -> dict:
+        logs: Path | None = None, max_errors: int = MAX_ERRORS, filing_store=None, reading_store=None,
+        verdict_store=None, client=None, s3=None) -> None:
     """The whole run of a frame in one command, for the box inside tmux;
     safe to run again after any stop, since every stage resumes from the
-    tables and buys only what they lack. Stages, each under a timestamped
-    banner:
+    tables and buys only what they lack. Seven stages, each under a
+    timestamped banner, everything printed mirrored to ``logs/run-<start>/run.log``:
 
-    1. prerequisites: ``pdftoppm`` and ``pdfimages`` on PATH (``pdftoppm -v``
-       printed), the gateway key and the datamart config in the environment,
-       an HTTPS request to TEOS, a head and a small put on the bucket, 15 GB
-       free under the cache; the first thing missing stops the run.
-    2. fetch: ``filing_images.fetch_filings`` on the frame, idempotent — zero
-       requests when everything is stored, and the log says so.
-    3. the cost gate: ``frame_pages``, the stored-only pass (which names the
-       pages without a reading, or passes buying and writing nothing), and
-       ``estimate``, the projection by model and in total; past ``cap`` the
-       run stops, and ``dry_run`` stops here either way.
+    1. prerequisites: poppler (``pdftoppm -v`` printed), the gateway key and
+       the datamart config in the environment, an HTTPS request to TEOS, a
+       head and a small put on the bucket, 15 GB free under the cache; the
+       first thing missing stops the run with a message.
+    2. fetch: ``fetch_filings`` on the frame; zero requests when everything
+       is stored, and the log says so.
+    3. the cost gate: the stored-only pass (which names the pages without a
+       reading, or passes buying and writing nothing) and ``estimate``'s
+       projection; past ``cap`` the run stops, and ``dry_run`` stops here.
     4. smoke: the frame's first fetched filing rendered and read through the
-       first base reader at one worker; its PNGs must exist, its rows must be
-       readings and not error rows, and a page with a grants table must have
-       parsed one. Prints pages, seconds a page and cost.
+       first base reader at one worker; its PNGs must exist, its rows must
+       be readings, and a page with a grants table must have parsed one.
     5. the base readers as child processes of the ``page_readings`` CLI, at
-       ``workers`` each, one log file each; the run stops if either exits
-       non-zero. Children rather than threads, so a Ctrl-C in the pane
-       reaches each reader on its own main thread and ``upsert_as_done``'s
-       stop path runs in each; the renderer's pid-tagged temp files cover
-       two processes on one cache.
+       ``WORKERS`` each with a log file each: children, not threads, so a
+       Ctrl-C in the pane reaches each reader on its own main thread and
+       ``upsert_as_done``'s stop path runs in each.
     6. ``transcribe`` under the policy, again if it left pages without a
-       verdict, then the stored-only pass as the final check, which must buy
-       nothing and write nothing.
+       verdict, then the stored-only pass, which must buy and write nothing.
     7. ``page_readings status`` and ``page_verdicts status`` for the policy.
 
-    The stores, clients, ``teos`` (the HTTPS request), ``popen`` and
-    ``reports`` are injectable for tests; without a ``session`` the datamart
-    config is checked and a session opened. Returns the stages run, what the
-    smoke bought and what ``transcribe`` decided.
+    The stores, ``client`` and ``s3`` are for tests, which patch the other
+    edges (poppler, TEOS, ``Popen``); with no stores the run opens a datamart
+    session and the status stage reads from it.
     """
     started = time.monotonic()
     rows = list(csv.DictReader(sample.open()))
     ids = [r["object_id"] for r in rows]
-    cache = Path(cache)
-    logs = Path(logs) if logs is not None else Path("logs") / f"run-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
-    logs.mkdir(parents=True, exist_ok=True)
-    handle = (logs / "run.log").open("a")
-    file_log = logging.FileHandler(logs / "run.log")
-    file_log.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"))
-    logging.getLogger().addHandler(file_log)
-    outcome: dict = {"stages": [], "logs": str(logs)}
-    try:
-        with contextlib.redirect_stdout(_Tee(sys.stdout, handle)):
-            outcome.update(_run(sample, rows, ids, policy, cache, logs, started, dry_run=dry_run, cap=cap,
-                                workers=workers, max_errors=max_errors, bucket=bucket, min_free=min_free,
-                                session=session, filing_store=filing_store, reading_store=reading_store,
-                                verdict_store=verdict_store, client=client, s3=s3, sts=sts, teos=teos, popen=popen,
-                                reports=reports, outcome=outcome))
-    finally:
-        logging.getLogger().removeHandler(file_log)
-        file_log.close()
-        handle.close()
-    return outcome
-
-
-def _run(sample, rows, ids, policy, cache, logs, started, *, dry_run, cap, workers, max_errors, bucket, min_free,
-         session, filing_store, reading_store, verdict_store, client, s3, sts, teos, popen, reports, outcome) -> dict:
-    version = policy["version"]
-    base = list(policy["base"])
-    stage = lambda name: outcome["stages"].append(name)    # noqa: E731
-
-    # --- 1. prerequisites
-    _banner(f"prerequisites: frame {sample}, {len(ids)} filings; cache {cache}; policy {version}; cap "
-            + (f"${cap:,.0f}" if cap is not None else "none") + f"; logs {logs}" + ("; DRY RUN, stops after the cost gate" if dry_run else ""))
-    stage("prerequisites")
-    ec2 = _instance_type()
-    print(f"host: {socket.gethostname()}, {os.cpu_count()} cores" + (f", EC2 {ec2}" if ec2 else ""))
-    for tool in ("pdftoppm", "pdfimages"):
-        if shutil.which(tool) is None:
-            _stop(f"{tool} is not on PATH: install poppler-utils (apt, dnf) or poppler (brew)")
-    version_out = subprocess.run(["pdftoppm", "-v"], capture_output=True, text=True)
-    print(f"poppler: {((version_out.stderr or version_out.stdout).strip().splitlines() or ['?'])[0]}")
-    key = os.environ.get("VERCEL_AI_GATEWAY_API_KEY") or os.environ.get("AI_GATEWAY_API_KEY")
-    if not key:
-        _stop("VERCEL_AI_GATEWAY_API_KEY is not set")
-    print(f"gateway key: set ({len(key)} characters)")
-    opened = None
-    if session is None:
-        from sqlalchemy import text
-
-        from givingtuesday_datamart._internal.db import get_session
-        from givingtuesday_datamart.ingestion import datamart_config
-        try:
-            config = datamart_config()
-            postgres = config["postgres"]
-        except Exception as exc:                          # noqa: BLE001 — no config.ini, or no [postgres]
-            _stop("the datamart config is not in the environment: GT_DATAMART_CONFIG_PATH must name a config.ini "
-                  f"with a [postgres] section ({type(exc).__name__}: {exc})")
-        opened = get_session(config=config)
-        session = opened.__enter__()
-        try:
-            n, = session.execute(text("SELECT count(*) FROM filing_images")).one()
-        except Exception as exc:                          # noqa: BLE001
-            _stop(f"the datamart at {postgres.get('host')} is not reachable: {type(exc).__name__}: {str(exc)[:200]}")
-        print(f"datamart: {postgres.get('host')} / {postgres.get('database')}, filing_images has {n:,} rows")
-    try:
-        return _stages(sample, rows, ids, policy, cache, logs, started, dry_run=dry_run, cap=cap, workers=workers,
-                       max_errors=max_errors, bucket=bucket, min_free=min_free, session=session,
-                       filing_store=filing_store, reading_store=reading_store, verdict_store=verdict_store,
-                       client=client, s3=s3, sts=sts, teos=teos, popen=popen, reports=reports, outcome=outcome,
-                       stage=stage)
-    finally:
-        if opened is not None:
-            opened.__exit__(None, None, None)
-
-
-def _stages(sample, rows, ids, policy, cache, logs, started, *, dry_run, cap, workers, max_errors, bucket, min_free,
-            session, filing_store, reading_store, verdict_store, client, s3, sts, teos, popen, reports, outcome,
-            stage) -> dict:
     version, base = policy["version"], list(policy["base"])
-    filings = filing_images._store(filing_store if filing_store is not None else session)
-    readings = reading_store if reading_store is not None else session
-    verdicts = verdict_store if verdict_store is not None else session
-    ein = next((r.get("filerein") for r in rows if r.get("filerein")), "731312965")
-    url = irs_source.TEOS_RETURNS.format(ein=ein)
-    t = time.monotonic()
-    try:
-        body = (teos or irs_source._get)(url)
-    except Exception as exc:                              # noqa: BLE001
-        _stop(f"TEOS is not reachable over HTTPS from this host ({url}): {type(exc).__name__}: {exc}")
-    print(f"TEOS: {url} answered {len(body):,} bytes in {time.monotonic() - t:.1f} s")
-    who = ""
-    try:
-        if sts is None:
-            import boto3
-            sts = boto3.client("sts")
-        who = f" as {sts.get_caller_identity()['Arn']}"
-    except Exception:                                     # noqa: BLE001 — identity is a nicety
-        pass
-    s3 = s3 if s3 is not None else filing_images._s3_client()
-    key = f"{WRITE_CHECK_PREFIX}/{socket.gethostname()}-{_utc()}"
-    try:
-        s3.head_bucket(Bucket=bucket)
-        s3.put_object(Bucket=bucket, Key=key, Body=b"placeholder_recovery run: write check\n")
-        s3.delete_object(Bucket=bucket, Key=key)
-    except Exception as exc:                              # noqa: BLE001
-        _stop(f"s3://{bucket} is not writable{who}: {type(exc).__name__}: {str(exc)[:200]}; the instance role "
-              "(or ~/.aws) needs read and write on the bucket, since fetch writes")
-    print(f"s3://{bucket}: head ok, a small object put and deleted at {key}{who}")
-    cache.mkdir(parents=True, exist_ok=True)
-    free = shutil.disk_usage(cache).free
-    if free < min_free:
-        _stop(f"{free / 1024 ** 3:.0f} GB free under {cache}; the run needs {min_free / 1024 ** 3:.0f} GB")
-    print(f"disk: {free / 1024 ** 3:.0f} GB free under {cache}")
-    _note(f"prerequisites met in {_elapsed(started)}")
+    logs = Path(logs) if logs else Path("logs") / f"run-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
+    logs.mkdir(parents=True, exist_ok=True)
+    with contextlib.ExitStack() as stack:
+        log = stack.enter_context((logs / "run.log").open("a"))
+        stack.enter_context(contextlib.redirect_stdout(_Tee(sys.stdout, log)))
+        handler = logging.StreamHandler(log)
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"))
+        logging.getLogger().addHandler(handler)
+        stack.callback(logging.getLogger().removeHandler, handler)
 
-    # --- 2. fetch
-    _banner(f"fetch: filing_images.fetch_filings on the frame (stored filings make no request; failures retry to "
-            f"{filing_images.MAX_ATTEMPTS} attempts)")
-    stage("fetch")
-    t = time.monotonic()
-    prior = filings.get(ids)
-    to_fetch = [oid for oid in ids if filing_images._retryable(prior.get(oid))]
-    if to_fetch:
-        _note(f"{len(to_fetch)} of {len(ids)} filings to fetch; the other {len(ids) - len(to_fetch)} are fetched, "
-              "permanent or out of attempts")
-    else:
-        _note(f"every one of the {len(ids)} filings is fetched, permanent or out of attempts: 0 TEOS requests")
-    statuses = filing_images.fetch_filings(
-        filings, [filing_images.Filing(r["object_id"], r.get("filerein") or None,
-                                       int(r["taxyear"]) if r.get("taxyear") else None) for r in rows],
-        bucket=bucket, cache_dir=cache, s3=s3)
-    counts = collections.Counter(statuses.values())
-    print("the frame by status: " + ", ".join(f"{status} {n}" for status, n in counts.most_common()))
-    _note(f"fetch done in {_elapsed(t)}")
+        # 1. prerequisites
+        _banner(f"prerequisites: frame {sample}, {len(ids)} filings; cache {cache}; policy {version}; cap "
+                + (f"${cap:,.0f}" if cap is not None else "none") + f"; logs {logs}"
+                + ("; DRY RUN, stops after the cost gate" if dry_run else ""))
+        ec2 = _instance_type()
+        print(f"host: {socket.gethostname()}, {os.cpu_count()} cores" + (f", EC2 {ec2}" if ec2 else ""))
+        for tool in ("pdftoppm", "pdfimages"):
+            if shutil.which(tool) is None:
+                _stop(f"{tool} is not on PATH: install poppler-utils (apt, dnf) or poppler (brew)")
+        poppler = subprocess.run(["pdftoppm", "-v"], capture_output=True, text=True)
+        print(f"poppler: {((poppler.stderr or poppler.stdout).strip().splitlines() or ['?'])[0]}")
+        key = os.environ.get("VERCEL_AI_GATEWAY_API_KEY") or os.environ.get("AI_GATEWAY_API_KEY")
+        if not key:
+            _stop("VERCEL_AI_GATEWAY_API_KEY is not set")
+        print(f"gateway key: set ({len(key)} characters)")
+        session = None
+        if filing_store is None:                          # the real run: the datamart, not a test's stores
+            from sqlalchemy import text
 
-    # --- 3. the cost gate
-    _banner(f"cost gate: the stored-only pass under {version}, then the projection against the cap of "
-            + (f"${cap:,.0f}" if cap is not None else "none"))
-    stage("cost gate")
-    t = time.monotonic()
-    pages = frame_pages(filings, ids)
-    print(f"{len({oid for oid, _ in pages})} filings with attachment pages, {len(pages):,} pages")
-    try:
-        gate = agree(verdicts, pages, policy, workers=workers, max_errors=max_errors, cache_dir=cache, client=client,
-                     filing_store=filings, reading_store=readings, s3=s3, buy=False)
-    except LookupError as exc:
-        _note(f"stored-only stopped, no call made: {str(exc).split(': [')[0]}")
-    else:
-        print(summary(gate))
-        bought = sum(spent["pages"] for spent in gate.bought.values())
-        if bought or gate.written:
-            _stop(f"the stored-only pass bought {bought} pages and wrote {gate.written} verdict rows; it should have done neither")
-        _note("every reading the policy needs is stored: the stored-only pass bought nothing and wrote nothing")
-    projected = estimate(session, sample, policy, cap, filing_store=filings, reading_store=readings)
-    outcome["projected"] = projected
-    _note(f"cost gate passed in {_elapsed(t)}")
-    if dry_run:
-        _banner(f"dry run: stopping after the projection, nothing bought; {_elapsed(started)} in all; logs in {logs}")
-        return outcome
+            from givingtuesday_datamart._internal.db import get_session
+            from givingtuesday_datamart.ingestion import datamart_config
+            try:
+                config = datamart_config()
+                postgres = config["postgres"]
+            except Exception as exc:                      # noqa: BLE001 — no config.ini, or no [postgres]
+                _stop("the datamart config is not in the environment: GT_DATAMART_CONFIG_PATH must name a "
+                      f"config.ini with a [postgres] section ({type(exc).__name__}: {exc})")
+            session = stack.enter_context(get_session(config=config))
+            try:
+                n, = session.execute(text("SELECT count(*) FROM filing_images")).one()
+            except Exception as exc:                      # noqa: BLE001
+                _stop(f"the datamart at {postgres.get('host')} is not reachable: {type(exc).__name__}: {str(exc)[:200]}")
+            print(f"datamart: {postgres.get('host')} / {postgres.get('database')}, filing_images has {n:,} rows")
+        filings = filing_images._store(filing_store if filing_store is not None else session)
+        readings = reading_store if reading_store is not None else session
+        verdicts = verdict_store if verdict_store is not None else session
+        url = irs_source.TEOS_RETURNS.format(ein=next((r.get("filerein") for r in rows if r.get("filerein")), "731312965"))
+        t = time.monotonic()
+        try:
+            body = irs_source._get(url)
+        except Exception as exc:                          # noqa: BLE001
+            _stop(f"TEOS is not reachable over HTTPS from this host ({url}): {type(exc).__name__}: {exc}")
+        print(f"TEOS: {url} answered {len(body):,} bytes in {time.monotonic() - t:.1f} s")
+        s3 = s3 if s3 is not None else filing_images._s3_client()
+        check_key = f"{WRITE_CHECK_PREFIX}/{socket.gethostname()}-{_utc()}"
+        try:
+            s3.head_bucket(Bucket=filing_images.BUCKET)
+            s3.put_object(Bucket=filing_images.BUCKET, Key=check_key, Body=b"placeholder_recovery run: write check\n")
+            s3.delete_object(Bucket=filing_images.BUCKET, Key=check_key)
+        except Exception as exc:                          # noqa: BLE001
+            _stop(f"s3://{filing_images.BUCKET} is not writable: {type(exc).__name__}: {str(exc)[:200]}; the instance "
+                  "role (or ~/.aws) needs read and write on the bucket, since fetch writes")
+        print(f"s3://{filing_images.BUCKET}: head ok, a small object put and deleted at {check_key}")
+        cache.mkdir(parents=True, exist_ok=True)
+        free = shutil.disk_usage(cache).free
+        if free < MIN_FREE_BYTES:
+            _stop(f"{free / 1024 ** 3:.0f} GB free under {cache}; the run needs {MIN_FREE_BYTES / 1024 ** 3:.0f} GB")
+        print(f"disk: {free / 1024 ** 3:.0f} GB free under {cache}")
+        _note(f"prerequisites met in {_elapsed(started)}")
 
-    # --- 4. smoke
-    images = filings.get(ids)
-    first = next((oid for oid in ids if page_readings._readable(images.get(oid)) and images[oid].attachment_from), None)
-    if first is None:
-        _stop("no fetched filing with attachment pages in the frame; nothing to read")
-    row = images[first]
-    span = (row.attachment_from, row.attachment_from + row.attachment_pages - 1)
-    smoke_pages = [(first, page) for page in range(span[0], span[1] + 1)]
-    _banner(f"smoke: {first} (the frame's first fetched filing, pages {span[0]}-{span[1]}) rendered and read "
-            f"through {base[0]} at one worker")
-    stage("smoke")
-    t = time.monotonic()
-    try:
-        pdf = filing_images.materialise(row, cache, bucket=bucket, s3=s3)
-        pngs = vlm_transcription.render(pdf, span[0], span[1], page_readings.page_dir(cache, first))
-    except Exception as exc:                              # noqa: BLE001
-        _stop(f"{first} could not be rendered: {type(exc).__name__}: {str(exc)[:200]}")
-    missing = [png for png in pngs if not png.exists()]
-    if missing:
-        _stop(f"{len(missing)} of {first}'s {len(pngs)} PNGs do not exist after the render: {missing[:3]}")
-    print(f"{len(pngs)} PNGs under {page_readings.page_dir(cache, first)}")
-    got = read_pages(readings, smoke_pages, base[0], workers=1, prompt_version=policy["prompt_version"],
-                     max_errors=max_errors, cache_dir=cache, client=client, filing_store=filings, s3=s3,
-                     settings=policy.get("settings", {}).get(base[0]))
-    if got.failed or got.skipped or len(got.responses) != len(smoke_pages):
-        _stop(f"{first} through {base[0]}: {len(got.responses)} of {len(smoke_pages)} pages read, "
-              f"{len(got.failed)} error rows, {len(got.skipped)} skipped at {max_errors} errors: "
-              + "; ".join(f"p{page:03d}: {(r.last_error or '')[:100]}" for (_, page), r in list(got.failed.items())[:3]))
-    kinds = collections.Counter(r.get("page_kind") for r in got.responses.values())
-    listed = [r for r in got.responses.values() if r.get("page_kind") in LIST_KINDS and r.get("rows")]
-    if not listed:
-        _stop(f"no page of {first} parsed as a grants table with rows; page kinds seen: {dict(kinds)}")
-    spent = vlm_transcription.cost(base[0], got.bought["in"], got.bought["out"]) or 0.0
-    seconds = time.monotonic() - t
-    print(f"smoke: {len(smoke_pages)} pages, {got.bought['pages']} bought"
-          + (" (the rest stored)" if got.bought["pages"] < len(smoke_pages) else "")
-          + f", {seconds / len(smoke_pages):.1f} s a page, ${spent:.2f}; page kinds {dict(kinds)}; "
-          f"{sum(len(r.get('rows') or []) for r in got.responses.values())} rows, {len(listed)} grants-table pages with rows")
-    outcome["smoke"] = {"object_id": first, "pages": len(smoke_pages), "bought": got.bought["pages"], "dollars": spent}
-    _note(f"smoke done in {_elapsed(t)}")
+        # 2. fetch
+        _banner("fetch: fetch_filings on the frame (stored filings make no request; failures retry to "
+                f"{filing_images.MAX_ATTEMPTS} attempts)")
+        t = time.monotonic()
+        prior = filings.get(ids)
+        to_fetch = sum(filing_images._retryable(prior.get(oid)) for oid in ids)
+        _note(f"{to_fetch} of {len(ids)} filings to fetch; the rest are fetched, permanent or out of attempts"
+              if to_fetch else f"every one of the {len(ids)} filings is fetched, permanent or out of attempts: 0 TEOS requests")
+        statuses = filing_images.fetch_filings(
+            filings, [filing_images.Filing(r["object_id"], r.get("filerein") or None,
+                                           int(r["taxyear"]) if r.get("taxyear") else None) for r in rows],
+            cache_dir=cache, s3=s3)
+        counts = collections.Counter(statuses.values())
+        print("the frame by status: " + ", ".join(f"{status} {n}" for status, n in counts.most_common()))
+        _note(f"fetch done in {_elapsed(t)}")
 
-    # --- 5. the base readers, as child processes
-    _banner("base readers in parallel: " + ", ".join(f"{model} at {workers.get(model, page_verdicts.DEFAULT_WORKERS)} workers" for model in base))
-    stage("base readers")
-    t = time.monotonic()
-    children = []
-    for model in base:
-        name = model.split("/")[-1]
-        log = (logs / f"{name}.log").open("ab")
-        command = _reader_command(sample, cache, model, workers.get(model, page_verdicts.DEFAULT_WORKERS), max_errors)
-        _note(f"{name}: {' '.join(command)} > {logs / f'{name}.log'}")
-        children.append((name, popen(command, stdout=log, stderr=subprocess.STDOUT), log))
-    failed = []
-    try:
-        for name, child, _ in children:
-            code = child.wait()
-            _note(f"{name}: exited {code}")
-            if code != 0:
-                failed.append(name)
-    except KeyboardInterrupt:
-        _note("stop: the readers are cancelling their queued pages and recording the ones in flight")
-        for _, child, _ in children:
-            with contextlib.suppress(Exception):
+        # 3. the cost gate
+        _banner(f"cost gate: the stored-only pass under {version}, then the projection against the cap of "
+                + (f"${cap:,.0f}" if cap is not None else "none"))
+        t = time.monotonic()
+        pages = frame_pages(filings, ids)
+        print(f"{len({oid for oid, _ in pages})} filings with attachment pages, {len(pages):,} pages")
+        try:
+            gate = agree(verdicts, pages, policy, max_errors=max_errors, cache_dir=cache, client=client,
+                         filing_store=filings, reading_store=readings, s3=s3, buy=False)
+        except LookupError as exc:
+            _note(f"stored-only stopped, no call made: {str(exc).split(': [')[0]}")
+        else:
+            print(summary(gate))
+            bought = sum(spent["pages"] for spent in gate.bought.values())
+            if bought or gate.written:
+                _stop(f"the stored-only pass bought {bought} pages and wrote {gate.written} verdict rows; it should have done neither")
+            _note("every reading the policy needs is stored: the stored-only pass bought nothing and wrote nothing")
+        estimate(session, sample, policy, cap, filing_store=filings, reading_store=readings)
+        _note(f"cost gate passed in {_elapsed(t)}")
+        if dry_run:
+            _banner(f"dry run: stopping after the projection, nothing bought; {_elapsed(started)} in all; logs in {logs}")
+            return
+
+        # 4. smoke
+        images = filings.get(ids)
+        first = next((oid for oid in ids if page_readings._readable(images.get(oid)) and images[oid].attachment_from), None)
+        if first is None:
+            _stop("no fetched filing with attachment pages in the frame; nothing to read")
+        row = images[first]
+        span = (row.attachment_from, row.attachment_from + row.attachment_pages - 1)
+        smoke_pages = [(first, page) for page in range(span[0], span[1] + 1)]
+        _banner(f"smoke: {first} (the frame's first fetched filing, pages {span[0]}-{span[1]}) rendered and read "
+                f"through {base[0]} at one worker")
+        t = time.monotonic()
+        try:
+            pdf = filing_images.materialise(row, cache, s3=s3)
+            pngs = vlm_transcription.render(pdf, span[0], span[1], page_readings.page_dir(cache, first))
+        except Exception as exc:                          # noqa: BLE001
+            _stop(f"{first} could not be rendered: {type(exc).__name__}: {str(exc)[:200]}")
+        missing = [png for png in pngs if not png.exists()]
+        if missing:
+            _stop(f"{len(missing)} of {first}'s {len(pngs)} PNGs do not exist after the render: {missing[:3]}")
+        print(f"{len(pngs)} PNGs under {page_readings.page_dir(cache, first)}")
+        got = read_pages(readings, smoke_pages, base[0], workers=1, prompt_version=policy["prompt_version"],
+                         max_errors=max_errors, cache_dir=cache, client=client, filing_store=filings, s3=s3,
+                         settings=policy.get("settings", {}).get(base[0]))
+        if got.failed or got.skipped or len(got.responses) != len(smoke_pages):
+            _stop(f"{first} through {base[0]}: {len(got.responses)} of {len(smoke_pages)} pages read, "
+                  f"{len(got.failed)} error rows, {len(got.skipped)} skipped at {max_errors} errors: "
+                  + "; ".join(f"p{page:03d}: {(r.last_error or '')[:100]}" for (_, page), r in list(got.failed.items())[:3]))
+        kinds = collections.Counter(r.get("page_kind") for r in got.responses.values())
+        listed = sum(1 for r in got.responses.values() if r.get("page_kind") in LIST_KINDS and r.get("rows"))
+        if not listed:
+            _stop(f"no page of {first} parsed as a grants table with rows; page kinds seen: {dict(kinds)}")
+        spent = vlm_transcription.cost(base[0], got.bought["in"], got.bought["out"]) or 0.0
+        print(f"smoke: {len(smoke_pages)} pages, {got.bought['pages']} bought"
+              + (" (the rest stored)" if got.bought["pages"] < len(smoke_pages) else "")
+              + f", {(time.monotonic() - t) / len(smoke_pages):.1f} s a page, ${spent:.2f}; page kinds {dict(kinds)}; "
+              f"{sum(len(r.get('rows') or []) for r in got.responses.values())} rows, {listed} grants-table pages with rows")
+        _note(f"smoke done in {_elapsed(t)}")
+
+        # 5. the base readers, as child processes
+        _banner("base readers in parallel: " + ", ".join(f"{m} at {WORKERS.get(m, page_verdicts.DEFAULT_WORKERS)} workers" for m in base))
+        t = time.monotonic()
+        children = []
+        for model in base:
+            name = model.split("/")[-1]
+            command = [sys.executable, "-m", "givingtuesday_datamart.page_readings", "--cache", str(cache), "read",
+                       str(sample), "--model", model, "--workers", str(WORKERS.get(model, page_verdicts.DEFAULT_WORKERS)),
+                       "--max-errors", str(max_errors)]
+            _note(f"{name}: {' '.join(command)} > {logs / f'{name}.log'}")
+            handle = stack.enter_context((logs / f"{name}.log").open("ab"))
+            children.append((name, subprocess.Popen(command, stdout=handle, stderr=subprocess.STDOUT)))
+        try:
+            codes = {name: child.wait() for name, child in children}
+        except KeyboardInterrupt:
+            _note("stop: the readers are cancelling their queued pages and recording the ones in flight")
+            for _, child in children:
                 child.wait()
-        raise
-    finally:
-        for _, _, log in children:
-            log.close()
-    for name in failed:
-        print(f"--- last lines of {name}.log ---")
-        print("".join((logs / f"{name}.log").read_text(errors="replace").splitlines(keepends=True)[-8:]), end="")
-    if failed:
-        _stop(f"{', '.join(failed)} exited non-zero (see {logs}); run the same command again to resume")
-    _note(f"base readers done in {_elapsed(t)}")
+            raise
+        failed = [name for name, code in codes.items() if code]
+        for name in failed:
+            _note(f"{name}: exited {codes[name]}; the last lines of its log:")
+            print("".join((logs / f"{name}.log").read_text(errors="replace").splitlines(keepends=True)[-8:]), end="")
+        if failed:
+            _stop(f"{', '.join(failed)} exited non-zero (see {logs}); run the same command again to resume")
+        _note(f"base readers done in {_elapsed(t)}")
 
-    # --- 6. transcribe, again if needed, then the stored-only check
-    _banner(f"transcribe --policy {version}: the escalation readers and the verdicts")
-    stage("transcribe")
-    t = time.monotonic()
-    result = transcribe(verdicts, sample, policy, cache, None, None, max_errors, buy=True, filing_store=filings,
-                        reading_store=readings, client=client, s3=s3)
-    _note(f"transcribe done in {_elapsed(t)}")
-    if result.no_verdict:
-        _banner(f"second transcribe: {len(result.no_verdict)} pages were left without a verdict (a reader failed on "
-                "them this run); reading them again")
-        stage("second transcribe")
+        # 6. transcribe, again if needed, then the stored-only check
+        _banner(f"transcribe --policy {version}: the escalation readers and the verdicts")
         t = time.monotonic()
         result = transcribe(verdicts, sample, policy, cache, None, None, max_errors, buy=True, filing_store=filings,
                             reading_store=readings, client=client, s3=s3)
-        _note(f"second transcribe done in {_elapsed(t)}; {len(result.no_verdict)} pages still without a verdict")
-    else:
-        _note("no page was left without a verdict; no second transcribe needed")
-    outcome["verdicts"] = result.mix()
-    _banner(f"final check: transcribe --policy {version} --stored-only must buy nothing and write nothing")
-    stage("final check")
-    t = time.monotonic()
-    try:
-        check = transcribe(verdicts, sample, policy, cache, None, None, max_errors, buy=False, filing_store=filings,
-                           reading_store=readings, client=client, s3=s3)
-    except LookupError as exc:
-        _stop(f"the stored-only check found readings missing: {str(exc).split(': [')[0]}; run the same command again")
-    bought = sum(spent["pages"] for spent in check.bought.values())
-    if bought or check.written:
-        _stop(f"the stored-only check bought {bought} pages and wrote {check.written} verdict rows; it should have done neither")
-    _note(f"final check passed in {_elapsed(t)}: 0 pages bought, 0 verdict rows written")
+        _note(f"transcribe done in {_elapsed(t)}")
+        if result.no_verdict:
+            _banner(f"second transcribe: {len(result.no_verdict)} pages were left without a verdict (a reader failed "
+                    "on them this run); reading them again")
+            t = time.monotonic()
+            result = transcribe(verdicts, sample, policy, cache, None, None, max_errors, buy=True, filing_store=filings,
+                                reading_store=readings, client=client, s3=s3)
+            _note(f"second transcribe done in {_elapsed(t)}; {len(result.no_verdict)} pages still without a verdict")
+        else:
+            _note("no page was left without a verdict; no second transcribe needed")
+        _banner(f"final check: transcribe --policy {version} --stored-only must buy nothing and write nothing")
+        t = time.monotonic()
+        try:
+            check = transcribe(verdicts, sample, policy, cache, None, None, max_errors, buy=False, filing_store=filings,
+                               reading_store=readings, client=client, s3=s3)
+        except LookupError as exc:
+            _stop(f"the stored-only check found readings missing: {str(exc).split(': [')[0]}; run the same command again")
+        bought = sum(spent["pages"] for spent in check.bought.values())
+        if bought or check.written:
+            _stop(f"the stored-only check bought {bought} pages and wrote {check.written} verdict rows; it should have done neither")
+        _note(f"final check passed in {_elapsed(t)}: 0 pages bought, 0 verdict rows written")
 
-    # --- 7. status
-    _banner("status after the run")
-    stage("status")
-    (reports or (lambda: _status(session, version)))()
-    _banner(f"done in {_elapsed(started)}; logs in {logs}")
-    return outcome
+        # 7. status
+        _banner("status after the run")
+        if session is not None:
+            print(page_readings.status_report(session))
+            print()
+            print(page_verdicts.status_report(session, version))
+        _banner(f"done in {_elapsed(started)}; logs in {logs}")
 
 
 def report(session, sample: Path, out: Path | None, xml_rows: Path | None, *, policy: dict = POLICY_V1,
