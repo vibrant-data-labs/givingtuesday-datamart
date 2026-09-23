@@ -7,11 +7,15 @@ cheap part (the selector) changes.
     python -m givingtuesday_datamart.exploratory.placeholder_recovery sample
     python -m givingtuesday_datamart.exploratory.placeholder_recovery sample --expand-1000
     python -m givingtuesday_datamart.exploratory.placeholder_recovery stage
-    python -m givingtuesday_datamart.exploratory.placeholder_recovery estimate --policy v2 --sample data/exploratory/placeholder_sample_1000.csv
-    python -m givingtuesday_datamart.exploratory.placeholder_recovery run --policy v2 --sample data/exploratory/placeholder_sample_1000.csv --cache /data/irs_index
+    python -m givingtuesday_datamart.exploratory.placeholder_recovery estimate --policy v2 \\
+        --sample data/exploratory/placeholder_sample_1000.csv
+    python -m givingtuesday_datamart.exploratory.placeholder_recovery run --policy v2 \\
+        --sample data/exploratory/placeholder_sample_1000.csv --cache /data/irs_index
     python -m givingtuesday_datamart.exploratory.placeholder_recovery transcribe --policy v1
-    python -m givingtuesday_datamart.exploratory.placeholder_recovery report --policy v1 --out data/exploratory/placeholder_report_v1.csv
-    python -m givingtuesday_datamart.exploratory.placeholder_recovery report --results ~/.cache/irs_index/unstructured
+    python -m givingtuesday_datamart.exploratory.placeholder_recovery report --policy v1 \\
+        --out data/exploratory/placeholder_report_v1.csv
+    python -m givingtuesday_datamart.exploratory.placeholder_recovery report \\
+        --results ~/.cache/irs_index/unstructured
 
 ``sample`` builds the stratified frame from GT's combined grants extract.
 The population is violently top-heavy — 22 filings carry $4.67B while 6,755
@@ -80,18 +84,20 @@ import subprocess
 import sys
 import time
 import urllib.request
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import NoReturn, Sequence
 
-from givingtuesday_datamart import filing_images, irs_source, page_readings, page_verdicts, vlm_transcription
+from givingtuesday_datamart import (
+    filing_images, irs_source, page_readings, page_verdicts, vlm_transcription)
 from givingtuesday_datamart.attachment_grants import (
     PLACEHOLDER, XML_SOURCES, candidate_tables, coverage, diagnose, extract_tables, is_pointer,
     load_elements, page_tables, xml_tables)
 from givingtuesday_datamart.page_readings import MAX_ERRORS, frame_pages, read_pages, reading_key
 from givingtuesday_datamart.page_verdicts import (
-    FLAGGED_RULES, POLICIES, POLICY_V1, WORKERS, AgreeResult, accepted_readings, agree, load_policy, reader_settings,
-    summary, with_flagged)
+    FLAGGED_RULES, POLICIES, POLICY_V1, WORKERS, AgreeResult, accepted_readings, agree,
+    load_policy, reader_settings, summary, with_flagged)
 
 COMBINED_CSV = Path.home() / "Downloads" / "combined-grants-datamarts-gt_team_priority-20260915.csv"
 SAMPLE_CSV = Path("data/exploratory/placeholder_sample_100.csv")
@@ -139,7 +145,7 @@ RESOLVE_RATES = {"google/gemini-3.8-flash": 0.39, "anthropic/claude-sonnet-5": 1
 COST_CAP = 400.0
 # The one-command run (``run``): the disk it needs under the cache, the key
 # its bucket write check uses, and the page kinds that carry a grants table.
-MIN_FREE_BYTES = 15 * 1024 ** 3
+MIN_FREE_GB = 15
 WRITE_CHECK_PREFIX = "irs/_run_check"
 LIST_KINDS = ("grants_paid_list", "grants_future_list", "expenditure_responsibility")
 
@@ -266,7 +272,8 @@ def build_sample(out: Path, xml_rows_out: Path, expansions: Sequence[dict] = ())
             rest = [kv for kv in pool if kv[0] not in already]
             extra = rest if take is None else rng.sample(rest, max(0, min(take - len(base), len(rest))))
             for key, value in extra:
-                keys.append(key); already.add(key)
+                keys.append(key)
+                already.add(key)
                 picked.append(_row(label, key, value, pool, "v2"))
             summary.append((label, len(pool), len(base) + len(extra), sum(v["amt"] for _, v in pool),
                             sum(float(r["placeholder_amt"]) for r in picked if r["stratum"] == label)))
@@ -336,13 +343,17 @@ def stage(sample: Path, cache: Path, limit: int | None, manifest: Path) -> None:
     manifest.parent.mkdir(parents=True, exist_ok=True)
     with manifest.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(results[0].keys()))
-        writer.writeheader(); writer.writerows(results)
+        writer.writeheader()
+        writer.writerows(results)
 
     print(f"\n{'status':<26}{'n':>5}{'declared $M':>14}{'pages':>8}{'attached':>10}")
     by = collections.defaultdict(lambda: [0, 0.0, 0, 0])
     for r in results:
         b = by[r["status"]]
-        b[0] += 1; b[1] += float(r["placeholder_amt"]); b[2] += r["pages"]; b[3] += r["attachment_pages"]
+        b[0] += 1
+        b[1] += float(r["placeholder_amt"])
+        b[2] += r["pages"]
+        b[3] += r["attachment_pages"]
     for status, (n, dollars, pages, attached) in sorted(by.items(), key=lambda kv: -kv[1][1]):
         print(f"  {status:<24}{n:>5}{dollars/1e6:>14,.1f}{pages:>8,}{attached:>10,}")
     total_pages = sum(r["pages"] for r in results)
@@ -353,34 +364,39 @@ def stage(sample: Path, cache: Path, limit: int | None, manifest: Path) -> None:
     print(f"manifest -> {manifest}")
 
 
-def transcribe(session, sample: Path, policy: dict, cache: Path, limit: int | None, only: str | None,
-               max_errors: int = MAX_ERRORS, buy: bool = True, *, filing_store=None, reading_store=None,
-               client=None, s3=None) -> AgreeResult:
+def transcribe(session, sample: Path, policy: dict, cache: Path, limit: int | None,
+               only: str | None, max_errors: int = MAX_ERRORS, buy: bool = True, *,
+               filing_store=None, reading_store=None, client=None, s3=None) -> AgreeResult:
     """Every attachment page of every fetched filing in the sample, decided
     under ``policy``: ``frame_pages`` from ``filing_images``, then ``agree``,
     which reads each page with the policy's readers (``read_pages``, a no-op
     for stored readings) and stores the verdicts under the policy version.
     ``limit`` keeps the first filings that have pages; ``only`` one filing.
     The stores and clients are for tests; returns what ``agree`` decided."""
-    ids = [r["object_id"] for r in csv.DictReader(sample.open()) if not only or r["object_id"] == only]
+    rows = csv.DictReader(sample.open())
+    ids = [row["object_id"] for row in rows if not only or row["object_id"] == only]
     filings = filing_images._store(filing_store if filing_store is not None else session)
     pages = frame_pages(filings, ids)
     if limit is not None:
         keep = set(list(dict.fromkeys(oid for oid, _ in pages))[:limit])
         pages = [page for page in pages if page[0] in keep]
-    readers = " + ".join(policy["base"]) + (" -> " + " -> ".join(policy["escalation"]) if policy["escalation"] else "")
-    print(f"{len({oid for oid, _ in pages})} filings, {len(pages)} attachment pages; policy {policy['version']}: "
-          f"{readers}, prompt {policy['prompt_version']}, flagged pages {policy.get('flagged', 'load_single')}")
-    result = agree(session, pages, policy, max_errors=max_errors, cache_dir=cache, buy=buy, filing_store=filings,
-                   reading_store=reading_store, client=client, s3=s3)
+    readers = " + ".join(policy["base"])
+    if policy["escalation"]:
+        readers += " -> " + " -> ".join(policy["escalation"])
+    filings_with_pages = len({oid for oid, _ in pages})
+    print(f"{filings_with_pages} filings, {len(pages)} attachment pages; "
+          f"policy {policy['version']}: {readers}, prompt {policy['prompt_version']}, "
+          f"flagged pages {policy.get('flagged', 'load_single')}")
+    result = agree(session, pages, policy, max_errors=max_errors, cache_dir=cache, buy=buy,
+                   filing_store=filings, reading_store=reading_store, client=client, s3=s3)
     print(summary(result))
     for (oid, page), why in sorted(result.no_verdict.items()):
         print(f"  no verdict {oid} p{page:03d}: {why}")
     return result
 
 
-def estimate(session, sample: Path, policy: dict, cap: float | None = COST_CAP, *, only: str | None = None,
-             filing_store=None, reading_store=None) -> float:
+def estimate(session, sample: Path, policy: dict, cap: float | None = COST_CAP, *,
+             only: str | None = None, filing_store=None, reading_store=None) -> float:
     """The cost gate: what ``transcribe`` under ``policy`` would buy today and
     what it would cost. Each reader is expected to see a share of the frame's
     attachment pages — every page for a base reader, ``DISPUTE_RATE`` of them
@@ -390,41 +406,51 @@ def estimate(session, sample: Path, policy: dict, cap: float | None = COST_CAP, 
     Every stored reading is credited, so where an escalation reader's stored
     readings turn out not to be needed the projection is a little low. Prints
     the projection by reader and in total and returns the total; past ``cap``
-    it exits with a message, so a run stops before it spends.
+    it stops with a message, so a run stops before it spends.
     """
     filings = filing_images._store(filing_store if filing_store is not None else session)
     readings = page_readings._store(reading_store if reading_store is not None else session)
-    ids = [r["object_id"] for r in csv.DictReader(sample.open()) if not only or r["object_id"] == only]
+    rows = csv.DictReader(sample.open())
+    ids = [row["object_id"] for row in rows if not only or row["object_id"] == only]
     pages = frame_pages(filings, ids)
     images = filings.get({oid for oid, _ in pages})
-    n = len(pages)
-    expected: dict[str, float] = {model: float(n) for model in policy["base"]}
-    entering = n * DISPUTE_RATE if len(policy["base"]) > 1 else 0.0
+    total_pages = len(pages)
+
+    # the pages each reader is expected to see
+    expected: dict[str, float] = {model: float(total_pages) for model in policy["base"]}
+    entering = total_pages * DISPUTE_RATE if len(policy["base"]) > 1 else 0.0
     for model in policy["escalation"]:
         expected[model] = entering
         entering *= 1 - RESOLVE_RATES.get(model, 0.0)
-    rates = ", ".join(f"{model.split('/')[-1]} resolves {rate:.0%}" for model, rate in RESOLVE_RATES.items()
-                      if model in policy["escalation"])
-    print(f"{len({oid for oid, _ in pages})} filings, {n:,} attachment pages under policy {policy['version']}; "
-          f"{DISPUTE_RATE:.0%} disputed by the base pair{', ' + rates if rates else ''}")
+    flagged = entering
+
+    rates = ", ".join(f"{model.split('/')[-1]} resolves {rate:.0%}"
+                      for model, rate in RESOLVE_RATES.items() if model in policy["escalation"])
+    filings_with_pages = len({oid for oid, _ in pages})
+    print(f"{filings_with_pages} filings, {total_pages:,} attachment pages under policy "
+          f"{policy['version']}; {DISPUTE_RATE:.0%} disputed by the base pair"
+          + (f", {rates}" if rates else ""))
     print(f"  {'reader':<32}{'expects':>9}{'stored':>8}{'to buy':>8}{'$/page':>8}{'$':>9}")
     total = 0.0
     for model, want in expected.items():
         settings = reader_settings(policy, model)
-        keys = [reading_key(oid, page, images[oid].sha256, model, policy["prompt_version"], settings=settings)
-                for oid, page in pages]
-        have = sum(1 for row in readings.get(keys).values() if row.response is not None)
+        keys = [reading_key(oid, page, images[oid].sha256, model, policy["prompt_version"],
+                            settings=settings) for oid, page in pages]
+        stored = readings.get(keys).values()
+        have = sum(1 for row in stored if row.response is not None)
         buy = max(0.0, want - have)
         price = PER_PAGE.get(model)
         dollars = buy * price if price is not None else 0.0
         total += dollars
-        print(f"  {model:<32}{want:>9,.0f}{have:>8,}{buy:>8,.0f}"
-              f"{f'{price:.4f}' if price is not None else '?':>8}{dollars:>9.2f}")
+        price_text = f"{price:.4f}" if price is not None else "?"
+        print(f"  {model:<32}{want:>9,.0f}{have:>8,}{buy:>8,.0f}{price_text:>8}{dollars:>9.2f}")
     print(f"  {'total':<32}{'':>33}{total:>9.2f}")
-    print(f"about {entering:,.0f} pages flagged ({entering / n if n else 0:.0%}); projection ${total:,.0f}"
-          + (f" against a cap of ${cap:,.0f}" if cap is not None else ""))
+    share = flagged / total_pages if total_pages else 0
+    cap_text = f" against a cap of ${cap:,.0f}" if cap is not None else ""
+    print(f"about {flagged:,.0f} pages flagged ({share:.0%}); projection ${total:,.0f}{cap_text}")
     if cap is not None and total > cap:
-        _stop(f"the projection ${total:,.0f} passes the cap of ${cap:,.0f}: stop and ask before spending")
+        _stop(f"the projection ${total:,.0f} passes the cap of ${cap:,.0f}: "
+              "stop and ask before spending")
     return total
 
 
@@ -472,26 +498,282 @@ class _Tee:
             stream.flush()
 
 
+def _mirror_output(stack: contextlib.ExitStack, path: Path) -> None:
+    """Everything printed or logged from here on goes to the pane and to ``path``."""
+    log = stack.enter_context(path.open("a"))
+    stack.enter_context(contextlib.redirect_stdout(_Tee(sys.stdout, log)))
+    handler = logging.StreamHandler(log)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s",
+                                           datefmt="%H:%M:%S"))
+    logging.getLogger().addHandler(handler)
+    stack.callback(logging.getLogger().removeHandler, handler)
+
+
+@dataclass
+class _Stores:
+    """What every stage reads through. The real run builds them from the
+    datamart session; a test injects in-memory stores and a fake client."""
+
+    filings: filing_images.FilingImageStore
+    readings: object            # a session or a page_readings store
+    verdicts: object            # a session or a page_verdicts store
+    client: object              # the gateway client; None means built on first use
+    s3: object                  # the boto3 client
+
+
+# --- the prerequisites, each stopping the run with the reason when it fails
+
+
 def _instance_type() -> str | None:
     """The EC2 instance type from the metadata service, or None off EC2."""
+    token_request = urllib.request.Request(
+        "http://169.254.169.254/latest/api/token", method="PUT",
+        headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"})
     try:
-        token = urllib.request.urlopen(urllib.request.Request(
-            "http://169.254.169.254/latest/api/token", method="PUT",
-            headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"}), timeout=1).read().decode()
-        return urllib.request.urlopen(urllib.request.Request(
+        token = urllib.request.urlopen(token_request, timeout=1).read().decode()
+        type_request = urllib.request.Request(
             "http://169.254.169.254/latest/meta-data/instance-type",
-            headers={"X-aws-ec2-metadata-token": token}), timeout=1).read().decode()
-    except Exception:                                     # noqa: BLE001 — not on EC2, or IMDS off
+            headers={"X-aws-ec2-metadata-token": token})
+        return urllib.request.urlopen(type_request, timeout=1).read().decode()
+    except Exception:                                     # noqa: BLE001 — not on EC2
         return None
 
 
-def run(sample: Path, policy: dict, cache: Path, *, dry_run: bool = False, cap: float | None = COST_CAP,
-        logs: Path | None = None, max_errors: int = MAX_ERRORS, filing_store=None, reading_store=None,
-        verdict_store=None, client=None, s3=None) -> None:
-    """The whole run of a frame in one command, for the box inside tmux;
-    safe to run again after any stop, since every stage resumes from the
-    tables and buys only what they lack. Seven stages, each under a
-    timestamped banner, everything printed mirrored to ``logs/run-<start>/run.log``:
+def _describe_host() -> None:
+    instance = _instance_type()
+    ec2 = f", EC2 {instance}" if instance else ""
+    print(f"host: {socket.gethostname()}, {os.cpu_count()} cores{ec2}")
+
+
+def _check_poppler() -> None:
+    for tool in ("pdftoppm", "pdfimages"):
+        if shutil.which(tool) is None:
+            _stop(f"{tool} is not on PATH: install poppler-utils (apt, dnf) or poppler (brew)")
+    poppler = subprocess.run(["pdftoppm", "-v"], capture_output=True, text=True)
+    version = (poppler.stderr or poppler.stdout).strip().splitlines()
+    print(f"poppler: {version[0] if version else '?'}")
+
+
+def _check_gateway_key() -> None:
+    key = os.environ.get("VERCEL_AI_GATEWAY_API_KEY") or os.environ.get("AI_GATEWAY_API_KEY")
+    if not key:
+        _stop("VERCEL_AI_GATEWAY_API_KEY is not set")
+    print(f"gateway key: set ({len(key)} characters)")
+
+
+def _open_datamart(stack: contextlib.ExitStack):
+    """A session on the datamart from the config in the environment, with one
+    query to prove it answers."""
+    from sqlalchemy import text
+
+    from givingtuesday_datamart._internal.db import get_session
+    from givingtuesday_datamart.ingestion import datamart_config
+    try:
+        config = datamart_config()
+        postgres = config["postgres"]
+    except Exception as exc:                              # noqa: BLE001 — no config.ini
+        _stop("the datamart config is not in the environment: GT_DATAMART_CONFIG_PATH must "
+              f"name a config.ini with a [postgres] section ({type(exc).__name__}: {exc})")
+    session = stack.enter_context(get_session(config=config))
+    try:
+        count, = session.execute(text("SELECT count(*) FROM filing_images")).one()
+    except Exception as exc:                              # noqa: BLE001
+        _stop(f"the datamart at {postgres.get('host')} is not reachable: "
+              f"{type(exc).__name__}: {str(exc)[:200]}")
+    print(f"datamart: {postgres.get('host')} / {postgres.get('database')}, "
+          f"filing_images has {count:,} rows")
+    return session
+
+
+def _check_teos(ein: str) -> None:
+    url = irs_source.TEOS_RETURNS.format(ein=ein)
+    started = time.monotonic()
+    try:
+        body = irs_source._get(url)
+    except Exception as exc:                              # noqa: BLE001
+        _stop(f"TEOS is not reachable over HTTPS from this host ({url}): "
+              f"{type(exc).__name__}: {exc}")
+    print(f"TEOS: {url} answered {len(body):,} bytes in {time.monotonic() - started:.1f} s")
+
+
+def _check_bucket(s3) -> None:
+    bucket = filing_images.BUCKET
+    key = f"{WRITE_CHECK_PREFIX}/{socket.gethostname()}-{_utc()}"
+    try:
+        s3.head_bucket(Bucket=bucket)
+        s3.put_object(Bucket=bucket, Key=key, Body=b"placeholder_recovery run: write check\n")
+        s3.delete_object(Bucket=bucket, Key=key)
+    except Exception as exc:                              # noqa: BLE001
+        _stop(f"s3://{bucket} is not writable: {type(exc).__name__}: {str(exc)[:200]}; the "
+              "instance role (or ~/.aws) needs read and write on the bucket, since fetch writes")
+    print(f"s3://{bucket}: head ok, a small object put and deleted at {key}")
+
+
+def _check_disk(cache: Path) -> None:
+    cache.mkdir(parents=True, exist_ok=True)
+    free_gb = shutil.disk_usage(cache).free / 1024 ** 3
+    if free_gb < MIN_FREE_GB:
+        _stop(f"{free_gb:.0f} GB free under {cache}; the run needs {MIN_FREE_GB} GB")
+    print(f"disk: {free_gb:.0f} GB free under {cache}")
+
+
+# --- the stages
+
+
+def _fetch(stores: _Stores, rows: list[dict], cache: Path) -> None:
+    """``fetch_filings`` on the frame; the log says first how many it will try."""
+    ids = [row["object_id"] for row in rows]
+    prior = stores.filings.get(ids)
+    to_fetch = sum(filing_images._retryable(prior.get(oid)) for oid in ids)
+    if to_fetch:
+        _note(f"{to_fetch} of {len(ids)} filings to fetch; the rest are fetched, permanent or "
+              "out of attempts")
+    else:
+        _note(f"every one of the {len(ids)} filings is fetched, permanent or out of attempts: "
+              "0 TEOS requests")
+    filings = [filing_images.Filing(row["object_id"], row.get("filerein") or None,
+                                    int(row["taxyear"]) if row.get("taxyear") else None)
+               for row in rows]
+    statuses = filing_images.fetch_filings(stores.filings, filings, cache_dir=cache, s3=stores.s3)
+    counts = collections.Counter(statuses.values()).most_common()
+    print("the frame by status: " + ", ".join(f"{status} {n}" for status, n in counts))
+
+
+def _stored_only(stores: _Stores, pages: list, policy: dict, cache: Path,
+                 max_errors: int) -> str | None:
+    """``agree`` with ``buy=False``. Returns what is missing when a reader lacks
+    readings (no call is made); returns None when every reading is stored, in
+    which case the pass must have bought nothing and written nothing."""
+    try:
+        result = agree(stores.verdicts, pages, policy, max_errors=max_errors, cache_dir=cache,
+                       client=stores.client, filing_store=stores.filings,
+                       reading_store=stores.readings, s3=stores.s3, buy=False)
+    except LookupError as exc:
+        return str(exc).split(": [")[0]
+    print(summary(result))
+    bought = sum(spent["pages"] for spent in result.bought.values())
+    if bought or result.written:
+        _stop(f"the stored-only pass bought {bought} pages and wrote {result.written} verdict "
+              "rows; it should have done neither")
+    _note("every reading the policy needs is stored: the stored-only pass bought nothing and "
+          "wrote nothing")
+    return None
+
+
+def _smoke(stores: _Stores, rows: list[dict], policy: dict, cache: Path, max_errors: int) -> None:
+    """The frame's first fetched filing rendered and read through the first
+    base reader at one worker: its PNGs must exist, its rows must be
+    readings, and a page with a grants table must have parsed one."""
+    ids = [row["object_id"] for row in rows]
+    images = stores.filings.get(ids)
+    fetched = [oid for oid in ids
+               if page_readings._readable(images.get(oid)) and images[oid].attachment_from]
+    if not fetched:
+        _stop("no fetched filing with attachment pages in the frame; nothing to read")
+    first = fetched[0]
+    row = images[first]
+    first_page = row.attachment_from
+    last_page = row.attachment_from + row.attachment_pages - 1
+    pages = [(first, page) for page in range(first_page, last_page + 1)]
+    model = policy["base"][0]
+    _banner(f"smoke: {first} (the frame's first fetched filing, pages {first_page}-{last_page}) "
+            f"rendered and read through {model} at one worker")
+    started = time.monotonic()
+
+    png_dir = page_readings.page_dir(cache, first)
+    try:
+        pdf = filing_images.materialise(row, cache, s3=stores.s3)
+        pngs = vlm_transcription.render(pdf, first_page, last_page, png_dir)
+    except Exception as exc:                              # noqa: BLE001
+        _stop(f"{first} could not be rendered: {type(exc).__name__}: {str(exc)[:200]}")
+    missing = [png for png in pngs if not png.exists()]
+    if missing:
+        _stop(f"{len(missing)} of {first}'s {len(pngs)} PNGs do not exist after the render: "
+              f"{missing[:3]}")
+    print(f"{len(pngs)} PNGs under {png_dir}")
+
+    got = read_pages(stores.readings, pages, model, workers=1,
+                     prompt_version=policy["prompt_version"], max_errors=max_errors,
+                     cache_dir=cache, client=stores.client, filing_store=stores.filings,
+                     s3=stores.s3, settings=policy.get("settings", {}).get(model))
+    if got.failed or got.skipped or len(got.responses) != len(pages):
+        errors = "; ".join(f"p{page:03d}: {(reading.last_error or '')[:100]}"
+                           for (_, page), reading in list(got.failed.items())[:3])
+        _stop(f"{first} through {model}: {len(got.responses)} of {len(pages)} pages read, "
+              f"{len(got.failed)} error rows, {len(got.skipped)} skipped at {max_errors} "
+              f"errors: {errors}")
+    responses = list(got.responses.values())
+    kinds = collections.Counter(response.get("page_kind") for response in responses)
+    tables = sum(1 for response in responses
+                 if response.get("page_kind") in LIST_KINDS and response.get("rows"))
+    if not tables:
+        _stop(f"no page of {first} parsed as a grants table with rows; page kinds seen: "
+              f"{dict(kinds)}")
+
+    rows_read = sum(len(response.get("rows") or []) for response in responses)
+    dollars = vlm_transcription.cost(model, got.bought["in"], got.bought["out"]) or 0.0
+    seconds_a_page = (time.monotonic() - started) / len(pages)
+    stored = " (the rest stored)" if got.bought["pages"] < len(pages) else ""
+    print(f"smoke: {len(pages)} pages, {got.bought['pages']} bought{stored}, "
+          f"{seconds_a_page:.1f} s a page, ${dollars:.2f}; page kinds {dict(kinds)}; "
+          f"{rows_read} rows, {tables} grants-table pages with rows")
+    _note(f"smoke done in {_elapsed(started)}")
+
+
+def _base_readers(models: list[str], sample: Path, cache: Path, logs: Path,
+                  max_errors: int) -> None:
+    """The base readers as child processes of the ``page_readings`` CLI, one
+    log file each. Children, not threads: a Ctrl-C in the pane reaches each
+    reader on its own main thread and ``upsert_as_done``'s stop path runs in
+    each; this waits for them, then re-raises."""
+    children = []
+    for model in models:
+        name = model.split("/")[-1]
+        workers = WORKERS.get(model, page_verdicts.DEFAULT_WORKERS)
+        command = [sys.executable, "-m", "givingtuesday_datamart.page_readings",
+                   "--cache", str(cache), "read", str(sample), "--model", model,
+                   "--workers", str(workers), "--max-errors", str(max_errors)]
+        log_path = logs / f"{name}.log"
+        _note(f"{name}: {' '.join(command)} > {log_path}")
+        log = log_path.open("ab")
+        child = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
+        children.append((name, child, log))
+    try:
+        codes = {name: child.wait() for name, child, _ in children}
+    except KeyboardInterrupt:
+        _note("stop: the readers are cancelling their queued pages and recording the ones in "
+              "flight")
+        for _, child, _ in children:
+            child.wait()
+        raise
+    finally:
+        for _, _, log in children:
+            log.close()
+    failed = [name for name, code in codes.items() if code]
+    for name in failed:
+        _note(f"{name}: exited {codes[name]}; the last lines of its log:")
+        lines = (logs / f"{name}.log").read_text(errors="replace").splitlines(keepends=True)
+        print("".join(lines[-8:]), end="")
+    if failed:
+        _stop(f"{', '.join(failed)} exited non-zero (see {logs}); run the same command again "
+              "to resume")
+
+
+def _transcribe(stores: _Stores, sample: Path, policy: dict, cache: Path, max_errors: int,
+                *, buy: bool) -> AgreeResult:
+    return transcribe(stores.verdicts, sample, policy, cache, None, None, max_errors, buy=buy,
+                      filing_store=stores.filings, reading_store=stores.readings,
+                      client=stores.client, s3=stores.s3)
+
+
+def run(sample: Path, policy: dict, cache: Path, *, dry_run: bool = False,
+        cap: float | None = COST_CAP, logs: Path | None = None, max_errors: int = MAX_ERRORS,
+        filing_store=None, reading_store=None, verdict_store=None, client=None,
+        s3=None) -> None:
+    """The whole run of a frame in one command, for the box inside tmux; safe
+    to run again after any stop, since every stage resumes from the tables
+    and buys only what they lack. Seven stages, each under a timestamped
+    banner, everything printed mirrored to ``logs/run-<start>/run.log``:
 
     1. prerequisites: poppler (``pdftoppm -v`` printed), the gateway key and
        the datamart config in the environment, an HTTPS request to TEOS, a
@@ -503,12 +785,10 @@ def run(sample: Path, policy: dict, cache: Path, *, dry_run: bool = False, cap: 
        reading, or passes buying and writing nothing) and ``estimate``'s
        projection; past ``cap`` the run stops, and ``dry_run`` stops here.
     4. smoke: the frame's first fetched filing rendered and read through the
-       first base reader at one worker; its PNGs must exist, its rows must
-       be readings, and a page with a grants table must have parsed one.
+       first base reader at one worker, with its PNGs, rows and a grants
+       table asserted.
     5. the base readers as child processes of the ``page_readings`` CLI, at
-       ``WORKERS`` each with a log file each: children, not threads, so a
-       Ctrl-C in the pane reaches each reader on its own main thread and
-       ``upsert_as_done``'s stop path runs in each.
+       ``WORKERS`` each, a log file each.
     6. ``transcribe`` under the policy, again if it left pages without a
        verdict, then the stored-only pass, which must buy and write nothing.
     7. ``page_readings status`` and ``page_verdicts status`` for the policy.
@@ -519,208 +799,98 @@ def run(sample: Path, policy: dict, cache: Path, *, dry_run: bool = False, cap: 
     """
     started = time.monotonic()
     rows = list(csv.DictReader(sample.open()))
-    ids = [r["object_id"] for r in rows]
-    version, base = policy["version"], list(policy["base"])
-    logs = Path(logs) if logs else Path("logs") / f"run-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
+    ids = [row["object_id"] for row in rows]
+    version = policy["version"]
+    if logs is None:
+        logs = Path("logs") / f"run-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
     logs.mkdir(parents=True, exist_ok=True)
+    cap_text = f"${cap:,.0f}" if cap is not None else "none"
+
     with contextlib.ExitStack() as stack:
-        log = stack.enter_context((logs / "run.log").open("a"))
-        stack.enter_context(contextlib.redirect_stdout(_Tee(sys.stdout, log)))
-        handler = logging.StreamHandler(log)
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"))
-        logging.getLogger().addHandler(handler)
-        stack.callback(logging.getLogger().removeHandler, handler)
+        _mirror_output(stack, logs / "run.log")
 
         # 1. prerequisites
-        _banner(f"prerequisites: frame {sample}, {len(ids)} filings; cache {cache}; policy {version}; cap "
-                + (f"${cap:,.0f}" if cap is not None else "none") + f"; logs {logs}"
-                + ("; DRY RUN, stops after the cost gate" if dry_run else ""))
-        ec2 = _instance_type()
-        print(f"host: {socket.gethostname()}, {os.cpu_count()} cores" + (f", EC2 {ec2}" if ec2 else ""))
-        for tool in ("pdftoppm", "pdfimages"):
-            if shutil.which(tool) is None:
-                _stop(f"{tool} is not on PATH: install poppler-utils (apt, dnf) or poppler (brew)")
-        poppler = subprocess.run(["pdftoppm", "-v"], capture_output=True, text=True)
-        print(f"poppler: {((poppler.stderr or poppler.stdout).strip().splitlines() or ['?'])[0]}")
-        key = os.environ.get("VERCEL_AI_GATEWAY_API_KEY") or os.environ.get("AI_GATEWAY_API_KEY")
-        if not key:
-            _stop("VERCEL_AI_GATEWAY_API_KEY is not set")
-        print(f"gateway key: set ({len(key)} characters)")
+        dry_text = "; DRY RUN, stops after the cost gate" if dry_run else ""
+        _banner(f"prerequisites: frame {sample}, {len(ids)} filings; cache {cache}; "
+                f"policy {version}; cap {cap_text}; logs {logs}{dry_text}")
+        _describe_host()
+        _check_poppler()
+        _check_gateway_key()
         session = None
-        if filing_store is None:                          # the real run: the datamart, not a test's stores
-            from sqlalchemy import text
-
-            from givingtuesday_datamart._internal.db import get_session
-            from givingtuesday_datamart.ingestion import datamart_config
-            try:
-                config = datamart_config()
-                postgres = config["postgres"]
-            except Exception as exc:                      # noqa: BLE001 — no config.ini, or no [postgres]
-                _stop("the datamart config is not in the environment: GT_DATAMART_CONFIG_PATH must name a "
-                      f"config.ini with a [postgres] section ({type(exc).__name__}: {exc})")
-            session = stack.enter_context(get_session(config=config))
-            try:
-                n, = session.execute(text("SELECT count(*) FROM filing_images")).one()
-            except Exception as exc:                      # noqa: BLE001
-                _stop(f"the datamart at {postgres.get('host')} is not reachable: {type(exc).__name__}: {str(exc)[:200]}")
-            print(f"datamart: {postgres.get('host')} / {postgres.get('database')}, filing_images has {n:,} rows")
-        filings = filing_images._store(filing_store if filing_store is not None else session)
-        readings = reading_store if reading_store is not None else session
-        verdicts = verdict_store if verdict_store is not None else session
-        url = irs_source.TEOS_RETURNS.format(ein=next((r.get("filerein") for r in rows if r.get("filerein")), "731312965"))
-        t = time.monotonic()
-        try:
-            body = irs_source._get(url)
-        except Exception as exc:                          # noqa: BLE001
-            _stop(f"TEOS is not reachable over HTTPS from this host ({url}): {type(exc).__name__}: {exc}")
-        print(f"TEOS: {url} answered {len(body):,} bytes in {time.monotonic() - t:.1f} s")
-        s3 = s3 if s3 is not None else filing_images._s3_client()
-        check_key = f"{WRITE_CHECK_PREFIX}/{socket.gethostname()}-{_utc()}"
-        try:
-            s3.head_bucket(Bucket=filing_images.BUCKET)
-            s3.put_object(Bucket=filing_images.BUCKET, Key=check_key, Body=b"placeholder_recovery run: write check\n")
-            s3.delete_object(Bucket=filing_images.BUCKET, Key=check_key)
-        except Exception as exc:                          # noqa: BLE001
-            _stop(f"s3://{filing_images.BUCKET} is not writable: {type(exc).__name__}: {str(exc)[:200]}; the instance "
-                  "role (or ~/.aws) needs read and write on the bucket, since fetch writes")
-        print(f"s3://{filing_images.BUCKET}: head ok, a small object put and deleted at {check_key}")
-        cache.mkdir(parents=True, exist_ok=True)
-        free = shutil.disk_usage(cache).free
-        if free < MIN_FREE_BYTES:
-            _stop(f"{free / 1024 ** 3:.0f} GB free under {cache}; the run needs {MIN_FREE_BYTES / 1024 ** 3:.0f} GB")
-        print(f"disk: {free / 1024 ** 3:.0f} GB free under {cache}")
+        if filing_store is None:                          # the real run; a test injects stores
+            session = _open_datamart(stack)
+        stores = _Stores(
+            filings=filing_images._store(filing_store if filing_store is not None else session),
+            readings=reading_store if reading_store is not None else session,
+            verdicts=verdict_store if verdict_store is not None else session,
+            client=client,
+            s3=s3 if s3 is not None else filing_images._s3_client(),
+        )
+        eins = [row["filerein"] for row in rows if row.get("filerein")]
+        _check_teos(eins[0] if eins else "731312965")
+        _check_bucket(stores.s3)
+        _check_disk(cache)
         _note(f"prerequisites met in {_elapsed(started)}")
 
         # 2. fetch
-        _banner("fetch: fetch_filings on the frame (stored filings make no request; failures retry to "
-                f"{filing_images.MAX_ATTEMPTS} attempts)")
-        t = time.monotonic()
-        prior = filings.get(ids)
-        to_fetch = sum(filing_images._retryable(prior.get(oid)) for oid in ids)
-        _note(f"{to_fetch} of {len(ids)} filings to fetch; the rest are fetched, permanent or out of attempts"
-              if to_fetch else f"every one of the {len(ids)} filings is fetched, permanent or out of attempts: 0 TEOS requests")
-        statuses = filing_images.fetch_filings(
-            filings, [filing_images.Filing(r["object_id"], r.get("filerein") or None,
-                                           int(r["taxyear"]) if r.get("taxyear") else None) for r in rows],
-            cache_dir=cache, s3=s3)
-        counts = collections.Counter(statuses.values())
-        print("the frame by status: " + ", ".join(f"{status} {n}" for status, n in counts.most_common()))
-        _note(f"fetch done in {_elapsed(t)}")
+        _banner("fetch: fetch_filings on the frame (stored filings make no request; failures "
+                f"retry to {filing_images.MAX_ATTEMPTS} attempts)")
+        stage_started = time.monotonic()
+        _fetch(stores, rows, cache)
+        _note(f"fetch done in {_elapsed(stage_started)}")
 
         # 3. the cost gate
-        _banner(f"cost gate: the stored-only pass under {version}, then the projection against the cap of "
-                + (f"${cap:,.0f}" if cap is not None else "none"))
-        t = time.monotonic()
-        pages = frame_pages(filings, ids)
-        print(f"{len({oid for oid, _ in pages})} filings with attachment pages, {len(pages):,} pages")
-        try:
-            gate = agree(verdicts, pages, policy, max_errors=max_errors, cache_dir=cache, client=client,
-                         filing_store=filings, reading_store=readings, s3=s3, buy=False)
-        except LookupError as exc:
-            _note(f"stored-only stopped, no call made: {str(exc).split(': [')[0]}")
-        else:
-            print(summary(gate))
-            bought = sum(spent["pages"] for spent in gate.bought.values())
-            if bought or gate.written:
-                _stop(f"the stored-only pass bought {bought} pages and wrote {gate.written} verdict rows; it should have done neither")
-            _note("every reading the policy needs is stored: the stored-only pass bought nothing and wrote nothing")
-        estimate(session, sample, policy, cap, filing_store=filings, reading_store=readings)
-        _note(f"cost gate passed in {_elapsed(t)}")
+        _banner(f"cost gate: the stored-only pass under {version}, then the projection against "
+                f"the cap of {cap_text}")
+        stage_started = time.monotonic()
+        pages = frame_pages(stores.filings, ids)
+        filings_with_pages = len({oid for oid, _ in pages})
+        print(f"{filings_with_pages} filings with attachment pages, {len(pages):,} pages")
+        missing = _stored_only(stores, pages, policy, cache, max_errors)
+        if missing:
+            _note(f"stored-only stopped, no call made: {missing}")
+        estimate(session, sample, policy, cap,
+                 filing_store=stores.filings, reading_store=stores.readings)
+        _note(f"cost gate passed in {_elapsed(stage_started)}")
         if dry_run:
-            _banner(f"dry run: stopping after the projection, nothing bought; {_elapsed(started)} in all; logs in {logs}")
+            _banner(f"dry run: stopping after the projection, nothing bought; "
+                    f"{_elapsed(started)} in all; logs in {logs}")
             return
 
-        # 4. smoke
-        images = filings.get(ids)
-        first = next((oid for oid in ids if page_readings._readable(images.get(oid)) and images[oid].attachment_from), None)
-        if first is None:
-            _stop("no fetched filing with attachment pages in the frame; nothing to read")
-        row = images[first]
-        span = (row.attachment_from, row.attachment_from + row.attachment_pages - 1)
-        smoke_pages = [(first, page) for page in range(span[0], span[1] + 1)]
-        _banner(f"smoke: {first} (the frame's first fetched filing, pages {span[0]}-{span[1]}) rendered and read "
-                f"through {base[0]} at one worker")
-        t = time.monotonic()
-        try:
-            pdf = filing_images.materialise(row, cache, s3=s3)
-            pngs = vlm_transcription.render(pdf, span[0], span[1], page_readings.page_dir(cache, first))
-        except Exception as exc:                          # noqa: BLE001
-            _stop(f"{first} could not be rendered: {type(exc).__name__}: {str(exc)[:200]}")
-        missing = [png for png in pngs if not png.exists()]
-        if missing:
-            _stop(f"{len(missing)} of {first}'s {len(pngs)} PNGs do not exist after the render: {missing[:3]}")
-        print(f"{len(pngs)} PNGs under {page_readings.page_dir(cache, first)}")
-        got = read_pages(readings, smoke_pages, base[0], workers=1, prompt_version=policy["prompt_version"],
-                         max_errors=max_errors, cache_dir=cache, client=client, filing_store=filings, s3=s3,
-                         settings=policy.get("settings", {}).get(base[0]))
-        if got.failed or got.skipped or len(got.responses) != len(smoke_pages):
-            _stop(f"{first} through {base[0]}: {len(got.responses)} of {len(smoke_pages)} pages read, "
-                  f"{len(got.failed)} error rows, {len(got.skipped)} skipped at {max_errors} errors: "
-                  + "; ".join(f"p{page:03d}: {(r.last_error or '')[:100]}" for (_, page), r in list(got.failed.items())[:3]))
-        kinds = collections.Counter(r.get("page_kind") for r in got.responses.values())
-        listed = sum(1 for r in got.responses.values() if r.get("page_kind") in LIST_KINDS and r.get("rows"))
-        if not listed:
-            _stop(f"no page of {first} parsed as a grants table with rows; page kinds seen: {dict(kinds)}")
-        spent = vlm_transcription.cost(base[0], got.bought["in"], got.bought["out"]) or 0.0
-        print(f"smoke: {len(smoke_pages)} pages, {got.bought['pages']} bought"
-              + (" (the rest stored)" if got.bought["pages"] < len(smoke_pages) else "")
-              + f", {(time.monotonic() - t) / len(smoke_pages):.1f} s a page, ${spent:.2f}; page kinds {dict(kinds)}; "
-              f"{sum(len(r.get('rows') or []) for r in got.responses.values())} rows, {listed} grants-table pages with rows")
-        _note(f"smoke done in {_elapsed(t)}")
+        # 4. smoke (its banner names the filing, so it prints its own)
+        _smoke(stores, rows, policy, cache, max_errors)
 
         # 5. the base readers, as child processes
-        _banner("base readers in parallel: " + ", ".join(f"{m} at {WORKERS.get(m, page_verdicts.DEFAULT_WORKERS)} workers" for m in base))
-        t = time.monotonic()
-        children = []
-        for model in base:
-            name = model.split("/")[-1]
-            command = [sys.executable, "-m", "givingtuesday_datamart.page_readings", "--cache", str(cache), "read",
-                       str(sample), "--model", model, "--workers", str(WORKERS.get(model, page_verdicts.DEFAULT_WORKERS)),
-                       "--max-errors", str(max_errors)]
-            _note(f"{name}: {' '.join(command)} > {logs / f'{name}.log'}")
-            handle = stack.enter_context((logs / f"{name}.log").open("ab"))
-            children.append((name, subprocess.Popen(command, stdout=handle, stderr=subprocess.STDOUT)))
-        try:
-            codes = {name: child.wait() for name, child in children}
-        except KeyboardInterrupt:
-            _note("stop: the readers are cancelling their queued pages and recording the ones in flight")
-            for _, child in children:
-                child.wait()
-            raise
-        failed = [name for name, code in codes.items() if code]
-        for name in failed:
-            _note(f"{name}: exited {codes[name]}; the last lines of its log:")
-            print("".join((logs / f"{name}.log").read_text(errors="replace").splitlines(keepends=True)[-8:]), end="")
-        if failed:
-            _stop(f"{', '.join(failed)} exited non-zero (see {logs}); run the same command again to resume")
-        _note(f"base readers done in {_elapsed(t)}")
+        counts = ", ".join(f"{model} at {WORKERS.get(model, page_verdicts.DEFAULT_WORKERS)} "
+                           "workers" for model in policy["base"])
+        _banner(f"base readers in parallel: {counts}")
+        stage_started = time.monotonic()
+        _base_readers(policy["base"], sample, cache, logs, max_errors)
+        _note(f"base readers done in {_elapsed(stage_started)}")
 
         # 6. transcribe, again if needed, then the stored-only check
         _banner(f"transcribe --policy {version}: the escalation readers and the verdicts")
-        t = time.monotonic()
-        result = transcribe(verdicts, sample, policy, cache, None, None, max_errors, buy=True, filing_store=filings,
-                            reading_store=readings, client=client, s3=s3)
-        _note(f"transcribe done in {_elapsed(t)}")
+        stage_started = time.monotonic()
+        result = _transcribe(stores, sample, policy, cache, max_errors, buy=True)
+        _note(f"transcribe done in {_elapsed(stage_started)}")
         if result.no_verdict:
-            _banner(f"second transcribe: {len(result.no_verdict)} pages were left without a verdict (a reader failed "
-                    "on them this run); reading them again")
-            t = time.monotonic()
-            result = transcribe(verdicts, sample, policy, cache, None, None, max_errors, buy=True, filing_store=filings,
-                                reading_store=readings, client=client, s3=s3)
-            _note(f"second transcribe done in {_elapsed(t)}; {len(result.no_verdict)} pages still without a verdict")
+            _banner(f"second transcribe: {len(result.no_verdict)} pages were left without a "
+                    "verdict (a reader failed on them this run); reading them again")
+            stage_started = time.monotonic()
+            result = _transcribe(stores, sample, policy, cache, max_errors, buy=True)
+            _note(f"second transcribe done in {_elapsed(stage_started)}; "
+                  f"{len(result.no_verdict)} pages still without a verdict")
         else:
             _note("no page was left without a verdict; no second transcribe needed")
-        _banner(f"final check: transcribe --policy {version} --stored-only must buy nothing and write nothing")
-        t = time.monotonic()
-        try:
-            check = transcribe(verdicts, sample, policy, cache, None, None, max_errors, buy=False, filing_store=filings,
-                               reading_store=readings, client=client, s3=s3)
-        except LookupError as exc:
-            _stop(f"the stored-only check found readings missing: {str(exc).split(': [')[0]}; run the same command again")
-        bought = sum(spent["pages"] for spent in check.bought.values())
-        if bought or check.written:
-            _stop(f"the stored-only check bought {bought} pages and wrote {check.written} verdict rows; it should have done neither")
-        _note(f"final check passed in {_elapsed(t)}: 0 pages bought, 0 verdict rows written")
+        _banner(f"final check: transcribe --policy {version} --stored-only must buy nothing "
+                "and write nothing")
+        stage_started = time.monotonic()
+        missing = _stored_only(stores, pages, policy, cache, max_errors)
+        if missing:
+            _stop(f"the stored-only check found readings missing: {missing}; run the same "
+                  "command again")
+        _note(f"final check passed in {_elapsed(stage_started)}: 0 pages bought, "
+              "0 verdict rows written")
 
         # 7. status
         _banner("status after the run")
@@ -844,7 +1014,9 @@ def report(session, sample: Path, out: Path | None, xml_rows: Path | None, *, po
         rate = 100 * b["reconciled"] / b["n"] if b["n"] else 0
         print(f"  {label:<7}{b['n']:>4}{b['reconciled']:>7}{rate:>6.0f}%"
               f"{b['declared']/1e6:>13,.1f}{b['recovered']/1e6:>14,.1f}{b['rows']:>9,}")
-        total_declared += b["declared"]; total_recovered += b["recovered"]; total_rows += b["rows"]
+        total_declared += b["declared"]
+        total_recovered += b["recovered"]
+        total_rows += b["rows"]
     print(f"  {'TOTAL':<7}{sum(b['n'] for b in by_stratum.values()):>4}"
           f"{sum(b['reconciled'] for b in by_stratum.values()):>7}"
           f"{'':>7}{total_declared/1e6:>13,.1f}{total_recovered/1e6:>14,.1f}{int(total_rows):>9,}")
@@ -879,7 +1051,8 @@ def report(session, sample: Path, out: Path | None, xml_rows: Path | None, *, po
     if out:
         with out.open("w", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(records[0].keys()))
-            writer.writeheader(); writer.writerows(records)
+            writer.writeheader()
+            writer.writerows(records)
         print(f"per-filing detail -> {out}")
 
 
@@ -929,7 +1102,8 @@ def compare(reports: list[tuple[str, Path]], out: Path | None) -> None:
     if out and rows:
         with out.open("w", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
-            writer.writeheader(); writer.writerows(rows)
+            writer.writeheader()
+            writer.writerows(rows)
         print(f"differences -> {out}")
 
 
