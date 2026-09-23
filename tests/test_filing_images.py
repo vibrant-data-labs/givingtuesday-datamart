@@ -189,6 +189,7 @@ def test_each_failure_keeps_its_status_and_last_error(teos, tmp_path):
     assert "404" in gone.last_error and gone.teos_url in gone.last_error      # the newest image's error...
     assert _url(rows["gone"], "20220421") in gone.last_error                  # ...and the fallback's
     assert "error page" in store.rows["201000000000000003"].last_error
+    assert store.rows["201000000000000001"].last_error == "TEOS lists no 990PF image for EIN 731312965, period 202212"
     assert "not in index_2010.csv" in store.rows["201000000000000004"].last_error
     assert store.rows["201000000000000004"].filerein == ""     # nothing anywhere said who filed it
 
@@ -428,6 +429,20 @@ def test_postgres_store_creates_the_table_and_its_status_index():
     assert "CREATE TABLE IF NOT EXISTS filing_images" in statements[0]
     assert "CREATE INDEX IF NOT EXISTS filing_images_status ON filing_images (status)" in statements[1]
     assert session.commits == 1
+
+
+def test_status_report_survives_postgres_returning_decimal_sums():
+    from decimal import Decimal
+
+    class _Reporting(_Session):
+        def execute(self, clause, params=None):
+            self.calls.append((clause.text, params))
+            if "GROUP BY 1 ORDER BY 2 DESC" in clause.text:
+                return [("fetched", 373, Decimal("1145857000"), Decimal("20000"), Decimal("9347"))]
+            return [(2022, 38)]
+
+    report = fi.status_report(_Reporting())
+    assert "fetched                      373    1.15   20,000     9,347" in report and "2022: 38" in report
 
 
 # ---------------------------------------------------------------------------

@@ -252,7 +252,8 @@ def fetch_image(object_id: str, cache_dir: Path = CACHE) -> Fetched:
     except Exception as exc:                              # noqa: BLE001
         return Fetched(f"lookup_failed:{type(exc).__name__}", row, None, None, str(exc)[:500])
     if not images:
-        return Fetched("no_teos_image", row, None, None, None)
+        return Fetched("no_teos_image", row, None, None,
+                       f"TEOS lists no {row.return_type} image for EIN {row.ein}, period {row.tax_period}")
     status, errors = "pdf_unavailable", []
     for image in reversed(images):         # newest first; older ones are fallbacks
         try:
@@ -575,9 +576,9 @@ def status_report(session) -> str:
     """Counts by status, and the unserved images by the year the IRS generated them."""
     lines = [f"{'status':<26}{'n':>6}{'GB':>8}{'pages':>9}{'attached':>10}"]
     for status, n, size, pages, attached in session.execute(text(
-            "SELECT status, count(*), coalesce(sum(bytes), 0), coalesce(sum(pages), 0), "
-            "coalesce(sum(attachment_pages), 0) FROM filing_images GROUP BY 1 ORDER BY 2 DESC")):
-        lines.append(f"{status:<26}{n:>6}{size / 1e9:>8.2f}{pages:>9,}{attached:>10,}")
+            "SELECT status, count(*), coalesce(sum(bytes), 0)::bigint, coalesce(sum(pages), 0)::bigint, "
+            "coalesce(sum(attachment_pages), 0)::bigint FROM filing_images GROUP BY 1 ORDER BY 2 DESC")):
+        lines.append(f"{status:<26}{n:>6}{int(size) / 1e9:>8.2f}{int(pages):>9,}{int(attached):>10,}")
     lines.append("")
     lines.append("unserved images (status pdf_unavailable:*) by the year the IRS generated them:")
     for year, n in session.execute(text(
