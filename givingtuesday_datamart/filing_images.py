@@ -247,12 +247,14 @@ def fetch_image(object_id: str, cache_dir: Path = CACHE) -> Fetched:
     is indexed and returns a 302 to an error page. Both are concentrated in
     older tax years.
     """
-    row = None
     try:
         row = irs_source.lookup(object_id, cache_dir)
+    except Exception as exc:                              # noqa: BLE001 — not in any index CSV
+        return Fetched(f"lookup_failed:{type(exc).__name__}", None, None, None, str(exc)[:500])
+    try:
         images = irs_source.images(row)
-    except Exception as exc:                              # noqa: BLE001
-        return Fetched(f"lookup_failed:{type(exc).__name__}", row, None, None, str(exc)[:500])
+    except Exception as exc:                              # noqa: BLE001 — TEOS down or malformed
+        return Fetched(f"teos_failed:{type(exc).__name__}", row, None, None, str(exc)[:500])
     if not images:
         return Fetched("no_teos_image", row, None, None,
                        f"TEOS lists no {row.return_type} image for EIN {row.ein}, period {row.tax_period}")

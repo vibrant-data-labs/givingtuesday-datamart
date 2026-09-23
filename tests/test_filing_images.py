@@ -64,7 +64,10 @@ class _Teos:
 
     def images(self, row):
         self.listings.append(row.object_id)
-        return list(self.listing[row.object_id])
+        listed = self.listing[row.object_id]
+        if isinstance(listed, Exception):
+            raise listed
+        return list(listed)
 
     def get(self, url, headers=None):
         self.gets.append(url)
@@ -196,11 +199,16 @@ def test_each_failure_keeps_its_status_and_last_error(teos, tmp_path):
         "html": teos.add("201000000000000003", [("20230101", HTML)]),
     }
     teos.index["201000000000000004"] = LookupError("201000000000000004 not in index_2010.csv or any other year")
+    teos.add("201000000000000005")
+    teos.listing["201000000000000005"] = urllib.error.HTTPError("https://apps.irs.gov/teos", 503, "Service Unavailable", {}, None)
     store, s3 = fi.MemoryStore(), _S3()
-    statuses = _fetch(store, ["201000000000000001", "201000000000000002",
-                              "201000000000000003", "201000000000000004"], tmp_path, s3)
+    statuses = _fetch(store, ["201000000000000001", "201000000000000002", "201000000000000003",
+                              "201000000000000004", "201000000000000005"], tmp_path, s3)
     assert statuses == {"201000000000000001": "no_teos_image", "201000000000000002": "pdf_unavailable:404",
-                        "201000000000000003": "not_a_pdf", "201000000000000004": "lookup_failed:LookupError"}
+                        "201000000000000003": "not_a_pdf", "201000000000000004": "lookup_failed:LookupError",
+                        "201000000000000005": "teos_failed:HTTPError"}
+    outage = store.rows["201000000000000005"]
+    assert (outage.filerein, outage.index_year) == ("731312965", "2023") and "503" in outage.last_error
     assert s3.puts == [] and all(r.sha256 is None and r.attempts == 1 for r in store.rows.values())
     gone = store.rows["201000000000000002"]
     assert gone.teos_url == _url(rows["gone"], "20221129") and gone.image_generated == date(2022, 11, 29)
