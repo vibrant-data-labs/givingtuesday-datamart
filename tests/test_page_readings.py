@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -50,6 +51,7 @@ def no_sleep(monkeypatch):
 def render(monkeypatch):
     fake = _Render()
     monkeypatch.setattr(vlm, "render", fake)
+    monkeypatch.setattr(pr.shutil, "which", lambda cmd, *args, **kwargs: "/opt/homebrew/bin/pdftoppm")
     return fake
 
 
@@ -220,6 +222,47 @@ def test_a_worker_that_raises_does_not_lose_the_other_rows(filings, render, tmp_
         _read(store, filings, _pages(OID, 3, 4, 5, 6), _client(4), tmp_path)
     assert sorted(key[1] for key in store.rows) == [3, 5, 6] and sum(store.commits) == 3
     assert "a worker raised" in caplog.text
+
+
+def test_a_render_failure_is_an_error_per_page_of_that_filing_not_a_crash(filings, render, tmp_path, caplog, monkeypatch):
+    _seed(filings, tmp_path, OID)
+    _seed(filings, tmp_path, OID2)
+    good = render.__call__
+
+    def broken(pdf, first, last, out_dir, dpi=vlm.DPI):
+        if out_dir.name == OID2:
+            raise subprocess.CalledProcessError(1, ["pdftoppm"], stderr=b"Syntax Error: Couldn't read xref table\n")
+        return good(pdf, first, last, out_dir, dpi)
+
+    monkeypatch.setattr(vlm, "render", broken)
+    store = pr.MemoryStore()
+    pages = _pages(OID, 3, 4) + _pages(OID2, 3, 4)
+    for run in (1, 2, 3):
+        client = _client(2)
+        result = _read(store, filings, pages, client, tmp_path)
+        assert len(client.json_modes) == (2 if run == 1 else 0)          # OID's two pages read once, then hits
+        assert sorted(result.responses) == _pages(OID, 3, 4) and sorted(result.failed) == _pages(OID2, 3, 4)
+        for row in result.failed.values():
+            assert row.errors == run and row.response is None
+            assert row.last_error == "render: CalledProcessError: Syntax Error: Couldn't read xref table"
+    assert caplog.text.count(f"{OID2}: rendering pages 3-4 failed") == 3
+    fourth = _read(store, filings, pages, _Client([]), tmp_path)             # errors = 3: skipped, not rendered again
+    assert sorted(fourth.skipped) == _pages(OID2, 3, 4) and not fourth.failed
+    assert sum(call[3].name == OID2 for call in render.calls) == 0            # broken never reached the fake's log
+    assert len(store.rows) == 4
+
+
+def test_a_missing_pdftoppm_stops_before_any_render_or_call_unless_all_pages_are_stored(filings, render, tmp_path, monkeypatch):
+    _seed(filings, tmp_path, OID)
+    store = pr.MemoryStore()
+    _read(store, filings, _pages(OID, 3), _client(1), tmp_path)
+    monkeypatch.setattr(pr.shutil, "which", lambda cmd, *args, **kwargs: None)
+    stored = _read(store, filings, _pages(OID, 3), _Client([]), tmp_path)   # no miss, no poppler needed
+    assert len(stored.responses) == 1
+    client = _client(1)
+    with pytest.raises(RuntimeError, match="pdftoppm is not on PATH"):
+        _read(store, filings, _pages(OID, 3, 4), client, tmp_path)
+    assert client.json_modes == [] and len(render.calls) == 1 and len(store.rows) == 1
 
 
 def test_render_runs_once_per_filing_for_the_span_asked_for(filings, render, tmp_path):

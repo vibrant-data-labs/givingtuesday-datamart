@@ -58,6 +58,8 @@ import json
 import logging
 import math
 import re
+import shutil
+import subprocess
 from abc import ABC, abstractmethod
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field, fields
@@ -346,12 +348,42 @@ def _readable(row: filing_images.FilingImage | None) -> bool:
     return row is not None and row.fetched and bool(row.sha256)
 
 
+def _require_pdftoppm() -> None:
+    """Fail before any render or gateway call on a box without poppler."""
+    if shutil.which("pdftoppm") is None:
+        raise RuntimeError("pdftoppm is not on PATH; install poppler-utils (apt) or poppler (brew)")
+
+
+def _render_filing(object_id: str, pdf: Path, first: int, last: int, out_dir: Path) -> list[Path]:
+    """Runs in the render pool: one filing's span of pages to PNGs. A failure
+    is logged once here; the filing's read jobs turn it into error rows."""
+    try:
+        return vlm_transcription.render(pdf, first, last, out_dir)
+    except Exception as exc:                              # noqa: BLE001
+        logger.error("%s: rendering pages %d-%d failed: %s", object_id, first, last, _render_error(exc))
+        raise
+
+
+def _render_error(exc: BaseException) -> str:
+    """``render: <type>: <detail>`` — poppler's stderr when it has one, so the
+    row says what pdftoppm said rather than "exit status 1"."""
+    detail = exc.stderr if isinstance(exc, subprocess.CalledProcessError) and exc.stderr else str(exc)
+    if isinstance(detail, bytes):
+        detail = detail.decode(errors="replace")
+    return f"render: {type(exc).__name__}: {detail.strip()[:300]}"
+
+
 def _read_one(client, model: str, rendered: Future, key: Key, request_settings: dict,
               prior: PageReading | None, pages_dir: Path) -> PageReading:
     """Runs in a worker thread: wait for the filing's render, read the page.
-    Never the session."""
-    rendered.result()
-    data = vlm_transcription.transcribe(client, model, pages_dir / f"p{key[1]:03d}.png")
+    Never the session. A failed render is this page's error result, so a
+    filing pdftoppm cannot draw costs its pages one error each, not the run."""
+    try:
+        rendered.result()
+    except Exception as exc:                              # noqa: BLE001 — logged once by _render_filing
+        data = {"error": _render_error(exc)}
+    else:
+        data = vlm_transcription.transcribe(client, model, pages_dir / f"p{key[1]:03d}.png")
     return reading_from_result(key, request_settings, data, prior)
 
 
@@ -440,6 +472,7 @@ def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
         logger.warning("%s p%03d skipped after %d errors: %s", oid, page, row.errors, (row.last_error or "")[:120])
     if not misses:
         return result
+    _require_pdftoppm()
 
     spans: dict[str, tuple[int, int]] = {}
     for (oid, page), _ in misses:
@@ -449,7 +482,7 @@ def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
     client = client if client is not None else vlm_transcription.client()
     tally = {"pages": 0, "rows": 0, "errors": 0, "partial": 0, "in": 0, "out": 0}
     with ThreadPoolExecutor(max_workers=RENDER_WORKERS) as renders, ThreadPoolExecutor(max_workers=workers) as pool:
-        rendered = {oid: renders.submit(vlm_transcription.render, pdfs[oid], first, last, page_dir(cache_dir, oid))
+        rendered = {oid: renders.submit(_render_filing, oid, pdfs[oid], first, last, page_dir(cache_dir, oid))
                     for oid, (first, last) in spans.items()}
         futures = [pool.submit(_read_one, client, model, rendered[page[0]], keys[page], settings, prior,
                                page_dir(cache_dir, page[0])) for page, prior in misses]
