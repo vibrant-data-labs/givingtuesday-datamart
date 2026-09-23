@@ -364,9 +364,21 @@ def stage(sample: Path, cache: Path, limit: int | None, manifest: Path) -> None:
     print(f"manifest -> {manifest}")
 
 
-def transcribe(session, sample: Path, policy: dict, cache: Path, limit: int | None,
-               only: str | None, max_errors: int = MAX_ERRORS, buy: bool = True, *,
-               filing_store=None, reading_store=None, client=None, s3=None) -> AgreeResult:
+def transcribe(
+    session,
+    sample: Path,
+    policy: dict,
+    cache: Path,
+    limit: int | None = None,
+    only: str | None = None,
+    max_errors: int = MAX_ERRORS,
+    buy: bool = True,
+    *,
+    filing_store=None,
+    reading_store=None,
+    client=None,
+    s3=None,
+) -> AgreeResult:
     """Every attachment page of every fetched filing in the sample, decided
     under ``policy``: ``frame_pages`` from ``filing_images``, then ``agree``,
     which reads each page with the policy's readers (``read_pages``, a no-op
@@ -410,8 +422,16 @@ def transcribe(session, sample: Path, policy: dict, cache: Path, limit: int | No
     return result
 
 
-def estimate(session, sample: Path, policy: dict, cap: float | None = COST_CAP, *,
-             only: str | None = None, filing_store=None, reading_store=None) -> float:
+def estimate(
+    session,
+    sample: Path,
+    policy: dict,
+    cap: float | None = COST_CAP,
+    *,
+    only: str | None = None,
+    filing_store=None,
+    reading_store=None,
+) -> float:
     """The cost gate: what ``transcribe`` under ``policy`` would buy today and
     what it would cost. Each reader is expected to see a share of the frame's
     attachment pages — every page for a base reader, ``DISPUTE_RATE`` of them
@@ -741,8 +761,13 @@ def _fetch(stores: _Stores, rows: list[dict], cache: Path) -> None:
     print("the frame by status: " + ", ".join(f"{status} {n}" for status, n in counts))
 
 
-def _stored_only(stores: _Stores, pages: list, policy: dict, cache: Path,
-                 max_errors: int) -> str | None:
+def _stored_only(
+    stores: _Stores,
+    pages: list,
+    policy: dict,
+    cache: Path,
+    max_errors: int,
+) -> str | None:
     """``agree`` with ``buy=False``. Returns what is missing when a reader lacks
     readings (no call is made); returns None when every reading is stored, in
     which case the pass must have bought nothing and written nothing."""
@@ -850,8 +875,13 @@ def _smoke(stores: _Stores, rows: list[dict], policy: dict, cache: Path, max_err
     _note(f"smoke done in {_elapsed(started)}")
 
 
-def _base_readers(models: list[str], sample: Path, cache: Path, logs: Path,
-                  max_errors: int) -> None:
+def _base_readers(
+    models: list[str],
+    sample: Path,
+    cache: Path,
+    logs: Path,
+    max_errors: int,
+) -> None:
     """The base readers as child processes of the ``page_readings`` CLI, one
     log file each. Children, not threads: a Ctrl-C in the pane reaches each
     reader on its own main thread and ``upsert_as_done``'s stop path runs in
@@ -904,19 +934,37 @@ def _base_readers(models: list[str], sample: Path, cache: Path, logs: Path,
               "to resume")
 
 
-def _transcribe(stores: _Stores, sample: Path, policy: dict, cache: Path, max_errors: int,
-                *, buy: bool) -> AgreeResult:
+def _transcribe(
+    stores: _Stores,
+    sample: Path,
+    policy: dict,
+    cache: Path,
+    max_errors: int,
+    *,
+    buy: bool,
+) -> AgreeResult:
     # ``transcribe`` above with the bundle unpacked into its keyword seams;
-    # the two Nones are ``limit`` and ``only``, so the whole frame is read.
-    return transcribe(stores.verdicts, sample, policy, cache, None, None, max_errors, buy=buy,
+    # ``limit`` and ``only`` stay at their defaults, so the whole frame is read.
+    return transcribe(stores.verdicts, sample, policy, cache, max_errors=max_errors, buy=buy,
                       filing_store=stores.filings, reading_store=stores.readings,
                       client=stores.client, s3=stores.s3)
 
 
-def run(sample: Path, policy: dict, cache: Path, *, dry_run: bool = False,
-        cap: float | None = COST_CAP, logs: Path | None = None, max_errors: int = MAX_ERRORS,
-        filing_store=None, reading_store=None, verdict_store=None, client=None,
-        s3=None) -> None:
+def run(
+    sample: Path,
+    policy: dict,
+    cache: Path,
+    *,
+    dry_run: bool = False,
+    cap: float | None = COST_CAP,
+    logs: Path | None = None,
+    max_errors: int = MAX_ERRORS,
+    filing_store=None,
+    reading_store=None,
+    verdict_store=None,
+    client=None,
+    s3=None,
+) -> None:
     """The whole run of a frame in one command, for the box inside tmux; safe
     to run again after any stop, since every stage resumes from the tables
     and buys only what they lack. Seven stages, each under a timestamped
@@ -1093,8 +1141,15 @@ def run(sample: Path, policy: dict, cache: Path, *, dry_run: bool = False,
         _banner(f"done in {_elapsed(started)}; logs in {logs}")
 
 
-def report(session, sample: Path, out: Path | None, xml_rows: Path | None, *, policy: dict = POLICY_V1,
-           results: Path | None = None) -> None:
+def report(
+    session,
+    sample: Path,
+    out: Path | None,
+    xml_rows: Path | None,
+    *,
+    policy: dict = POLICY_V1,
+    results: Path | None = None,
+) -> None:
     """Score one engine's pages through the selector, filing by filing.
 
     The vision path is ``page_verdicts`` joined to ``page_readings`` under
