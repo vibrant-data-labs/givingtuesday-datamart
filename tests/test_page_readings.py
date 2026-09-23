@@ -1,0 +1,444 @@
+"""``page_readings`` with no Postgres, poppler or gateway in the loop: the
+fake client from ``test_vlm_transcription`` counting every call, an
+in-memory ``filing_images`` store seeded with fetched rows, an in-memory
+reading store, and a render that writes empty PNGs."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from dataclasses import replace
+from datetime import datetime, timezone
+from decimal import Decimal
+
+import pytest
+from test_filing_images import _Session
+from test_vlm_transcription import _Client, _answer, _rows
+
+from givingtuesday_datamart import filing_images as fi
+from givingtuesday_datamart import page_readings as pr
+from givingtuesday_datamart import vlm_transcription as vlm
+
+IRS, FILER = 2246, 2550
+OID, OID2 = "202343149349101129", "202133169349103203"
+QWEN, GEMINI, SONNET = "alibaba/qwen3-vl-instruct", "google/gemini-3.5-flash-lite", "anthropic/claude-sonnet-5"
+
+
+class _Render:
+    """Writes an empty ``pNNN.png`` per page and records every call."""
+
+    def __init__(self):
+        self.calls: list[tuple] = []
+
+    def __call__(self, pdf, first, last, out_dir, dpi=vlm.DPI):
+        self.calls.append((pdf, first, last, out_dir))
+        out_dir.mkdir(parents=True, exist_ok=True)
+        paths = []
+        for page in range(first, last + 1):
+            (out_dir / f"p{page:03d}.png").write_bytes(b"")
+            paths.append(out_dir / f"p{page:03d}.png")
+        return paths
+
+
+@pytest.fixture(autouse=True)
+def no_sleep(monkeypatch):
+    monkeypatch.setattr(vlm.time, "sleep", lambda seconds: None)
+
+
+@pytest.fixture
+def render(monkeypatch):
+    fake = _Render()
+    monkeypatch.setattr(vlm, "render", fake)
+    return fake
+
+
+@pytest.fixture
+def filings():
+    return fi.MemoryStore()
+
+
+def _seed(filings, tmp_path, oid, *, pages=6, attachment_from=3, payload=None):
+    """A fetched filing whose PDF sits in the cache directory, so ``local_pdf``
+    serves it without S3."""
+    payload = payload or f"%PDF-1.4 {oid}".encode()
+    path = fi.pdf_path(tmp_path, oid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
+    attached = pages - attachment_from + 1
+    row = fi.FilingImage(object_id=oid, filerein="731312965", taxyear=2022, index_year=None, teos_url=None,
+                         image_generated=None, status="fetched", attempts=1, sha256=hashlib.sha256(payload).hexdigest(),
+                         s3_key=f"irs/pdf/{oid}.pdf", bytes=len(payload), pages=pages,
+                         page_widths=[IRS] * (attachment_from - 1) + [FILER] * attached,
+                         attachment_from=attachment_from, attachment_pages=attached)
+    filings.rows[oid] = row
+    return row
+
+
+def _client(n, rows=3):
+    """Enough scripted answers for ``n`` one-call reads; a call past the end
+    raises inside the client, which ``transcribe`` records as an error."""
+    return _Client([(_answer(_rows(rows)), "stop")] * n)
+
+
+def _read(store, filings, pages, client, tmp_path, model=QWEN, **kwargs):
+    return pr.read_pages(store, pages, model, workers=4, cache_dir=tmp_path, client=client,
+                         filing_store=filings, **kwargs)
+
+
+def _pages(oid, *pages):
+    return [(oid, page) for page in pages]
+
+
+# ---------------------------------------------------------------------------
+# read_pages: the cache
+# ---------------------------------------------------------------------------
+
+
+def test_a_stored_batch_makes_zero_calls(filings, render, tmp_path):
+    _seed(filings, tmp_path, OID)
+    store, client = pr.MemoryStore(), _client(4)
+    first = _read(store, filings, _pages(OID, 3, 4, 5, 6), client, tmp_path)
+    assert len(client.json_modes) == 4 and len(first.responses) == 4 and not first.skipped and not first.failed
+    assert first.responses[(OID, 3)] == {"page_kind": "grants_paid_list", "heading": "", "rows": _rows(3), "totals": []}
+    assert store.commits == [4] and sorted(row.key[:2] for row in store.rows.values()) == _pages(OID, 3, 4, 5, 6)
+
+    again = _Client([])
+    second = _read(store, filings, _pages(OID, 3, 4, 5, 6), again, tmp_path)
+    assert again.json_modes == [] and second.responses == first.responses
+    assert store.commits == [4] and render.calls == [render.calls[0]]
+
+
+def test_a_half_stored_batch_reads_exactly_the_missing_half(filings, render, tmp_path):
+    _seed(filings, tmp_path, OID)
+    store = pr.MemoryStore()
+    _read(store, filings, _pages(OID, 3, 4), _client(2), tmp_path)
+    client = _client(2)
+    result = _read(store, filings, _pages(OID, 3, 4, 5, 6), client, tmp_path)
+    assert len(client.json_modes) == 2 and sorted(result.responses) == _pages(OID, 3, 4, 5, 6)
+    assert sorted(row.key[:2] for row in store.rows.values()) == _pages(OID, 3, 4, 5, 6)
+    assert render.calls[-1][1:3] == (5, 6)                   # only the missing span was rendered
+
+
+def test_the_row_carries_the_key_and_every_stamp(filings, render, tmp_path):
+    image = _seed(filings, tmp_path, OID)
+    store = pr.MemoryStore()
+    _read(store, filings, _pages(OID, 3), _client(1), tmp_path)
+    (row,) = store.rows.values()
+    assert row.key == (OID, 3, image.sha256, 200, QWEN, "v4", pr.request_hash(QWEN, "v4"))
+    assert row.request == {"json_mode": False, "extras": {}}
+    assert row.response == {"page_kind": "grants_paid_list", "heading": "", "rows": _rows(3), "totals": []}
+    assert (row.partial, row.finish, row.attempts, row.json_mode) == (False, "stop", 1, False)
+    assert row.usage == {"in": 10, "out": len(_answer(_rows(3)))} and row.seconds is not None
+    assert row.errors == 0 and row.last_error is None and row.read_at.tzinfo is not None
+
+
+def test_v4_stored_is_a_miss_under_v5_and_a_hit_under_v4(filings, render, tmp_path):
+    _seed(filings, tmp_path, OID)
+    store = pr.MemoryStore()
+    _read(store, filings, _pages(OID, 3, 4), _client(2), tmp_path, prompt_version="v4")
+    under_v5 = _client(2)
+    _read(store, filings, _pages(OID, 3, 4), under_v5, tmp_path, prompt_version="v5")
+    assert len(under_v5.json_modes) == 2
+    under_v4 = _Client([])
+    result = _read(store, filings, _pages(OID, 3, 4), under_v4, tmp_path, prompt_version="v4")
+    assert under_v4.json_modes == [] and len(result.responses) == 2
+    assert sorted(key[5] for key in store.rows) == ["v4", "v4", "v5", "v5"]
+
+
+def test_a_reissued_image_makes_its_pages_misses_and_keeps_the_old_rows(filings, render, tmp_path):
+    old = _seed(filings, tmp_path, OID)
+    store = pr.MemoryStore()
+    _read(store, filings, _pages(OID, 3, 4), _client(2), tmp_path)
+    before = dict(store.rows)
+    new = _seed(filings, tmp_path, OID, payload=b"%PDF-1.4 re-issued")
+    assert new.sha256 != old.sha256
+    client = _client(2)
+    result = _read(store, filings, _pages(OID, 3, 4), client, tmp_path)
+    assert len(client.json_modes) == 2 and len(result.responses) == 2
+    assert all(store.rows[key] == row for key, row in before.items())
+    assert sorted(key[2] for key in store.rows) == sorted([old.sha256] * 2 + [new.sha256] * 2)
+
+
+def test_a_page_at_max_errors_is_skipped_and_listed_not_read(filings, render, tmp_path):
+    image = _seed(filings, tmp_path, OID)
+    store = pr.MemoryStore()
+    dead = pr.PageReading(*pr.reading_key(OID, 3, image.sha256, QWEN), request=pr.request(QWEN),
+                          errors=3, last_error="TimeoutError: three times")
+    store.upsert([dead])
+    client = _client(1)
+    result = _read(store, filings, _pages(OID, 3, 4), client, tmp_path)
+    assert len(client.json_modes) == 1 and sorted(result.responses) == _pages(OID, 4)
+    assert result.skipped == {(OID, 3): dead} and not result.failed
+    assert store.rows[dead.key] == dead                       # untouched
+    lenient = _client(1)
+    result = _read(store, filings, _pages(OID, 3), lenient, tmp_path, max_errors=4)
+    assert len(lenient.json_modes) == 1 and (OID, 3) in result.responses
+    assert store.rows[dead.key].errors == 3 and store.rows[dead.key].last_error == dead.last_error
+
+
+def test_an_error_result_increments_errors_and_keeps_the_stamps(filings, render, tmp_path):
+    image = _seed(filings, tmp_path, OID)
+    store = pr.MemoryStore()
+    prior = pr.PageReading(*pr.reading_key(OID, 3, image.sha256, QWEN), request=pr.request(QWEN),
+                           errors=1, last_error="old")
+    store.upsert([prior])
+    result = _read(store, filings, _pages(OID, 3), _Client([]), tmp_path)      # every call raises
+    assert not result.responses and sorted(result.failed) == _pages(OID, 3)
+    row = store.rows[prior.key]
+    assert row.errors == 2 and row.last_error.startswith("IndexError") and row.response is None
+    assert row.attempts == 3 and row.seconds is not None and row.usage is None
+
+    garbled = _Client([("not json at all", "stop")] * 3)
+    result = _read(store, filings, _pages(OID, 4), garbled, tmp_path)
+    row = store.rows[pr.reading_key(OID, 4, image.sha256, QWEN)]
+    assert row.errors == 1 and row.last_error == "not json at all" and row.response is None
+    assert row.usage == {"in": 10, "out": 15} and row.attempts == 3 and row.finish == "stop"
+    assert sorted(result.failed) == _pages(OID, 4)
+
+
+def test_rows_are_committed_in_chunks_of_two_hundred(filings, render, tmp_path):
+    _seed(filings, tmp_path, OID, pages=452)
+    store = pr.MemoryStore()
+    pages = _pages(OID, *range(3, 453))
+    result = _read(store, filings, pages, _client(450), tmp_path)
+    assert len(result.responses) == 450 and store.commits == [200, 200, 50]
+
+
+def test_a_worker_that_raises_does_not_lose_the_other_rows(filings, render, tmp_path, monkeypatch, caplog):
+    _seed(filings, tmp_path, OID)
+    original = vlm.transcribe
+
+    def flaky(client, model, png):
+        if png.name == "p004.png":
+            raise RuntimeError("the pool worker itself broke")
+        return original(client, model, png)
+
+    monkeypatch.setattr(vlm, "transcribe", flaky)
+    store = pr.MemoryStore()
+    with pytest.raises(RuntimeError, match="pool worker"):
+        _read(store, filings, _pages(OID, 3, 4, 5, 6), _client(4), tmp_path)
+    assert sorted(key[1] for key in store.rows) == [3, 5, 6] and sum(store.commits) == 3
+    assert "a worker raised" in caplog.text
+
+
+def test_render_runs_once_per_filing_for_the_span_asked_for(filings, render, tmp_path):
+    _seed(filings, tmp_path, OID)
+    _seed(filings, tmp_path, OID2, pages=10, attachment_from=2)
+    store = pr.MemoryStore()
+    _read(store, filings, [(OID, 3), (OID2, 4), (OID, 5), (OID2, 9)], _client(4), tmp_path)
+    assert sorted(render.calls) == [
+        (fi.pdf_path(tmp_path, OID2), 4, 9, tmp_path / "pages200" / OID2),
+        (fi.pdf_path(tmp_path, OID), 3, 5, tmp_path / "pages200" / OID),
+    ]
+
+
+def test_unfetched_filings_and_pages_outside_the_pdf_raise_before_any_call(filings, render, tmp_path):
+    _seed(filings, tmp_path, OID)
+    filings.rows[OID2] = replace(filings.rows[OID], object_id=OID2, status="no_teos_image", sha256=None, s3_key=None)
+    store, client = pr.MemoryStore(), _client(2)
+    with pytest.raises(LookupError, match=OID2):
+        _read(store, filings, [(OID, 3), (OID2, 3)], client, tmp_path)
+    with pytest.raises(ValueError, match="outside"):
+        _read(store, filings, [(OID, 3), (OID, 7)], client, tmp_path)
+    assert client.json_modes == [] and not store.rows and render.calls == []
+
+
+def test_frame_pages_is_every_attachment_page_of_the_fetched_filings(filings, tmp_path):
+    _seed(filings, tmp_path, OID, pages=6, attachment_from=4)
+    none = replace(_seed(filings, tmp_path, OID2), status="no_attachment", attachment_from=None, attachment_pages=0)
+    filings.rows[OID2] = none
+    assert pr.frame_pages(filings, [OID, OID2, "202000000000000000", OID]) == _pages(OID, 4, 5, 6)
+
+
+# ---------------------------------------------------------------------------
+# the request hash
+# ---------------------------------------------------------------------------
+
+
+def test_the_request_hash_keys_json_mode_and_extras_not_max_tokens(monkeypatch):
+    qwen, gemini, sonnet = pr.request_hash(QWEN), pr.request_hash(GEMINI), pr.request_hash(SONNET)
+    assert len({qwen, gemini, sonnet}) == 3
+    assert pr.request(SONNET) == {"json_mode": True, "extras": {"reasoning_effort": "none"}}
+    assert pr.request_hash(QWEN, "v5") == qwen                # the prompt version is its own key column
+    monkeypatch.setattr(vlm, "MAX_TOKENS", vlm.MAX_TOKENS * 2)
+    assert (pr.request_hash(QWEN), pr.request_hash(SONNET)) == (qwen, sonnet)
+    monkeypatch.setattr(vlm, "JSON_MODE", {})
+    assert pr.request_hash(QWEN) == gemini and pr.request_hash(QWEN) != qwen
+    monkeypatch.setattr(vlm, "REQUEST_EXTRAS", {SONNET: {"reasoning_effort": "low"}})
+    assert pr.request_hash(SONNET) != sonnet and pr.request_hash(GEMINI) == gemini
+
+
+# ---------------------------------------------------------------------------
+# backfill
+# ---------------------------------------------------------------------------
+
+
+def _reading(rows, **stamps):
+    return {"page_kind": "grants_paid_list", "heading": "Part XV", "rows": _rows(rows), "totals": [], **stamps}
+
+
+def _write(vlm_dir, folder, oid, page, data, mtime=None):
+    path = vlm_dir / folder / oid / f"p{page:03d}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data))
+    if mtime is not None:
+        os.utime(path, (mtime, mtime))
+    return path
+
+
+@pytest.fixture
+def vlm_dir(tmp_path):
+    """The laptop's folder tree in small: v2 without ``_json_mode``, v3, v4
+    with one error file, a ``-v4b`` repeat, the Sonnet max experiment, and
+    one filing that is not in ``filing_images``."""
+    root = tmp_path / "vlm"
+    v2 = dict(_usage={"in": 2828, "out": 78}, _seconds=3.1, _finish="stop", _max_tokens=8000, _attempts=1, _model=QWEN)
+    _write(root, "alibaba__qwen3-vl-instruct", OID, 3, _reading(2, **v2), mtime=1_726_000_000)
+    _write(root, "alibaba__qwen3-vl-instruct", OID, 4, _reading(1, **v2, _partial=True))
+    _write(root, "alibaba__qwen3-vl-instruct", "202000000000000000", 3, _reading(1, **v2))
+    v3 = dict(v2, _json_mode=False, _prompt="v3", _attempts=2)
+    _write(root, "alibaba__qwen3-vl-instruct-v3", OID, 3, _reading(3, **v3))
+    v4 = dict(_usage={"in": 1763, "out": 2216}, _seconds=7.2, _finish="stop", _max_tokens=8000, _json_mode=True,
+              _prompt="v4", _attempts=1, _model="openai/gpt-5.6-terra")
+    _write(root, "openai__gpt-5.6-terra-v4", OID, 3, _reading(4, **v4))
+    _write(root, "openai__gpt-5.6-terra-v4", OID2, 70, {"error": "BadRequestError: Error code: 400", "_seconds": 1.1,
+                                                        "_attempts": 3, "_model": "openai/gpt-5.6-terra"})
+    _write(root, "alibaba__qwen3-vl-instruct-v4b", OID, 3, _reading(3, **v3))
+    _write(root, "anthropic__claude-sonnet-5-max-v4", OID, 3, _reading(3, _usage={"in": 1, "out": 1}))
+    (root / "alibaba__qwen3-vl-instruct" / OID / "notes.txt").write_text("not a page")
+    return root
+
+
+def test_backfill_dry_run_counts_files_per_reader_and_touches_nothing(vlm_dir, filings, caplog):
+    store = pr.MemoryStore()
+    result = pr.backfill(store, vlm_dir=vlm_dir, dry_run=True, filing_store=filings)
+    assert result["readers"] == {(QWEN, "v2"): {"files": 3}, (QWEN, "v3"): {"files": 1},
+                                 ("openai/gpt-5.6-terra", "v4"): {"files": 2}}
+    assert sorted(result["skipped"]) == ["alibaba__qwen3-vl-instruct-v4b", "anthropic__claude-sonnet-5-max-v4"]
+    assert "second read" in result["skipped"]["alibaba__qwen3-vl-instruct-v4b"]
+    assert "maximum reasoning" in result["skipped"]["anthropic__claude-sonnet-5-max-v4"]
+    assert store.rows == {} and store.commits == [] and result["missing"] == []
+    assert "skipping alibaba__qwen3-vl-instruct-v4b" in caplog.text
+
+
+def test_backfill_loads_the_folders_with_the_right_keys_and_stamps(vlm_dir, filings, tmp_path):
+    image, image2 = _seed(filings, tmp_path, OID), _seed(filings, tmp_path, OID2, pages=80)
+    store = pr.MemoryStore()
+    result = pr.backfill(store, vlm_dir=vlm_dir, filing_store=filings)
+    assert result["readers"] == {
+        (QWEN, "v2"): {"files": 3, "rows": 2, "new": 2, "changed": 0, "errors": 0},
+        (QWEN, "v3"): {"files": 1, "rows": 1, "new": 1, "changed": 0, "errors": 0},
+        ("openai/gpt-5.6-terra", "v4"): {"files": 2, "rows": 2, "new": 2, "changed": 0, "errors": 1},
+    }
+    assert result["missing"] == ["202000000000000000"]
+    assert sorted(store.rows) == sorted([
+        pr.reading_key(OID, 3, image.sha256, QWEN, "v2"), pr.reading_key(OID, 4, image.sha256, QWEN, "v2"),
+        pr.reading_key(OID, 3, image.sha256, QWEN, "v3"),
+        pr.reading_key(OID, 3, image.sha256, "openai/gpt-5.6-terra", "v4"),
+        pr.reading_key(OID2, 70, image2.sha256, "openai/gpt-5.6-terra", "v4"),
+    ])
+
+    v2 = store.rows[pr.reading_key(OID, 3, image.sha256, QWEN, "v2")]
+    assert v2.json_mode is True and v2.dpi == 200 and v2.request == pr.request(QWEN)
+    assert v2.response == {"page_kind": "grants_paid_list", "heading": "Part XV", "rows": _rows(2), "totals": []}
+    assert (v2.usage, v2.seconds, v2.finish, v2.attempts, v2.partial) == ({"in": 2828, "out": 78}, 3.1, "stop", 1, False)
+    assert v2.read_at == datetime.fromtimestamp(1_726_000_000, tz=timezone.utc)
+    assert store.rows[pr.reading_key(OID, 4, image.sha256, QWEN, "v2")].partial is True
+    v3 = store.rows[pr.reading_key(OID, 3, image.sha256, QWEN, "v3")]
+    assert v3.json_mode is False and v3.attempts == 2 and v3.prompt_version == "v3"
+    error = store.rows[pr.reading_key(OID2, 70, image2.sha256, "openai/gpt-5.6-terra", "v4")]
+    assert (error.errors, error.last_error, error.response) == (1, "BadRequestError: Error code: 400", None)
+    assert (error.attempts, error.seconds, error.usage, error.json_mode) == (3, 1.1, None, True)
+    assert store.commits == [2, 1, 2]
+
+
+def test_backfill_is_idempotent(vlm_dir, filings, tmp_path):
+    _seed(filings, tmp_path, OID)
+    _seed(filings, tmp_path, OID2, pages=80)
+    store = pr.MemoryStore()
+    pr.backfill(store, vlm_dir=vlm_dir, filing_store=filings)
+    before = {key: replace(row) for key, row in store.rows.items()}
+    result = pr.backfill(store, vlm_dir=vlm_dir, filing_store=filings)
+    assert all(summary["new"] == 0 and summary["changed"] == 0 for summary in result["readers"].values())
+    assert store.rows == before and store.commits == [2, 1, 2, 2, 1, 2]
+    assert all(path.exists() for path in vlm_dir.glob("*/*/p*.json"))
+
+
+def test_folder_names_map_to_reader_and_prompt_version():
+    assert pr.folder_reader("alibaba__qwen3-vl-instruct") == (QWEN, "v2")
+    assert pr.folder_reader("google__gemini-3.5-flash-lite-v3") == (GEMINI, "v3")
+    assert pr.folder_reader("google__gemini-3.8-flash-v4") == ("google/gemini-3.8-flash", "v4")
+    assert pr.folder_reader("openai__gpt-5.6-luna-v4") == ("openai/gpt-5.6-luna", "v4")
+    assert pr.skipped_folder("google__gemini-3.5-flash-lite-v4b") and pr.skipped_folder("anthropic__claude-sonnet-5-max-v4")
+    assert pr.skipped_folder("anthropic__claude-sonnet-5-v4") is None
+
+
+# ---------------------------------------------------------------------------
+# PostgresStore, on a session that never connects
+# ---------------------------------------------------------------------------
+
+
+def _row(oid, page=3, **overrides):
+    values = dict(object_id=oid, page=page, image_sha256="ab" * 32, dpi=200, model=QWEN, prompt_version="v4",
+                  request_hash=pr.request_hash(QWEN), request=pr.request(QWEN),
+                  response={"page_kind": "grants_paid_list", "heading": "", "rows": _rows(1), "totals": []},
+                  usage={"in": 10, "out": 20}, finish="stop", attempts=1, json_mode=False, seconds=2.5,
+                  read_at=datetime(2026, 9, 22, tzinfo=timezone.utc))
+    values.update(overrides)
+    return pr.PageReading(**values)
+
+
+def test_postgres_store_upserts_one_chunk_in_one_statement_and_commits():
+    session = _Session()
+    store = pr.PostgresStore(session)
+    store.upsert([_row("1" * 18), _row("2" * 18, response=None, usage=None, errors=1, last_error="boom")])
+    (sql, params), = session.calls
+    assert sql.startswith("INSERT INTO page_readings (object_id, page, image_sha256, ")
+    assert "ON CONFLICT (object_id, page, image_sha256, dpi, model, prompt_version, request_hash) DO UPDATE SET" in sql
+    assert all(f"{column} = EXCLUDED.{column}" in sql for column in pr.COLUMNS if column not in pr.KEY_COLUMNS)
+    assert not any(f"{column} = EXCLUDED" in sql for column in pr.KEY_COLUMNS)
+    assert all(f"CAST(:{column} AS jsonb)" in sql for column in pr.JSON_COLUMNS)
+    assert [p["object_id"] for p in params] == ["1" * 18, "2" * 18]
+    assert json.loads(params[0]["response"])["rows"] == _rows(1) and params[0]["request"] == '{"json_mode": false, "extras": {}}'
+    assert params[1]["response"] is None and params[1]["usage"] is None and params[1]["last_error"] == "boom"
+    assert session.commits == 1
+    store.upsert([])
+    assert len(session.calls) == 1
+
+
+def test_postgres_store_reads_a_batch_of_keys_in_one_query_and_rebuilds_rows():
+    wanted = _row("1" * 18)
+    session = _Session(rows=[{column: getattr(wanted, column) for column in pr.COLUMNS}])
+    store = pr.PostgresStore(session)
+    assert store.get([]) == {} and session.calls == []
+    other = pr.reading_key("2" * 18, 5, "cd" * 32, GEMINI, "v5")
+    assert store.get([wanted.key, other, wanted.key]) == {wanted.key: wanted}
+    (sql, params), = session.calls
+    assert "IN (SELECT * FROM unnest(CAST(:object_id AS text[]), CAST(:page AS integer[])" in sql
+    assert params == {"object_id": ["1" * 18, "2" * 18], "page": [3, 5], "image_sha256": ["ab" * 32, "cd" * 32],
+                      "dpi": [200, 200], "model": [QWEN, GEMINI], "prompt_version": ["v4", "v5"],
+                      "request_hash": [pr.request_hash(QWEN), pr.request_hash(GEMINI)]}
+
+
+def test_postgres_store_creates_the_table_and_its_model_index():
+    session = _Session()
+    pr.ensure_table(session)
+    statements = [sql for sql, _ in session.calls]
+    assert "CREATE TABLE IF NOT EXISTS page_readings" in statements[0]
+    assert "PRIMARY KEY (object_id, page, image_sha256, dpi, model, prompt_version, request_hash)" in statements[0]
+    assert "CREATE INDEX IF NOT EXISTS page_readings_model ON page_readings (model, prompt_version)" in statements[1]
+    assert session.commits == 1
+
+
+def test_status_report_prices_usage_and_survives_decimal_sums():
+    class _Reporting(_Session):
+        def execute(self, clause, params=None):
+            self.calls.append((clause.text, params))
+            return [(QWEN, "v2", 1782, Decimal(1782), Decimal(55), Decimal(4_000_000), Decimal(3_000_000)),
+                    ("example/unpriced", "v4", 2, 1, 0, Decimal(10), Decimal(10))]
+
+    report = pr.status_report(_Reporting())
+    assert "alibaba/qwen3-vl-instruct       v2        1,782  1,782       0       55     3.44" in report
+    assert "example/unpriced                v4            2      1       1        0        ?" in report
+    assert report.splitlines()[-1].endswith("3.44")
