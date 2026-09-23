@@ -54,7 +54,7 @@ import os
 import sys
 from abc import ABC, abstractmethod
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Iterable, Iterator, NamedTuple, Sequence
@@ -315,18 +315,26 @@ def _fetch_one(filing: Filing, prior: FilingImage | None, *, cache_dir: Path,
     """Runs in a worker thread: TEOS, hash, widths, S3. Never the session."""
     got = fetch_image(filing.object_id, cache_dir)
     index = got.row
-    row = FilingImage(
-        object_id=filing.object_id,
-        filerein=filing.filerein or (index.ein if index else None) or (prior.filerein if prior else "") or "",
-        taxyear=filing.taxyear or (_taxyear(index.tax_period) if index else None) or (prior.taxyear if prior else None),
-        index_year=(index.index_year if index else None) or (prior.index_year if prior else None),
-        teos_url=got.image.url if got.image else (prior.teos_url if prior else None),
-        image_generated=generated_on(got.image.url) if got.image else (prior.image_generated if prior else None),
-        status=got.status,
-        attempts=(prior.attempts if prior else 0) + 1,
+    base = prior if prior is not None else FilingImage(
+        object_id=filing.object_id, filerein="", taxyear=None, index_year=None,
+        teos_url=None, image_generated=None, status=got.status)
+    row = replace(
+        base,
+        filerein=filing.filerein or (index.ein if index else None) or base.filerein or "",
+        taxyear=filing.taxyear or (_taxyear(index.tax_period) if index else None) or base.taxyear,
+        index_year=(index.index_year if index else None) or base.index_year,
+        teos_url=got.image.url if got.image else base.teos_url,
+        image_generated=generated_on(got.image.url) if got.image else base.image_generated,
+        attempts=base.attempts + 1,
         last_error=got.error,
     )
     if got.status != "fetched":
+        if row.fetched:
+            # A fetched row that fails a re-fetch keeps its status, its object
+            # and the URL that object came from; only the attempt is recorded.
+            row.teos_url, row.image_generated = base.teos_url, base.image_generated
+        else:
+            row.status = got.status
         return row
 
     payload = got.payload

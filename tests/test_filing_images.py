@@ -8,6 +8,7 @@ import csv
 import hashlib
 import io
 import urllib.error
+from dataclasses import replace
 from datetime import date
 
 import pytest
@@ -222,6 +223,22 @@ def test_refetch_of_a_reissued_image_updates_the_hash(teos, tmp_path):
     got = store.rows[OID]
     assert got.sha256 == hashlib.sha256(PDF2).hexdigest() and got.attempts == 2 and len(s3.puts) == 2
     assert s3.objects[("b", got.s3_key)] == PDF2 and got.pages == 2
+
+
+def test_a_failed_refetch_leaves_the_fetched_row_and_its_object_alone(teos, tmp_path):
+    row = teos.add(OID, [("20230501", PDF)])
+    store, s3 = fi.MemoryStore(), _S3()
+    _fetch(store, [OID], tmp_path, s3)
+    was = replace(store.rows[OID])
+    teos.serve[_url(row, "20230501")] = 404                  # a transient 5xx or the 2022 batch: TEOS stops serving it
+    assert _fetch(store, [OID], tmp_path, s3, refetch=True) == {OID: "fetched"}
+    got = store.rows[OID]
+    assert got.status == "fetched" and got.sha256 == was.sha256 == hashlib.sha256(PDF).hexdigest()
+    assert (got.s3_key, got.bytes, got.pages, got.page_widths, got.attachment_from, got.attachment_pages, got.fetched_at) == (
+        was.s3_key, was.bytes, was.pages, was.page_widths, was.attachment_from, was.attachment_pages, was.fetched_at)
+    assert got.teos_url == was.teos_url and got.image_generated == was.image_generated
+    assert got.attempts == 2 and "404" in got.last_error and len(s3.puts) == 1
+    assert fi.local_pdf(store, OID, tmp_path, bucket="b", s3=s3).read_bytes() == PDF
 
 
 def test_rows_are_committed_in_chunks_of_fifty(teos, tmp_path):
