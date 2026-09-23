@@ -517,8 +517,12 @@ def local_pdf(session, object_id: str, cache_dir: Path = CACHE, *, bucket: str =
 # ---------------------------------------------------------------------------
 
 
-def _backfill_one(staged: dict, prior: FilingImage | None, *, pdf_dir: Path, bucket: str,
-                  prefix: str, s3) -> FilingImage:
+def _transient(status: str) -> bool:
+    """A failure of ours, not the IRS's: worth another go without ``refetch``."""
+    return status.startswith(("upload_failed:", "widths_failed:"))
+
+
+def _backfill_one(staged: dict, *, pdf_dir: Path, bucket: str, prefix: str, s3) -> FilingImage:
     """One cached PDF into S3 and a row, from the staging CSV's line for it.
     The widths are read from the PDF, not copied, so the CSV's
     ``attachment_from`` is checked rather than trusted."""
@@ -536,8 +540,7 @@ def _backfill_one(staged: dict, prior: FilingImage | None, *, pdf_dir: Path, buc
             return _failed(row, None, "not_a_pdf", f"pdfimages: {exc.stderr or exc}"[:500])
         except Exception as exc:                          # noqa: BLE001
             return _failed(row, None, f"widths_failed:{type(exc).__name__}", str(exc)[:500])
-        if not (prior and prior.sha256 == digest.hexdigest() and prior.s3_key == key):
-            _upload(s3, bucket, key, payload, digest.digest())
+        _upload(s3, bucket, key, payload, digest.digest())
     except Exception as exc:                              # noqa: BLE001
         return _failed(row, None, f"upload_failed:{type(exc).__name__}", str(exc)[:500])
     start = irs_source.attachment_start(widths)
@@ -559,6 +562,12 @@ def backfill(session, *, staging_csvs: Sequence[Path] = STAGING_CSVS,
              dry_run: bool = False) -> dict[str, str]:
     """Load the exploratory ``stage`` results — cached PDFs and the staging
     CSVs — into the table and S3 without a single TEOS request.
+
+    A one-off seed: a filing already in the table is left exactly as it is,
+    since a live fetch may have moved its ``attempts`` and filled the TEOS
+    fields the CSVs cannot supply. The exception is a row an earlier
+    backfill left as ``upload_failed`` or ``widths_failed``, which is done
+    again. The dry run sizes the whole upload without consulting the table.
 
     ``staged`` and ``cached`` become ``fetched`` or ``no_attachment`` by the
     PDF's own widths. Failures keep their status; ``attempts`` counts the
@@ -595,7 +604,12 @@ def backfill(session, *, staging_csvs: Sequence[Path] = STAGING_CSVS,
     store = _store(session)
     store.ensure_table()
     prior = store.get(staged)
-    statuses: dict[str, str] = {}
+    seeded = {oid for oid, row in prior.items() if not _transient(row.status)}
+    if seeded:
+        logger.info("backfill: %d filings are already in the table and are left as they are", len(seeded))
+    failures = [line for line in failures if line["object_id"] not in seeded]
+    to_upload = [line for line in to_upload if line["object_id"] not in seeded]
+    statuses: dict[str, str] = {oid: prior[oid].status for oid in seeded}
 
     rows = []
     for line in failures:
@@ -613,8 +627,8 @@ def backfill(session, *, staging_csvs: Sequence[Path] = STAGING_CSVS,
 
     s3 = s3 if s3 is not None else _s3_client(workers)
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(_backfill_one, line, prior.get(line["object_id"]), pdf_dir=pdf_dir,
-                               bucket=bucket, prefix=prefix, s3=s3) for line in to_upload]
+        futures = [pool.submit(_backfill_one, line, pdf_dir=pdf_dir, bucket=bucket, prefix=prefix, s3=s3)
+                   for line in to_upload]
         for n, row in enumerate(_upsert_as_done(store, futures), 1):
             statuses[row.object_id] = row.status
             if n % CHUNK == 0 or n == len(futures):

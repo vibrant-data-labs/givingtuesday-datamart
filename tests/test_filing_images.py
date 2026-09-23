@@ -433,13 +433,26 @@ def test_backfill_loads_the_csvs_and_pdfs_with_no_teos_request(teos, staging):
     assert store.rows["202133559349100018"].attempts == 1
 
 
-def test_backfill_is_idempotent_and_dry_run_touches_nothing(teos, staging):
+def test_backfill_is_a_one_off_seed_and_dry_run_touches_nothing(teos, staging, tmp_path):
     store, s3 = fi.MemoryStore(), _S3()
     fi.backfill(store, s3=s3, dry_run=True, **staging)
     assert store.rows == {} and s3.puts == []
     fi.backfill(store, s3=s3, **staging)
-    fi.backfill(store, s3=s3, **staging)
     assert len(s3.puts) == 2 and len(store.rows) == 4 and teos.requests == 0
+
+    # A live fetch then re-tries the one failure still inside its attempts and
+    # fills what the CSVs could not know about it.
+    teos.add("202133559349100018", index=_index("202133559349100018", ein="451742989", period="202012", year="2021"))
+    _fetch(store, list(store.rows), tmp_path, s3)
+    live = store.rows["202133559349100018"]
+    assert (live.status, live.attempts, live.index_year) == ("no_teos_image", 2, "2021") and "TEOS lists no" in live.last_error
+    assert teos.requests == 1 and len(s3.puts) == 2
+
+    fi.backfill(store, s3=s3, **staging)
+    again = store.rows["202133559349100018"]
+    assert (again.attempts, again.index_year, again.last_error) == (2, "2021", live.last_error)
+    assert store.rows["202123169349102217"].attempts == 3 and store.rows["202123169349102217"].teos_url
+    assert len(s3.puts) == 2 and len(store.rows) == 4 and teos.requests == 1
 
 
 def test_backfill_records_an_s3_failure_and_carries_on(teos, staging):
@@ -450,6 +463,8 @@ def test_backfill_records_an_s3_failure_and_carries_on(teos, staging):
     failed = next(r for r in store.rows.values() if r.status.startswith("upload_failed"))
     assert failed.filerein and failed.taxyear == 2022 and failed.attempts == 1 and failed.s3_key is None
     assert len(s3.puts) == 1 and teos.requests == 0
+    fi.backfill(store, s3=s3, **staging)                     # the seed finishes what it left undone
+    assert store.rows[failed.object_id].fetched and len(s3.puts) == 2 and teos.requests == 0
 
 
 def test_backfill_refuses_to_run_with_a_pdf_missing(teos, staging):
