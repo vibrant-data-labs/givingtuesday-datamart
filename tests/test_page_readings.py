@@ -491,7 +491,7 @@ def test_a_corrupt_file_is_passed_over_and_listed_not_a_crash(vlm_dir, filings, 
     assert not any(key[1] in (98, 99) for key in store.rows)
 
 
-def test_backfill_is_idempotent(vlm_dir, filings, tmp_path):
+def test_backfill_is_idempotent_and_writes_only_what_changed(vlm_dir, filings, tmp_path):
     _seed(filings, tmp_path, OID)
     _seed(filings, tmp_path, OID2, pages=80)
     store = pr.MemoryStore()
@@ -499,8 +499,18 @@ def test_backfill_is_idempotent(vlm_dir, filings, tmp_path):
     before = {key: replace(row) for key, row in store.rows.items()}
     result = pr.backfill(store, vlm_dir=vlm_dir, filing_store=filings)
     assert all(summary["new"] == 0 and summary["changed"] == 0 for summary in result["readers"].values())
-    assert store.rows == before and store.commits == [2, 2, 2, 2, 2, 2]
+    assert store.rows == before and store.commits == [2, 2, 2]          # the second run wrote nothing
     assert all(path.exists() for path in vlm_dir.glob("*/*/p*.json"))
+
+    edited = vlm_dir / "alibaba__qwen3-vl-instruct-v3" / OID / "p003.json"
+    data = json.loads(edited.read_text())
+    data["rows"].append(_rows(1)[0])
+    edited.write_text(json.dumps(data))
+    result = pr.backfill(store, vlm_dir=vlm_dir, filing_store=filings)
+    assert result["readers"][(QWEN, "v3")] == {"files": 2, "rows": 2, "new": 0, "changed": 1, "errors": 0}
+    assert store.commits == [2, 2, 2, 1] and len(store.rows) == 6
+    assert len(store.rows[pr.reading_key(OID, 3, before[next(iter(before))].image_sha256, QWEN, "v3",
+                                         settings={"json_mode": True, "extras": {}})].response["rows"]) == 4
 
 
 def test_a_run_asked_for_json_first_if_any_answer_came_back_in_it():

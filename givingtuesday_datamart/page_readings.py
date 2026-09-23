@@ -601,8 +601,8 @@ def backfill(session, *, vlm_dir: Path = VLM_DIR, dry_run: bool = False, filing_
     ``_seconds``, ``_usage`` and ran with JSON mode on, and the v3 Qwen run
     asked for it first too (468 of its answers came back in it), so those
     rows are keyed apart from Qwen v4, which ran without it. Idempotent: a
-    second run upserts identical rows and reports zero changed. The folders
-    are left where they are.
+    second run reads the stored rows back, finds nothing new or changed and
+    writes nothing. The folders are left where they are.
 
     Returns ``{"readers": {(model, version): {files, rows, new, changed,
     errors}}, "skipped": {folder: reason}, "missing": [object_id…],
@@ -657,14 +657,17 @@ def backfill(session, *, vlm_dir: Path = VLM_DIR, dry_run: bool = False, filing_
             rows.append(reading_from_result(key, settings, data, json_mode_default=settings["json_mode"],
                                             read_at=datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)))
         existing = store.get(row.key for row in rows)
+        # Only what the table lacks or holds differently is written: the
+        # idempotent re-run moves nothing over the wire.
+        to_write = [row for row in rows if row.key not in existing or not _same(existing[row.key], row)]
         summary = readers[(model, version)]
         summary.update(rows=len(rows), new=sum(row.key not in existing for row in rows),
-                       changed=sum(row.key in existing and not _same(existing[row.key], row) for row in rows),
+                       changed=sum(row.key in existing for row in to_write),
                        errors=sum(row.response is None for row in rows))
-        for start in range(0, len(rows), CHUNK):
-            store.upsert(rows[start:start + CHUNK])
-        logger.info("backfill: %s %s: %d rows (%d new, %d changed, %d errors)", model, version, len(rows),
-                    summary["new"], summary["changed"], summary["errors"])
+        for start in range(0, len(to_write), CHUNK):
+            store.upsert(to_write[start:start + CHUNK])
+        logger.info("backfill: %s %s: %d rows (%d new, %d changed, %d errors); %d written", model, version,
+                    len(rows), summary["new"], summary["changed"], summary["errors"], len(to_write))
     return {"readers": readers, "skipped": skipped, "missing": missing, "unreadable": unreadable}
 
 
