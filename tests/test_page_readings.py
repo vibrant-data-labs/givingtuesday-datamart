@@ -245,11 +245,52 @@ def test_a_render_failure_is_an_error_per_page_of_that_filing_not_a_crash(filing
         for row in result.failed.values():
             assert row.errors == run and row.response is None
             assert row.last_error == "render: CalledProcessError: Syntax Error: Couldn't read xref table"
-    assert caplog.text.count(f"{OID2}: rendering pages 3-4 failed") == 3
+    assert caplog.text.count(f"{OID2}: pages 3-4 cannot be read this run: render: CalledProcessError") == 3
     fourth = _read(store, filings, pages, _Client([]), tmp_path)             # errors = 3: skipped, not rendered again
     assert sorted(fourth.skipped) == _pages(OID2, 3, 4) and not fourth.failed
     assert sum(call[3].name == OID2 for call in render.calls) == 0            # broken never reached the fake's log
     assert len(store.rows) == 4
+
+
+class _S3:
+    """Serves what it is given, or raises; records every GET."""
+
+    def __init__(self, objects=None):
+        self.objects = dict(objects or {})
+        self.gets: list[str] = []
+
+    def get_object(self, *, Bucket, Key):
+        self.gets.append(Key)
+        if Key not in self.objects:
+            raise RuntimeError("An error occurred (NoSuchKey) when calling the GetObject operation")
+        import io
+        return {"Body": io.BytesIO(self.objects[Key])}
+
+
+def test_the_pdf_is_materialised_in_the_render_pool_from_s3_when_the_cache_misses(filings, render, tmp_path):
+    cached = _seed(filings, tmp_path, OID)
+    fetched = _seed(filings, tmp_path, OID2, payload=b"%PDF-1.4 only in S3")
+    fi.pdf_path(tmp_path, OID2).unlink()
+    s3 = _S3({fetched.s3_key: b"%PDF-1.4 only in S3"})
+    store, client = pr.MemoryStore(), _client(2)
+    result = _read(store, filings, [(OID, 3), (OID2, 3)], client, tmp_path, s3=s3)
+    assert len(result.responses) == 2 and len(client.json_modes) == 2
+    assert s3.gets == [fetched.s3_key] and fi.pdf_path(tmp_path, OID2).read_bytes() == b"%PDF-1.4 only in S3"
+    assert sorted(call[0] for call in render.calls) == sorted([fi.pdf_path(tmp_path, OID), fi.pdf_path(tmp_path, OID2)])
+    assert cached.sha256 != fetched.sha256
+
+
+def test_a_pdf_that_cannot_be_materialised_is_an_error_per_page_not_a_crash(filings, render, tmp_path, caplog):
+    _seed(filings, tmp_path, OID)
+    _seed(filings, tmp_path, OID2)
+    fi.pdf_path(tmp_path, OID2).unlink()                    # not cached, and S3 has nothing for it
+    store, client = pr.MemoryStore(), _client(1)
+    result = _read(store, filings, [(OID, 3), (OID2, 3), (OID2, 4)], client, tmp_path, s3=_S3())
+    assert sorted(result.responses) == _pages(OID, 3) and sorted(result.failed) == _pages(OID2, 3, 4)
+    assert len(client.json_modes) == 1 and sorted(call[3].name for call in render.calls) == [OID]
+    for row in result.failed.values():
+        assert row.errors == 1 and row.last_error.startswith("pdf: RuntimeError: An error occurred (NoSuchKey)")
+    assert caplog.text.count(f"{OID2}: pages 3-4 cannot be read this run: pdf: RuntimeError") == 1
 
 
 def test_a_missing_pdftoppm_stops_before_any_render_or_call_unless_all_pages_are_stored(filings, render, tmp_path, monkeypatch):

@@ -40,11 +40,12 @@ may come back. The backfill re-does only its own ``upload_failed`` and
 ``widths_failed`` rows. The unreachable set, the 404s by image year and the
 no-attachment filings are therefore queries on this table, not files.
 
-**Reading back.** ``local_pdf`` is the only way renders and readings get a
-PDF: from the cache directory when the cached file's hash matches the row,
-else downloaded from S3 and verified. TEOS is never consulted again for a
-fetched filing, and a re-issued image (a new ``sha256`` on the row) makes
-the stale cached file miss.
+**Reading back.** ``local_pdf`` (a session and an id) and ``materialise``
+(a row already read, for worker threads) are the only ways renders and
+readings get a PDF: from the cache directory when the cached file's hash
+matches the row, else downloaded from S3 and verified. TEOS is never
+consulted again for a fetched filing, and a re-issued image (a new
+``sha256`` on the row) makes the stale cached file miss.
 
 **Tests.** The store is a small interface — ``PostgresStore`` over a
 SQLAlchemy session, ``MemoryStore`` for tests — and the network edges
@@ -578,17 +579,23 @@ def fetch_filings(session, object_ids: Iterable[str | Filing], *, bucket: str = 
 
 def local_pdf(session, object_id: str, cache_dir: Path = CACHE, *, bucket: str = BUCKET,
               s3=None) -> Path:
-    """The filing's PDF on local disk, matching the row's ``sha256``.
-
-    Served from ``cache_dir`` when the cached file hashes to the row's
-    ``sha256``, else downloaded from S3, verified and cached. Raises
-    ``LookupError`` for a filing that is not fetched — nothing here ever
-    goes back to TEOS.
-    """
+    """The filing's PDF on local disk, matching the row's ``sha256``: the
+    row from the table, then ``materialise``. Raises ``LookupError`` for a
+    filing that is not fetched — nothing here ever goes back to TEOS."""
     row = _store(session).get([object_id]).get(object_id)
     if row is None or not row.fetched or not row.s3_key or not row.sha256:
         raise LookupError(f"{object_id} is not fetched ({row.status if row else 'no row'})")
-    path = pdf_path(cache_dir, object_id)
+    return materialise(row, cache_dir, bucket=bucket, s3=s3)
+
+
+def materialise(row: FilingImage, cache_dir: Path = CACHE, *, bucket: str = BUCKET, s3=None) -> Path:
+    """The row's PDF on local disk: served from ``cache_dir`` when the cached
+    file hashes to the row's ``sha256``, else downloaded from S3, verified
+    and cached. Takes the row and never the session, so a caller that has
+    already read the rows can run this in a worker thread."""
+    if not row.fetched or not row.s3_key or not row.sha256:
+        raise LookupError(f"{row.object_id} is not fetched ({row.status})")
+    path = pdf_path(cache_dir, row.object_id)
     if path.exists() and hashlib.sha256(path.read_bytes()).hexdigest() == row.sha256:
         return path
     s3 = s3 if s3 is not None else _s3_client()
