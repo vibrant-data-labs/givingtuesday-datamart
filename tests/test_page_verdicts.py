@@ -441,7 +441,7 @@ def test_status_report_lists_verdicts_by_version_and_accepted_readings_by_model(
 
     session = _Reporting()
     report = pv.status_report(session, "v1")
-    assert "v1            agreed           40" in report and "v1            flagged          23" in report
-    assert f"v1            {SONNET:<32}       0          6       23" in report
+    assert "v1                agreed           40" in report and "v1                flagged          23" in report
+    assert f"v1                {SONNET:<32}       0          6       23" in report
     assert all(params == {"v": "v1"} and "WHERE policy_version = :v" in sql for sql, params in session.calls)
     pv.status_report(_Reporting())

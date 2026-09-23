@@ -523,17 +523,17 @@ def status_report(session, policy_version: str | None = None) -> str:
     accepted reading is its."""
     where = "WHERE policy_version = :v" if policy_version else ""
     params = {"v": policy_version} if policy_version else {}
-    lines = [f"{'policy':<14}{'verdict':<12}{'pages':>7}"]
+    lines = [f"{'policy':<18}{'verdict':<12}{'pages':>7}"]
     for version, verdict, n in session.execute(text(
             f"SELECT policy_version, verdict, count(*) FROM page_verdicts {where} GROUP BY 1, 2 ORDER BY 1, 2"), params):
-        lines.append(f"{version:<14}{verdict:<12}{int(n):>7,}")
-    lines.append(f"\n{'policy':<14}{'accepted reading':<32}{'agreed':>8}{'escalated':>11}{'flagged':>9}")
+        lines.append(f"{version:<18}{verdict:<12}{int(n):>7,}")
+    lines.append(f"\n{'policy':<18}{'accepted reading':<32}{'agreed':>8}{'escalated':>11}{'flagged':>9}")
     for version, model, agreed, escalated, flagged in session.execute(text(
             "SELECT policy_version, accepted_model, count(*) FILTER (WHERE verdict = 'agreed'), "
             "count(*) FILTER (WHERE verdict = 'escalated'), count(*) FILTER (WHERE verdict = 'flagged') "
             f"FROM page_verdicts {where + ' AND' if where else 'WHERE'} accepted_model IS NOT NULL "
             "GROUP BY 1, 2 ORDER BY 1, 2"), params):
-        lines.append(f"{version:<14}{model:<32}{int(agreed):>8,}{int(escalated):>11,}{int(flagged):>9,}")
+        lines.append(f"{version:<18}{model:<32}{int(agreed):>8,}{int(escalated):>11,}{int(flagged):>9,}")
     return "\n".join(lines)
 
 

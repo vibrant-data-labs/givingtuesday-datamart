@@ -11,11 +11,10 @@ pipeline. Two parts, meant to be built in separate sessions:
   reads what is missing in parallel, and `page_verdicts` derived from
   readings under a versioned policy.
 
-Vibrant Data Labs, 2026-09-22. Status: Part A built and its criteria
-run; Part B's readings (`page_readings`, `read_pages`, the JSON backfill)
-built and the first four Part B criteria run (both in the pipeline doc's
-*Order of operations*, item 4); Part B's verdicts (`agree`,
-`page_verdicts`, the rewiring) are spec. Background and the measurements
+Vibrant Data Labs, 2026-09-22. Status: Parts A and B built and every
+criterion run by hand against the datamart (all three notes in the
+pipeline doc's *Order of operations*, item 4); the 1,000-filing run
+(Session 4) is next. Background and the measurements
 every decision below rests on are in
 [placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md);
 the short report is [placeholder_grant_recovery.md](placeholder_grant_recovery.md).
@@ -109,7 +108,8 @@ Reuse these; do not rewrite them.
 | `vlm_transcription.cost`, `PRICES`, `REQUEST_EXTRAS`, `JSON_MODE` | per-model price and request settings |
 | `attachment_grants.page_tables` | page JSON → selector tables |
 | `_internal/db.get_session(config)` | transactional session; `ingestion.datamart_config()` builds the config |
-| `exploratory/placeholder_ground_truth.py` | the scorer; `POLICIES`, `PAIRS`, `_pairs`, `_key` define comparison and the policy shapes |
+| `exploratory/placeholder_ground_truth.py` | the scorer; `POLICIES` and `PAIRS` define the policy shapes, and its `verdicts` command scores stored verdicts as `policies` scores a design |
+| `reading_pairs.py` | the page comparison (`key`, `amount`, `rows`, `pairs`, `agree_on`), shared by the scorer and `agree` |
 | `~/.cache/irs_index/pdfs/*.pdf` | the 517 fetched PDFs of the 610-filing frame, 1.15 GB; uploaded by the Part A backfill |
 | `~/.cache/irs_index/vlm/<folder>/<oid>/pNNN.json` | readings to backfill: `<model>` = prompt v2, `-v3`, `-v4`; candidates `google__gemini-3.8-flash-v4`, `anthropic__claude-sonnet-5-v4`, `openai__gpt-5.6-*-v4` |
 | `data/exploratory/placeholder_staging*.csv`, `placeholder_404_images_expanded.csv`, `placeholder_unreachable.csv` | fetch statuses to backfill into `filing_images` |
@@ -300,30 +300,75 @@ POLICY_V1 = {
     "flagged": "load_single",     # the last escalation reader's reading, marked; "leave_out" is the alternative
 }
 
-def agree(session, pages, policy=POLICY_V1, *, workers: dict[str, int]) -> dict[tuple[str, int], Verdict]
+def agree(session, pages, policy=POLICY_V1, *, workers=WORKERS, max_errors=3, cache_dir=CACHE,
+          client=None, filing_store=None, reading_store=None, s3=None, buy=True) -> AgreeResult
 ```
 
 Per page: read with both base models (`read_pages`, which is a no-op for
-stored readings); equal non-empty pair multisets → `agreed`. Otherwise
-read the disputed subset with each escalation model in turn, accepting
-on the first reading that equals any earlier one (`escalated`). No match
-after the last → `flagged`; under `"flagged": "load_single"` the row
-still carries `accepted_model` and `accepted_hash` for the last
-escalation reader's reading, with `matched_models` empty, so the load
-takes the reading and the verdict travels with it as the mark. A page
-one base reader could not read at all after `max_errors` →
-`unreadable`. Verdicts are upserted under `policy_version`; a policy
-change is a new version and only readers not yet stored cost anything.
-The comparison uses the scorer's `_pairs` and `_key`, moved into a
-shared module so the scorer and `agree` cannot drift.
+stored readings, each in a pool of the model's `WORKERS`); equal
+non-empty pair multisets → `agreed`, the accepted reading the first base
+model's. Otherwise read the disputed subset with each escalation model
+in turn, accepting on the first reading that equals any earlier one
+(`escalated`, `matched_models` the two): the accepted reading is the
+escalation reader's, since the pairs are identical by construction and
+the escalation readers are the more accurate on the columns the key
+does not cover (address, purpose, the page heading). No match after the
+last → `flagged`; under `"flagged": "load_single"` the row still carries
+`accepted_model` and `accepted_hash` for the last escalation reader's
+reading that exists, with `matched_models` empty, so the load takes the
+reading and the verdict travels with it as the mark; under `"leave_out"`
+both are NULL. A page one base reader could not read at all after
+`max_errors` → `unreadable` (the other base reader is not asked for it),
+and so is a disputed page no escalation reader could read. A page a
+reader failed on *this run* while still under `max_errors` gets no
+verdict this run and is not sent to later readers; `AgreeResult` lists
+it (`no_verdict`, with why) beside `verdicts` (page → `Verdict`, as
+stored), `bought` (pages, tokens and dollars per model) and `written`,
+and a re-run reads it again. Verdicts are upserted under
+`policy["version"]` in chunks of 200, only where new or changed, so
+`decided_at` dates the decision and a re-run over stored readings writes
+nothing; a policy change is a new version and only readers not yet
+stored cost anything. The comparison is `reading_pairs`, which the
+scorer imports too, so the two cannot drift.
+
+Two things the built code adds to the policy shape. A policy may carry
+`"settings": {model: {json_mode, extras}}` for readings stored under a
+run's own settings rather than today's — the sample's Qwen v2 and v3
+rows are keyed on the JSON mode their runs asked for, so a policy over
+them names it — and `read_pages` looks such readings up but never buys
+under them (a miss raises before a call). `buy=False` (`--stored-only`
+on the CLIs) makes any miss raise the same way, for a re-derivation
+that must cost nothing. A single-reader policy (one base reader, no
+escalation) marks every page it can read `agreed` with itself; that is
+how a stored full-sample read is scored through `report`. A registered
+policy is named by version (`v1`); any other is a JSON file with the
+dict (`data/exploratory/placeholder_policy_single_*_v3.json`). The CLI's
+`--flagged` overrides the rule under the *same* version, rewriting that
+version's flagged rows (23 rows either way on the ground-truth pages);
+a different agreement policy is a different version.
+
+`accepted_readings(session, pages, policy)` is the join the load and the
+report use: the verdict on each page under the policy's version, decided
+on the filing's current image, with the accepted reading's response
+from `page_readings` on (object_id, page, image_sha256, accepted_model,
+the policy's prompt version, accepted_hash) — one query for the
+verdicts, one for the readings; None where the verdict names no reading.
 
 ### Rewiring
 
-- `placeholder_recovery.py transcribe` becomes a thin call to
-  `read_pages` per model and `agree`; the `--results` folder goes away.
-- `report` reads `page_verdicts` joined to `page_readings` for the
-  accepted reading, builds `page_tables` from it, and adds the verdict
-  mix per filing to its output.
+- `placeholder_recovery.py transcribe` is `frame_pages` from
+  `filing_images` for the sample's fetched filings, then `agree` under
+  `--policy` (default `v1`), which reads through `read_pages` per
+  reader; `--model`, `--results` and the manifest CSV go away, the
+  policy names the readers. `--only`, `--limit`, `--max-errors` and
+  `--stored-only` stay.
+- `report --policy` reads `accepted_readings` for the vision path,
+  builds `page_tables` from the accepted responses, adds the verdict
+  mix per filing (`agreed`, `escalated`, `flagged`, `unreadable`,
+  `no_verdict`) and the rows loaded from flagged pages (`flagged_rows`)
+  to its CSV and summary, and takes fetch outcomes from
+  `filing_images`; `--results` remains for the Unstructured baseline
+  only. The `<oid>/pNNN.json` folder path is gone.
 - Backfill: a one-off loads the existing JSON folders into
   `page_readings` (folder suffix → prompt version; `_json_mode`,
   `_usage`, `_attempts`, `_partial` from each file) so the sample's four
@@ -339,16 +384,18 @@ shared module so the scorer and `agree` cannot drift.
   misses; the old readings remain.
 - [x] A page that has errored three times is skipped and listed, not
   retried.
-- [ ] `agree` on the 83 ground-truth pages under `POLICY_V1` reproduces
+- [x] `agree` on the 83 ground-truth pages under `POLICY_V1` reproduces
   `placeholder_ground_truth.py policies` for design C: 58 right, 2
   wrong, 23 flagged, with zero gateway calls once the backfill has run.
-- [ ] `report` on the 100-filing sample from `page_verdicts` under the
-  stored v4 base readings gives the same filing outcomes as the
-  folder-based report on the same readings.
-- [ ] A flagged page under `load_single` has `accepted_model` set to
+- [x] `report` on the 100-filing sample from `page_verdicts` under the
+  stored v3 base readings, one single-reader policy per model, gives
+  the same filing outcomes as the folder-based report on the same
+  readings (the v4 base readings exist for the 83 ground-truth pages
+  only; a full-sample v4 read is Session 4's).
+- [x] A flagged page under `load_single` has `accepted_model` set to
   the last escalation reader and `verdict = 'flagged'`; under
   `leave_out` it has no accepted reading.
-- [ ] Unit tests use the fake client from
+- [x] Unit tests use the fake client from
   `tests/test_vlm_transcription.py` and the in-memory store; no test
   connects to Postgres or makes a gateway call. The criteria above that
   need real data are run by hand against the datamart and their output
@@ -386,7 +433,7 @@ shared module so the scorer and `agree` cannot drift.
 | base-pair wall time, 10,000 pages | under 6 h | run log |
 | design cost, 9,347-page frame | $300–$430 | sum of `usage` × `PRICES` |
 | traceability | every loaded row joins to its verdict and two readings | a query with no orphans |
-| ground-truth reproduction | 58 / 2 / 23 | `agree` vs `policies` command |
+| ground-truth reproduction | 58 / 2 / 23 | the scorer's `verdicts` command against its `policies` |
 
 ## Open questions
 
