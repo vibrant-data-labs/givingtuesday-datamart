@@ -39,11 +39,17 @@ did that for the sample from the folders.
 **Rendering.** PNGs go to ``<cache_dir>/pages<DPI>/<object_id>/pNNN.png``,
 the layout ``exploratory/placeholder_recovery.transcribe`` already uses, so
 pages rendered there are reused. Rendering runs in its own small pool, one
-job per filing for the span of pages asked for: ``pdftoppm`` is a
+job per chunk of ``RENDER_CHUNK`` pages of a filing: ``pdftoppm`` is a
 subprocess, so the GIL is not the limit; bounding it to ``RENDER_WORKERS``
 keeps forty Qwen workers from starting forty poppler processes; and each
-read job waits on its filing's render, so reading overlaps rendering
-instead of the pool idling through an hour of it. The render job also
+read job waits on its own chunk's render, so reading overlaps rendering
+instead of the pool idling through an hour of it. Chunks, not whole
+filings, because a render is one single-threaded poppler process: on the
+EC2 box (four cores, two seconds a page against the laptop's 0.4) a
+1,089-page filing rendered whole held every read job behind it for the
+better part of an hour while the other render workers sat on the next
+giants (the frame run, 2026-09-23); in chunks of 20 the read pool consumes
+each chunk as it lands and a giant spreads across the workers. The render job also
 materialises the filing's PDF (``filing_images.materialise``, from the row
 already read, so no worker touches the session), so on a box with an
 empty cache the S3 downloads pipeline with the renders and reads rather
@@ -83,6 +89,7 @@ from givingtuesday_datamart.vlm_transcription import DPI, PROMPT_VERSION
 
 CHUNK = 200
 RENDER_WORKERS = 4
+RENDER_CHUNK = 20        # pages per render job; a 20-page chunk is about 40 s of pdftoppm on the box
 MAX_ERRORS = 3
 RESPONSE_KEYS = ("page_kind", "heading", "rows", "totals")
 VLM_DIR = CACHE / "vlm"
@@ -460,11 +467,11 @@ def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
        and is stored, at no cost, whatever its ``errors``. A row at
        ``max_errors`` is skipped and listed; anything else is a miss.
     3. Misses are rendered in a pool of ``RENDER_WORKERS``, one job per
-       filing: its PDF materialised from the cache or S3 (from the row read
-       in step 1, never the session), then the span of its pages asked for
-       to PNGs. Each read job waits on its filing's render, so download,
-       render and read pipeline per filing while the read pool of
-       ``workers`` calls ``vlm_transcription.transcribe``.
+       chunk of ``RENDER_CHUNK`` pages of a filing: its PDF materialised
+       from the cache or S3 (from the row read in step 1, never the
+       session), then the chunk's pages to PNGs. Each read job waits on its
+       own chunk's render, so download, render and read pipeline per chunk
+       while the read pool of ``workers`` calls ``vlm_transcription.transcribe``.
     4. The main thread collects the results and upserts them 200 at a time.
     5. The result carries page → response for hits and successful reads, the
        skipped pages with the rows that gated them, and the pages that
@@ -528,10 +535,14 @@ def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
                           f"{[page for page, _ in misses[:5]]}")
     _require_pdftoppm()
 
-    spans: dict[str, tuple[int, int]] = {}
+    # One render job per chunk of a filing's pages, keyed on the chunk the
+    # page falls in, so a read job waits on its own chunk and not on the
+    # whole filing.
+    spans: dict[tuple[str, int], tuple[int, int]] = {}
     for (oid, page), _ in misses:
-        first, last = spans.get(oid, (page, page))
-        spans[oid] = (min(first, page), max(last, page))
+        chunk = (oid, page // RENDER_CHUNK)
+        first, last = spans.get(chunk, (page, page))
+        spans[chunk] = (min(first, page), max(last, page))
     client = client if client is not None else vlm_transcription.client()
     # Built here, once: boto3 documents constructing clients from the
     # default session as not thread-safe, and on an empty cache the render
@@ -539,10 +550,10 @@ def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
     s3 = s3 if s3 is not None else filing_images._s3_client(RENDER_WORKERS)
     tally = result.bought
     with ThreadPoolExecutor(max_workers=RENDER_WORKERS) as renders, ThreadPoolExecutor(max_workers=workers) as pool:
-        rendered = {oid: renders.submit(_render_filing, images[oid], first, last, cache_dir, s3)
-                    for oid, (first, last) in spans.items()}
-        futures = [pool.submit(_read_one, client, model, rendered[page[0]], keys[page], settings, prior,
-                               page_dir(cache_dir, page[0])) for page, prior in misses]
+        rendered = {chunk: renders.submit(_render_filing, images[chunk[0]], first, last, cache_dir, s3)
+                    for chunk, (first, last) in spans.items()}
+        futures = [pool.submit(_read_one, client, model, rendered[(page[0], page[1] // RENDER_CHUNK)], keys[page],
+                               settings, prior, page_dir(cache_dir, page[0])) for page, prior in misses]
         def stop() -> None:
             # On the way out for any reason but completion (an interrupt in
             # the wait, the caller raising): the renders not yet started
