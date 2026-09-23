@@ -415,6 +415,37 @@ def test_summary_prints_the_mix_and_the_cost(stores, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# the scorer's verdicts command
+# ---------------------------------------------------------------------------
+
+
+def _truth_rows(page, rows, oid=OID):
+    return [{"object_id": oid, "page": page, "n": n, "name": row["name"], "amount": f"{row['amount']:.2f}",
+             "note": "kind=paid" if n == 1 else ""} for n, row in enumerate(rows, 1)]
+
+
+def test_the_scorer_counts_right_wrong_flagged_and_unreadable_verdicts_against_the_truth(stores, tmp_path, capsys):
+    from givingtuesday_datamart.exploratory import placeholder_ground_truth as gt
+
+    _decided(stores, tmp_path)                                        # p3 agreed, p4 escalated, p5 flagged, p6 unreadable
+    truth = {(OID, 3): _truth_rows(3, _rows(2)),                      # the accepted reading (Qwen's two rows): right
+             (OID, 4): _truth_rows(4, _rows(3)),                      # Flash's two rows accepted, the page has three: wrong
+             (OID, 5): _truth_rows(5, _rows(4)),                      # flagged; Sonnet's four rows are the page's
+             (OID, 6): _truth_rows(6, _rows(1)),                      # unreadable
+             (OID, 7): _truth_rows(7, _rows(1))}                      # no verdict
+    filings, readings, verdicts = stores
+    tally = gt.verdicts(pv.POLICY_V1, session=verdicts, filing_store=filings, reading_store=readings, truth=truth)
+    assert tally == {"right": 1, "wrong": 1, "flagged": 1, "flagged, accepted reading right": 1, "unreadable": 1,
+                     "no verdict": 1}
+    out = capsys.readouterr().out
+    assert "| v1 | 1 | 1 | 1 | 1 | 1 | 1 of 1 |" in out and f"accepted wrongly: {OID} p004 (escalated, {GEMINI} = {FLASH})" in out
+    assert f"flagged     {SONNET:<32}    1" in out
+    leave_out = _decided(stores, tmp_path, policy=LEAVE_OUT)
+    tally = gt.verdicts(LEAVE_OUT, session=verdicts, filing_store=filings, reading_store=readings, truth=truth)
+    assert tally["flagged"] == 1 and tally["flagged, accepted reading right"] == 0 and leave_out.written == 4
+
+
+# ---------------------------------------------------------------------------
 # PostgresStore, on a session that never connects
 # ---------------------------------------------------------------------------
 

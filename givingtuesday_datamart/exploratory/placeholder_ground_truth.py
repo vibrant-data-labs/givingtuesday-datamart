@@ -651,23 +651,30 @@ def policies(frame_pages: int, dispute_rate: float) -> None:
               + ", ".join(f"{n} {e[n]}" for n in e) + f" | ${base_cost + stage_cost:,.0f} |")
 
 
-def verdicts(policy_token: str) -> None:
+def checked_truth() -> dict[tuple[str, int], list[dict]]:
+    """The truth rows of the drawn pages that were checked against the image
+    (seeded pages left out): what ``policies`` and ``verdicts`` score."""
+    pages = {(r["object_id"], int(r["page"])) for r in csv.DictReader(PAGES_CSV.open())}
+    return {key: rs for key, rs in _truth().items() if "SEEDED" not in rs[0]["note"] and key in pages}
+
+
+def verdicts(policy: dict, *, session, filing_store=None, reading_store=None,
+             truth: dict[tuple[str, int], list[dict]] | None = None) -> collections.Counter:
     """The verdicts ``page_verdicts.agree`` stored under a policy, on the
     checked pages, scored as ``policies`` scores a design: an accepted
     reading whose pairs equal the truth's is right, any other is wrong; a
     flagged or unreadable page is counted as such; a checked page with no
     verdict is listed. For the flagged pages, how many the reading a
     ``load_single`` policy would load (the accepted one) has right, and the
-    pages accepted wrongly, for a look at the image."""
-    from givingtuesday_datamart._internal.db import get_session
-    from givingtuesday_datamart.ingestion import datamart_config
-    from givingtuesday_datamart.page_verdicts import accepted_readings, load_policy
+    pages accepted wrongly, for a look at the image. Prints the table and
+    returns the tally. ``session`` is the datamart session or a
+    ``VerdictStore``, with the other two stores injectable as
+    ``accepted_readings`` takes them; ``truth`` defaults to
+    ``checked_truth``."""
+    from givingtuesday_datamart.page_verdicts import accepted_readings
 
-    policy = load_policy(policy_token)
-    pages = {(r["object_id"], int(r["page"])): r for r in csv.DictReader(PAGES_CSV.open())}
-    truth = {key: rs for key, rs in _truth().items() if "SEEDED" not in rs[0]["note"] and key in pages}
-    with get_session(config=datamart_config()) as session:
-        found = accepted_readings(session, list(truth), policy)
+    truth = checked_truth() if truth is None else truth
+    found = accepted_readings(session, list(truth), policy, filing_store=filing_store, reading_store=reading_store)
     tally = collections.Counter()
     decided = collections.Counter()
     wrong = []
@@ -700,6 +707,7 @@ def verdicts(policy_token: str) -> None:
         print(f"  {kind:<11} {model:<32} {n:>4}")
     for (oid, page), verdict in wrong:
         print(f"  accepted wrongly: {oid} p{page:03d} ({verdict.verdict}, {' = '.join(verdict.matched_models)})")
+    return tally
 
 
 def main() -> None:
@@ -735,9 +743,16 @@ def main() -> None:
                         "(87%% on J&J's 836, 49%% elsewhere), blended for the expanded frame's mix")
     p = sub.add_parser("verdicts", help="score the verdicts page_verdicts.agree stored under a policy, as policies does")
     p.add_argument("--policy", default="v1", help="a registered version or a JSON file with the policy")
+    p.add_argument("--flagged", default=None, choices=("load_single", "leave_out"),
+                   help="the verdicts an override of the flagged rule decided, under <version>-<rule>")
     args = parser.parse_args()
     if args.command == "verdicts":
-        verdicts(args.policy)
+        from givingtuesday_datamart._internal.db import get_session
+        from givingtuesday_datamart.ingestion import datamart_config
+        from givingtuesday_datamart.page_verdicts import load_policy, with_flagged
+
+        with get_session(config=datamart_config()) as session:
+            verdicts(with_flagged(load_policy(args.policy), args.flagged), session=session)
         return
     if args.command == "tiebreak":
         tiebreak()
