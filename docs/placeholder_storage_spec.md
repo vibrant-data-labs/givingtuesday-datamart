@@ -162,10 +162,18 @@ CREATE INDEX IF NOT EXISTS filing_images_status ON filing_images (status);
 
 `status` values, the ones `_fetch_pdf` already produces plus the
 post-fetch outcomes: `fetched`, `no_attachment` (fetched, zero filer
-pages), `no_teos_image`, `pdf_unavailable:<http code>`, `not_a_pdf`,
-`lookup_failed:<exception>`. One row per filing; a re-fetch that returns
-a different `sha256` updates the row, and the old hash's readings stay
-in `page_readings` untouched.
+pages), `no_teos_image`, `pdf_unavailable:<http code>`, `not_a_pdf`
+(the bytes served, or poppler reading them, say so),
+`lookup_failed:<exception>` (not in any index CSV), and three that are
+ours rather than the IRS's: `teos_failed:<exception>` (the TEOS listing
+itself failed), `widths_failed:<exception>` (poppler failed, as opposed
+to rejecting the file), `upload_failed:<exception>` (S3, credentials or
+disk after a good download). Every failure is re-tried until it has
+three attempts; the backfill re-does only its own `upload_failed` and
+`widths_failed` rows. One row per filing; a re-fetch that returns a different
+`sha256` updates the row, and the old hash's readings stay in
+`page_readings` untouched. A fetched row that fails a re-fetch keeps its
+status and its object; only `attempts` and `last_error` move.
 
 ### Behaviour
 

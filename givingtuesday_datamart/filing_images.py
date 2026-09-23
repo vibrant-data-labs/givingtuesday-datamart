@@ -22,13 +22,20 @@ crash loses at most one chunk and a re-run picks up where it stopped.
 
 **Statuses.** ``fetched`` and ``no_attachment`` (fetched, but every page is
 the IRS's own rendering of the XML) are the two successful outcomes and are
-never fetched again unless ``refetch``. ``no_teos_image`` (TEOS lists no
-image), ``pdf_unavailable:<http code>`` (listed, not served — every one seen
-so far is an image the IRS generated in 2022), ``not_a_pdf`` and
-``lookup_failed:<exception>`` are failures: the row keeps ``attempts`` and
-``last_error``, and after three failed attempts the filing is left alone
-until ``refetch``. The unreachable set, the 404s by image year and the
-no-attachment filings are therefore queries on this table, not files.
+never fetched again unless ``refetch``; a fetched row that fails a re-fetch
+keeps its status and its object. The IRS's failures are ``no_teos_image``
+(TEOS lists no image), ``pdf_unavailable:<http code>`` (listed, not served —
+every one seen so far is an image the IRS generated in 2022), ``not_a_pdf``
+(the bytes served, or poppler reading them, say so) and
+``lookup_failed:<exception>`` (in no index CSV). Ours are
+``teos_failed:<exception>`` (the listing request itself),
+``widths_failed:<exception>`` (poppler failed rather than refused) and
+``upload_failed:<exception>`` (S3, credentials or disk after a good
+download). Every failure keeps ``attempts`` and ``last_error`` and is
+re-tried until it has three attempts, then left alone until ``refetch``;
+the backfill re-does only its own ``upload_failed`` and ``widths_failed``
+rows. The unreachable set, the 404s by image year and the no-attachment
+filings are therefore queries on this table, not files.
 
 **Reading back.** ``local_pdf`` is the only way renders and readings get a
 PDF: from the cache directory when the cached file's hash matches the row,
