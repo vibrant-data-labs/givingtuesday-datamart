@@ -84,6 +84,7 @@ class IndexRow(NamedTuple):
     object_id: str
     batch_id: str
     return_id: str
+    index_year: str = ""    # which index_<year>.csv listed it; see ``lookup``
 
     @property
     def xml_url(self) -> str:
@@ -145,6 +146,7 @@ def index_rows(year: str, cache_dir: Path | None = None) -> Iterator[IndexRow]:
                 object_id=(row.get("OBJECT_ID") or "").strip(),
                 batch_id=(row.get("XML_BATCH_ID") or "").strip(),
                 return_id=(row.get("RETURN_ID") or "").strip(),
+                index_year=year,
             )
 
 
