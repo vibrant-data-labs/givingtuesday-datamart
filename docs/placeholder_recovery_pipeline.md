@@ -730,10 +730,14 @@ against 59, 17 of the 46 disputed pages resolved against 16, one call a
 page, still never Flash Lite's error. `low` is the setting in
 `REQUEST_EXTRAS` from that date and the policy that reads under it is
 `POLICY_V2`, the 1,000-filing run's; `POLICY_V1` pins the default-effort
-readings its verdicts were decided on. `none` (and `minimal`, one page
-probed) map to an unbounded thinking budget for a Google model: 12,835
-tokens a page, 7 pages run to the 32K limit and partial, 56 s median,
-and no gain.
+readings its verdicts were decided on. Decided under v2 from the stored
+readings (`agree` with `buy=False`, 0 calls, 83 rows under `v2`), the 83
+pages score the same 58 right, 2 wrong, 23 flagged as under v1 — the
+same two wrong pages, 3.8 Flash resolving 17 and Sonnet 6 where v1 had
+16 and 7 — so the cheaper reader changes the price, not the verdicts.
+`none` (and `minimal`, one page probed) map to an unbounded thinking
+budget for a Google model: 12,835 tokens a page, 7 pages run to the 32K
+limit and partial, 56 s median, and no gain.
 
 Simulated as stage 3b on the 83 pages, with Qwen and Flash Lite as the
 base pair (46 of the 83 are disputes; the sample is enriched for them):
