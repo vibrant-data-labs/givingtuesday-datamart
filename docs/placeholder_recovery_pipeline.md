@@ -667,6 +667,103 @@ page, so the question may be moot.
    - Backfilled fetched rows have no `index_year` or `teos_url`, which
      only TEOS can supply; the live re-tries filled both for the
      failures, and a `refetch` would fill the rest.
+
+   **Part B readings built** (2026-09-22,
+   [`page_readings.py`](../givingtuesday_datamart/page_readings.py); the
+   verdicts are the next session). The laptop's JSON folders are in the
+   table: `backfill --dry-run` counted 7,626 files in ten folders — 1,782
+   each for Qwen and Flash Lite under v2 and v3, 83 each for Qwen, Flash
+   Lite, 3.8 Flash, Luna, Terra and Sonnet under v4 — and skipped the
+   two `-v4b` repeats and the Sonnet max-reasoning folder (187 files) as
+   the spec says. The first real run loaded all 7,626 as new rows in
+   10m40s, almost all of it waiting on the network: psycopg2's
+   `executemany` sends one INSERT per row, a round trip each. The upsert
+   is now one multi-row INSERT per 200-row chunk, and the second run —
+   the idempotency check, which reads every stored row back and compares
+   — took 29 s and reported zero new and zero changed for every reader.
+   One row is an error: Terra's p070 of Schusterman 2022, the
+   `reasoning_effort: minimal` rejection from before Terra's setting was
+   changed to `none`; its row carries today's request settings, as the
+   backfill's docstring says every v2/v3/v4 row does. `status` after the
+   load, with the cost from `usage` at the gateway's prices:
+
+   | model | prompt | rows | hits | failed | partial | $ |
+   |---|---|---|---|---|---|---|
+   | alibaba/qwen3-vl-instruct | v2 | 1,782 | 1,782 | 0 | 55 | 3.57 |
+   | alibaba/qwen3-vl-instruct | v3 | 1,782 | 1,782 | 0 | 355 | 4.24 |
+   | alibaba/qwen3-vl-instruct | v4 | 83 | 83 | 0 | 2 | 0.20 |
+   | anthropic/claude-sonnet-5 | v4 | 83 | 83 | 0 | 0 | 4.36 |
+   | google/gemini-3.5-flash-lite | v2 | 1,782 | 1,782 | 0 | 1 | 12.37 |
+   | google/gemini-3.5-flash-lite | v3 | 1,782 | 1,782 | 0 | 0 | 12.21 |
+   | google/gemini-3.5-flash-lite | v4 | 83 | 83 | 0 | 0 | 0.55 |
+   | google/gemini-3.8-flash | v4 | 83 | 83 | 0 | 0 | 1.83 |
+   | openai/gpt-5.6-luna | v4 | 83 | 83 | 0 | 0 | 0.27 |
+   | openai/gpt-5.6-terra | v4 | 83 | 82 | 1 | 0 | 3.00 |
+   | total | | 7,626 | 7,625 | 1 | 413 | 42.60 |
+
+   The v2 costs are the $3.57 and $12.37 the sample section reports,
+   recomputed from the stored usage. The first four Part B criteria were
+   then run by hand against the datamart on the 83 ground-truth pages
+   under Qwen v4, with the gateway client's `chat.completions.create`
+   wrapped in a counter and `vlm_transcription.transcribe` wrapped in a
+   second one, since "the missing half" is pages sent to the model and
+   the retry ladder can ask a page more than once:
+   - `read_pages` on the 83 stored pages: 83 responses, 0 pages sent, 0
+     gateway calls, 0.9 s.
+   - The first 8 pages with 4 of their rows deleted: 8 responses, 4 pages
+     sent, 4 gateway calls, 64 s (Qwen on these dense pages is about a
+     minute a page at 8 workers). A third backfill run then restored the
+     four re-read rows from disk: 4 changed on Qwen v4, 0 elsewhere, 31 s.
+   - 2 stored v4 pages asked for under prompt `v5`: 2 pages sent, 4
+     gateway calls (Johnson & Johnson's p482 came back partial and was
+     asked twice more; `attempts` = 3 on its row), 67 s; the same 2 under
+     `v4`: 0 sent, 0 calls. The two v5 rows were deleted afterwards, since
+     they hold the v4 prompt's reading under a v5 label.
+   - A row inserted with `errors = 3` and no response for
+     202133169349103203 p025 (a page outside the ground-truth set) in a
+     batch with one stored page: 1 response, the page skipped and listed
+     with its `last_error`, 0 sent, 0 calls. The row was deleted after.
+   - The `sha256` criterion, at no gateway cost: with 202213189349106261's
+     row set to a hash of zeros (its 12 ground-truth pages have 3,416
+     readings under the real hash across all readers), `read_pages` found
+     0 stored and 12 to read, and `local_pdf` then refused the S3 object
+     because it hashes to the old value (15.6 s, including the download).
+     0 calls; the 3,416 rows untouched; the hash restored. Reading under a
+     genuinely re-issued image is exercised by the unit test only.
+
+   In all, the criteria sent 12 pages to Qwen in 16 gateway calls (the
+   script ran twice; the first run stopped on the raw-call count before
+   the second counter was added), about $0.03. The 83 pages' PNGs were
+   already in `pages200/` from the earlier runs, so the render pool was
+   not exercised by hand, only by its test.
+
+   **Request settings corrected** (2026-09-23, from the review of PR
+   #44). The first backfill keyed every row on today's `request(model)`,
+   so the 1,782 Qwen v2 rows said `json_mode: false` while their answers
+   came back in JSON mode, and the Terra error row said
+   `reasoning_effort: none` while its message says `minimal`. The
+   backfill now keys each row on what its folder and file evidence.
+   `json_mode` is the run's first-call mode, read from the `_json_mode`
+   stamps: `transcribe` only ever falls back out of JSON mode, so one
+   answer in it proves the run asked for it (Qwen v3: 468 of its 1,782
+   did), no stamps is the v2 sample, which ran with it on, and every
+   answer out of it means the run did not ask (Qwen v4). `extras` are the
+   model's `REQUEST_EXTRAS`, which the runs used and the files do not
+   stamp. A file with no stamps at all never got an answer and evidences
+   nothing, so both fields are `null` under a hash of its own and no live
+   key inherits its strike. The re-run added 3,565 rows as new — Qwen v2
+   and v3, 1,782 each, and the Terra error — with 0 changed, in 24 s; the
+   3,565 superseded copies under today's hashes were then deleted by hand
+   (`DELETE FROM page_readings WHERE model = 'alibaba/qwen3-vl-instruct'
+   AND prompt_version IN ('v2', 'v3') AND request_hash = <today's Qwen
+   hash>`, and the one Terra row with `response IS NULL` under today's
+   Terra hash). 7,626 rows again, and the `status` table above is
+   unchanged, since nothing moved between readers. Gemini v4's one page
+   that fell back out of JSON mode stays keyed with its run, as a live
+   reading would be; keying per file would have made it a miss for
+   `agree`. The backfill now writes only rows the table lacks or holds
+   differently, so the idempotent re-run on the corrected table reads
+   every row back and writes nothing: 0 new, 0 changed, 0 written, 11 s.
 5. Decide the flagged-page policy before that run's load.
 6. Send GT the findings list; report the 2022 image batch to the IRS.
 
