@@ -372,11 +372,16 @@ class ReadResult:
     """What ``read_pages`` gives back. Every page asked for lands in exactly
     one: ``responses`` (a hit, or read this run), ``skipped`` (at
     ``max_errors`` before the run; the row that gated it), ``failed`` (read
-    this run and errored; the row as stored, ``errors`` incremented)."""
+    this run and errored; the row as stored, ``errors`` incremented).
+    ``bought`` is what the run paid for: pages sent to the model, rows and
+    errors back, partial pages, and the tokens in and out (zero throughout
+    when every page was stored)."""
 
     responses: dict[Page, dict] = field(default_factory=dict)
     skipped: dict[Page, PageReading] = field(default_factory=dict)
     failed: dict[Page, PageReading] = field(default_factory=dict)
+    bought: dict[str, int] = field(default_factory=lambda: {"pages": 0, "rows": 0, "errors": 0, "partial": 0,
+                                                            "in": 0, "out": 0})
 
 
 def page_dir(cache_dir: Path, object_id: str) -> Path:
@@ -442,7 +447,8 @@ def _read_one(client, model: str, rendered: Future, key: Key, request_settings: 
 
 def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
                prompt_version: str = PROMPT_VERSION, max_errors: int = MAX_ERRORS,
-               cache_dir: Path = CACHE, client=None, filing_store=None, s3=None) -> ReadResult:
+               cache_dir: Path = CACHE, client=None, filing_store=None, s3=None,
+               settings: dict | None = None, buy: bool = True) -> ReadResult:
     """Read ``pages`` (``(object_id, page)`` pairs) through ``model``, from the
     table where a reading exists and through the gateway where it does not.
 
@@ -463,6 +469,14 @@ def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
        skipped pages with the rows that gated them, and the pages that
        errored this run.
 
+    ``settings`` are the request settings to look the readings up under:
+    today's ``request(model)`` by default, which is also the only setting a
+    page can be *read* under, so a miss under any other raises
+    ``LookupError`` before a render or a call (the sample's Qwen v3 rows,
+    keyed on the JSON mode their run asked for, are reached this way). With
+    ``buy`` false a miss under any settings raises the same way: the run is
+    a re-derivation from stored readings and must cost nothing.
+
     ``session`` is a SQLAlchemy session or a ``PageReadingStore``;
     ``filing_store`` a ``FilingImageStore`` when the readings and the
     filings are not on the same session (tests); ``client`` the gateway
@@ -480,8 +494,9 @@ def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
     if outside:
         raise ValueError(f"{len(outside)} pages are outside their filing: {outside[:5]}")
 
-    settings = request(model)
-    keys = {(oid, page): reading_key(oid, page, images[oid].sha256, model, prompt_version) for oid, page in wanted}
+    settings = request(model) if settings is None else settings
+    keys = {(oid, page): reading_key(oid, page, images[oid].sha256, model, prompt_version, settings=settings)
+            for oid, page in wanted}
     existing = store.get(keys.values())
     result = ReadResult()
     misses: list[tuple[Page, PageReading | None]] = []
@@ -506,6 +521,10 @@ def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
         logger.warning("%s p%03d skipped after %d errors: %s", oid, page, row.errors, (row.last_error or "")[:120])
     if not misses:
         return result
+    if not buy or settings != request(model):
+        why = "the run buys nothing" if not buy else "the settings asked for are not today's, so nothing can be read under them"
+        raise LookupError(f"{len(misses)} pages have no reading of {model} {prompt_version} and {why}: "
+                          f"{[page for page, _ in misses[:5]]}")
     _require_pdftoppm()
 
     spans: dict[str, tuple[int, int]] = {}
@@ -517,7 +536,7 @@ def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
     # default session as not thread-safe, and on an empty cache the render
     # workers would otherwise each build one through the unlocked lru_cache.
     s3 = s3 if s3 is not None else filing_images._s3_client(RENDER_WORKERS)
-    tally = {"pages": 0, "rows": 0, "errors": 0, "partial": 0, "in": 0, "out": 0}
+    tally = result.bought
     with ThreadPoolExecutor(max_workers=RENDER_WORKERS) as renders, ThreadPoolExecutor(max_workers=workers) as pool:
         rendered = {oid: renders.submit(_render_filing, images[oid], first, last, cache_dir, s3)
                     for oid, (first, last) in spans.items()}
