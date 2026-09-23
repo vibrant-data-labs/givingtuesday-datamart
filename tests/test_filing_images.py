@@ -7,6 +7,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import subprocess
 import urllib.error
 from dataclasses import replace
 from datetime import date
@@ -75,7 +76,8 @@ class _Teos:
     def page_widths(self, path):
         payload = path.read_bytes()
         if payload not in self.widths:
-            raise RuntimeError("pdfimages: Syntax Error: Couldn't read xref table")
+            raise subprocess.CalledProcessError(1, ["pdfimages", "-list", str(path)],
+                                                stderr="Syntax Error: Couldn't read xref table")
         return list(self.widths[payload])
 
     @property
@@ -120,6 +122,7 @@ def teos(monkeypatch):
     monkeypatch.setattr(irs_source, "_get", fake.get)
     monkeypatch.setattr(irs_source, "index_rows", lambda year, cache_dir=None: iter(()))
     monkeypatch.setattr(irs_source, "page_widths", fake.page_widths)
+    monkeypatch.setattr(fi.shutil, "which", lambda cmd, *args, **kwargs: "/opt/homebrew/bin/pdfimages")
     return fake
 
 
@@ -302,6 +305,28 @@ def test_a_pdf_poppler_cannot_read_is_not_a_pdf_and_is_not_uploaded(teos, tmp_pa
     store, s3 = fi.MemoryStore(), _S3()
     assert _fetch(store, [OID], tmp_path, s3) == {OID: "not_a_pdf"}
     assert s3.puts == [] and "xref" in store.rows[OID].last_error and store.rows[OID].s3_key is None
+
+
+def test_a_missing_pdfimages_stops_before_any_request(teos, tmp_path, staging, monkeypatch):
+    teos.add(OID, [("20230501", PDF)])
+    monkeypatch.setattr(fi.shutil, "which", lambda cmd, *args, **kwargs: None)
+    store = fi.MemoryStore()
+    with pytest.raises(RuntimeError, match="poppler"):
+        _fetch(store, [OID], tmp_path, _S3())
+    with pytest.raises(RuntimeError, match="poppler"):
+        fi.backfill(store, s3=_S3(), **staging)
+    assert teos.requests == 0 and store.rows == {}
+
+
+def test_poppler_failing_is_retryable_unlike_poppler_rejecting_the_file(teos, tmp_path, monkeypatch):
+    teos.add(OID, [("20230501", PDF)])
+    store, s3 = fi.MemoryStore(), _S3()
+    working = irs_source.page_widths
+    monkeypatch.setattr(irs_source, "page_widths", lambda path: (_ for _ in ()).throw(OSError(28, "No space left on device")))
+    assert _fetch(store, [OID], tmp_path, s3) == {OID: "widths_failed:OSError"}
+    assert s3.puts == [] and "No space left" in store.rows[OID].last_error and store.rows[OID].attempts == 1
+    monkeypatch.setattr(irs_source, "page_widths", working)
+    assert _fetch(store, [OID], tmp_path, s3) == {OID: "fetched"} and store.rows[OID].attempts == 2
 
 
 # ---------------------------------------------------------------------------

@@ -51,6 +51,8 @@ import csv
 import hashlib
 import logging
 import os
+import shutil
+import subprocess
 import sys
 from abc import ABC, abstractmethod
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
@@ -293,6 +295,13 @@ def generated_on(url: str | None) -> date | None:
         return None
 
 
+def _require_pdfimages() -> None:
+    """Fail before any download on a box without poppler: the attachment
+    boundary is read from ``pdfimages -list`` and nothing else gives it."""
+    if shutil.which("pdfimages") is None:
+        raise RuntimeError("pdfimages is not on PATH; install poppler-utils (apt) or poppler (brew)")
+
+
 def pdf_path(cache_dir: Path, object_id: str) -> Path:
     return cache_dir / "pdfs" / f"{object_id}.pdf"
 
@@ -338,8 +347,10 @@ def _fetch_one(filing: Filing, prior: FilingImage | None, *, cache_dir: Path,
         _write_atomic(local, payload)
         try:
             widths = irs_source.page_widths(local)
-        except Exception as exc:                          # noqa: BLE001
-            return _failed(row, prior, "not_a_pdf", f"pdfimages: {exc}"[:500])
+        except subprocess.CalledProcessError as exc:      # poppler rejected the bytes
+            return _failed(row, prior, "not_a_pdf", f"pdfimages: {exc.stderr or exc}"[:500])
+        except Exception as exc:                          # noqa: BLE001 — poppler itself failed
+            return _failed(row, prior, f"widths_failed:{type(exc).__name__}", str(exc)[:500])
         digest = hashlib.sha256(payload)
         _upload(s3, bucket, key, payload, digest.digest())
     except Exception as exc:                              # noqa: BLE001
@@ -445,6 +456,7 @@ def fetch_filings(session, object_ids: Iterable[str | Filing], *, bucket: str = 
     ``session`` is a SQLAlchemy session (``_internal.db.get_session``) or a
     ``FilingImageStore``; ``s3`` is a boto3 client, built when not given.
     """
+    _require_pdfimages()
     store = _store(session)
     store.ensure_table()
     filings = _filings(object_ids)
@@ -518,9 +530,14 @@ def _backfill_one(staged: dict, prior: FilingImage | None, *, pdf_dir: Path, buc
     try:
         payload = local.read_bytes()
         digest = hashlib.sha256(payload)
+        try:
+            widths = irs_source.page_widths(local)
+        except subprocess.CalledProcessError as exc:
+            return _failed(row, None, "not_a_pdf", f"pdfimages: {exc.stderr or exc}"[:500])
+        except Exception as exc:                          # noqa: BLE001
+            return _failed(row, None, f"widths_failed:{type(exc).__name__}", str(exc)[:500])
         if not (prior and prior.sha256 == digest.hexdigest() and prior.s3_key == key):
             _upload(s3, bucket, key, payload, digest.digest())
-        widths = irs_source.page_widths(local)
     except Exception as exc:                              # noqa: BLE001
         return _failed(row, None, f"upload_failed:{type(exc).__name__}", str(exc)[:500])
     start = irs_source.attachment_start(widths)
@@ -551,6 +568,7 @@ def backfill(session, *, staging_csvs: Sequence[Path] = STAGING_CSVS,
     come from the CSVs; ``index_year`` and ``teos_url`` for fetched rows
     would need TEOS, so they stay NULL until a ``refetch``.
     """
+    _require_pdfimages()
     staged: dict[str, dict] = {}
     passes: dict[str, int] = {}
     for path in staging_csvs:
