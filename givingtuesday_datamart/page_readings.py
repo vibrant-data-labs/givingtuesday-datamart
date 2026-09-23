@@ -152,12 +152,24 @@ _SELECT = (
     f"SELECT {', '.join(COLUMNS)} FROM page_readings WHERE ({', '.join(KEY_COLUMNS)}) IN ("
     "SELECT * FROM unnest(" + ", ".join(f"CAST(:{c} AS {t}[])" for c, t in zip(KEY_COLUMNS, _KEY_TYPES)) + "))"
 )
-_UPSERT = (
-    f"INSERT INTO page_readings ({', '.join(COLUMNS)}) VALUES ("
-    + ", ".join(f"CAST(:{c} AS jsonb)" if c in JSON_COLUMNS else f":{c}" for c in COLUMNS)
-    + f") ON CONFLICT ({', '.join(KEY_COLUMNS)}) DO UPDATE SET "
+_ON_CONFLICT = (
+    f"ON CONFLICT ({', '.join(KEY_COLUMNS)}) DO UPDATE SET "
     + ", ".join(f"{c} = EXCLUDED.{c}" for c in COLUMNS if c not in KEY_COLUMNS)
 )
+
+
+def _upsert_sql(n: int) -> str:
+    """One INSERT for ``n`` rows, each row's values as ``:<column>_<i>``.
+
+    psycopg2's ``executemany`` sends one statement per row, a round trip
+    each, and the first backfill of 7,626 readings spent eleven minutes
+    almost entirely waiting on the network that way. A chunk of 200 rows is
+    3,600 parameters, well inside Postgres's 65,535.
+    """
+    rows = ", ".join(
+        "(" + ", ".join(f"CAST(:{c}_{i} AS jsonb)" if c in JSON_COLUMNS else f":{c}_{i}" for c in COLUMNS) + ")"
+        for i in range(n))
+    return f"INSERT INTO page_readings ({', '.join(COLUMNS)}) VALUES {rows} {_ON_CONFLICT}"
 
 
 # ---------------------------------------------------------------------------
@@ -225,13 +237,13 @@ class PostgresStore(PageReadingStore):
     def upsert(self, rows: Sequence[PageReading]) -> None:
         if not rows:
             return
-        params = []
-        for row in rows:
+        params = {}
+        for i, row in enumerate(rows):
             values = asdict(row)
             for column in JSON_COLUMNS:
                 values[column] = None if values[column] is None else json.dumps(values[column])
-            params.append(values)
-        self.session.execute(text(_UPSERT), params)
+            params.update({f"{column}_{i}": values[column] for column in COLUMNS})
+        self.session.execute(text(_upsert_sql(len(rows))), params)
         self.session.commit()
 
 

@@ -389,19 +389,20 @@ def _row(oid, page=3, **overrides):
     return pr.PageReading(**values)
 
 
-def test_postgres_store_upserts_one_chunk_in_one_statement_and_commits():
+def test_postgres_store_upserts_one_chunk_in_one_multi_row_statement_and_commits():
     session = _Session()
     store = pr.PostgresStore(session)
     store.upsert([_row("1" * 18), _row("2" * 18, response=None, usage=None, errors=1, last_error="boom")])
     (sql, params), = session.calls
     assert sql.startswith("INSERT INTO page_readings (object_id, page, image_sha256, ")
+    assert sql.count("VALUES") == 1 and sql.count("(:object_id_") == 2         # two rows, one statement
     assert "ON CONFLICT (object_id, page, image_sha256, dpi, model, prompt_version, request_hash) DO UPDATE SET" in sql
     assert all(f"{column} = EXCLUDED.{column}" in sql for column in pr.COLUMNS if column not in pr.KEY_COLUMNS)
     assert not any(f"{column} = EXCLUDED" in sql for column in pr.KEY_COLUMNS)
-    assert all(f"CAST(:{column} AS jsonb)" in sql for column in pr.JSON_COLUMNS)
-    assert [p["object_id"] for p in params] == ["1" * 18, "2" * 18]
-    assert json.loads(params[0]["response"])["rows"] == _rows(1) and params[0]["request"] == '{"json_mode": false, "extras": {}}'
-    assert params[1]["response"] is None and params[1]["usage"] is None and params[1]["last_error"] == "boom"
+    assert all(f"CAST(:{column}_1 AS jsonb)" in sql for column in pr.JSON_COLUMNS)
+    assert len(params) == 2 * len(pr.COLUMNS) and (params["object_id_0"], params["object_id_1"]) == ("1" * 18, "2" * 18)
+    assert json.loads(params["response_0"])["rows"] == _rows(1) and params["request_0"] == '{"json_mode": false, "extras": {}}'
+    assert params["response_1"] is None and params["usage_1"] is None and params["last_error_1"] == "boom"
     assert session.commits == 1
     store.upsert([])
     assert len(session.calls) == 1
