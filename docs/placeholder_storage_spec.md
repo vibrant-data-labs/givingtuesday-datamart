@@ -11,9 +11,10 @@ pipeline. Two parts, meant to be built in separate sessions:
   reads what is missing in parallel, and `page_verdicts` derived from
   readings under a versioned policy.
 
-Vibrant Data Labs, 2026-09-22. Status: spec, nothing built. Background
-and the measurements every decision below rests on are in
-[placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md);
+Vibrant Data Labs, 2026-09-22. Status: Part A built and its criteria
+run (the pipeline doc's *Order of operations*, item 4); Part B is
+spec. Background and the measurements every decision below rests on
+are in [placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md);
 the short report is [placeholder_grant_recovery.md](placeholder_grant_recovery.md).
 
 ## Problem statement
@@ -105,7 +106,7 @@ Reuse these; do not rewrite them.
 | `attachment_grants.page_tables` | page JSON → selector tables |
 | `_internal/db.get_session(config)` | transactional session; `ingestion.datamart_config()` builds the config |
 | `exploratory/placeholder_ground_truth.py` | the scorer; `POLICIES`, `PAIRS`, `_pairs`, `_key` define comparison and the policy shapes |
-| `~/.cache/irs_index/pdfs/*.pdf` | ~700 fetched PDFs for the 610-filing frame, to upload once |
+| `~/.cache/irs_index/pdfs/*.pdf` | the 517 fetched PDFs of the 610-filing frame, 1.15 GB; uploaded by the Part A backfill |
 | `~/.cache/irs_index/vlm/<folder>/<oid>/pNNN.json` | readings to backfill: `<model>` = prompt v2, `-v3`, `-v4`; candidates `google__gemini-3.8-flash-v4`, `anthropic__claude-sonnet-5-v4`, `openai__gpt-5.6-*-v4` |
 | `data/exploratory/placeholder_staging*.csv`, `placeholder_404_images_expanded.csv`, `placeholder_unreachable.csv` | fetch statuses to backfill into `filing_images` |
 
@@ -186,17 +187,17 @@ readings go through this, never through TEOS again.
 
 ### Acceptance criteria
 
-- [ ] Fetching the 610-filing frame twice makes zero TEOS requests and
+- [x] Fetching the 610-filing frame twice makes zero TEOS requests and
   zero uploads the second time.
-- [ ] The 93 no-PDF and 144 no-attachment filings in
+- [x] The 93 no-PDF and 144 no-attachment filings in
   `placeholder_staging_expanded.csv` are reproduced by a `status` query,
   and the 38 rows of `placeholder_404_images_expanded.csv` by
   `status LIKE 'pdf_unavailable%' AND image_generated BETWEEN '2022-01-01' AND '2022-12-31'`.
-- [ ] `attachment_from` and `attachment_pages` match the staging CSVs on
+- [x] `attachment_from` and `attachment_pages` match the staging CSVs on
   every fetched filing.
-- [ ] A one-off backfill loads the ~700 cached PDFs and both staging
+- [x] A one-off backfill loads the ~700 cached PDFs and both staging
   CSVs without a network fetch.
-- [ ] A row's `sha256` equals the SHA-256 of the object at `s3_key`.
+- [x] A row's `sha256` equals the SHA-256 of the object at `s3_key`.
 
 ## Part B — Model reading cache
 

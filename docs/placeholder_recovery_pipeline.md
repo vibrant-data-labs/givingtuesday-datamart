@@ -629,6 +629,41 @@ page, so the question may be moot.
    and `page_verdicts` under a versioned policy — per
    [placeholder_storage_spec.md](placeholder_storage_spec.md), one
    session per part. Then the 1,000-filing run on it.
+
+   **Part A built** (2026-09-22,
+   [`filing_images.py`](../givingtuesday_datamart/filing_images.py)).
+   The 610-filing frame is in the table and in S3: 517 PDFs, 1.15 GB
+   (the spec's ~12 GB guess was off by ten; these average 2.2 MB),
+   uploaded by `backfill` from the laptop cache and the two staging
+   CSVs in 116 s with zero TEOS requests. By status: 373 `fetched`, 144
+   `no_attachment`, 55 `no_teos_image`, 38 `pdf_unavailable:404`;
+   9,347 attachment pages. The Part A criteria were run by hand against
+   the datamart (`ingestion.datamart_config()`, `_internal.db.get_session`)
+   with the three TEOS entry points and the S3 client wrapped in call
+   counters:
+   - The status queries give 93 filings without a PDF, 144 without an
+     attachment, and 38 `pdf_unavailable%` rows with `image_generated`
+     in 2022 (April 7, May 3, October 13, November 15) — the CSVs'
+     numbers exactly.
+   - `attachment_from`, `attachment_pages`, `pages` and `bytes` match
+     the expanded staging CSV on all 517 fetched filings, with the
+     widths re-read from the PDFs by `pdfimages` rather than copied.
+   - `verify` downloaded all 517 objects (100 s): every one hashes to
+     its row's `sha256`. `local_pdf` into an empty cache directory
+     brought Schusterman 2022 back from S3 in 1.4 s, hash checked; on a
+     404 filing it raises rather than going to TEOS.
+   - Idempotency, `fetch_filings` over the frame three times in a row.
+     Run 1 re-tried 87 filings — the failures with fewer than three
+     attempts on record — with 87 TEOS listings and 32 PDF requests, all
+     failing exactly as staged, and zero uploads. Run 2 re-tried 46,
+     zero uploads. Run 3: zero TEOS requests, zero uploads, one second.
+     The 517 fetched filings made no request in any run; the "twice"
+     criterion holds once the failures have used the three attempts the
+     spec gives them. All 93 failures reproduced live on 2026-09-22, so
+     the 2022 image batch is still unserved.
+   - Backfilled fetched rows have no `index_year` or `teos_url`, which
+     only TEOS can supply; the live re-tries filled both for the
+     failures, and a `refetch` would fill the rest.
 5. Decide the flagged-page policy before that run's load.
 6. Send GT the findings list; report the 2022 image batch to the IRS.
 
