@@ -65,6 +65,7 @@ import math
 import re
 import shutil
 import subprocess
+import time
 from abc import ABC, abstractmethod
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field, fields, replace
@@ -408,10 +409,16 @@ def _render_filing(row: filing_images.FilingImage, first: int, last: int, cache_
         pdf = filing_images.materialise(row, cache_dir, s3=s3)
     except Exception as exc:                              # noqa: BLE001
         raise _unreadable(row.object_id, first, last, "pdf", exc) from exc
+    started = time.monotonic()
     try:
-        return vlm_transcription.render(pdf, first, last, page_dir(cache_dir, row.object_id))
+        pngs = vlm_transcription.render(pdf, first, last, page_dir(cache_dir, row.object_id))
     except Exception as exc:                              # noqa: BLE001
         raise _unreadable(row.object_id, first, last, "render", exc) from exc
+    # One line per filing, so a run log carries the render time of the
+    # empty-cache path (``materialise`` logs the S3 download the same way).
+    logger.info("render: %s pages %d-%d, %d PNGs in %.1f s", row.object_id, first, last, len(pngs),
+                time.monotonic() - started)
+    return pngs
 
 
 def _unreadable(object_id: str, first: int, last: int, stage: str, exc: BaseException) -> FilingUnreadable:

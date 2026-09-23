@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 import os
 import subprocess
 from dataclasses import replace
@@ -371,6 +372,19 @@ def test_render_runs_once_per_filing_for_the_span_asked_for(filings, render, tmp
         (fi.pdf_path(tmp_path, OID2), 4, 9, tmp_path / "pages200" / OID2),
         (fi.pdf_path(tmp_path, OID), 3, 5, tmp_path / "pages200" / OID),
     ]
+
+
+def test_the_render_pool_logs_one_render_time_per_filing(filings, render, tmp_path, caplog):
+    """The run log carries the render time of each filing's span, so the
+    empty-cache path can be measured from the log alone."""
+    _seed(filings, tmp_path, OID)
+    _seed(filings, tmp_path, OID2, pages=10, attachment_from=2)
+    with caplog.at_level(logging.INFO, logger="givingtuesday_datamart"):
+        _read(pr.MemoryStore(), filings, [(OID, 3), (OID2, 4), (OID, 5), (OID2, 9)], _client(4), tmp_path)
+    lines = sorted(r.getMessage() for r in caplog.records if r.getMessage().startswith("render:"))
+    assert len(lines) == 2
+    assert lines[0].startswith(f"render: {OID2} pages 4-9, 6 PNGs in ")
+    assert lines[1].startswith(f"render: {OID} pages 3-5, 3 PNGs in ")
 
 
 def test_unfetched_filings_and_pages_outside_the_pdf_raise_before_any_call(filings, render, tmp_path):

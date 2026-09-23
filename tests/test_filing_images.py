@@ -400,6 +400,23 @@ def test_local_pdf_serves_the_cache_when_it_matches_and_s3_otherwise(teos, tmp_p
     assert teos.requests == 2                                 # the listing and the GET of the fetch, nothing since
 
 
+def test_materialise_logs_an_s3_download_and_not_a_cache_hit(teos, tmp_path, caplog):
+    """A run log counts the PDFs that came from S3 and how long they took —
+    the empty-cache path — from one line per download; a cache hit is silent."""
+    teos.add(OID, [("20230501", PDF)])
+    store, s3 = fi.MemoryStore(), _S3()
+    _fetch(store, [OID], tmp_path, s3)
+    row = store.rows[OID]
+    with caplog.at_level(logging.INFO, logger="givingtuesday_datamart"):
+        fi.materialise(row, tmp_path, bucket="b", s3=s3)
+        assert "materialise:" not in caplog.text
+        fi.pdf_path(tmp_path, OID).unlink()
+        fi.materialise(row, tmp_path, bucket="b", s3=s3)
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("materialise:")]
+    assert len(lines) == 1 and s3.gets == [f"irs/pdf/{OID}.pdf"]
+    assert lines[0].startswith(f"materialise: {OID} from s3://b/irs/pdf/{OID}.pdf, 0.0 MB in ")
+
+
 def test_local_pdf_refuses_unfetched_filings_and_corrupt_objects(teos, tmp_path):
     teos.add(OID, [("20230501", PDF)])
     teos.add("201000000000000002", [("20221026", 404)])
