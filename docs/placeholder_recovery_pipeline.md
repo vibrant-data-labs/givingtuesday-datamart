@@ -660,7 +660,10 @@ page, so the question may be moot.
      The 517 fetched filings made no request in any run; the "twice"
      criterion holds once the failures have used the three attempts the
      spec gives them. All 93 failures reproduced live on 2026-09-22, so
-     the 2022 image batch is still unserved.
+     the 2022 image batch is still unserved. Since those runs
+     `no_teos_image` is permanent (only `refetch` goes back for it) and a
+     404 keeps its three attempts, so a fresh seed followed by one fetch
+     re-tries only the 404s still inside their attempts.
    - Backfilled fetched rows have no `index_year` or `teos_url`, which
      only TEOS can supply; the live re-tries filled both for the
      failures, and a `refetch` would fill the rest.

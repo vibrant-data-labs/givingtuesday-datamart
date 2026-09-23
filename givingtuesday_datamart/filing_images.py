@@ -31,11 +31,14 @@ every one seen so far is an image the IRS generated in 2022), ``not_a_pdf``
 ``teos_failed:<exception>`` (the listing request itself),
 ``widths_failed:<exception>`` (poppler failed rather than refused) and
 ``upload_failed:<exception>`` (S3, credentials or disk after a good
-download). Every failure keeps ``attempts`` and ``last_error`` and is
-re-tried until it has three attempts, then left alone until ``refetch``;
-the backfill re-does only its own ``upload_failed`` and ``widths_failed``
-rows. The unreachable set, the 404s by image year and the no-attachment
-filings are therefore queries on this table, not files.
+download). Every failure keeps ``attempts`` and ``last_error``.
+``no_teos_image`` is permanent: TEOS's own listing said so, and an image
+that appears months later is fetched with ``refetch``, not by retrying.
+Every other failure is re-tried until it has three attempts, then left
+alone until ``refetch``; a 404 keeps its attempts because the 2022 batch
+may come back. The backfill re-does only its own ``upload_failed`` and
+``widths_failed`` rows. The unreachable set, the 404s by image year and the
+no-attachment filings are therefore queries on this table, not files.
 
 **Reading back.** ``local_pdf`` is the only way renders and readings get a
 PDF: from the cache directory when the cached file's hash matches the row,
@@ -80,6 +83,10 @@ CACHE = Path.home() / ".cache" / "irs_index"
 MAX_ATTEMPTS = 3
 CHUNK = 50
 FETCHED = ("fetched", "no_attachment")
+# Not retried at all without refetch: TEOS's own listing said there is no
+# image, and one that appears months later is a refetch, not a retry. A 404
+# keeps its attempts because the 2022 batch may come back (Zein, 2026-09-22).
+PERMANENT = ("no_teos_image",)
 
 STAGING_CSVS = (Path("data/exploratory/placeholder_staging.csv"),
                 Path("data/exploratory/placeholder_staging_expanded.csv"))
@@ -447,7 +454,7 @@ def _filings(object_ids: Iterable[str | Filing]) -> list[Filing]:
 
 
 def _retryable(row: FilingImage | None) -> bool:
-    return row is None or (not row.fetched and row.attempts < MAX_ATTEMPTS)
+    return row is None or (not row.fetched and row.status not in PERMANENT and row.attempts < MAX_ATTEMPTS)
 
 
 def _warm_index(cache_dir: Path) -> None:
@@ -541,7 +548,7 @@ def fetch_filings(session, object_ids: Iterable[str | Filing], *, bucket: str = 
     todo = [f for f in filings if refetch or _retryable(prior.get(f.object_id))]
     pending = {f.object_id for f in todo}
     statuses = {f.object_id: prior[f.object_id].status for f in filings if f.object_id not in pending}
-    logger.info("fetch_filings: %d filings, %d to fetch, %d already fetched or out of attempts",
+    logger.info("fetch_filings: %d filings, %d to fetch, %d already fetched, permanent or out of attempts",
                 len(filings), len(todo), len(statuses))
     if not todo:
         return statuses

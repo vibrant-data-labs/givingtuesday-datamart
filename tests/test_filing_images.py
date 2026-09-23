@@ -256,6 +256,21 @@ def test_three_failed_attempts_and_the_filing_is_left_alone_unless_refetch(teos,
     assert store.rows[OID].attempts == 4 and store.rows[OID].last_error is None and s3.puts == [f"irs/pdf/{OID}.pdf"]
 
 
+def test_no_teos_image_is_permanent_until_refetch(teos, tmp_path):
+    row = teos.add(OID)
+    store, s3 = fi.MemoryStore(), _S3()
+    assert _fetch(store, [OID], tmp_path, s3) == {OID: "no_teos_image"} and store.rows[OID].attempts == 1
+    before = teos.requests
+    assert _fetch(store, [OID], tmp_path, s3) == {OID: "no_teos_image"}
+    assert teos.requests == before and store.rows[OID].attempts == 1
+    teos.listing[OID].append(irs_source.Image(_url(row, "20261201"), "20261201", True))   # the IRS generates it
+    teos.serve[_url(row, "20261201")] = PDF
+    teos.widths[PDF] = [IRS, IRS, FILER]
+    assert _fetch(store, [OID], tmp_path, s3) == {OID: "no_teos_image"} and teos.requests == before
+    assert _fetch(store, [OID], tmp_path, s3, refetch=True) == {OID: "fetched"}
+    assert store.rows[OID].attempts == 2 and store.rows[OID].image_generated == date(2026, 12, 1)
+
+
 def test_refetch_of_a_reissued_image_updates_the_hash(teos, tmp_path):
     row = teos.add(OID, [("20230501", PDF)])
     store, s3 = fi.MemoryStore(), _S3()
@@ -483,10 +498,12 @@ def test_backfill_is_a_one_off_seed_and_dry_run_touches_nothing(teos, staging, t
     fi.backfill(store, s3=s3, **staging)
     assert len(s3.puts) == 2 and len(store.rows) == 4 and teos.requests == 0
 
-    # A live fetch then re-tries the one failure still inside its attempts and
-    # fills what the CSVs could not know about it.
+    # A live refetch of the unlisted filing fills what the CSVs could not know
+    # about it (no_teos_image is permanent, so only refetch goes back to TEOS).
     teos.add("202133559349100018", index=_index("202133559349100018", ein="451742989", period="202012", year="2021"))
     _fetch(store, list(store.rows), tmp_path, s3)
+    assert teos.requests == 0
+    _fetch(store, ["202133559349100018"], tmp_path, s3, refetch=True)
     live = store.rows["202133559349100018"]
     assert (live.status, live.attempts, live.index_year) == ("no_teos_image", 2, "2021") and "TEOS lists no" in live.last_error
     assert teos.requests == 1 and len(s3.puts) == 2

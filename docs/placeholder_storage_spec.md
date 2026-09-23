@@ -88,6 +88,7 @@ fresh session should not reopen them.
 | page comparison key | name lower-cased, non-alphanumerics stripped, first 14 characters; amount exact | what the ground-truth scorer uses |
 | flagged pages | load Sonnet's single reading, marked `flagged` | Zein, 2026-09-22; Sonnet alone right on 11 of 23, maximum reasoning changed nothing |
 | PDF retention | indefinite | Zein, 2026-09-22; ~300 GB for the population is cheap against re-fetching, and the IRS loses images |
+| retries | `no_teos_image` never without `refetch`; `pdf_unavailable` and the rest three attempts | Zein, 2026-09-22; TEOS's listing is definitive on the day, the 2022 404 batch may come back |
 | tables | raw `CREATE TABLE IF NOT EXISTS`, no migration tool | the repo's convention (`ingestion.py`, `canonical/build.py`) |
 | tests | no database in unit tests: a store interface with a Postgres implementation and an in-memory one, plus the fake client | the repo's convention — the client tests build on a `sqlite://` engine that never connects |
 
@@ -168,9 +169,12 @@ pages), `no_teos_image`, `pdf_unavailable:<http code>`, `not_a_pdf`
 ours rather than the IRS's: `teos_failed:<exception>` (the TEOS listing
 itself failed), `widths_failed:<exception>` (poppler failed, as opposed
 to rejecting the file), `upload_failed:<exception>` (S3, credentials or
-disk after a good download). Every failure is re-tried until it has
-three attempts; the backfill re-does only its own `upload_failed` and
-`widths_failed` rows. One row per filing; a re-fetch that returns a different
+disk after a good download). `no_teos_image` is permanent — TEOS's own
+listing said so, and an image that appears later is a `refetch`, not a
+retry; every other failure is re-tried until it has three attempts, a
+404 among them because the 2022 batch may come back. The backfill
+re-does only its own `upload_failed` and `widths_failed` rows. One row
+per filing; a re-fetch that returns a different
 `sha256` updates the row, and the old hash's readings stay in
 `page_readings` untouched. A fetched row that fails a re-fetch keeps its
 status and its object; only `attempts` and `last_error` move.
