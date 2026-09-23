@@ -166,7 +166,9 @@ def test_flagged_takes_the_last_escalation_reader_that_could_read_the_page(store
     _store_reading(stores, OID, 4, QWEN, _rows(1)); _store_reading(stores, OID, 4, GEMINI, _rows(2))
     _store_reading(stores, OID, 4, FLASH, None, errors=3); _store_reading(stores, OID, 4, SONNET, None, errors=3)
     result = _agree(stores, _pages(4), tmp_path=tmp_path)
-    assert (_verdict(result, 4).verdict, _verdict(result, 4).accepted_model) == ("unreadable", None)
+    flagged = _verdict(result, 4)                                     # two readers read it and disagree: flagged,
+    assert (flagged.verdict, flagged.accepted_model, flagged.accepted_hash, flagged.matched_models) == (
+        "flagged", None, None, [])                                    # with nothing to load
 
 
 def test_two_empty_readings_are_a_dispute_not_an_agreement(stores, tmp_path):
@@ -179,19 +181,30 @@ def test_two_empty_readings_are_a_dispute_not_an_agreement(stores, tmp_path):
     assert (_verdict(result, 4).verdict, _verdict(result, 4).matched_models) == ("escalated", [FLASH, SONNET])
 
 
-def test_unreadable_when_a_base_reader_is_out_of_attempts_and_the_other_is_not_asked(stores, tmp_path):
-    _store_reading(stores, OID, 3, QWEN, None, errors=3)             # Flash Lite has no reading of p3: asking would buy
+def test_a_base_reader_out_of_attempts_is_absent_and_the_page_goes_through_the_dispute_path(stores, tmp_path):
+    _seed(stores[0], tmp_path, OID, pages=8)
+    _store_reading(stores, OID, 3, QWEN, None, errors=3); _store_reading(stores, OID, 3, GEMINI, _rows(2))
+    _store_reading(stores, OID, 3, FLASH, _rows(2))                                          # Flash Lite = Flash
     _store_reading(stores, OID, 4, QWEN, _rows(2)); _store_reading(stores, OID, 4, GEMINI, None, errors=3)
-    _store_reading(stores, OID, 5, QWEN, _rows(2)); _store_reading(stores, OID, 5, GEMINI, _rows(2))
+    _store_reading(stores, OID, 4, FLASH, _rows(3)); _store_reading(stores, OID, 4, SONNET, _rows(2))   # Qwen = Sonnet
+    _store_reading(stores, OID, 5, QWEN, None, errors=3); _store_reading(stores, OID, 5, GEMINI, _rows(2))
+    _store_reading(stores, OID, 5, FLASH, None, errors=3); _store_reading(stores, OID, 5, SONNET, None, errors=3)
+    _store_reading(stores, OID, 6, QWEN, None, errors=3); _store_reading(stores, OID, 6, GEMINI, None, errors=3)
+    _store_reading(stores, OID, 6, FLASH, _rows(1)); _store_reading(stores, OID, 6, SONNET, _rows(1))   # Flash = Sonnet
+    _store_reading(stores, OID, 7, QWEN, None, errors=3); _store_reading(stores, OID, 7, GEMINI, _rows(2))
+    _store_reading(stores, OID, 7, FLASH, _rows(3)); _store_reading(stores, OID, 7, SONNET, _rows(4))   # three, none agree
+    _store_reading(stores, OID, 8, QWEN, _rows(2)); _store_reading(stores, OID, 8, GEMINI, _rows(2))
     client = _Client([])
-    result = _agree(stores, _pages(3, 4, 5), client, tmp_path)
+    result = _agree(stores, _pages(3, 4, 5, 6, 7, 8), client, tmp_path)
     assert client.json_modes == [] and result.no_verdict == {}
-    assert (_verdict(result, 3).verdict, _verdict(result, 3).readers_consulted) == ("unreadable", 1)
-    assert (_verdict(result, 4).verdict, _verdict(result, 4).readers_consulted) == ("unreadable", 2)
-    assert _verdict(result, 5).verdict == "agreed"
-    for verdict in (_verdict(result, 3), _verdict(result, 4)):
-        assert (verdict.accepted_model, verdict.accepted_hash, verdict.matched_models) == (None, None, [])
-    assert not any(key[:2] == (OID, 3) and key[4] == GEMINI for key in stores[1].rows)
+    third, fourth, fifth, sixth, seventh = (_verdict(result, page) for page in (3, 4, 5, 6, 7))
+    assert (third.verdict, third.matched_models, third.accepted_model, third.readers_consulted) == ("escalated", [GEMINI, FLASH], FLASH, 3)
+    assert (fourth.verdict, fourth.matched_models, fourth.accepted_model, fourth.readers_consulted) == ("escalated", [QWEN, SONNET], SONNET, 4)
+    assert (fifth.verdict, fifth.accepted_model, fifth.matched_models, fifth.readers_consulted) == ("unreadable", None, [], 4)
+    assert (sixth.verdict, sixth.matched_models, sixth.accepted_model) == ("escalated", [FLASH, SONNET], SONNET)
+    assert (seventh.verdict, seventh.accepted_model, seventh.matched_models, seventh.readers_consulted) == ("flagged", SONNET, [], 4)
+    assert _verdict(result, 8).verdict == "agreed"
+    assert stores[1].rows[pr.reading_key(OID, 3, stores[0].rows[OID].sha256, QWEN)].errors == 3   # not read again
 
 
 def test_a_page_a_reader_fails_on_this_run_gets_no_verdict_and_is_not_sent_on(stores, render, tmp_path):
@@ -353,7 +366,8 @@ def _decided(stores, tmp_path, policy=pv.POLICY_V1):
     _store_reading(stores, OID, 4, FLASH, _rows(2), heading="flash")
     for model, n in ((QWEN, 1), (GEMINI, 2), (FLASH, 3), (SONNET, 4)):
         _store_reading(stores, OID, 5, model, _rows(n), heading=model)
-    _store_reading(stores, OID, 6, QWEN, None, errors=3)
+    for model in (QWEN, GEMINI, FLASH, SONNET):
+        _store_reading(stores, OID, 6, model, None, errors=3)             # no reader could read it
     return _agree(stores, _pages(3, 4, 5, 6), tmp_path=tmp_path, policy=policy)
 
 

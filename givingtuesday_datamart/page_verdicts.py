@@ -19,9 +19,11 @@ on the first reading that equals any earlier one. A page no two readers
 agree on after the last is ``flagged``; under ``"flagged": "load_single"``
 its row still names the last escalation reader's reading, so the load
 takes it with the verdict as the mark, and under ``"leave_out"`` it names
-nothing. A page a base reader is out of attempts on (``max_errors``), or
-a disputed page no escalation reader could read, is ``unreadable``.
-Agreement counts only between different models. A policy may carry
+nothing. A reader out of attempts on a page (``max_errors``) is absent
+for it: a page one base reader could not read goes through the dispute
+path with the other base reader and the escalation readers, and is
+accepted on any two that agree; ``unreadable`` is a page fewer than two
+readers could read. Agreement counts only between different models. A policy may carry
 ``"settings": {model: {json_mode, extras}}`` for readings stored under a
 run's own settings rather than today's (the sample's Qwen v3); such a
 policy is a re-derivation and can buy nothing. A single-reader policy
@@ -354,9 +356,11 @@ def agree(session, pages: Sequence[Page], policy: dict = POLICY_V1, *, workers: 
 
     1. Every page is read with each base reader in turn (``read_pages``,
        which is a no-op for stored readings, in a pool of the reader's
-       ``workers``). A page a base reader is out of attempts on
-       (``max_errors``) is ``unreadable``, ``readers_consulted`` the readers
-       tried; the next base reader is not asked for it.
+       ``workers``). A reader out of attempts on a page (``max_errors``) is
+       absent for it, and the page goes on as a dispute: a base reader
+       timing out three times on a dense page must not kill a page three
+       other readers can decide. ``readers_consulted`` counts the readers
+       asked, absent ones included.
     2. Equal, non-empty pairs (``reading_pairs.agree_on``) → ``agreed``:
        the accepted reading is the first base reader's, ``matched_models``
        both. One base reader and no escalation → every page read is
@@ -368,9 +372,9 @@ def agree(session, pages: Sequence[Page], policy: dict = POLICY_V1, *, workers: 
        accurate on the columns the key does not cover (address, purpose, the
        page heading). A reader out of attempts on a page is absent for it.
     4. No match after the last → ``flagged``; under ``"load_single"`` the
-       accepted reading is the last escalation reader's that exists, under
-       ``"leave_out"`` none. A disputed page no escalation reader could read
-       is ``unreadable``.
+       accepted reading is the last escalation reader's that exists (none
+       when every escalation reader was absent), under ``"leave_out"``
+       none. A page fewer than two readers could read is ``unreadable``.
 
     A page a reader failed on this run while still under ``max_errors``
     gets no verdict this run and is not sent to later readers: it is
@@ -456,20 +460,19 @@ def agree(session, pages: Sequence[Page], policy: dict = POLICY_V1, *, workers: 
 
     open_pages = wanted
     for model in base:
-        got = consult(model, open_pages)
-        for page in got.skipped:
-            decide(page, "unreadable")
-        open_pages = [page for page in open_pages if page not in got.skipped and page not in result.no_verdict]
+        consult(model, open_pages)                        # a reader out of attempts is absent for the page
+        open_pages = [page for page in open_pages if page not in result.no_verdict]
     disputed: list[Page] = []
     for page in open_pages:
-        counters = [read[page][model] for model in base]
-        if len(base) == 1 or agree_on(counters[0], counters[1]):
+        present = [model for model in base if model in read[page]]
+        if len(present) == len(base) and (len(base) == 1 or agree_on(read[page][base[0]], read[page][base[1]])):
             decide(page, "agreed", accepted=base[0], matched=base)
         else:
             disputed.append(page)
-    logger.info("agree %s: %d pages, %d agreed by %s, %d disputed, %d unreadable, %d without a verdict this run",
-                version, len(wanted), len(open_pages) - len(disputed), " + ".join(base), len(disputed),
-                sum(v.verdict == "unreadable" for v in result.verdicts.values()), len(result.no_verdict))
+    absent = sum(1 for page in disputed if any(model not in read[page] for model in base))
+    logger.info("agree %s: %d pages, %d agreed by %s, %d disputed (%d with a base reader out of attempts), "
+                "%d without a verdict this run", version, len(wanted), len(open_pages) - len(disputed),
+                " + ".join(base), len(disputed), absent, len(result.no_verdict))
     flush("the base pair")
 
     for stage, model in enumerate(escalation):
@@ -492,8 +495,9 @@ def agree(session, pages: Sequence[Page], policy: dict = POLICY_V1, *, workers: 
         disputed = still
         flush(model)
     for page in disputed:
-        produced = [model for model in escalation if model in read[page]]
-        if escalation and not produced:
+        readable = [model for model in base + escalation if model in read[page]]
+        produced = [model for model in escalation if model in readable]
+        if len(readable) < 2:
             decide(page, "unreadable")
         elif rule == "load_single" and produced:
             decide(page, "flagged", accepted=produced[-1])

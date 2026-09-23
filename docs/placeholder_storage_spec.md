@@ -89,6 +89,7 @@ fresh session should not reopen them.
 | DPI | 200 | 130 misread digits; 300 costs more for nothing |
 | page comparison key | name lower-cased, non-alphanumerics stripped, first 14 characters; amount exact | what the ground-truth scorer uses |
 | flagged pages | load Sonnet's single reading, marked `flagged` | Zein, 2026-09-22; Sonnet alone right on 11 of 23, maximum reasoning changed nothing |
+| a base reader out of attempts on a page | the reader is absent for it and the page goes through the dispute path; `unreadable` only when fewer than two readers could read it | Zein, 2026-09-23; a base reader timing out three times on a dense page must not kill a page three other readers can decide |
 | PDF retention | indefinite | Zein, 2026-09-22; ~300 GB for the population is cheap against re-fetching, and the IRS loses images |
 | retries | `no_teos_image` never without `refetch`; `pdf_unavailable` and the rest three attempts | Zein, 2026-09-22; TEOS's listing is definitive on the day, the 2022 404 batch may come back |
 | tables | raw `CREATE TABLE IF NOT EXISTS`, no migration tool | the repo's convention (`ingestion.py`, `canonical/build.py`) |
@@ -317,9 +318,13 @@ last → `flagged`; under `"flagged": "load_single"` the row still carries
 `accepted_model` and `accepted_hash` for the last escalation reader's
 reading that exists, with `matched_models` empty, so the load takes the
 reading and the verdict travels with it as the mark; under `"leave_out"`
-both are NULL. A page one base reader could not read at all after
-`max_errors` → `unreadable` (the other base reader is not asked for it),
-and so is a disputed page no escalation reader could read. A page a
+both are NULL. A reader out of attempts on a page (`max_errors`) is
+absent for it: a page one base reader could not read goes through the
+dispute path — the other base reader and the escalation readers in the
+usual order, accepted on any two that agree — and `unreadable` is
+reserved for a page fewer than two readers could read (the decisions
+table: a base reader timing out three times on a dense page must not
+kill a page three other readers can decide). A page a
 reader failed on *this run* while still under `max_errors` gets no
 verdict this run and is not sent to later readers; `AgreeResult` lists
 it (`no_verdict`, with why) beside `verdicts` (page → `Verdict`, as
