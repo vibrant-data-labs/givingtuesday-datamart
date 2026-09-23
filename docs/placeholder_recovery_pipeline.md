@@ -537,10 +537,23 @@ under v2; v4 is read without JSON mode from the first call, and the
 empty-list answers of v2 are gone). 3.8 Flash reports 1.8 times Flash
 Lite's output tokens on the same 1,147 pages while returning the same
 text — 7,270 against 7,200 characters a page, the same name, address and
-purpose lengths — so the difference is tokens the model spent thinking,
-which the gateway reports inside the completion count and bills; that,
-at 1.5 times Flash Lite's output price, is why it costs three times as
-much a page.
+purpose lengths — so the difference is tokens the model spends before
+it answers, reported inside the completion count and billed; that, at
+1.5 times Flash Lite's output price, is why it costs three times as
+much a page. `reasoning_effort: none` does not remove them (tried on
+the 83 ground-truth pages under a request hash of its own, 2026-09-23,
+the only other read of the session): 3.8 Flash then answered 24 pages
+on the first call against 64 by default, the retry ladder re-asked the
+rest, 7 pages ran to the 32K-token limit and came back partial, output
+tokens a page went from 5,520 to 12,840, the cost from $0.022 to $0.050
+a page and the median latency from 26 s to 56 s — and the reading was
+no better: 96.6% precision and 91.1% recall against the truth versus
+94.2% / 94.0%, 58 of 83 pages exact against 59, the pairs identical to
+the default's on 61 of 83 (where they differ, the default is exact on
+4, thinking-off on 3, neither on 15). The default stays. One caveat on
+every dollar figure here: a row's `usage` is the kept attempt's, so the
+retry ladder's other calls are not counted — about 800 of the
+rehearsal's 5,844 calls, roughly $4 on top of the $63 the rows report.
 
 **Filings that changed outcome against the v3 single reads** (15 of the
 100; `compare`): v1 gains Kenan 2021, Roberts 2022, Eden Hall 2023,
@@ -1007,8 +1020,10 @@ page, so the question may be moot.
    pages), no call made and the directory still empty; the estimate
    before the run was about $80 (base pair $15, 3.8 Flash on ~1,150
    disputes $25, Sonnet on ~750 still open $40). The real run took
-   **118 minutes of wall time and $63.07**, in two parts, because it was
-   stopped once by hand (below). Every gateway call — 5,844 across the
+   **118 minutes of wall time and $63.07** by the rows' `usage` (the
+   kept attempt's tokens; the retry ladder's other calls, about 800 of
+   the 5,844, add roughly $4 the rows do not see), in two parts,
+   because it was stopped once by hand (below). Every gateway call — 5,844 across the
    five stages — was answered HTTP 200: no 429, no timeout, no error row,
    no page at `max_errors`, no render or S3 failure, nothing for
    `reparse` to recover, `no_verdict` empty at the end, so no third run
