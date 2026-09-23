@@ -31,12 +31,14 @@ and [placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md).
    pip install -e '.[ingest]'
    ```
 
-3. **Two environment variables**, in `~/.bashrc` or a file you `source`
-   before starting tmux:
+3. **Two environment variables**, in a file you `source` before starting
+   tmux (`~/frame.env`, mode 600; `PYTHON` there too saves activating the
+   venv):
 
    ```bash
    export VERCEL_AI_GATEWAY_API_KEY=...                  # the gateway key
    export GT_DATAMART_CONFIG_PATH=$HOME/config.ini      # [postgres] host, port, user, password
+   export PYTHON=$HOME/venv-frame/bin/python
    ```
 
    The `config.ini` needs only the `[postgres]` section; the database name
@@ -65,8 +67,13 @@ and [placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md).
 From the repo root, with the environment variables set:
 
 ```bash
-tmux new -s frame 'bash scripts/run_frame.sh data/exploratory/placeholder_sample_1000.csv /data/irs_index'
+source ~/frame.env
+tmux -L frame new -s frame 'bash scripts/run_frame.sh data/exploratory/placeholder_sample_1000.csv /data/irs_index'
 ```
+
+`-L frame` starts a tmux server of its own, which inherits the shell's
+environment; a session opened on a server that is already running (the
+box runs one for the marimo playground) would not see the variables.
 
 The script checks every prerequisite first and stops at the first thing
 missing, with a message saying what. Then, each stage under a timestamped
@@ -84,7 +91,7 @@ transcribe** if any page was left without a verdict; the **final check**
 **status** reports. Every stage logs to its own file under
 `logs/frame-<start time>/`, and `run_frame.log` there mirrors the pane. The
 pane closes when the script ends; the log has everything. Detach with
-`Ctrl-b d`, reattach with `tmux attach -t frame`.
+`Ctrl-b d`, reattach with `tmux -L frame attach -t frame`.
 
 `--dry-run` stops after the cost gate, so the projection can be committed
 from the laptop before the box runs the script for real:
@@ -123,7 +130,7 @@ with the rows, errors, partial pages and dollars so far.
 
 ## Stop, and start again
 
-**Ctrl-C in the pane is safe** (so is `tmux send-keys -t frame C-c` from
+**Ctrl-C in the pane is safe** (so is `tmux -L frame send-keys -t frame C-c` from
 another window, or `kill -INT` on the script's pid): the readers cancel the
 pages not yet started, record the results of the pages in flight (at most
 the workers' count, about a dollar), and the script stops with a banner.
