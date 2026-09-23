@@ -5,6 +5,7 @@ parts (downloading images, paying a model) must not be repeated when the
 cheap part (the selector) changes.
 
     python -m givingtuesday_datamart.exploratory.placeholder_recovery sample
+    python -m givingtuesday_datamart.exploratory.placeholder_recovery sample --expand-1000
     python -m givingtuesday_datamart.exploratory.placeholder_recovery stage
     python -m givingtuesday_datamart.exploratory.placeholder_recovery transcribe --policy v1
     python -m givingtuesday_datamart.exploratory.placeholder_recovery report --policy v1 --out data/exploratory/placeholder_report_v1.csv
@@ -13,10 +14,13 @@ cheap part (the selector) changes.
 ``sample`` builds the stratified frame from GT's combined grants extract.
 The population is violently top-heavy — 22 filings carry $4.67B while 6,755
 carry $1.76B — so a uniform draw would spend 70% of the budget measuring
-noise. Bands A is a census; B, C and D are sampled and extrapolated. It
-also writes the rows the XML itemises for the sampled filings (named Part
-XV lines, the expenditure-responsibility statement): those never need
-transcribing, and the attachment routinely leaves them out.
+noise. Bands A is a census; B, C and D are sampled and extrapolated. The
+expanded frames — ``--expand``, 610 filings with B a census; ``--expand-1000``,
+C and D topped up to 1,000 — are drawn on top of the 100 from the same
+seeded generator, so every earlier frame regenerates unchanged inside the
+next. It also writes the rows the XML itemises for the sampled filings
+(named Part XV lines, the expenditure-responsibility statement): those
+never need transcribing, and the attachment routinely leaves them out.
 
 Two classes are excluded, for different reasons. Three named
 patient-assistance programs (Genentech Patient Foundation, Boehringer
@@ -54,6 +58,7 @@ import csv
 import re
 import sys
 from pathlib import Path
+from typing import Sequence
 
 from givingtuesday_datamart import filing_images, irs_source, vlm_transcription
 from givingtuesday_datamart.attachment_grants import (
@@ -70,6 +75,8 @@ MANIFEST_CSV = Path("data/exploratory/placeholder_staging.csv")
 EXPANDED = {"sample": Path("data/exploratory/placeholder_sample_expanded.csv"),
             "xml_rows": Path("data/exploratory/placeholder_sample_expanded_xml_rows.csv"),
             "manifest": Path("data/exploratory/placeholder_staging_expanded.csv")}
+FRAME_1000 = {"sample": Path("data/exploratory/placeholder_sample_1000.csv"),
+              "xml_rows": Path("data/exploratory/placeholder_sample_1000_xml_rows.csv")}
 CACHE = Path.home() / ".cache" / "irs_index"
 PF_SOURCES = ("990PF_P14_3A", "990PF_P14_3B")
 SEED = 20260921
@@ -86,6 +93,13 @@ STRATA = (("A", 1e8, float("inf"), None), ("B", 1e7, 1e8, 44),
 # one. Drawn from the broadened classifier's population, on top of the
 # original 100, which are kept exactly as drawn.
 EXPANSION = {"B": None, "C": 100, "D": 50}
+# The 1,000-filing frame: bands C and D topped up on top of the 610 to the
+# same sampling fraction — 540 of the 9,055 filings in the two bands, 5.96%,
+# so 137 of C's 2,296 and 403 of D's 6,759 — as the next draws from the same
+# generator, so the 610 are kept exactly as drawn. A and B are already a
+# census. The split is Zein's to change (Session 4, 2026-09-23).
+EXPANSION_1000 = {"B": None, "C": 137, "D": 403}
+FRAMES = {"610": (EXPANSION,), "1000": (EXPANSION, EXPANSION_1000)}
 _OBJECT_ID = re.compile(r"(?<!\d)(\d{18})(?!\d)")
 VERDICT_KINDS = ("agreed", "escalated", "flagged", "unreadable", "no_verdict")
 
@@ -155,12 +169,15 @@ def _row(label, key, value, pool, classifier):
             "is_canary": ein in CANARIES, **({"classifier": classifier} if classifier else {})}
 
 
-def build_sample(out: Path, xml_rows_out: Path, expand: bool = False) -> None:
-    """The 100-filing frame, or with ``expand`` the 500-filing one on top of it.
+def build_sample(out: Path, xml_rows_out: Path, expansions: Sequence[dict] = ()) -> None:
+    """The 100-filing frame, or with ``expansions`` (``FRAMES``) the 610- and
+    1,000-filing ones on top of it.
 
     The base draw is repeated exactly, so the original 100 regenerate
-    unchanged. The extra filings are drawn afterwards, from the broadened
-    classifier's population, with the population columns restated for it.
+    unchanged, and each expansion is drawn after the last from the same
+    generator, so the 610 regenerate unchanged inside the 1,000. The extra
+    filings come from the broadened classifier's population, with the
+    population columns restated for it.
     """
     import random
 
@@ -187,23 +204,25 @@ def build_sample(out: Path, xml_rows_out: Path, expand: bool = False) -> None:
                         sum(v["amt"] for _, v in pool), sum(v["amt"] for _, v in chosen)))
         for key, value in chosen:
             keys.append(key)
-            picked.append(_row(label, key, value, pool, "v1" if expand else ""))
+            picked.append(_row(label, key, value, pool, "v1" if expansions else ""))
 
-    if expand:
+    if expansions:
         # Only now, so the RNG state behind the base draw is untouched.
         wide, itemised = _read_population(is_pointer)
         wide = _addressable(wide)
         print(f"broadened classifier: {len(wide):,} addressable filings "
               f"${sum(v['amt'] for v in wide.values())/1e9:.2f}B\n")
         already = set(keys)
+        pools = {label: sorted([(k, v) for k, v in wide.items() if low <= v["amt"] < high],
+                               key=lambda kv: -kv[1]["amt"]) for label, low, high, _ in STRATA}
+    for expansion in expansions:
         summary = []
-        for label, low, high, _ in STRATA:
-            pool = sorted([(k, v) for k, v in wide.items() if low <= v["amt"] < high],
-                          key=lambda kv: -kv[1]["amt"])
+        for label, _, _, _ in STRATA:
+            pool = pools[label]
             base = [r for r in picked if r["stratum"] == label]
             for r in base:                       # restate the population for the new frame
                 r["stratum_pop"], r["stratum_pop_dollars"] = len(pool), round(sum(v["amt"] for _, v in pool), 2)
-            take = EXPANSION.get(label)
+            take = expansion.get(label)
             rest = [kv for kv in pool if kv[0] not in already]
             extra = rest if take is None else rng.sample(rest, max(0, min(take - len(base), len(rest))))
             for key, value in extra:
@@ -526,6 +545,8 @@ def main() -> None:
     p.add_argument("--xml-rows", type=Path, default=None)
     p.add_argument("--expand", action="store_true",
                    help="the expanded frame: band B in full, C to 100, D to 50, on top of the 100 (610 filings)")
+    p.add_argument("--expand-1000", action="store_true",
+                   help="the 1,000-filing frame: C to 137 and D to 403, the same sampling fraction, on top of the 610")
 
     p = sub.add_parser("stage", help="fetch the IRS PDFs and find where the attachments start")
     p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
@@ -563,9 +584,9 @@ def main() -> None:
         compare([(name, Path(path)) for name, path in (item.split("=", 1) for item in args.reports)], args.out)
         return
     if args.command == "sample":
-        build_sample(args.out or (EXPANDED["sample"] if args.expand else SAMPLE_CSV),
-                     args.xml_rows or (EXPANDED["xml_rows"] if args.expand else XML_ROWS_CSV),
-                     args.expand)
+        frame = "1000" if args.expand_1000 else "610" if args.expand else None
+        paths = {"1000": FRAME_1000, "610": EXPANDED, None: {"sample": SAMPLE_CSV, "xml_rows": XML_ROWS_CSV}}[frame]
+        build_sample(args.out or paths["sample"], args.xml_rows or paths["xml_rows"], FRAMES.get(frame, ()))
     elif args.command == "stage":
         stage(args.sample, args.cache, args.limit, args.manifest)
     else:
