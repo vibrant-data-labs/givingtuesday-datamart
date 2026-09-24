@@ -1150,6 +1150,104 @@ page, so the question may be moot.
      resumes from the tables. The one thing the rehearsal could not
      exercise is a gateway refusal or a timeout: the error path exists
      and is unit-tested, and `no_verdict` plus a re-run is the recovery.
+   **Frame run** (2026-09-23/24; Session 4: the 1,000-filing frame under
+   `POLICY_V2`, on the EC2 box, through one command; the results are
+   *The 1,000-filing frame under POLICY_V2* above). What the run needed,
+   in order, and what each step found:
+   - **The frame.** `sample --expand-1000` tops bands C and D up on top of
+     the 610 to the same sampling fraction (540 of the two bands' 9,055
+     filings, 5.96%: C 137 of 2,296, D 403 of 6,759), as the next draws
+     from the same seeded generator, so the 610 regenerate unchanged
+     inside the 1,000. `filing_images fetch` on the 390 new filings took
+     85 s from the laptop (180 fetched, 134 without an attachment, 48 with
+     no TEOS image, 28 unserved 404s, all 2022 images; the 610 made no
+     request). The frame as read: 1,000 filings of 677 filers, 831 with a
+     PDF, 553 with an attachment (278 are the IRS rendering and nothing
+     else, 103 have no TEOS image, 66 a 404), 9,926 attachment pages out
+     of 39,917 in the fetched PDFs, 579 of them the top-up's. Johnson &
+     Johnson is four years of the frame, not the one year of the sample —
+     2020, 2021, 2022 and 2023 at 550, 836, 1,089 and 855 pages — 3,330
+     pages, a third of the frame.
+   - **The cost gate** (`estimate`, `run`'s stage 3; from the laptop first
+     with `--dry-run`, 31 s, nothing bought): 8,144 pages without a Qwen
+     v4 reading, and at the rehearsal's per-page prices and re-weighted
+     rates a projection of $241.50 against the $400 cap. The run cost
+     **$221.64** by the rows' `usage` (every call's tokens, from
+     2026-09-23): Qwen 7,613 pages $19.30, Flash Lite 7,606 $46.89, 3.8
+     Flash at low 5,959 $54.21, Sonnet 2,953 $101.24 — Sonnet at $0.034 a
+     page against the $0.046 the sample priced it at, the other three
+     within 10% of theirs.
+   - **The box.** `zein_playground`, a t3.xlarge (4 vCPUs, 15 GB, 100 GB
+     disk with 22 GB free), Amazon Linux 2023, Python 3.12.6 in a venv
+     with the `ingest` extra (`openai` added to it: the gateway client
+     imports it), poppler-utils 22.08.0 from dnf, tmux and git-lfs already
+     there, TEOS and the gateway reachable, S3 through the account's keys
+     in `~/.aws` rather than an instance role, the datamart through
+     `~/config.ini`. Set up per [placeholder_ec2_runbook.md](placeholder_ec2_runbook.md)
+     in about ten minutes; the prerequisites stage passes in a second.
+   - **Rendering is the box's bottleneck, and it stalled the first attempt.**
+     Twenty minutes into a first try, answers fell from about a hundred a
+     minute to none: no refusal or timeout, but the four cores at 100% on
+     eight `pdftoppm` processes — each reader's four render workers on the
+     frame's giants (J&J 2022, 2023 and 2020), rendered whole, in
+     duplicate, one single-threaded process each at about 2 s a page (0.5
+     s alone; the laptop's M2 Pro does 0.4) — while every read job queued
+     behind them. `read_pages` now renders in chunks of 20 pages
+     (`RENDER_CHUNK`), one job per chunk, so the read pool consumes each
+     chunk as it lands (about 30 s each on the box) and a giant spreads
+     across the render workers.
+   - **Two races the chunks exposed, both in temp-file names keyed on the
+     process id.** With four chunk renders of one filing in one process,
+     `render`'s `tmp<pid>` prefix was shared, and the first chunk to
+     finish globbed the prefix and unlinked the PNGs the others were
+     still writing: an hour in, every read of those pages raised
+     `FileNotFoundError` before the gateway call (3,033 in Flash Lite,
+     2,045 in Qwen, unrecorded, so unpaid), and each reader exited on the
+     collected failure once its queue drained, Flash Lite with 4,575 pages
+     stored, Qwen 2,800. `render` now writes each `pdftoppm` run into a
+     directory of its own and raises when a promised PNG is absent, so a
+     page pdftoppm cannot produce is an error row for its chunk. The same
+     shape in `filing_images._stage`, the PDF download's `<pdf>.<pid>.tmp`:
+     two chunk jobs of J&J 2021 in the transcribe process staged the same
+     download and one rename took the file from the other, 19 error rows
+     (`pdf: FileNotFoundError`), read again by `run`'s second transcribe
+     with the PDF in the cache. Each staged download now has a name of
+     its own. The rule: nothing keyed on the pid is unique once render
+     jobs are per chunk.
+   - **Ctrl-C under `run`, on the box, three times.** With the readers as
+     child processes in the pane's process group, each Ctrl-C reached
+     both: the readers cancelled their queued pages (7,057 the first
+     time, 1,505 the last) and recorded the ones in flight, `run` waited
+     for them and exited, and the same command resumed within two
+     minutes at page granularity — prerequisites in a second, fetch 0
+     requests, the gate naming what was left, the smoke on stored pages.
+     The third stop was the worker trial: Qwen from 40 to 80 for its last
+     1,592 pages, +54% aggregate output (1,979 to 3,048 tokens a second)
+     at a fifth less speed per call (52 to 42 tokens a second), zero
+     errors, every answer 200 — the count stays at 80; the pages-a-minute
+     jump (54 to 240) was mostly the tail's lighter pages (775 output
+     tokens a page against 2,221).
+   - **Stages, wall time and cost.** End to end 22:37 to 02:20 UTC, 3 h
+     43 min, with the two stops and the crash inside it; the last start
+     ran 1 h 34 min from prerequisites to status. The base pair read for
+     2 h 16 min across the three starts, in parallel: Flash Lite 7,606
+     pages in 93 min at 81 a minute (12 workers, 6.4 s median, 1.01 calls
+     a page), Qwen 7,613 in 138 min at 55 a minute (40 then 80 workers,
+     41 s median, p90 75, 1.10 calls a page, 300 partial pages, every one
+     of them dense). 3.8 Flash at low: 5,959 disputed pages in 45 min at
+     131 a minute (24 workers, 12.0 s median, p90 17.4). Sonnet: 2,953 in
+     36 min at 82 a minute (24 workers, 16.8 s median, p90 38.3). The
+     second transcribe 42 s for the 20 pages, the final check 11 s. No
+     gateway refusal, timeout or error row in 24,131 pages bought; the
+     only error rows were the 20 above.
+   - **Zero-cost checks after the run.** The final stored-only pass inside
+     `run`: 0 pages bought, 0 verdict rows written, 11 s. `run` again on
+     the box as the resume check: 42 s end to end, every stage on stored
+     readings, 0 bought, 0 written. `verdicts --policy v2` on the
+     ground-truth pages: 58 / 2 / 23, the same two wrong pages as v1, 11
+     of 23 flagged right in Sonnet's reading. Traceability on the 9,926
+     verdicts: none without its accepted reading, none decided without
+     two readings, none flagged from a reader but Sonnet.
 5. ~~Decide the flagged-page policy before that run's load.~~ Decided
    (2026-09-22, the spec's decisions table): loaded from Sonnet's single
    reading with the verdict as the mark, `POLICY_V1["flagged"] =

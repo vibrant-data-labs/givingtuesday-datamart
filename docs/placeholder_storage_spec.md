@@ -19,7 +19,11 @@ under `POLICY_V1` from an empty cache, $63 and 118 minutes, every gateway
 call answered, projecting the 9,347-page frame at about $330 and 8 hours
 under v1 and about $270 and 7 hours under `POLICY_V2`, 3.8 Flash at low
 reasoning effort (the *Rehearsal run* note there and the *Sample under
-POLICY_V1* results); the 1,000-filing run itself, under v2, is next. Background and the measurements
+POLICY_V1* results); and Session 4's run itself on 2026-09-23/24 — the
+1,000-filing frame, 9,926 attachment pages, under `POLICY_V2` on the EC2 box
+through one command, $222 and 3 h 43 min with two stops inside, every
+success metric below met (the *Frame run* note there and *The 1,000-filing
+frame under POLICY_V2*). Background and the measurements
 every decision below rests on are in
 [placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md);
 the short report is [placeholder_grant_recovery.md](placeholder_grant_recovery.md).
@@ -448,14 +452,14 @@ verdicts, one for the readings; None where the verdict names no reading.
 
 ## Success metrics
 
-| metric | target | how measured |
-|---|---|---|
-| API calls on re-derivation | 0 | gateway call count during `report` / `agree` on a stored frame |
-| resume cost of a completed stage | 0 calls | re-run `read_pages` on the frame |
-| base-pair wall time, 10,000 pages | under 6 h | run log |
-| design cost, 9,347-page frame | $300–$430 | sum of `usage` × `PRICES` |
-| traceability | every loaded row joins to its verdict and two readings | a query with no orphans |
-| ground-truth reproduction | 58 / 2 / 23 | the scorer's `verdicts` command against its `policies` |
+| metric | target | how measured | measured on the frame run (2026-09-24) |
+|---|---|---|---|
+| API calls on re-derivation | 0 | gateway call count during `report` / `agree` on a stored frame | 0: the run's final stored-only pass bought 0 pages and wrote 0 verdict rows; the reports ran from the tables with no call |
+| resume cost of a completed stage | 0 calls | re-run `read_pages` on the frame | 0: `run` again on the box after the run, 42 s, every stage on stored readings, 0 bought |
+| base-pair wall time, 10,000 pages | under 6 h | run log | 2 h 16 min for 9,926 pages, in parallel (Flash Lite 93 min, Qwen 138 min) |
+| design cost, 9,347-page frame | $300–$430 | sum of `usage` × `PRICES` | $221.64 for 9,926 pages under v2 (the range was priced under v1; v1 at the run's rates, 3.8 Flash at $0.022 a page, would be about $300) |
+| traceability | every loaded row joins to its verdict and two readings | a query with no orphans | 9,926 verdicts: 0 without their accepted reading, 0 decided pages without two readings, 0 flagged from a reader but Sonnet |
+| ground-truth reproduction | 58 / 2 / 23 | the scorer's `verdicts` command against its `policies` | 58 / 2 / 23 under v2, the same two wrong pages, 11 of 23 flagged right |
 
 ## Open questions
 

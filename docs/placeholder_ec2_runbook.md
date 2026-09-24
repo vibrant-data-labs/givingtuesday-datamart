@@ -153,9 +153,11 @@ runs `transcribe` a second time for them, and a re-run reads them again
 until they have three errors, after which the reader is absent for the page
 and the other readers decide it.
 
-**What to expect.** About $250 and five hours under `POLICY_V2`: the base
-pair about 3 hours in parallel (Qwen-bound; 40 workers gave 53 pages a
-minute, 80 is being tried), 3.8 Flash at
-`low` and Sonnet about an hour each. The cost gate stops the run if the
-projection passes $400; stop it yourself if `page_readings status` on the
-laptop projects past that over the pre-run total.
+**What to expect.** The 1,000-filing frame (9,926 attachment pages) cost
+$222 and 3 h 43 min of wall on the box under `POLICY_V2` on 2026-09-23/24,
+two stops included: the base pair 2 h 16 min in parallel (Flash Lite 81
+pages a minute at 12 workers, Qwen 55 at 40 then 80), 3.8 Flash at `low`
+45 min for 5,959 disputed pages, Sonnet 36 min for 2,953. The cost gate
+stops the run if the projection passes $400; stop it yourself if
+`page_readings status` on the laptop projects past that over the pre-run
+total.
