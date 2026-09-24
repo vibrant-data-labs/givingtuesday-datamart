@@ -777,10 +777,15 @@ def _stored_only(
     policy: dict,
     cache: Path,
     max_errors: int,
+    *,
+    final: bool,
 ) -> str | None:
     """``agree`` with ``buy=False``. Returns what is missing when a reader lacks
     readings (no call is made); returns None when every reading is stored, in
-    which case the pass must have bought nothing and written nothing."""
+    which case the pass must have bought nothing. Verdict rows written are
+    legitimate at the cost gate (a new policy version over stored readings
+    derives its verdicts there, at no cost) and a failure at the ``final``
+    check, which follows the run's own transcribe."""
     try:
         # ``buy=False``: stored readings only. When a reader has no reading
         # for some page, ``read_pages`` raises MissingReadings before any
@@ -792,15 +797,16 @@ def _stored_only(
         return exc.summary
     print(summary(result))
     # It got through, so every reading was stored and nothing can have been
-    # bought; and the verdicts already on the table under this policy are
-    # the same decisions, so nothing should have been written either. Either
-    # count above zero means the tables are not what they should be: stop.
+    # bought. After the run's own transcribe the verdicts on the table are
+    # the same decisions, so the final check must have written nothing
+    # either; at the cost gate, verdicts written are a new version's.
     bought = sum(spent["pages"] for spent in result.bought.values())
-    if bought or result.written:
+    if bought or (final and result.written):
         _stop(f"the stored-only pass bought {bought} pages and wrote {result.written} verdict "
               "rows; it should have done neither")
-    _note("every reading the policy needs is stored: the stored-only pass bought nothing and "
-          "wrote nothing")
+    written = f"wrote {result.written} verdict rows" if result.written else "wrote nothing"
+    _note(f"every reading the policy needs is stored: the stored-only pass bought nothing and "
+          f"{written}")
     return None
 
 
@@ -910,7 +916,8 @@ def run(
     2. fetch: ``fetch_filings`` on the frame; zero requests when everything
        is stored, and the log says so.
     3. the cost gate: the stored-only pass (which names the pages without a
-       reading, or passes buying and writing nothing) and ``estimate``'s
+       reading, or passes buying nothing; a new policy version over stored
+       readings writes its verdicts here at no cost) and ``estimate``'s
        projection; past ``cap`` the run stops, and ``dry_run`` stops here.
     4. the base readers as child processes of the ``page_readings`` CLI, at
        ``WORKERS`` each, a log file each. Nothing spends before a render has
@@ -1000,7 +1007,7 @@ def run(
         # without readings, having bought nothing, and that is the expected
         # answer; on a resumed run with everything stored it must get through
         # buying and writing nothing.
-        missing = _stored_only(stores, pages, policy, cache, max_errors)
+        missing = _stored_only(stores, pages, policy, cache, max_errors, final=False)
         if missing:
             _note(f"stored-only stopped, no call made: {missing}")
         # The projection: what the readers would buy today at PER_PAGE, less
@@ -1052,7 +1059,7 @@ def run(
         _banner(f"final check: transcribe --policy {version} --stored-only must buy nothing "
                 "and write nothing")
         stage_started = time.monotonic()
-        missing = _stored_only(stores, pages, policy, cache, max_errors)
+        missing = _stored_only(stores, pages, policy, cache, max_errors, final=True)
         if missing:
             _stop(f"the stored-only check found readings missing: {missing}; run the same "
                   "command again")

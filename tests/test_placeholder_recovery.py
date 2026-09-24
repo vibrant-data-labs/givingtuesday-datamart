@@ -212,6 +212,19 @@ def test_run_dry_run_stops_after_the_cost_gate_and_reads_nothing(run_stores, box
     assert box.popen.commands == [] and client.json_modes == [] and box.render.calls == [] and run_stores[2].rows == {}
 
 
+def test_run_cost_gate_lets_a_new_policy_version_write_its_verdicts_over_stored_readings(run_stores, box, tmp_path, capsys):
+    filings, readings, verdicts = run_stores
+    for page in (3, 4, 5, 6):                                    # Qwen stored too: nothing to buy, no verdicts yet
+        key = pr.reading_key(OID, page, filings.rows[OID].sha256, QWEN, "v4")
+        readings.rows[key] = pr.PageReading(*key, request=pr.request(QWEN),
+                                            response={"page_kind": "grants_paid_list", "heading": "", "rows": _rows(3), "totals": []})
+    _run(run_stores, _frame_csv(tmp_path), tmp_path, client=_Client([]))
+    out = capsys.readouterr().out
+    assert "the stored-only pass bought nothing and wrote 4 verdict rows" in out and "cost gate passed" in out
+    assert "final check passed" in out and "0 pages bought, 0 verdict rows written" in out
+    assert sorted(v.verdict for v in verdicts.rows.values()) == ["agreed"] * 4
+
+
 def test_run_stops_at_the_cost_cap(run_stores, box, tmp_path, capsys):
     with pytest.raises(SystemExit):
         _run(run_stores, _frame_csv(tmp_path), tmp_path, cap=0.001)
