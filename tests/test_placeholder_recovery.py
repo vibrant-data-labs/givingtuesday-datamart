@@ -185,6 +185,7 @@ def test_run_drives_every_stage_and_ends_with_a_stored_only_check_that_buys_noth
     assert [c[c.index("--model") + 1] for c in box.popen.commands] == [QWEN, GEMINI]
     assert ([c[c.index("--workers") + 1] for c in box.popen.commands]
             == [str(pv.WORKERS[QWEN]), str(pv.WORKERS[GEMINI])])
+    assert [c[c.index("--prompt-version") + 1] for c in box.popen.commands] == ["v4", "v4"]
     assert all(c[:3] == [__import__("sys").executable, "-m", "givingtuesday_datamart.page_readings"] for c in box.popen.commands)
     assert (tmp_path / "logs" / "qwen3-vl-instruct.log").read_bytes() == b"fake reader\n"
     assert sorted(v.verdict for v in run_stores[2].rows.values()) == ["agreed"] * 4

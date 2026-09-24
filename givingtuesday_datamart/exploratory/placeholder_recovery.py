@@ -806,15 +806,17 @@ def _stored_only(
 
 def _base_readers(
     models: list[str],
+    prompt_version: str,
     sample: Path,
     cache: Path,
     logs: Path,
     max_errors: int,
 ) -> None:
     """The base readers as child processes of the ``page_readings`` CLI, one
-    log file each. Children, not threads: a Ctrl-C in the pane reaches each
-    reader on its own main thread and ``upsert_as_done``'s stop path runs in
-    each; this waits for them, then re-raises."""
+    log file each, reading under the policy's prompt version. Children, not
+    threads: a Ctrl-C in the pane reaches each reader on its own main thread
+    and ``upsert_as_done``'s stop path runs in each; this waits for them,
+    then re-raises."""
     children = []
     for model in models:
         name = model.split("/")[-1]                       # "qwen3-vl-instruct": the log's name
@@ -822,12 +824,14 @@ def _base_readers(
         # Flash Lite 24); the default for a model not listed there.
         workers = WORKERS.get(model, page_verdicts.DEFAULT_WORKERS)
         # The same command a person would type by hand: the page_readings
-        # CLI on the frame CSV, with the model and the worker count.
+        # CLI on the frame CSV, with the model, the policy's prompt version
+        # (the readings transcribe will look up) and the worker count.
         # ``sys.executable`` is this interpreter, so the child runs in the
         # same venv with the same environment (the key, the config path).
         command = [sys.executable, "-m", "givingtuesday_datamart.page_readings",
                    "--cache", str(cache), "read", str(sample), "--model", model,
-                   "--workers", str(workers), "--max-errors", str(max_errors)]
+                   "--prompt-version", prompt_version, "--workers", str(workers),
+                   "--max-errors", str(max_errors)]
         log_path = logs / f"{name}.log"
         _note(f"{name}: {' '.join(command)} > {log_path}")
         # Append mode, bytes: the child writes its stdout and stderr (merged)
@@ -1019,7 +1023,7 @@ def run(
                            "workers" for model in policy["base"])
         _banner(f"base readers in parallel: {counts}")
         stage_started = time.monotonic()
-        _base_readers(policy["base"], sample, cache, logs, max_errors)
+        _base_readers(policy["base"], policy["prompt_version"], sample, cache, logs, max_errors)
         _note(f"base readers done in {_elapsed(stage_started)}")
 
         # 5. transcribe, again if needed, then the stored-only check
