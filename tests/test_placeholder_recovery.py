@@ -82,7 +82,7 @@ from test_vlm_transcription import _Client, _answer, _rows
 
 from givingtuesday_datamart import vlm_transcription as vlm
 
-BANNERS = ("=== prerequisites", "=== fetch", "=== cost gate", "=== smoke", "=== base readers", "=== transcribe",
+BANNERS = ("=== prerequisites", "=== fetch", "=== cost gate", "=== base readers", "=== transcribe",
            "=== final check", "=== status", "=== done in")
 
 
@@ -156,8 +156,8 @@ def _banners(out):
 @pytest.fixture
 def run_stores(tmp_path):
     """One fetched filing (pages 3-6) with Flash Lite stored on every page and
-    Qwen on none, so the smoke buys through the fake client and the base pair
-    then agrees on every page."""
+    Qwen on none, so transcribe buys Qwen's pages through the fake client and
+    the base pair then agrees on every page."""
     filings = fi.MemoryStore()
     _seed(filings, tmp_path, OID)
     readings = pr.MemoryStore()
@@ -170,7 +170,7 @@ def run_stores(tmp_path):
 
 def test_run_drives_every_stage_and_ends_with_a_stored_only_check_that_buys_nothing(run_stores, box, tmp_path, capsys):
     sample = _frame_csv(tmp_path)
-    client = _Client([(_answer(_rows(3)), "stop")] * 4)          # the smoke's four Qwen pages
+    client = _Client([(_answer(_rows(3)), "stop")] * 4)          # transcribe buys Qwen's four pages
     _run(run_stores, sample, tmp_path, client=client)
     out = capsys.readouterr().out
     assert _banners(out) == list(BANNERS)
@@ -180,9 +180,8 @@ def test_run_drives_every_stage_and_ends_with_a_stored_only_check_that_buys_noth
     assert "every one of the 1 filings is fetched, permanent or out of attempts: 0 TEOS requests" in out
     assert "stored-only stopped, no call made: 4 pages have no reading of alibaba/qwen3-vl-instruct v4" in out
     assert "projection $" in out
-    # the smoke renders the filing itself, then read_pages renders again (a no-op on disk: the PNGs exist)
-    assert box.render.calls[0] == (fi.pdf_path(tmp_path, OID), 3, 6, pr.page_dir(tmp_path, OID)) and len(box.render.calls) == 2
-    assert "smoke: 4 pages, 4 bought" in out and "4 grants-table pages with rows" in out and len(client.json_modes) == 4
+    assert box.render.calls == [(fi.pdf_path(tmp_path, OID), 3, 6, pr.page_dir(tmp_path, OID))]
+    assert len(client.json_modes) == 4
     assert [c[c.index("--model") + 1] for c in box.popen.commands] == [QWEN, GEMINI]
     assert ([c[c.index("--workers") + 1] for c in box.popen.commands]
             == [str(pv.WORKERS[QWEN]), str(pv.WORKERS[GEMINI])])
@@ -207,7 +206,7 @@ def test_run_stops_at_the_cost_cap(run_stores, box, tmp_path, capsys):
     with pytest.raises(SystemExit):
         _run(run_stores, _frame_csv(tmp_path), tmp_path, cap=0.001)
     out = capsys.readouterr().out
-    assert "STOPPED: the projection $0 passes the cap of $0" in out and "=== smoke" not in out
+    assert "STOPPED: the projection $0 passes the cap of $0" in out and "=== base readers" not in out
     assert "STOPPED: the projection" in (tmp_path / "logs" / "run.log").read_text()
 
 
@@ -233,16 +232,3 @@ def test_run_stops_when_a_base_reader_exits_non_zero(run_stores, box, tmp_path, 
     assert "qwen3-vl-instruct, gemini-3.5-flash-lite exited non-zero" in out and "run the same command again to resume" in out
 
 
-def test_the_smoke_reads_one_render_chunk_of_the_first_filing_at_most(tmp_path):
-    filings = fi.MemoryStore()
-    short = _seed(filings, tmp_path, OID, pages=6, attachment_from=3)               # 4 attachment pages
-    long = _seed(filings, tmp_path, "202323149349101837", pages=1113, attachment_from=25)
-    assert rec._smoke_span(short) == (3, 6)
-    assert rec._smoke_span(long) == (25, 25 + pr.RENDER_CHUNK - 1)
-
-
-def test_run_smoke_stops_when_no_page_parsed_as_a_grants_table(run_stores, box, tmp_path, capsys):
-    client = _Client([(_answer([], kind="other"), "stop")] * 4)
-    with pytest.raises(SystemExit):
-        _run(run_stores, _frame_csv(tmp_path), tmp_path, client=client)
-    assert "no page of" in capsys.readouterr().out

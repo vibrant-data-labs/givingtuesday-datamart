@@ -1365,9 +1365,12 @@ Decided on 2026-09-24, after the frame run (Zein):
 - The band split stays at C 137 and D 403, the same sampling fraction for
   both; the frame is read, and its C and D rates are set by how many
   filings have anything to read, not by their count.
-- The smoke reads one render chunk (20 pages) of the frame's first fetched
-  filing, not the whole filing: it proves the box can render, call and
-  parse, and 64 pages at one worker was 50 minutes of that proof.
+- The smoke stage is gone (the review of PR #47). Nothing spends money
+  before a render has succeeded — S3 download, then pdftoppm, then the
+  gateway call, chunk by chunk — so the base readers' first chunk proves
+  within a minute what the smoke proved in fifty; and a smoke that stopped
+  on a page at `max_errors`, or on a first chunk without a grants table,
+  could stop a resumable run for good.
 - Renders stay unstored (the spec's non-goal) so long as one render on the
   box serves every reader, which it does apart from the base pair's
   overlap (item 8 above).

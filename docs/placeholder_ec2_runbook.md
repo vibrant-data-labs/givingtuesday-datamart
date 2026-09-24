@@ -85,12 +85,11 @@ already, so on the box it makes zero TEOS requests and says so); the
 **cost gate** (the stored-only pass, which names the pages without a
 reading and buys nothing, then the projection by reader at the measured
 per-page prices and the rehearsal's dispute and resolution rates; past
-$400 the run stops); **smoke** (the first render chunk, 20 pages, of the
-frame's first fetched filing rendered and read through Qwen at one worker:
-its PNGs must exist, its rows must be readings, a page with a grants table
-must have parsed one); the two **base readers** as child processes of the
+$400 the run stops); the two **base readers** as child processes of the
 `page_readings` CLI (Qwen at 80 workers, Flash Lite at 24), each with its
-own log; **transcribe** for the
+own log — nothing spends before a render has succeeded, so their first
+chunk proves within a minute that the box can download, render, call and
+parse; **transcribe** for the
 escalation readers and the verdicts, again if any page was left without a
 verdict; the **final check** (the stored-only pass must buy nothing and
 write nothing); and the two **status** reports. Everything printed goes to

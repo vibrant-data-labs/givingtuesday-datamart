@@ -50,8 +50,7 @@ rehearsal measured; past the cap it exits so the run stops before a call.
 ``run`` is the whole run of a frame in one command, for the EC2 box inside
 tmux, safe to run again after any stop since every stage resumes from the
 tables: the prerequisites, the fetch, the cost gate (``--dry-run`` stops
-there), a smoke read of the frame's first filing, the two base readers as
-child processes of the ``page_readings`` CLI, ``transcribe`` under the
+there), the two base readers as child processes of the ``page_readings`` CLI, ``transcribe`` under the
 policy, the stored-only check that must buy and write nothing, and the two
 status reports, each stage under a timestamped banner.
 
@@ -94,7 +93,7 @@ from givingtuesday_datamart import (
 from givingtuesday_datamart.attachment_grants import (
     PLACEHOLDER, XML_SOURCES, candidate_tables, coverage, diagnose, extract_tables, is_pointer,
     load_elements, page_tables, xml_tables)
-from givingtuesday_datamart.page_readings import MAX_ERRORS, frame_pages, read_pages, reading_key
+from givingtuesday_datamart.page_readings import MAX_ERRORS, frame_pages, reading_key
 from givingtuesday_datamart.page_verdicts import (
     FLAGGED_RULES, POLICIES, POLICY_V1, WORKERS, AgreeResult, accepted_readings, agree,
     load_policy, reader_settings, summary, with_flagged)
@@ -143,11 +142,10 @@ PER_PAGE = {"alibaba/qwen3-vl-instruct": 0.0024, "google/gemini-3.5-flash-lite":
 DISPUTE_RATE = 0.52
 RESOLVE_RATES = {"google/gemini-3.8-flash": 0.39, "anthropic/claude-sonnet-5": 1 / 3}
 COST_CAP = 400.0
-# The one-command run (``run``): the disk it needs under the cache, the key
-# its bucket write check uses, and the page kinds that carry a grants table.
+# The one-command run (``run``): the disk it needs under the cache and the
+# key its bucket write check uses.
 MIN_FREE_GB = 15
 WRITE_CHECK_PREFIX = "irs/_run_check"
-LIST_KINDS = ("grants_paid_list", "grants_future_list", "expenditure_responsibility")
 
 
 def _read_population(pointer=None) -> tuple[dict, dict]:
@@ -796,95 +794,6 @@ def _stored_only(
     return None
 
 
-def _smoke_span(row: filing_images.FilingImage) -> tuple[int, int]:
-    """The pages the smoke reads: the filing's first render chunk of
-    attachment pages, at most ``RENDER_CHUNK`` of them. The smoke proves
-    the box can render, call and parse; a 64-page filing at one worker
-    was 50 minutes of that proof on a fresh frame (Zein, 2026-09-24)."""
-    first_page = row.attachment_from
-    last_page = min(first_page + row.attachment_pages - 1, first_page + page_readings.RENDER_CHUNK - 1)
-    return first_page, last_page
-
-
-def _smoke(stores: _Stores, rows: list[dict], policy: dict, cache: Path, max_errors: int) -> None:
-    """The first render chunk of the frame's first fetched filing rendered
-    and read through the first base reader at one worker: its PNGs must
-    exist, its rows must be readings, and a page with a grants table must
-    have parsed one."""
-    # The first filing in frame order that is fetched (a PDF with a hash on
-    # the row) and has an attachment; the smoke reads that filing's pages.
-    ids = [row["object_id"] for row in rows]
-    images = stores.filings.get(ids)
-    fetched = [oid for oid in ids
-               if page_readings._readable(images.get(oid)) and images[oid].attachment_from]
-    if not fetched:
-        _stop("no fetched filing with attachment pages in the frame; nothing to read")
-    first = fetched[0]
-    row = images[first]
-    # The attachment is one contiguous span of pages starting at
-    # attachment_from; the smoke takes its first render chunk.
-    first_page, last_page = _smoke_span(row)
-    pages = [(first, page) for page in range(first_page, last_page + 1)]
-    # The first base reader (Qwen under v2), at one worker so the reader's
-    # log is a plain sequence of pages.
-    model = policy["base"][0]
-    _banner(f"smoke: {first} (the frame's first fetched filing, pages {first_page}-{last_page} of "
-            f"its {row.attachment_pages}) rendered and read through {model} at one worker")
-    started = time.monotonic()
-
-    # Render explicitly first, so a render failure is reported as one before
-    # any reader is called. ``materialise`` puts the PDF on local disk (from
-    # the cache when its hash matches the row, else from S3); ``render`` runs
-    # pdftoppm over the span and returns the PNG paths it expects to exist.
-    png_dir = page_readings.page_dir(cache, first)
-    try:
-        pdf = filing_images.materialise(row, cache, s3=stores.s3)
-        pngs = vlm_transcription.render(pdf, first_page, last_page, png_dir)
-    except Exception as exc:                              # noqa: BLE001
-        _stop(f"{first} could not be rendered: {type(exc).__name__}: {str(exc)[:200]}")
-    missing = [png for png in pngs if not png.exists()]
-    if missing:
-        _stop(f"{len(missing)} of {first}'s {len(pngs)} PNGs do not exist after the render: "
-              f"{missing[:3]}")
-    print(f"{len(pngs)} PNGs under {png_dir}")
-
-    # The read itself. ``read_pages`` renders too, but skips pages whose PNG
-    # exists; it reuses any reading already stored and buys the rest.
-    got = read_pages(stores.readings, pages, model, workers=1,
-                     prompt_version=policy["prompt_version"], max_errors=max_errors,
-                     cache_dir=cache, client=stores.client, filing_store=stores.filings,
-                     s3=stores.s3, settings=policy.get("settings", {}).get(model))
-    # Every page must have come back with a reading: none failed this run,
-    # none skipped for being at max_errors before it.
-    if got.failed or got.skipped or len(got.responses) != len(pages):
-        errors = "; ".join(f"p{page:03d}: {(reading.last_error or '')[:100]}"
-                           for (_, page), reading in list(got.failed.items())[:3])
-        _stop(f"{first} through {model}: {len(got.responses)} of {len(pages)} pages read, "
-              f"{len(got.failed)} error rows, {len(got.skipped)} skipped at {max_errors} "
-              f"errors: {errors}")
-    # Each reading is the reader's parsed JSON: a page_kind, and on a
-    # grants-table page the rows it read. At least one page must be a grants
-    # table with rows, or the reader is not returning what the pipeline needs.
-    responses = list(got.responses.values())
-    kinds = collections.Counter(response.get("page_kind") for response in responses)
-    tables = sum(1 for response in responses
-                 if response.get("page_kind") in LIST_KINDS and response.get("rows"))
-    if not tables:
-        _stop(f"no page of {first} parsed as a grants table with rows; page kinds seen: "
-              f"{dict(kinds)}")
-
-    # What the smoke cost and how fast it went. "bought" is below the page
-    # count when some readings were already stored (a resumed run).
-    rows_read = sum(len(response.get("rows") or []) for response in responses)
-    dollars = vlm_transcription.cost(model, got.bought["in"], got.bought["out"]) or 0.0
-    seconds_a_page = (time.monotonic() - started) / len(pages)
-    stored = " (the rest stored)" if got.bought["pages"] < len(pages) else ""
-    print(f"smoke: {len(pages)} pages, {got.bought['pages']} bought{stored}, "
-          f"{seconds_a_page:.1f} s a page, ${dollars:.2f}; page kinds {dict(kinds)}; "
-          f"{rows_read} rows, {tables} grants-table pages with rows")
-    _note(f"smoke done in {_elapsed(started)}")
-
-
 def _base_readers(
     models: list[str],
     sample: Path,
@@ -977,7 +886,7 @@ def run(
 ) -> None:
     """The whole run of a frame in one command, for the box inside tmux; safe
     to run again after any stop, since every stage resumes from the tables
-    and buys only what they lack. Seven stages, each under a timestamped
+    and buys only what they lack. Six stages, each under a timestamped
     banner, everything printed mirrored to ``logs/run-<start>/run.log``:
 
     1. prerequisites: poppler (``pdftoppm -v`` printed), the gateway key and
@@ -989,14 +898,13 @@ def run(
     3. the cost gate: the stored-only pass (which names the pages without a
        reading, or passes buying and writing nothing) and ``estimate``'s
        projection; past ``cap`` the run stops, and ``dry_run`` stops here.
-    4. smoke: the first render chunk (20 pages) of the frame's first fetched
-       filing rendered and read through the first base reader at one
-       worker, with its PNGs, rows and a grants table asserted.
-    5. the base readers as child processes of the ``page_readings`` CLI, at
-       ``WORKERS`` each, a log file each.
-    6. ``transcribe`` under the policy, again if it left pages without a
+    4. the base readers as child processes of the ``page_readings`` CLI, at
+       ``WORKERS`` each, a log file each. Nothing spends before a render has
+       succeeded (S3 download, pdftoppm, then the gateway call, chunk by
+       chunk), so their first chunk is the proof a smoke stage once gave.
+    5. ``transcribe`` under the policy, again if it left pages without a
        verdict, then the stored-only pass, which must buy and write nothing.
-    7. ``page_readings status`` and ``page_verdicts status`` for the policy.
+    6. ``page_readings status`` and ``page_verdicts status`` for the policy.
 
     The stores, ``client`` and ``s3`` are for tests, which patch the other
     edges (poppler, TEOS, ``Popen``); with no stores the run opens a datamart
@@ -1088,15 +996,12 @@ def run(
         _note(f"cost gate passed in {_elapsed(stage_started)}")
         if dry_run:
             # Nothing so far has cost anything; --dry-run ends the run before
-            # the smoke stage, the first that spends.
+            # the base readers, the first stage that spends.
             _banner(f"dry run: stopping after the projection, nothing bought; "
                     f"{_elapsed(started)} in all; logs in {logs}")
             return
 
-        # 4. smoke (its banner names the filing, so it prints its own)
-        _smoke(stores, rows, policy, cache, max_errors)
-
-        # 5. the base readers, as child processes
+        # 4. the base readers, as child processes
         # Both base readers at once, each reading every attachment page of
         # the frame it holds no reading for yet. Their output goes to
         # logs/<reader>.log, so run.log carries only the boundaries.
@@ -1107,7 +1012,7 @@ def run(
         _base_readers(policy["base"], sample, cache, logs, max_errors)
         _note(f"base readers done in {_elapsed(stage_started)}")
 
-        # 6. transcribe, again if needed, then the stored-only check
+        # 5. transcribe, again if needed, then the stored-only check
         # With the base readings stored, ``transcribe`` buys only the
         # escalation readers (3.8 Flash on the pages the base pair disputes,
         # Sonnet on what 3.8 Flash leaves), then writes a verdict per page.
@@ -1140,7 +1045,7 @@ def run(
         _note(f"final check passed in {_elapsed(stage_started)}: 0 pages bought, "
               "0 verdict rows written")
 
-        # 7. status
+        # 6. status
         # The two status reports query the tables, so they need the real
         # session; a test, with stores injected, has none and skips them.
         _banner("status after the run")
