@@ -367,6 +367,21 @@ def test_a_pdftoppm_that_cannot_render_fails_with_its_stderr(monkeypatch):
         pr._require_pdftoppm()
 
 
+def test_a_page_pdftoppm_left_out_is_that_pages_error_and_its_span_mates_are_read(filings, render, tmp_path, monkeypatch):
+    class _Skips(_Render):
+        def __call__(self, pdf, first, last, out_dir, dpi=vlm.DPI):
+            paths = super().__call__(pdf, first, last, out_dir, dpi)
+            (out_dir / "p004.png").unlink()
+            return paths
+    monkeypatch.setattr(vlm, "render", _Skips())
+    store = pr.MemoryStore()
+    _seed(filings, tmp_path, OID)
+    client = _Client([(_answer(_rows(2)), "stop")] * 3)
+    got = _read(store, filings, _pages(OID, 3, 4, 5, 6), client, tmp_path)
+    assert set(got.responses) == {(OID, 3), (OID, 5), (OID, 6)} and list(got.failed) == [(OID, 4)]
+    assert "no PNG for the page (p004.png)" in got.failed[(OID, 4)].last_error and got.failed[(OID, 4)].errors == 1
+
+
 def test_a_missing_pdftoppm_stops_before_any_render_or_call_unless_all_pages_are_stored(filings, render, tmp_path, monkeypatch):
     _seed(filings, tmp_path, OID)
     store = pr.MemoryStore()

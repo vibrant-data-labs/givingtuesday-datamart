@@ -44,6 +44,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from givingtuesday_datamart._internal.logger import logger
+
 GATEWAY_URL = "https://ai-gateway.vercel.sh/v1"
 DPI = 200
 # $ per 1M tokens (in, out): Vercel AI Gateway list prices, 2026-09-21.
@@ -162,10 +164,14 @@ def render(pdf: Path, first: int, last: int, out_dir: Path, dpi: int = DPI) -> l
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
     absent = [page for page, path in wanted.items() if not path.exists()]
-    if absent:
-        # An error for the chunk's pages (a page the PDF does not have, a
-        # render killed underneath), not a FileNotFoundError from a reader.
+    if absent and len(absent) == len(wanted):
+        # Nothing came out: an error for the whole span (pdftoppm killed
+        # underneath, a span past the end of the PDF), raised here.
         raise RuntimeError(f"pdftoppm left no PNG for pages {absent[:5]} of {pdf.name}")
+    if absent:
+        # Some came out: the reader records each missing page as its own
+        # error, so one bad page costs its span-mates nothing.
+        logger.warning("pdftoppm left no PNG for pages %s of %s", absent[:5], pdf.name)
     return [wanted[page] for page in sorted(wanted)]
 
 

@@ -501,12 +501,16 @@ def _read_one(client, model: str, rendered: Future, key: Key, request_settings: 
     """Runs in a worker thread: wait for the filing's render, read the page.
     Never the session. A failed render is this page's error result, so a
     filing pdftoppm cannot draw costs its pages one error each, not the run."""
+    png = pages_dir / f"p{key[1]:03d}.png"
     try:
         rendered.result()
     except FilingUnreadable as exc:                       # logged once by the render job
         data = {"error": str(exc)}
     else:
-        data = vlm_transcription.transcribe(client, model, pages_dir / f"p{key[1]:03d}.png")
+        if png.exists():
+            data = vlm_transcription.transcribe(client, model, png)
+        else:                                             # the one page pdftoppm left out of its span
+            data = {"error": f"render: no PNG for the page ({png.name}); the rest of its span rendered"}
     return reading_from_result(key, request_settings, data, prior)
 
 
