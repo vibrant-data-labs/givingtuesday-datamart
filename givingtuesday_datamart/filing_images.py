@@ -62,7 +62,6 @@ import csv
 import functools
 import hashlib
 import logging
-import os
 import shutil
 import subprocess
 import sys
