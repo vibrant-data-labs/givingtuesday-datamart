@@ -26,13 +26,26 @@ from givingtuesday_datamart._internal.logger import logger
 Row = TypeVar("Row")
 
 
+class SystemicFailure(RuntimeError):
+    """``upsert_as_done``'s breaker tripped: the run's first results say the
+    failure is the machine's, not the pages', and nothing was written."""
+
+
 class Store(Protocol[Row]):
     def upsert(self, rows: Sequence[Row]) -> None: ...
 
 
 def upsert_as_done(store: Store[Row], futures: Sequence[Future], chunk: int, *,
-                   on_stop: Callable[[], None] | None = None) -> Iterator[Row]:
+                   on_stop: Callable[[], None] | None = None,
+                   breaker: Callable[[list[Row]], str | bool] | None = None) -> Iterator[Row]:
     """Collect worker results on the main thread and commit every ``chunk``.
+
+    ``breaker`` is a circuit breaker on the run's first results: while it is
+    deciding, rows are held back from the store and it is asked after each
+    one, with every row so far. ``True`` releases the run (commits as usual
+    from here); a string trips it — the queued jobs are cancelled, the jobs
+    in flight are waited for, nothing held or collected is written, and
+    ``SystemicFailure`` is raised with the string; ``False`` keeps deciding.
 
     Workers return rows rather than raising; one that raises anyway is
     logged and re-raised only after every other result has been collected
@@ -51,7 +64,8 @@ def upsert_as_done(store: Store[Row], futures: Sequence[Future], chunk: int, *,
     buffer: list[Row] = []
     failures: list[Exception] = []
     collected: set[Future] = set()
-    completed = False
+    completed = tripped = False
+    deciding = breaker is not None
     try:
         for future in as_completed(futures):
             collected.add(future)
@@ -62,7 +76,13 @@ def upsert_as_done(store: Store[Row], futures: Sequence[Future], chunk: int, *,
                 failures.append(exc)
                 continue
             buffer.append(row)
-            if len(buffer) >= chunk:
+            if deciding:
+                verdict = breaker(buffer)
+                if isinstance(verdict, str):
+                    tripped = True
+                    raise SystemicFailure(verdict)
+                deciding = not verdict
+            if not deciding and len(buffer) >= chunk:
                 ready, buffer = buffer, []
                 store.upsert(ready)
             yield row
@@ -77,12 +97,17 @@ def upsert_as_done(store: Store[Row], futures: Sequence[Future], chunk: int, *,
                 on_stop()
             for future in in_flight:
                 try:
-                    buffer.append(future.result())
+                    result = future.result()
+                    if not tripped:
+                        buffer.append(result)
                 except CancelledError:
                     logger.warning("stopping: a job in flight was cancelled underneath (its render, say); "
                                    "its row is not recorded")
                 except Exception:                         # noqa: BLE001
                     logger.exception("stopping: a job in flight raised; its row is not recorded")
+        if tripped:
+            logger.error("the breaker tripped: %d rows held back and not written", len(buffer))
+            buffer.clear()
         if buffer:
             store.upsert(buffer)
     if failures:

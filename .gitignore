@@ -183,3 +183,6 @@ givingtuesday_datamart/exploratory/__marimo__/
 # Scratch filings pulled by irs_source / pushed through OCR — never artifacts.
 /*.pdf
 /*.xml
+
+# placeholder_recovery run: the stage logs (kept in scratch or on the box, not in git)
+logs/

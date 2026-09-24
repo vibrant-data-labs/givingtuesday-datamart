@@ -5,18 +5,28 @@ parts (downloading images, paying a model) must not be repeated when the
 cheap part (the selector) changes.
 
     python -m givingtuesday_datamart.exploratory.placeholder_recovery sample
+    python -m givingtuesday_datamart.exploratory.placeholder_recovery sample --expand-1000
     python -m givingtuesday_datamart.exploratory.placeholder_recovery stage
+    python -m givingtuesday_datamart.exploratory.placeholder_recovery estimate --policy v2 \\
+        --sample data/exploratory/placeholder_sample_1000.csv
+    python -m givingtuesday_datamart.exploratory.placeholder_recovery run --policy v2 \\
+        --sample data/exploratory/placeholder_sample_1000.csv --cache /data/irs_index
     python -m givingtuesday_datamart.exploratory.placeholder_recovery transcribe --policy v1
-    python -m givingtuesday_datamart.exploratory.placeholder_recovery report --policy v1 --out data/exploratory/placeholder_report_v1.csv
-    python -m givingtuesday_datamart.exploratory.placeholder_recovery report --results ~/.cache/irs_index/unstructured
+    python -m givingtuesday_datamart.exploratory.placeholder_recovery report --policy v1 \\
+        --out data/exploratory/placeholder_report_v1.csv
+    python -m givingtuesday_datamart.exploratory.placeholder_recovery report \\
+        --results ~/.cache/irs_index/unstructured
 
 ``sample`` builds the stratified frame from GT's combined grants extract.
 The population is violently top-heavy — 22 filings carry $4.67B while 6,755
 carry $1.76B — so a uniform draw would spend 70% of the budget measuring
-noise. Bands A is a census; B, C and D are sampled and extrapolated. It
-also writes the rows the XML itemises for the sampled filings (named Part
-XV lines, the expenditure-responsibility statement): those never need
-transcribing, and the attachment routinely leaves them out.
+noise. Bands A is a census; B, C and D are sampled and extrapolated. The
+expanded frames — ``--expand``, 610 filings with B a census; ``--expand-1000``,
+C and D topped up to 1,000 — are drawn on top of the 100 from the same
+seeded generator, so every earlier frame regenerates unchanged inside the
+next. It also writes the rows the XML itemises for the sampled filings
+(named Part XV lines, the expenditure-responsibility statement): those
+never need transcribing, and the attachment routinely leaves them out.
 
 Two classes are excluded, for different reasons. Three named
 patient-assistance programs (Genentech Patient Foundation, Boehringer
@@ -31,6 +41,18 @@ Foundation and Ruth Lilly Foundation, which are ordinary grantmakers.
 it, and records where the filer's attachments start — the IRS-rendered
 pages before that point are the XML we already hold, and are never sent
 to a model. On this sample they are 62% of all pages.
+
+``estimate`` is the cost gate, ``run``'s stage 3, that runs before it spends:
+what ``transcribe`` would buy today from each reader, less the readings the
+table holds, at the per-page prices and the dispute and resolution rates the
+frame run measured; past the cap it exits so the run stops before a call.
+
+``run`` is the whole run of a frame in one command, for the EC2 box inside
+tmux, safe to run again after any stop since every stage resumes from the
+tables: the prerequisites, the fetch, the cost gate (``--dry-run`` stops
+there), the two base readers as child processes of the ``page_readings`` CLI, ``transcribe`` under the
+policy, the stored-only check that must buy and write nothing, and the two
+status reports, each stage under a timestamped banner.
 
 ``transcribe`` decides every attachment page of the sample's fetched filings
 under a policy (``page_verdicts.agree``): each page is read by the policy's
@@ -50,18 +72,32 @@ from __future__ import annotations
 
 import argparse
 import collections
+import contextlib
 import csv
+import logging
+import os
 import re
+import shutil
+import socket
+import subprocess
 import sys
+import time
+import urllib.request
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import NoReturn, Sequence
 
-from givingtuesday_datamart import filing_images, irs_source, vlm_transcription
+from givingtuesday_datamart import (
+    filing_images, irs_source, page_readings, page_verdicts, vlm_transcription)
 from givingtuesday_datamart.attachment_grants import (
     PLACEHOLDER, XML_SOURCES, candidate_tables, coverage, diagnose, extract_tables, is_pointer,
     load_elements, page_tables, xml_tables)
-from givingtuesday_datamart.page_readings import MAX_ERRORS, frame_pages
+from givingtuesday_datamart._internal.bulk import SystemicFailure
+from givingtuesday_datamart.page_readings import MAX_ERRORS, frame_pages, reading_key
 from givingtuesday_datamart.page_verdicts import (
-    FLAGGED_RULES, POLICIES, POLICY_V1, accepted_readings, agree, load_policy, summary, with_flagged)
+    FLAGGED_RULES, POLICIES, POLICY_V1, WORKERS, AgreeResult, accepted_readings, agree,
+    load_policy, reader_settings, summary, with_flagged)
 
 COMBINED_CSV = Path.home() / "Downloads" / "combined-grants-datamarts-gt_team_priority-20260915.csv"
 SAMPLE_CSV = Path("data/exploratory/placeholder_sample_100.csv")
@@ -70,6 +106,8 @@ MANIFEST_CSV = Path("data/exploratory/placeholder_staging.csv")
 EXPANDED = {"sample": Path("data/exploratory/placeholder_sample_expanded.csv"),
             "xml_rows": Path("data/exploratory/placeholder_sample_expanded_xml_rows.csv"),
             "manifest": Path("data/exploratory/placeholder_staging_expanded.csv")}
+FRAME_1000 = {"sample": Path("data/exploratory/placeholder_sample_1000.csv"),
+              "xml_rows": Path("data/exploratory/placeholder_sample_1000_xml_rows.csv")}
 CACHE = Path.home() / ".cache" / "irs_index"
 PF_SOURCES = ("990PF_P14_3A", "990PF_P14_3B")
 SEED = 20260921
@@ -86,8 +124,32 @@ STRATA = (("A", 1e8, float("inf"), None), ("B", 1e7, 1e8, 44),
 # one. Drawn from the broadened classifier's population, on top of the
 # original 100, which are kept exactly as drawn.
 EXPANSION = {"B": None, "C": 100, "D": 50}
+# The 1,000-filing frame: bands C and D topped up on top of the 610 to the
+# same sampling fraction — 540 of the 9,055 filings in the two bands, 5.96%,
+# so 137 of C's 2,296 and 403 of D's 6,759 — as the next draws from the same
+# generator, so the 610 are kept exactly as drawn. A and B are already a
+# census. The split is Zein's to change (Session 4, 2026-09-23).
+EXPANSION_1000 = {"B": None, "C": 137, "D": 403}
+FRAMES = {"610": (EXPANSION,), "1000": (EXPANSION, EXPANSION_1000)}
 _OBJECT_ID = re.compile(r"(?<!\d)(\d{18})(?!\d)")
 VERDICT_KINDS = ("agreed", "escalated", "flagged", "unreadable", "no_verdict")
+# The cost gate's numbers (``estimate``), measured on the 1,000-filing frame
+# run of 2026-09-24 — 9,926 attachment pages under POLICY_V2, the pipeline
+# doc's *The 1,000-filing frame under POLICY_V2* — replacing the rehearsal's
+# (52% disputed, 39% and a third resolved, $0.0459 a Sonnet page), which
+# projected $241.50 for a run that cost $221.64 only because the errors
+# offset: what a page bought from each reader cost, 3.8 Flash at reasoning
+# effort low; the share of pages the base pair disputes; and the share of
+# what reaches each escalation reader that it resolves. The cap is Session 4's.
+PER_PAGE = {"alibaba/qwen3-vl-instruct": 0.0025, "google/gemini-3.5-flash-lite": 0.0062,
+            "google/gemini-3.8-flash": 0.0091, "anthropic/claude-sonnet-5": 0.0343}
+DISPUTE_RATE = 0.605
+RESOLVE_RATES = {"google/gemini-3.8-flash": 0.423, "anthropic/claude-sonnet-5": 0.18}
+COST_CAP = 400.0
+# The one-command run (``run``): the disk it needs under the cache and the
+# key its bucket write check uses.
+MIN_FREE_GB = 15
+WRITE_CHECK_PREFIX = "irs/_run_check"
 
 
 def _read_population(pointer=None) -> tuple[dict, dict]:
@@ -155,12 +217,22 @@ def _row(label, key, value, pool, classifier):
             "is_canary": ein in CANARIES, **({"classifier": classifier} if classifier else {})}
 
 
-def build_sample(out: Path, xml_rows_out: Path, expand: bool = False) -> None:
-    """The 100-filing frame, or with ``expand`` the 500-filing one on top of it.
+def _print_bands(title: str, summary: list[tuple]) -> None:
+    """One draw's band table: filings picked of the band's pool, and dollars."""
+    print(title)
+    for label, pop_n, pick_n, pop_d, pick_d in summary:
+        print(f"  {label}  {pick_n:>3}/{pop_n:<5} ${pick_d/1e9:>6.2f}B of ${pop_d/1e9:>6.2f}B")
+
+
+def build_sample(out: Path, xml_rows_out: Path, expansions: Sequence[dict] = ()) -> None:
+    """The 100-filing frame, or with ``expansions`` (``FRAMES``) the 610- and
+    1,000-filing ones on top of it.
 
     The base draw is repeated exactly, so the original 100 regenerate
-    unchanged. The extra filings are drawn afterwards, from the broadened
-    classifier's population, with the population columns restated for it.
+    unchanged, and each expansion is drawn after the last from the same
+    generator, so the 610 regenerate unchanged inside the 1,000. The extra
+    filings come from the broadened classifier's population, with the
+    population columns restated for it.
     """
     import random
 
@@ -187,30 +259,35 @@ def build_sample(out: Path, xml_rows_out: Path, expand: bool = False) -> None:
                         sum(v["amt"] for _, v in pool), sum(v["amt"] for _, v in chosen)))
         for key, value in chosen:
             keys.append(key)
-            picked.append(_row(label, key, value, pool, "v1" if expand else ""))
+            picked.append(_row(label, key, value, pool, "v1" if expansions else ""))
+    _print_bands(f"the base draw, {len(picked)} filings:", summary)
 
-    if expand:
+    if expansions:
         # Only now, so the RNG state behind the base draw is untouched.
         wide, itemised = _read_population(is_pointer)
         wide = _addressable(wide)
         print(f"broadened classifier: {len(wide):,} addressable filings "
               f"${sum(v['amt'] for v in wide.values())/1e9:.2f}B\n")
         already = set(keys)
+        pools = {label: sorted([(k, v) for k, v in wide.items() if low <= v["amt"] < high],
+                               key=lambda kv: -kv[1]["amt"]) for label, low, high, _ in STRATA}
+    for number, expansion in enumerate(expansions, 1):
         summary = []
-        for label, low, high, _ in STRATA:
-            pool = sorted([(k, v) for k, v in wide.items() if low <= v["amt"] < high],
-                          key=lambda kv: -kv[1]["amt"])
+        for label, _, _, _ in STRATA:
+            pool = pools[label]
             base = [r for r in picked if r["stratum"] == label]
             for r in base:                       # restate the population for the new frame
                 r["stratum_pop"], r["stratum_pop_dollars"] = len(pool), round(sum(v["amt"] for _, v in pool), 2)
-            take = EXPANSION.get(label)
+            take = expansion.get(label)
             rest = [kv for kv in pool if kv[0] not in already]
             extra = rest if take is None else rng.sample(rest, max(0, min(take - len(base), len(rest))))
             for key, value in extra:
-                keys.append(key); already.add(key)
+                keys.append(key)
+                already.add(key)
                 picked.append(_row(label, key, value, pool, "v2"))
             summary.append((label, len(pool), len(base) + len(extra), sum(v["amt"] for _, v in pool),
                             sum(float(r["placeholder_amt"]) for r in picked if r["stratum"] == label)))
+        _print_bands(f"after expansion {number}, {len(picked)} filings:", summary)
 
     picked.sort(key=lambda r: (r["stratum"], -r["placeholder_amt"]))
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -218,8 +295,6 @@ def build_sample(out: Path, xml_rows_out: Path, expand: bool = False) -> None:
         writer = csv.DictWriter(handle, fieldnames=list(picked[0].keys()))
         writer.writeheader()
         writer.writerows(picked)
-    for label, pop_n, pick_n, pop_d, pick_d in summary:
-        print(f"  {label}  {pick_n:>3}/{pop_n:<5} ${pick_d/1e9:>6.2f}B of ${pop_d/1e9:>6.2f}B")
     print(f"\n{len(picked)} filings -> {out}")
 
     rows = [{"object_id": key[2], **item} for key in keys for item in itemised.get(key, [])]
@@ -277,13 +352,17 @@ def stage(sample: Path, cache: Path, limit: int | None, manifest: Path) -> None:
     manifest.parent.mkdir(parents=True, exist_ok=True)
     with manifest.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(results[0].keys()))
-        writer.writeheader(); writer.writerows(results)
+        writer.writeheader()
+        writer.writerows(results)
 
     print(f"\n{'status':<26}{'n':>5}{'declared $M':>14}{'pages':>8}{'attached':>10}")
     by = collections.defaultdict(lambda: [0, 0.0, 0, 0])
     for r in results:
         b = by[r["status"]]
-        b[0] += 1; b[1] += float(r["placeholder_amt"]); b[2] += r["pages"]; b[3] += r["attachment_pages"]
+        b[0] += 1
+        b[1] += float(r["placeholder_amt"])
+        b[2] += r["pages"]
+        b[3] += r["attachment_pages"]
     for status, (n, dollars, pages, attached) in sorted(by.items(), key=lambda kv: -kv[1][1]):
         print(f"  {status:<24}{n:>5}{dollars/1e6:>14,.1f}{pages:>8,}{attached:>10,}")
     total_pages = sum(r["pages"] for r in results)
@@ -294,29 +373,732 @@ def stage(sample: Path, cache: Path, limit: int | None, manifest: Path) -> None:
     print(f"manifest -> {manifest}")
 
 
-def transcribe(session, sample: Path, policy: dict, cache: Path, limit: int | None, only: str | None,
-               max_errors: int = MAX_ERRORS, buy: bool = True) -> None:
+def transcribe(
+    session,
+    sample: Path,
+    policy: dict,
+    cache: Path,
+    limit: int | None = None,
+    only: str | None = None,
+    max_errors: int = MAX_ERRORS,
+    buy: bool = True,
+    *,
+    filing_store=None,
+    reading_store=None,
+    client=None,
+    s3=None,
+) -> AgreeResult:
     """Every attachment page of every fetched filing in the sample, decided
     under ``policy``: ``frame_pages`` from ``filing_images``, then ``agree``,
     which reads each page with the policy's readers (``read_pages``, a no-op
     for stored readings) and stores the verdicts under the policy version.
-    ``limit`` keeps the first filings that have pages; ``only`` one filing."""
-    ids = [r["object_id"] for r in csv.DictReader(sample.open()) if not only or r["object_id"] == only]
-    pages = frame_pages(session, ids)
+    ``limit`` keeps the first filings that have pages; ``only`` one filing.
+    The stores and clients are for tests; returns what ``agree`` decided."""
+    # The frame CSV names the filings; ``only`` narrows it to one object id.
+    rows = csv.DictReader(sample.open())
+    ids = [row["object_id"] for row in rows if not only or row["object_id"] == only]
+    # ``_store`` wraps a datamart session or an in-memory test store in the
+    # same interface, so nothing below needs to know which it was given.
+    filings = filing_images._store(filing_store if filing_store is not None else session)
+    # Every attachment page of every fetched filing, as (object_id, page)
+    # pairs. Filings not fetched, or with no attachment, are left out.
+    pages = frame_pages(filings, ids)
     if limit is not None:
+        # The first ``limit`` filings that have pages, in frame order
+        # (dict.fromkeys keeps one entry per id, in first-seen order).
         keep = set(list(dict.fromkeys(oid for oid, _ in pages))[:limit])
         pages = [page for page in pages if page[0] in keep]
-    readers = " + ".join(policy["base"]) + (" -> " + " -> ".join(policy["escalation"]) if policy["escalation"] else "")
-    print(f"{len({oid for oid, _ in pages})} filings, {len(pages)} attachment pages; policy {policy['version']}: "
-          f"{readers}, prompt {policy['prompt_version']}, flagged pages {policy.get('flagged', 'load_single')}")
-    result = agree(session, pages, policy, max_errors=max_errors, cache_dir=cache, buy=buy)
+    # A one-line picture of the policy for the log, e.g.
+    # "qwen3-vl-instruct + gemini-3.5-flash-lite -> gemini-3.8-flash -> claude-sonnet-5".
+    readers = " + ".join(policy["base"])
+    if policy["escalation"]:
+        readers += " -> " + " -> ".join(policy["escalation"])
+    filings_with_pages = len({oid for oid, _ in pages})
+    print(f"{filings_with_pages} filings, {len(pages)} attachment pages; "
+          f"policy {policy['version']}: {readers}, prompt {policy['prompt_version']}, "
+          f"flagged pages {policy.get('flagged', 'load_single')}")
+    # ``agree`` does the work: it reads each page through the readers the
+    # policy needs (stored readings are reused; with ``buy=False`` a missing
+    # one raises instead of being bought), decides a verdict per page and
+    # writes the verdicts under the policy version.
+    result = agree(session, pages, policy, max_errors=max_errors, cache_dir=cache, buy=buy,
+                   filing_store=filings, reading_store=reading_store, client=client, s3=s3)
     print(summary(result))
+    # Pages that got no verdict because a reader failed on them this run;
+    # a second transcribe reads them again.
     for (oid, page), why in sorted(result.no_verdict.items()):
         print(f"  no verdict {oid} p{page:03d}: {why}")
+    return result
 
 
-def report(session, sample: Path, out: Path | None, xml_rows: Path | None, *, policy: dict = POLICY_V1,
-           results: Path | None = None) -> None:
+def estimate(
+    session,
+    sample: Path,
+    policy: dict,
+    cap: float | None = COST_CAP,
+    *,
+    only: str | None = None,
+    filing_store=None,
+    reading_store=None,
+) -> float:
+    """The cost gate: what ``transcribe`` under ``policy`` would buy today and
+    what it would cost. Each reader is expected to see a share of the frame's
+    attachment pages — every page for a base reader, ``DISPUTE_RATE`` of them
+    for the first escalation reader, and for each later one what the reader
+    before it left open (``RESOLVE_RATES``) — less the readings the table
+    already holds for it under the policy's settings, priced at ``PER_PAGE``.
+    Every stored reading is credited, so where an escalation reader's stored
+    readings turn out not to be needed the projection is a little low. Prints
+    the projection by reader and in total and returns the total; past ``cap``
+    it stops with a message, so a run stops before it spends.
+    """
+    # The same session-or-store wrapping as ``transcribe``.
+    filings = filing_images._store(filing_store if filing_store is not None else session)
+    readings = page_readings._store(reading_store if reading_store is not None else session)
+    rows = csv.DictReader(sample.open())
+    ids = [row["object_id"] for row in rows if not only or row["object_id"] == only]
+    pages = frame_pages(filings, ids)
+    # The filing rows themselves, for each PDF's sha256: a reading is keyed
+    # on the image it was read from, so looking one up needs the hash.
+    images = filings.get({oid for oid, _ in pages})
+    total_pages = len(pages)
+
+    # the pages each reader is expected to see
+    # A base reader sees every page. The first escalation reader sees the
+    # pages the base pair disputes, DISPUTE_RATE of them (one base reader
+    # means no pair and no disputes). Each escalation reader after that sees
+    # what the reader before it left unresolved. What the last one leaves is
+    # flagged, not read again.
+    expected: dict[str, float] = {model: float(total_pages) for model in policy["base"]}
+    entering = total_pages * DISPUTE_RATE if len(policy["base"]) > 1 else 0.0
+    for model in policy["escalation"]:
+        expected[model] = entering
+        entering *= 1 - RESOLVE_RATES.get(model, 0.0)     # what this reader leaves open
+    flagged = entering
+
+    # The header line: "... 52% disputed by the base pair, gemini-3.8-flash
+    # resolves 39%, claude-sonnet-5 resolves 33%".
+    rates = ", ".join(f"{model.split('/')[-1]} resolves {rate:.0%}"
+                      for model, rate in RESOLVE_RATES.items() if model in policy["escalation"])
+    filings_with_pages = len({oid for oid, _ in pages})
+    print(f"{filings_with_pages} filings, {total_pages:,} attachment pages under policy "
+          f"{policy['version']}; {DISPUTE_RATE:.0%} disputed by the base pair"
+          + (f", {rates}" if rates else ""))
+    print(f"  {'reader':<32}{'expects':>9}{'stored':>8}{'to buy':>8}{'$/page':>8}{'$':>9}")
+    total = 0.0
+    for model, want in expected.items():
+        # The readings the table already holds for this reader on these
+        # pages, under the policy's settings for it. The settings are part
+        # of the key: a Qwen reading taken with json_mode on is a different
+        # reading from one taken without, and only the policy's own count.
+        settings = reader_settings(policy, model)
+        keys = [reading_key(oid, page, images[oid].sha256, model, policy["prompt_version"],
+                            settings=settings) for oid, page in pages]
+        stored = readings.get(keys).values()
+        # A row with a response is a reading. A row without one is an error
+        # row (the reader failed on the page), and the page must still be bought.
+        have = sum(1 for row in stored if row.response is not None)
+        buy = max(0.0, want - have)
+        # No price for a model means an unknown reader: shown as "?" at $0,
+        # so the table still prints rather than the gate failing.
+        price = PER_PAGE.get(model)
+        dollars = buy * price if price is not None else 0.0
+        total += dollars
+        price_text = f"{price:.4f}" if price is not None else "?"
+        print(f"  {model:<32}{want:>9,.0f}{have:>8,}{buy:>8,.0f}{price_text:>8}{dollars:>9.2f}")
+    print(f"  {'total':<32}{'':>33}{total:>9.2f}")
+    share = flagged / total_pages if total_pages else 0
+    cap_text = f" against a cap of ${cap:,.0f}" if cap is not None else ""
+    print(f"about {flagged:,.0f} pages flagged ({share:.0%}); projection ${total:,.0f}{cap_text}")
+    # The gate itself: past the cap the run stops here, before any spend.
+    if cap is not None and total > cap:
+        _stop(f"the projection ${total:,.0f} passes the cap of ${cap:,.0f}: "
+              "stop and ask before spending")
+    return total
+
+
+# ---------------------------------------------------------------------------
+# run: the whole frame in one command
+#
+# The section reads in this order: a few small helpers for the log (the
+# timestamp, banners, the stop path, mirroring the pane into run.log); the
+# ``_Stores`` bundle every stage reads through; one function per
+# prerequisite; one function per stage; and ``run`` itself, which calls them
+# in order under a banner each, so run.log reads as the seven stages the
+# ``run`` docstring lists.
+# ---------------------------------------------------------------------------
+
+
+def _utc() -> str:
+    # The timestamp on every line the run prints, e.g. 2026-09-23T22:37:46Z.
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _banner(text: str) -> None:
+    # A stage boundary: a blank line, then the time and the text between
+    # === marks, so ``grep ===`` on run.log lists the stages and their times.
+    print(f"\n[{_utc()}] === {text} ===", flush=True)
+
+
+def _note(text: str) -> None:
+    # A timestamped line inside a stage. ``flush=True`` so it reaches the
+    # pane and run.log at once, not when a buffer happens to fill.
+    print(f"[{_utc()}] {text}", flush=True)
+
+
+def _elapsed(since: float) -> str:
+    # "1h02m03s" since a ``time.monotonic()`` reading; monotonic so a clock
+    # adjustment on the box cannot make a stage look shorter than it was.
+    seconds = int(time.monotonic() - since)
+    return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m{seconds % 60:02d}s"
+
+
+def _stop(message: str) -> NoReturn:
+    """The run stops here, with the reason on the pane and in the log."""
+    # SystemExit unwinds through ``run``'s ExitStack, so the log file, the
+    # stdout mirror and the datamart session are all closed on the way out,
+    # and the process exits 1 with the message as the last line of the pane.
+    print(f"\n[{_utc()}] STOPPED: {message}", flush=True)
+    raise SystemExit(1)
+
+
+class _Tee:
+    """What is printed goes to the pane and to run.log both."""
+
+    # ``print`` writes to ``sys.stdout``. ``_mirror_output`` swaps in a _Tee
+    # over the real stdout and the log file, so each write lands in both.
+    # ``write`` and ``flush`` are all that ``print`` ever calls.
+
+    def __init__(self, *streams) -> None:
+        self.streams = streams
+
+    def write(self, text: str) -> int:
+        for stream in self.streams:
+            stream.write(text)
+        return len(text)
+
+    def flush(self) -> None:
+        for stream in self.streams:
+            stream.flush()
+
+    def __getattr__(self, name: str):
+        # Everything else a caller asks of sys.stdout (isatty, fileno,
+        # encoding) is answered by the pane's stream, the first one.
+        return getattr(self.streams[0], name)
+
+
+def _mirror_output(stack: contextlib.ExitStack, path: Path) -> None:
+    """Everything printed or logged from here on goes to the pane and to ``path``."""
+    # Append mode: a run resumed with the same --logs directory adds to the
+    # same run.log rather than replacing it.
+    log = stack.enter_context(path.open("a"))
+    # From here on every ``print`` (this module's and the library's) goes to
+    # the pane and to the file.
+    stack.enter_context(contextlib.redirect_stdout(_Tee(sys.stdout, log)))
+    # The ``logging`` module is a separate channel: page_readings,
+    # page_verdicts, filing_images and boto log through it, and ``main``'s
+    # basicConfig already shows those lines on the pane. This handler copies
+    # them into run.log too, in the same format.
+    handler = logging.StreamHandler(log)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s",
+                                           datefmt="%H:%M:%S"))
+    logging.getLogger().addHandler(handler)
+    # Everything entered on the stack is undone when ``run`` exits, in
+    # reverse order: the handler removed, stdout restored, the file closed.
+    stack.callback(logging.getLogger().removeHandler, handler)
+
+
+@dataclass
+class _Stores:
+    """What every stage reads through. The real run builds them from the
+    datamart session; a test injects in-memory stores and a fake client."""
+
+    # The library functions the stages call (``fetch_filings``, ``agree``,
+    # ``read_pages``, ``estimate``) each accept a session or a store per
+    # table. Bundling the five here means a stage takes one argument, and
+    # ``run`` builds the bundle once, right after the datamart opens.
+
+    filings: filing_images.FilingImageStore
+    readings: object            # a session or a page_readings store
+    verdicts: object            # a session or a page_verdicts store
+    client: object              # the gateway client; None means built on first use
+    s3: object                  # the boto3 client
+
+
+# --- the prerequisites, each stopping the run with the reason when it fails
+
+
+def _instance_type() -> str | None:
+    """The EC2 instance type from the metadata service, or None off EC2."""
+    # The metadata service answers only on EC2 and only with a token first
+    # (IMDSv2): a PUT for a 60-second token, then a GET with it. One-second
+    # timeouts, so on a laptop, where nothing listens, this fails fast.
+    token_request = urllib.request.Request(
+        "http://169.254.169.254/latest/api/token", method="PUT",
+        headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"})
+    try:
+        token = urllib.request.urlopen(token_request, timeout=1).read().decode()
+        type_request = urllib.request.Request(
+            "http://169.254.169.254/latest/meta-data/instance-type",
+            headers={"X-aws-ec2-metadata-token": token})
+        return urllib.request.urlopen(type_request, timeout=1).read().decode()
+    except Exception:                                     # noqa: BLE001 — not on EC2
+        return None
+
+
+def _describe_host() -> None:
+    # The first line after the opening banner: which machine ran this.
+    instance = _instance_type()
+    ec2 = f", EC2 {instance}" if instance else ""
+    print(f"host: {socket.gethostname()}, {os.cpu_count()} cores{ec2}")
+
+
+def _check_poppler() -> None:
+    # Both poppler tools are needed: pdftoppm renders pages to PNGs for the
+    # readers (proved on a one-page fixture, so "installed but broken"
+    # stops here), pdfimages finds where the filer's attachment starts.
+    try:
+        page_readings._require_pdftoppm()
+        filing_images._require_pdfimages()
+    except RuntimeError as exc:
+        _stop(str(exc))
+    # ``pdftoppm -v`` prints its version to stderr; take whichever stream has it.
+    poppler = subprocess.run(["pdftoppm", "-v"], capture_output=True, text=True)
+    version = (poppler.stderr or poppler.stdout).strip().splitlines()
+    print(f"poppler: {version[0] if version else '?'}")
+
+
+def _check_gateway_key() -> None:
+    # The same two names ``vlm_transcription.client`` reads; the runbook's
+    # frame.env sets the first. Only its length is printed, never the key.
+    key = os.environ.get("VERCEL_AI_GATEWAY_API_KEY") or os.environ.get("AI_GATEWAY_API_KEY")
+    if not key:
+        _stop("VERCEL_AI_GATEWAY_API_KEY is not set")
+    print(f"gateway key: set ({len(key)} characters)")
+
+
+def _open_datamart(stack: contextlib.ExitStack):
+    """A session on the datamart from the config in the environment, with one
+    query to prove it answers."""
+    # Imported here, as ``main`` does, so the commands that never touch the
+    # datamart (sample, stage) and the tests import this module without
+    # sqlalchemy or a config being involved.
+    from sqlalchemy import text
+
+    from givingtuesday_datamart._internal.db import get_session
+    from givingtuesday_datamart.ingestion import datamart_config
+    try:
+        config = datamart_config()          # the config.ini GT_DATAMART_CONFIG_PATH names
+        postgres = config["postgres"]
+    except Exception as exc:                              # noqa: BLE001 — no config.ini
+        _stop("the datamart config is not in the environment: GT_DATAMART_CONFIG_PATH must "
+              f"name a config.ini with a [postgres] section ({type(exc).__name__}: {exc})")
+    # Entered on the stack, so the session closes when ``run`` exits.
+    session = stack.enter_context(get_session(config=config))
+    # One cheap query proves the connection works and the table is there.
+    try:
+        count, = session.execute(text("SELECT count(*) FROM filing_images")).one()
+    except Exception as exc:                              # noqa: BLE001
+        _stop(f"the datamart at {postgres.get('host')} is not reachable: "
+              f"{type(exc).__name__}: {str(exc)[:200]}")
+    print(f"datamart: {postgres.get('host')} / {postgres.get('database')}, "
+          f"filing_images has {count:,} rows")
+    return session
+
+
+def _check_teos(ein: str) -> None:
+    # The same GET that fetch makes for a filer's return list, on one EIN:
+    # proves HTTPS egress to apps.irs.gov from this host before fetch needs it.
+    url = irs_source.TEOS_RETURNS.format(ein=ein)
+    started = time.monotonic()
+    try:
+        body = irs_source._get(url)
+    except Exception as exc:                              # noqa: BLE001
+        _stop(f"TEOS is not reachable over HTTPS from this host ({url}): "
+              f"{type(exc).__name__}: {exc}")
+    print(f"TEOS: {url} answered {len(body):,} bytes in {time.monotonic() - started:.1f} s")
+
+
+def _check_bucket(s3) -> None:
+    # head_bucket proves the credentials can see the bucket; a put and a
+    # delete prove they can write, which fetch needs for the PDFs it uploads.
+    # The key sits under irs/_run_check/, apart from the PDFs under irs/pdf/,
+    # and carries the host and the time so two boxes never touch one object.
+    bucket = filing_images.BUCKET
+    key = f"{WRITE_CHECK_PREFIX}/{socket.gethostname()}-{_utc()}"
+    try:
+        s3.head_bucket(Bucket=bucket)
+        s3.put_object(Bucket=bucket, Key=key, Body=b"placeholder_recovery run: write check\n")
+        s3.delete_object(Bucket=bucket, Key=key)
+    except Exception as exc:                              # noqa: BLE001
+        _stop(f"s3://{bucket} is not writable: {type(exc).__name__}: {str(exc)[:200]}; the "
+              "instance role (or ~/.aws) needs read and write on the bucket, since fetch writes")
+    print(f"s3://{bucket}: head ok, a small object put and deleted at {key}")
+
+
+def _check_disk(cache: Path) -> None:
+    # The cache holds the PDFs and the rendered PNGs. mkdir first, so on a
+    # fresh box ``disk_usage`` has a path to ask about.
+    cache.mkdir(parents=True, exist_ok=True)
+    free_gb = shutil.disk_usage(cache).free / 1024 ** 3
+    if free_gb < MIN_FREE_GB:
+        _stop(f"{free_gb:.0f} GB free under {cache}; the run needs {MIN_FREE_GB} GB")
+    print(f"disk: {free_gb:.0f} GB free under {cache}")
+
+
+# --- the stages
+
+
+def _fetch(stores: _Stores, rows: list[dict], cache: Path) -> None:
+    """``fetch_filings`` on the frame; the log says first how many it will try."""
+    # Count what fetch_filings will actually request before it runs, so the
+    # log states up front how many TEOS requests to expect. A filing is
+    # retryable when it has no row yet, or its last attempt failed for a
+    # reason that is not permanent and it has attempts left (MAX_ATTEMPTS).
+    ids = [row["object_id"] for row in rows]
+    prior = stores.filings.get(ids)
+    to_fetch = sum(filing_images._retryable(prior.get(oid)) for oid in ids)
+    if to_fetch:
+        _note(f"{to_fetch} of {len(ids)} filings to fetch; the rest are fetched, permanent or "
+              "out of attempts")
+    else:
+        _note(f"every one of the {len(ids)} filings is fetched, permanent or out of attempts: "
+              "0 TEOS requests")
+    # A ``Filing`` carries the EIN and tax year with the object id; the TEOS
+    # lookup needs them, and the CSV may lack either, hence the fallbacks.
+    filings = [filing_images.Filing(row["object_id"], row.get("filerein") or None,
+                                    int(row["taxyear"]) if row.get("taxyear") else None)
+               for row in rows]
+    # fetch_filings: TEOS for the PDF's URL, the download, the attachment cut
+    # (pdfimages), the upload to S3 and the filing_images row; it returns
+    # each filing's status afterwards, whether fetched this time or before.
+    statuses = filing_images.fetch_filings(stores.filings, filings, cache_dir=cache, s3=stores.s3)
+    # e.g. "the frame by status: fetched 992, no_teos_image 8"
+    counts = collections.Counter(statuses.values()).most_common()
+    print("the frame by status: " + ", ".join(f"{status} {n}" for status, n in counts))
+
+
+def _stored_only(
+    stores: _Stores,
+    pages: list,
+    policy: dict,
+    cache: Path,
+    max_errors: int,
+    *,
+    final: bool,
+) -> str | None:
+    """``agree`` with ``buy=False``. Returns what is missing when a reader lacks
+    readings (no call is made); returns None when every reading is stored, in
+    which case the pass must have bought nothing. Verdict rows written are
+    legitimate at the cost gate (a new policy version over stored readings
+    derives its verdicts there, at no cost) and a failure at the ``final``
+    check, which follows the run's own transcribe."""
+    try:
+        # ``buy=False``: stored readings only. When a reader has no reading
+        # for some page, ``read_pages`` raises MissingReadings before any
+        # render or gateway call, carrying the reader and the pages.
+        result = agree(stores.verdicts, pages, policy, max_errors=max_errors, cache_dir=cache,
+                       client=stores.client, filing_store=stores.filings,
+                       reading_store=stores.readings, s3=stores.s3, buy=False)
+    except page_readings.MissingReadings as exc:
+        return exc.summary
+    print(summary(result))
+    # It got through, so every reading was stored and nothing can have been
+    # bought. After the run's own transcribe the verdicts on the table are
+    # the same decisions, so the final check must have written nothing
+    # either; at the cost gate, verdicts written are a new version's.
+    bought = sum(spent["pages"] for spent in result.bought.values())
+    if bought or (final and result.written):
+        _stop(f"the stored-only pass bought {bought} pages and wrote {result.written} verdict "
+              "rows; it should have done neither")
+    written = f"wrote {result.written} verdict rows" if result.written else "wrote nothing"
+    _note(f"every reading the policy needs is stored: the stored-only pass bought nothing and "
+          f"{written}")
+    return None
+
+
+def _base_readers(
+    models: list[str],
+    prompt_version: str,
+    sample: Path,
+    cache: Path,
+    logs: Path,
+    max_errors: int,
+) -> None:
+    """The base readers as child processes of the ``page_readings`` CLI, one
+    log file each, reading under the policy's prompt version. Children, not
+    threads: a Ctrl-C in the pane reaches each reader on its own main thread
+    and ``upsert_as_done``'s stop path runs in each; this waits for them,
+    then re-raises."""
+    children = []
+    for model in models:
+        name = model.split("/")[-1]                       # "qwen3-vl-instruct": the log's name
+        # The reader's worker count from page_verdicts.WORKERS (Qwen 80,
+        # Flash Lite 24); the default for a model not listed there.
+        workers = WORKERS.get(model, page_verdicts.DEFAULT_WORKERS)
+        # The same command a person would type by hand: the page_readings
+        # CLI on the frame CSV, with the model, the policy's prompt version
+        # (the readings transcribe will look up) and the worker count.
+        # ``sys.executable`` is this interpreter, so the child runs in the
+        # same venv with the same environment (the key, the config path).
+        command = [sys.executable, "-m", "givingtuesday_datamart.page_readings",
+                   "--cache", str(cache), "read", str(sample), "--model", model,
+                   "--prompt-version", prompt_version, "--workers", str(workers),
+                   "--max-errors", str(max_errors)]
+        log_path = logs / f"{name}.log"
+        _note(f"{name}: {' '.join(command)} > {log_path}")
+        # Append mode, bytes: the child writes its stdout and stderr (merged)
+        # straight into the file, and a resumed run adds to the same file.
+        log = log_path.open("ab")
+        child = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
+        children.append((name, child, log))
+    try:
+        # Block until every child has exited; each one's exit code by name.
+        codes = {name: child.wait() for name, child, _ in children}
+    except KeyboardInterrupt:
+        # Ctrl-C in the pane sends SIGINT to the whole foreground process
+        # group, so each child got it too and is running its own stop path
+        # (cancel the queued pages, record the ones in flight). Wait for them
+        # to finish that, then let the interrupt carry on up through ``run``.
+        _note("stop: the readers are cancelling their queued pages and recording the ones in "
+              "flight")
+        for _, child, _ in children:
+            child.wait()
+        raise
+    finally:
+        for _, _, log in children:
+            log.close()
+    # A reader that exited non-zero: the tail of its log on the pane, then
+    # stop. Its stored readings are kept, so the same command resumes it.
+    failed = [name for name, code in codes.items() if code]
+    for name in failed:
+        _note(f"{name}: exited {codes[name]}; the last lines of its log:")
+        lines = (logs / f"{name}.log").read_text(errors="replace").splitlines(keepends=True)
+        print("".join(lines[-8:]), end="")
+    if failed:
+        _stop(f"{', '.join(failed)} exited non-zero (see {logs}); run the same command again "
+              "to resume")
+
+
+def _transcribe(
+    stores: _Stores,
+    sample: Path,
+    policy: dict,
+    cache: Path,
+    max_errors: int,
+    *,
+    buy: bool,
+) -> AgreeResult:
+    # ``transcribe`` above with the bundle unpacked into its keyword seams;
+    # ``limit`` and ``only`` stay at their defaults, so the whole frame is read.
+    return transcribe(stores.verdicts, sample, policy, cache, max_errors=max_errors, buy=buy,
+                      filing_store=stores.filings, reading_store=stores.readings,
+                      client=stores.client, s3=stores.s3)
+
+
+def run(
+    sample: Path,
+    policy: dict,
+    cache: Path,
+    *,
+    dry_run: bool = False,
+    cap: float | None = COST_CAP,
+    logs: Path | None = None,
+    max_errors: int = MAX_ERRORS,
+    filing_store=None,
+    reading_store=None,
+    verdict_store=None,
+    client=None,
+    s3=None,
+) -> None:
+    """The whole run of a frame in one command, for the box inside tmux; safe
+    to run again after any stop, since every stage resumes from the tables
+    and buys only what they lack. Six stages, each under a timestamped
+    banner, everything printed mirrored to ``logs/run-<start>/run.log``:
+
+    1. prerequisites: poppler (``pdftoppm -v`` printed), the gateway key and
+       the datamart config in the environment, an HTTPS request to TEOS, a
+       head and a small put on the bucket, 15 GB free under the cache; the
+       first thing missing stops the run with a message.
+    2. fetch: ``fetch_filings`` on the frame; zero requests when everything
+       is stored, and the log says so.
+    3. the cost gate: the stored-only pass (which names the pages without a
+       reading, or passes buying nothing; a new policy version over stored
+       readings writes its verdicts here at no cost) and ``estimate``'s
+       projection; past ``cap`` the run stops, and ``dry_run`` stops here.
+    4. the base readers as child processes of the ``page_readings`` CLI, at
+       ``WORKERS`` each, a log file each. Nothing spends before a render has
+       succeeded (S3 download, pdftoppm, then the gateway call, chunk by
+       chunk), so their first chunk is the proof a smoke stage once gave.
+    5. ``transcribe`` under the policy, again if it left pages without a
+       verdict, then the stored-only pass, which must buy and write nothing.
+    6. ``page_readings status`` and ``page_verdicts status`` for the policy.
+
+    The stores, ``client`` and ``s3`` are for tests, which patch the other
+    edges (poppler, TEOS, ``Popen``); with no stores the run opens a datamart
+    session and the status stage reads from it.
+    """
+    started = time.monotonic()
+    # The frame CSV, read once; every stage works from ``rows`` or ``ids``.
+    rows = list(csv.DictReader(sample.open()))
+    ids = [row["object_id"] for row in rows]
+    version = policy["version"]
+    # One directory per run, named for its start time, holding run.log and a
+    # log per base reader; --logs names one instead (a resumed run can reuse it).
+    if logs is None:
+        logs = Path("logs") / f"run-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
+    logs.mkdir(parents=True, exist_ok=True)
+    cap_text = f"${cap:,.0f}" if cap is not None else "none"
+
+    # The ExitStack holds everything that must be undone at the end: the log
+    # file, the stdout mirror, the logging handler and the datamart session.
+    # They are released in reverse order on any exit: the normal return, the
+    # dry-run return, ``_stop``'s SystemExit, or a Ctrl-C.
+    with contextlib.ExitStack() as stack:
+        _mirror_output(stack, logs / "run.log")
+
+        # 1. prerequisites
+        # The banner states every parameter of the run, so run.log describes
+        # itself. Then each check in turn; the first failure stops the run.
+        dry_text = "; DRY RUN, stops after the cost gate" if dry_run else ""
+        _banner(f"prerequisites: frame {sample}, {len(ids)} filings; cache {cache}; "
+                f"policy {version}; cap {cap_text}; logs {logs}{dry_text}")
+        _describe_host()
+        _check_poppler()
+        _check_gateway_key()
+        # A test injects its stores and never opens a datamart. The real run
+        # has none injected, and opens the session here.
+        session = None
+        if filing_store is None:                          # the real run; a test injects stores
+            session = _open_datamart(stack)
+        # The bundle every stage reads through. ``filing_images._store``
+        # wraps a session or a store in one interface; the readings and
+        # verdicts are wrapped the same way inside the functions that use
+        # them. The gateway client is built on first use by
+        # vlm_transcription; the S3 client comes from filing_images unless a
+        # test passes a fake.
+        stores = _Stores(
+            filings=filing_images._store(filing_store if filing_store is not None else session),
+            readings=reading_store if reading_store is not None else session,
+            verdicts=verdict_store if verdict_store is not None else session,
+            client=client,
+            s3=s3 if s3 is not None else filing_images._s3_client(),
+        )
+        # TEOS is checked with the frame's first EIN (a real filer, so a real
+        # answer), the bucket through the S3 client just built.
+        eins = [row["filerein"] for row in rows if row.get("filerein")]
+        _check_teos(eins[0] if eins else "731312965")
+        _check_bucket(stores.s3)
+        _check_disk(cache)
+        _note(f"prerequisites met in {_elapsed(started)}")
+
+        # 2. fetch
+        # Zero requests when every filing is already stored: the stage still
+        # runs, and its first log line says so.
+        _banner("fetch: fetch_filings on the frame (stored filings make no request; failures "
+                f"retry to {filing_images.MAX_ATTEMPTS} attempts)")
+        stage_started = time.monotonic()
+        _fetch(stores, rows, cache)
+        _note(f"fetch done in {_elapsed(stage_started)}")
+
+        # 3. the cost gate
+        _banner(f"cost gate: the stored-only pass under {version}, then the projection against "
+                f"the cap of {cap_text}")
+        stage_started = time.monotonic()
+        # ``frame_pages``: every attachment page of every fetched filing, the
+        # unit every stage from here on works in.
+        pages = frame_pages(stores.filings, ids)
+        filings_with_pages = len({oid for oid, _ in pages})
+        print(f"{filings_with_pages} filings with attachment pages, {len(pages):,} pages")
+        # The stored-only pass. On a fresh frame it stops at the first reader
+        # without readings, having bought nothing, and that is the expected
+        # answer; on a resumed run with everything stored it must get through
+        # buying and writing nothing.
+        missing = _stored_only(stores, pages, policy, cache, max_errors, final=False)
+        if missing:
+            _note(f"stored-only stopped, no call made: {missing}")
+        # The projection: what the readers would buy today at PER_PAGE, less
+        # what is stored. Past the cap ``estimate`` stops the run itself.
+        estimate(session, sample, policy, cap,
+                 filing_store=stores.filings, reading_store=stores.readings)
+        _note(f"cost gate passed in {_elapsed(stage_started)}")
+        if dry_run:
+            # Nothing so far has cost anything; --dry-run ends the run before
+            # the base readers, the first stage that spends.
+            _banner(f"dry run: stopping after the projection, nothing bought; "
+                    f"{_elapsed(started)} in all; logs in {logs}")
+            return
+
+        # 4. the base readers, as child processes
+        # Both base readers at once, each reading every attachment page of
+        # the frame it holds no reading for yet. Their output goes to
+        # logs/<reader>.log, so run.log carries only the boundaries.
+        counts = ", ".join(f"{model} at {WORKERS.get(model, page_verdicts.DEFAULT_WORKERS)} "
+                           "workers" for model in policy["base"])
+        _banner(f"base readers in parallel: {counts}")
+        stage_started = time.monotonic()
+        _base_readers(policy["base"], policy["prompt_version"], sample, cache, logs, max_errors)
+        _note(f"base readers done in {_elapsed(stage_started)}")
+
+        # 5. transcribe, again if needed, then the stored-only check
+        # With the base readings stored, ``transcribe`` buys only the
+        # escalation readers (3.8 Flash on the pages the base pair disputes,
+        # Sonnet on what 3.8 Flash leaves), then writes a verdict per page.
+        _banner(f"transcribe --policy {version}: the escalation readers and the verdicts")
+        stage_started = time.monotonic()
+        try:
+            result = _transcribe(stores, sample, policy, cache, max_errors, buy=True)
+        except SystemicFailure as exc:                    # read_pages' breaker: nothing written
+            _stop(str(exc))
+        _note(f"transcribe done in {_elapsed(stage_started)}")
+        # A page is left without a verdict when a reader failed on it this
+        # run (a gateway error, say). Error rows are read again on the next
+        # pass, so one more transcribe collects what a retry can.
+        if result.no_verdict:
+            _banner(f"second transcribe: {len(result.no_verdict)} pages were left without a "
+                    "verdict (a reader failed on them this run); reading them again")
+            stage_started = time.monotonic()
+            try:
+                result = _transcribe(stores, sample, policy, cache, max_errors, buy=True)
+            except SystemicFailure as exc:
+                _stop(str(exc))
+            _note(f"second transcribe done in {_elapsed(stage_started)}; "
+                  f"{len(result.no_verdict)} pages still without a verdict")
+        else:
+            _note("no page was left without a verdict; no second transcribe needed")
+        # The final check: with everything stored, a stored-only pass must
+        # reproduce the verdicts without buying or writing. That proves the
+        # tables hold the whole run, which is what ``report`` reads from.
+        _banner(f"final check: transcribe --policy {version} --stored-only must buy nothing "
+                "and write nothing")
+        stage_started = time.monotonic()
+        missing = _stored_only(stores, pages, policy, cache, max_errors, final=True)
+        if missing:
+            _stop(f"the stored-only check found readings missing: {missing}; run the same "
+                  "command again")
+        _note(f"final check passed in {_elapsed(stage_started)}: 0 pages bought, "
+              "0 verdict rows written")
+
+        # 6. status
+        # The two status reports query the tables, so they need the real
+        # session; a test, with stores injected, has none and skips them.
+        _banner("status after the run")
+        if session is not None:
+            print(page_readings.status_report(session))
+            print()
+            print(page_verdicts.status_report(session, version))
+        _banner(f"done in {_elapsed(started)}; logs in {logs}")
+
+
+def report(
+    session,
+    sample: Path,
+    out: Path | None,
+    xml_rows: Path | None,
+    *,
+    policy: dict = POLICY_V1,
+    results: Path | None = None,
+) -> None:
     """Score one engine's pages through the selector, filing by filing.
 
     The vision path is ``page_verdicts`` joined to ``page_readings`` under
@@ -342,8 +1124,9 @@ def report(session, sample: Path, out: Path | None, xml_rows: Path | None, *, po
             frame[oid].append(page)
         accepted = accepted_readings(session, pages, policy)
     by_stratum: dict = collections.defaultdict(
-        lambda: {"n": 0, "declared": 0.0, "recovered": 0.0, "reconciled": 0,
-                 "rows": 0, "near": 0.0, "outcomes": collections.Counter()})
+        lambda: {"n": 0, "declared": 0.0, "recovered": 0.0, "reconciled": 0, "readable": 0,
+                 "readable_declared": 0.0, "rows": 0, "near": 0.0,
+                 "outcomes": collections.Counter()})
     pages_seen = collections.Counter()
     records = []
 
@@ -392,6 +1175,12 @@ def report(session, sample: Path, out: Path | None, xml_rows: Path | None, *, po
         bucket["n"] += 1
         bucket["declared"] += declared
         bucket["outcomes"][outcome] += 1
+        # A filing is readable when the IRS served its PDF and the filer
+        # attached something: the two denominators below separate what the
+        # readers reach from what the data allows.
+        if image is not None and image.fetched and image.attachment_from:
+            bucket["readable"] += 1
+            bucket["readable_declared"] += declared
         if result is not None and result.recovered:
             bucket["reconciled"] += result.paid.reconciled
             bucket["recovered"] += result.recovered   # credit the declared amount, not the transcribed sum
@@ -421,19 +1210,37 @@ def report(session, sample: Path, out: Path | None, xml_rows: Path | None, *, po
             "flagged_rows": flagged_rows,   # loaded from a flagged page's single reading, marked
         })
 
-    print(f"{'stratum':<9}{'n':>4}{'recon':>7}{'rate':>7}{'declared $M':>13}{'recovered $M':>14}{'grants':>9}")
-    total_declared = total_recovered = total_rows = 0.0
+    # Two denominators a band: every filing, and the filings that had a PDF
+    # with an attachment ("readable"). The gap between the two columns is
+    # data the IRS or the filer never supplied; the readable rate is what
+    # the readers and the selector achieve on what they can see.
+    print(f"{'stratum':<9}{'n':>4}{'readable':>9}{'recon':>7}{'of n':>7}{'of rdbl':>8}"
+          f"{'declared $M':>13}{'readable $M':>13}{'recovered $M':>14}{'grants':>9}")
+    total_declared = total_readable = total_recovered = total_rows = 0.0
     for label in sorted(by_stratum):
         b = by_stratum[label]
         rate = 100 * b["reconciled"] / b["n"] if b["n"] else 0
-        print(f"  {label:<7}{b['n']:>4}{b['reconciled']:>7}{rate:>6.0f}%"
-              f"{b['declared']/1e6:>13,.1f}{b['recovered']/1e6:>14,.1f}{b['rows']:>9,}")
-        total_declared += b["declared"]; total_recovered += b["recovered"]; total_rows += b["rows"]
-    print(f"  {'TOTAL':<7}{sum(b['n'] for b in by_stratum.values()):>4}"
-          f"{sum(b['reconciled'] for b in by_stratum.values()):>7}"
-          f"{'':>7}{total_declared/1e6:>13,.1f}{total_recovered/1e6:>14,.1f}{int(total_rows):>9,}")
+        readable_rate = 100 * b["reconciled"] / b["readable"] if b["readable"] else 0
+        print(f"  {label:<7}{b['n']:>4}{b['readable']:>9}{b['reconciled']:>7}{rate:>6.0f}%"
+              f"{readable_rate:>7.0f}%{b['declared']/1e6:>13,.1f}{b['readable_declared']/1e6:>13,.1f}"
+              f"{b['recovered']/1e6:>14,.1f}{b['rows']:>9,}")
+        total_declared += b["declared"]
+        total_readable += b["readable_declared"]
+        total_recovered += b["recovered"]
+        total_rows += b["rows"]
+    n_all = sum(b["n"] for b in by_stratum.values())
+    n_readable = sum(b["readable"] for b in by_stratum.values())
+    n_reconciled = sum(b["reconciled"] for b in by_stratum.values())
+    print(f"  {'TOTAL':<7}{n_all:>4}{n_readable:>9}{n_reconciled:>7}"
+          f"{100 * n_reconciled / n_all if n_all else 0:>6.0f}%"
+          f"{100 * n_reconciled / n_readable if n_readable else 0:>7.0f}%"
+          f"{total_declared/1e6:>13,.1f}{total_readable/1e6:>13,.1f}{total_recovered/1e6:>14,.1f}"
+          f"{int(total_rows):>9,}")
     if total_declared:
-        print(f"\ndollar-weighted recovery on the sample: {100*total_recovered/total_declared:.1f}%")
+        readable_text = (f", {100*total_recovered/total_readable:.1f}% of the readable filings' "
+                         f"declared" if total_readable else "")
+        print(f"\ndollar-weighted recovery on the sample: {100*total_recovered/total_declared:.1f}% "
+              f"of declared{readable_text}")
         near = sum(b["near"] for b in by_stratum.values())
         print(f"present but 90-110% covered (row loss, not selection): ${near/1e6:,.1f}M "
               f"({100*near/total_declared:.1f}%)")
@@ -463,7 +1270,8 @@ def report(session, sample: Path, out: Path | None, xml_rows: Path | None, *, po
     if out:
         with out.open("w", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(records[0].keys()))
-            writer.writeheader(); writer.writerows(records)
+            writer.writeheader()
+            writer.writerows(records)
         print(f"per-filing detail -> {out}")
 
 
@@ -513,7 +1321,8 @@ def compare(reports: list[tuple[str, Path]], out: Path | None) -> None:
     if out and rows:
         with out.open("w", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
-            writer.writeheader(); writer.writerows(rows)
+            writer.writeheader()
+            writer.writerows(rows)
         print(f"differences -> {out}")
 
 
@@ -526,6 +1335,8 @@ def main() -> None:
     p.add_argument("--xml-rows", type=Path, default=None)
     p.add_argument("--expand", action="store_true",
                    help="the expanded frame: band B in full, C to 100, D to 50, on top of the 100 (610 filings)")
+    p.add_argument("--expand-1000", action="store_true",
+                   help="the 1,000-filing frame: C to 137 and D to 403, the same sampling fraction, on top of the 610")
 
     p = sub.add_parser("stage", help="fetch the IRS PDFs and find where the attachments start")
     p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
@@ -543,6 +1354,21 @@ def main() -> None:
     p.add_argument("--only", default=None, help="a single object id")
     p.add_argument("--max-errors", type=int, default=MAX_ERRORS)
     p.add_argument("--stored-only", action="store_true", help="buy nothing: a missing reading stops the run before any call")
+
+    p = sub.add_parser("estimate", help="the cost gate: what transcribe would buy today at the measured rates; exits past the cap")
+    p.add_argument("--policy", default="v1", help=f"a registered version ({', '.join(POLICIES)}) or a JSON file")
+    p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
+    p.add_argument("--only", default=None, help="a single object id")
+    p.add_argument("--cap", type=float, default=COST_CAP, help="dollars; zero or less for no cap")
+
+    p = sub.add_parser("run", help="the whole run of a frame in one command, inside tmux; safe to run again after any stop")
+    p.add_argument("--policy", default="v2", help=f"a registered version ({', '.join(POLICIES)}) or a JSON file")
+    p.add_argument("--sample", type=Path, required=True, help="the frame CSV")
+    p.add_argument("--cache", type=Path, default=CACHE)
+    p.add_argument("--dry-run", action="store_true", help="stop after the cost gate's projection")
+    p.add_argument("--cap", type=float, default=COST_CAP, help="dollars; zero or less for no cap")
+    p.add_argument("--logs", type=Path, default=None, help="default: logs/run-<start time, UTC>")
+    p.add_argument("--max-errors", type=int, default=MAX_ERRORS)
 
     p = sub.add_parser("report", help="score one engine's pages through the selector")
     p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
@@ -563,23 +1389,27 @@ def main() -> None:
         compare([(name, Path(path)) for name, path in (item.split("=", 1) for item in args.reports)], args.out)
         return
     if args.command == "sample":
-        build_sample(args.out or (EXPANDED["sample"] if args.expand else SAMPLE_CSV),
-                     args.xml_rows or (EXPANDED["xml_rows"] if args.expand else XML_ROWS_CSV),
-                     args.expand)
+        frame = "1000" if args.expand_1000 else "610" if args.expand else None
+        paths = {"1000": FRAME_1000, "610": EXPANDED, None: {"sample": SAMPLE_CSV, "xml_rows": XML_ROWS_CSV}}[frame]
+        build_sample(args.out or paths["sample"], args.xml_rows or paths["xml_rows"], FRAMES.get(frame, ()))
     elif args.command == "stage":
         stage(args.sample, args.cache, args.limit, args.manifest)
     else:
-        import logging
-
         from givingtuesday_datamart._internal.db import get_session
         from givingtuesday_datamart.ingestion import datamart_config
 
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
-        policy = with_flagged(load_policy(args.policy), args.flagged)
+        policy = with_flagged(load_policy(args.policy), getattr(args, "flagged", None))
+        if args.command == "run":
+            run(args.sample, policy, args.cache, dry_run=args.dry_run, cap=args.cap if args.cap > 0 else None,
+                logs=args.logs, max_errors=args.max_errors)
+            return
         with get_session(config=datamart_config()) as session:
             if args.command == "transcribe":
                 transcribe(session, args.sample, policy, args.cache, args.limit, args.only, args.max_errors,
                            buy=not args.stored_only)
+            elif args.command == "estimate":
+                estimate(session, args.sample, policy, args.cap if args.cap > 0 else None, only=args.only)
             else:
                 report(session, args.sample, args.out, args.xml_rows, policy=policy, results=args.results)
 

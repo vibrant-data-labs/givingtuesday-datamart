@@ -114,9 +114,15 @@ POLICIES = {"v1": POLICY_V1, "v2": POLICY_V2}
 # base pair's counts are the same kind of number — 40 and 12 held, nothing
 # says they are the ceiling — and the 1,000-filing run may raise them too
 # (Zein, 2026-09-23); the gateway's own limits are the thing to find.
+# Qwen went to 80 on the frame run's last 1,592 pages (2026-09-24 00:45Z):
+# at 40 it read about 53 pages a minute with a 52 s median call, its p90
+# 77 s, every call answered; at 80, +54% aggregate output at a fifth less
+# speed per call, still every call answered. Flash Lite to 24 after the
+# run (Zein, 2026-09-24): 12 was never a throughput test, 3.8 Flash held
+# 24 on the same provider through 5,959 pages; the next run is its trial.
 WORKERS = {
-    "alibaba/qwen3-vl-instruct": 40,
-    "google/gemini-3.5-flash-lite": 12,
+    "alibaba/qwen3-vl-instruct": 80,
+    "google/gemini-3.5-flash-lite": 24,
     "google/gemini-3.8-flash": 24,
     "anthropic/claude-sonnet-5": 24,
 }

@@ -39,11 +39,17 @@ did that for the sample from the folders.
 **Rendering.** PNGs go to ``<cache_dir>/pages<DPI>/<object_id>/pNNN.png``,
 the layout ``exploratory/placeholder_recovery.transcribe`` already uses, so
 pages rendered there are reused. Rendering runs in its own small pool, one
-job per filing for the span of pages asked for: ``pdftoppm`` is a
+job per chunk of ``RENDER_CHUNK`` pages of a filing: ``pdftoppm`` is a
 subprocess, so the GIL is not the limit; bounding it to ``RENDER_WORKERS``
 keeps forty Qwen workers from starting forty poppler processes; and each
-read job waits on its filing's render, so reading overlaps rendering
-instead of the pool idling through an hour of it. The render job also
+read job waits on its own chunk's render, so reading overlaps rendering
+instead of the pool idling through an hour of it. Chunks, not whole
+filings, because a render is one single-threaded poppler process: on the
+EC2 box (four cores, two seconds a page against the laptop's 0.4) a
+1,089-page filing rendered whole held every read job behind it for the
+better part of an hour while the other render workers sat on the next
+giants (the frame run, 2026-09-23); in chunks of 20 the read pool consumes
+each chunk as it lands and a giant spreads across the workers. The render job also
 materialises the filing's PDF (``filing_images.materialise``, from the row
 already read, so no worker touches the session), so on a box with an
 empty cache the S3 downloads pipeline with the renders and reads rather
@@ -65,6 +71,9 @@ import math
 import re
 import shutil
 import subprocess
+import sys
+import tempfile
+import threading
 import time
 from abc import ABC, abstractmethod
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -76,13 +85,19 @@ from typing import Iterable, Sequence
 from sqlalchemy import text
 
 from givingtuesday_datamart import filing_images, vlm_transcription
-from givingtuesday_datamart._internal.bulk import keyed_params, keyed_select, multi_row_insert, multi_row_params, upsert_as_done
+from givingtuesday_datamart._internal.bulk import (SystemicFailure, keyed_params, keyed_select, multi_row_insert,
+                                                   multi_row_params, upsert_as_done)
 from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart.filing_images import CACHE
 from givingtuesday_datamart.vlm_transcription import DPI, PROMPT_VERSION
 
 CHUNK = 200
+# The circuit breaker (``_systemic``): a run whose first results are all
+# error rows across this many filings is a broken box, not bad pages.
+BREAKER_ROWS = 50
+BREAKER_FILINGS = 3
 RENDER_WORKERS = 4
+RENDER_CHUNK = 20        # pages per render job; a 20-page chunk is about 40 s of pdftoppm on the box
 MAX_ERRORS = 3
 RESPONSE_KEYS = ("page_kind", "heading", "rows", "totals")
 VLM_DIR = CACHE / "vlm"
@@ -387,10 +402,66 @@ def _readable(row: filing_images.FilingImage | None) -> bool:
     return row is not None and row.fetched and bool(row.sha256)
 
 
+def _one_page_pdf() -> bytes:
+    """A valid one-page PDF, blank, 72 by 72 points: the fixture
+    ``_prove_pdftoppm`` renders. Built with its cross-reference table so no
+    poppler version has to reconstruct one."""
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>",
+               b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+               b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] >>"]
+    out, offsets = bytearray(b"%PDF-1.4\n"), []
+    for number, body in enumerate(objects, 1):
+        offsets.append(len(out))
+        out += f"{number} 0 obj\n".encode() + body + b"\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode()
+    for offset in offsets:
+        out += f"{offset:010d} 00000 n \n".encode()
+    out += f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    return bytes(out)
+
+
+def _prove_pdftoppm() -> None:
+    """Render the one-page fixture into a temporary directory, so a poppler
+    that is installed but cannot render (a broken library, a bad build)
+    fails here and not on the frame's first chunk."""
+    tmp = Path(tempfile.mkdtemp(prefix="pdftoppm-check-"))
+    try:
+        pdf = tmp / "one.pdf"
+        pdf.write_bytes(_one_page_pdf())
+        pngs = vlm_transcription.render(pdf, 1, 1, tmp / "out")
+        if not pngs or not pngs[0].exists():
+            raise RuntimeError("no PNG came out")
+    except Exception as exc:                              # noqa: BLE001
+        detail = exc.stderr if isinstance(exc, subprocess.CalledProcessError) and exc.stderr else str(exc)
+        if isinstance(detail, bytes):
+            detail = detail.decode(errors="replace")
+        raise RuntimeError("pdftoppm is installed but cannot render a page: "
+                           f"{detail.strip()[:300]}") from exc
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def _require_pdftoppm() -> None:
-    """Fail before any render or gateway call on a box without poppler."""
+    """Fail before any render or gateway call on a box without a working
+    poppler: not on PATH, or installed and unable to render the fixture."""
     if shutil.which("pdftoppm") is None:
         raise RuntimeError("pdftoppm is not on PATH; install poppler-utils (apt) or poppler (brew)")
+    _prove_pdftoppm()
+
+
+class MissingReadings(LookupError):
+    """``read_pages`` with ``buy=False`` (or under settings that are not
+    today's) found pages without a reading of the model: nothing was read.
+    Carries what a caller needs without parsing the message."""
+
+    def __init__(self, model: str, prompt_version: str, pages: list, why: str) -> None:
+        self.model, self.prompt_version, self.pages, self.why = model, prompt_version, list(pages), why
+        super().__init__(f"{self.summary}: {self.pages[:5]}")
+
+    @property
+    def summary(self) -> str:
+        return f"{len(self.pages)} pages have no reading of {self.model} {self.prompt_version} and {self.why}"
 
 
 class FilingUnreadable(Exception):
@@ -398,15 +469,43 @@ class FilingUnreadable(Exception):
     be materialised, or pdftoppm failed. The message is the pages' error."""
 
 
-def _render_filing(row: filing_images.FilingImage, first: int, last: int, cache_dir: Path, s3) -> list[Path]:
+class _PdfOnce:
+    """``materialise`` once per filing per run, however many chunk jobs the
+    filing has: the first job to ask downloads (or hashes the cached file)
+    while the others wait on its future, so a 55-chunk filing is one S3
+    GET and one hash rather than four concurrent downloads and 55 hashes.
+    The in-process half of a per-chunk render lock; the base readers, as
+    two processes, still each do it once."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.futures: dict[str, Future] = {}
+
+    def pdf(self, row: filing_images.FilingImage, cache_dir: Path, s3) -> Path:
+        with self.lock:
+            future = self.futures.get(row.object_id)
+            first = future is None
+            if first:
+                future = self.futures[row.object_id] = Future()
+        if first:
+            try:
+                future.set_result(filing_images.materialise(row, cache_dir, s3=s3))
+            except BaseException as exc:                  # noqa: BLE001 — the waiters get it too
+                future.set_exception(exc)
+                raise
+        return future.result()
+
+
+def _render_filing(row: filing_images.FilingImage, first: int, last: int, cache_dir: Path, s3,
+                   pdfs: _PdfOnce) -> list[Path]:
     """Runs in the render pool: the filing's PDF onto local disk (from the
     cache when it hashes to the row, else S3 through the client the main
-    thread built), then its span of pages to PNGs. Takes the row, never
-    the session. A failure at either step is logged once here and raised
-    as ``FilingUnreadable`` for the filing's read jobs to store as error
-    rows."""
+    thread built; once per filing, through ``pdfs``), then its span of
+    pages to PNGs. Takes the row, never the session. A failure at either
+    step is logged once here and raised as ``FilingUnreadable`` for the
+    filing's read jobs to store as error rows."""
     try:
-        pdf = filing_images.materialise(row, cache_dir, s3=s3)
+        pdf = pdfs.pdf(row, cache_dir, s3)
     except Exception as exc:                              # noqa: BLE001
         raise _unreadable(row.object_id, first, last, "pdf", exc) from exc
     started = time.monotonic()
@@ -432,17 +531,45 @@ def _unreadable(object_id: str, first: int, last: int, stage: str, exc: BaseExce
     return FilingUnreadable(message)
 
 
+def _systemic(rows: list[PageReading]) -> str | bool:
+    """``upsert_as_done``'s breaker for a reading run. A failed render or
+    gateway call is one error on its page, and ``run`` retries a page up to
+    ``MAX_ERRORS`` times in one invocation, so one run on a box with a
+    broken poppler or a dead key would leave every page's base rows at the
+    limit and the next run, on the fixed box, would read the whole frame
+    through the escalation readers. So: while every result is an error,
+    nothing is written; once ``BREAKER_ROWS`` of them span
+    ``BREAKER_FILINGS`` filings the run stops with nothing written and the
+    first error named; the first page read releases the run. A filing of
+    its own that cannot be read keeps its attempts, since its errors never
+    reach three filings."""
+    if any(row.response is not None for row in rows):
+        return True
+    filings = {row.object_id for row in rows}
+    if len(rows) < BREAKER_ROWS or len(filings) < BREAKER_FILINGS:
+        return False
+    first = rows[0]
+    return (f"the first {len(rows)} results of this run are all errors, from {len(filings)} filings: "
+            "that looks systemic (poppler, the gateway, S3, disk), not the pages', so nothing is written "
+            f"and every page keeps its attempts. The first: {first.object_id} p{first.page:03d}: "
+            f"{(first.last_error or '')[:200]}")
+
+
 def _read_one(client, model: str, rendered: Future, key: Key, request_settings: dict,
               prior: PageReading | None, pages_dir: Path) -> PageReading:
     """Runs in a worker thread: wait for the filing's render, read the page.
     Never the session. A failed render is this page's error result, so a
     filing pdftoppm cannot draw costs its pages one error each, not the run."""
+    png = pages_dir / f"p{key[1]:03d}.png"
     try:
         rendered.result()
     except FilingUnreadable as exc:                       # logged once by the render job
         data = {"error": str(exc)}
     else:
-        data = vlm_transcription.transcribe(client, model, pages_dir / f"p{key[1]:03d}.png")
+        if png.exists():
+            data = vlm_transcription.transcribe(client, model, png)
+        else:                                             # the one page pdftoppm left out of its span
+            data = {"error": f"render: no PNG for the page ({png.name}); the rest of its span rendered"}
     return reading_from_result(key, request_settings, data, prior)
 
 
@@ -460,11 +587,11 @@ def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
        and is stored, at no cost, whatever its ``errors``. A row at
        ``max_errors`` is skipped and listed; anything else is a miss.
     3. Misses are rendered in a pool of ``RENDER_WORKERS``, one job per
-       filing: its PDF materialised from the cache or S3 (from the row read
-       in step 1, never the session), then the span of its pages asked for
-       to PNGs. Each read job waits on its filing's render, so download,
-       render and read pipeline per filing while the read pool of
-       ``workers`` calls ``vlm_transcription.transcribe``.
+       chunk of ``RENDER_CHUNK`` pages of a filing: its PDF materialised
+       from the cache or S3 (from the row read in step 1, never the
+       session), then the chunk's pages to PNGs. Each read job waits on its
+       own chunk's render, so download, render and read pipeline per chunk
+       while the read pool of ``workers`` calls ``vlm_transcription.transcribe``.
     4. The main thread collects the results and upserts them 200 at a time.
     5. The result carries page → response for hits and successful reads, the
        skipped pages with the rows that gated them, and the pages that
@@ -524,14 +651,17 @@ def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
         return result
     if not buy or settings != request(model):
         why = "the run buys nothing" if not buy else "the settings asked for are not today's, so nothing can be read under them"
-        raise LookupError(f"{len(misses)} pages have no reading of {model} {prompt_version} and {why}: "
-                          f"{[page for page, _ in misses[:5]]}")
+        raise MissingReadings(model, prompt_version, [page for page, _ in misses], why)
     _require_pdftoppm()
 
-    spans: dict[str, tuple[int, int]] = {}
+    # One render job per chunk of a filing's pages, keyed on the chunk the
+    # page falls in, so a read job waits on its own chunk and not on the
+    # whole filing.
+    spans: dict[tuple[str, int], tuple[int, int]] = {}
     for (oid, page), _ in misses:
-        first, last = spans.get(oid, (page, page))
-        spans[oid] = (min(first, page), max(last, page))
+        chunk = (oid, page // RENDER_CHUNK)
+        first, last = spans.get(chunk, (page, page))
+        spans[chunk] = (min(first, page), max(last, page))
     client = client if client is not None else vlm_transcription.client()
     # Built here, once: boto3 documents constructing clients from the
     # default session as not thread-safe, and on an empty cache the render
@@ -539,10 +669,11 @@ def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
     s3 = s3 if s3 is not None else filing_images._s3_client(RENDER_WORKERS)
     tally = result.bought
     with ThreadPoolExecutor(max_workers=RENDER_WORKERS) as renders, ThreadPoolExecutor(max_workers=workers) as pool:
-        rendered = {oid: renders.submit(_render_filing, images[oid], first, last, cache_dir, s3)
-                    for oid, (first, last) in spans.items()}
-        futures = [pool.submit(_read_one, client, model, rendered[page[0]], keys[page], settings, prior,
-                               page_dir(cache_dir, page[0])) for page, prior in misses]
+        pdfs = _PdfOnce()
+        rendered = {chunk: renders.submit(_render_filing, images[chunk[0]], first, last, cache_dir, s3, pdfs)
+                    for chunk, (first, last) in spans.items()}
+        futures = [pool.submit(_read_one, client, model, rendered[(page[0], page[1] // RENDER_CHUNK)], keys[page],
+                               settings, prior, page_dir(cache_dir, page[0])) for page, prior in misses]
         def stop() -> None:
             # On the way out for any reason but completion (an interrupt in
             # the wait, the caller raising): the renders not yet started
@@ -554,7 +685,7 @@ def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
             if sum(future.cancel() for future in rendered.values()):
                 logger.warning("stopping: the renders not yet started are cancelled")
 
-        for row in upsert_as_done(store, futures, CHUNK, on_stop=stop):
+        for row in upsert_as_done(store, futures, CHUNK, on_stop=stop, breaker=_systemic):
             page = (row.object_id, row.page)
             tally["pages"] += 1
             if row.response is None:
@@ -743,7 +874,7 @@ def main() -> None:
     read = sub.add_parser("read", help="read every attachment page of the fetched filings in a frame CSV, or of the ids given")
     read.add_argument("filings", nargs="+", help="frame CSV path(s) or object ids")
     read.add_argument("--model", required=True, help="gateway model id, e.g. alibaba/qwen3-vl-instruct")
-    read.add_argument("--workers", type=int, required=True, help="Qwen 40, Flash Lite 12, 3.8 Flash and Sonnet 8")
+    read.add_argument("--workers", type=int, required=True, help="Qwen 80, Flash Lite 24, 3.8 Flash and Sonnet 24 (page_verdicts.WORKERS)")
     read.add_argument("--prompt-version", default=PROMPT_VERSION)
     read.add_argument("--max-errors", type=int, default=MAX_ERRORS)
 
@@ -766,8 +897,13 @@ def main() -> None:
         if args.command == "read":
             ids = [f.object_id for token in args.filings for f in filing_images._read_frame(token)]
             pages = frame_pages(session, ids)
-            result = read_pages(session, pages, args.model, workers=args.workers, prompt_version=args.prompt_version,
-                                max_errors=args.max_errors, cache_dir=args.cache)
+            try:
+                result = read_pages(session, pages, args.model, workers=args.workers,
+                                    prompt_version=args.prompt_version, max_errors=args.max_errors,
+                                    cache_dir=args.cache)
+            except SystemicFailure as exc:
+                print(f"STOPPED: {exc}", file=sys.stderr)
+                sys.exit(1)
             print(f"{len(pages)} pages: {len(result.responses)} with a reading, {len(result.failed)} errored this run, "
                   f"{len(result.skipped)} skipped at {args.max_errors} errors")
             for (oid, page), row in sorted(result.skipped.items()):

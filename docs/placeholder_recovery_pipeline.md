@@ -614,6 +614,92 @@ had. The three largest by declared amount:
   on is working as designed here, and `load_single` then loads readings
   the selector rightly cannot use.
 
+### The 1,000-filing frame under POLICY_V2
+
+The frame — 1,000 filings of 677 filers, 831 with a PDF, 553 with an
+attachment, 9,926 attachment pages — decided by the page gate as
+`POLICY_V2` (3.8 Flash at low reasoning effort, otherwise v1) on
+2026-09-23/24, on the EC2 box through `run` (the operational facts —
+the box, the stops, two races the chunked renders exposed, wall time and
+throughput — are the *Frame run* note under *Order of operations*, item
+4). The base pair bought 7,613 and 7,606 pages, 3.8 Flash 5,959, Sonnet
+2,953; **$221.64 in all**, against a pre-run projection of $241.50 and
+the session's $400 cap. Per-filing detail is
+`data/exploratory/placeholder_report_v2_1000.csv`; the sample's own v2
+report is `placeholder_report_v2.csv`.
+
+| band | filings | readable | **POLICY_V2** | of all filings | of readable | dollars, of all | dollars, of readable | v2, flagged pages left out |
+|---|---|---|---|---|---|---|---|---|
+| A (over $100M) | 22 | 17 | **15 / $2,664M** | 68% | 88% | 57.0% | 83.4% | 12 / $2,001M |
+| B ($10M–$100M) | 438 | 281 | **201 / $5,299M** | 46% | 72% | 46.4% | 71.2% | 148 / $3,884M |
+| C | 137 | 64 | **51 / $177M** | 37% | 80% | 39.5% | 75.9% | 42 / $132M |
+| D | 403 | 191 | **140 / $36.5M** | 35% | 73% | 36.7% | 73.8% | 131 / $33.8M |
+| **all** | **1,000** | **553** | **407 / $8,177M** | **41%** | **74%** | **49.1%** | **74.9%** | **333 / 36.4%** |
+
+Reconciled filings and declared dollars credited, on two denominators:
+every filing in the band, and the *readable* ones — a PDF served by the
+IRS with something attached by the filer. **407 filings and 49.1% of
+the $16.6B declared**, 235,622 grant rows; of the 553 readable filings,
+74%, and 74.9% of their $10.9B. The gap between the two denominators is
+data acquisition — the IRS's missing images and the filers' empty
+attachments — and it is what makes the band gradient: the readers
+reconcile 72–88% of readable filings in every band, but 77% of band A
+is readable against 64% of B and 47% of C and D. The gap between the
+readable rate and 100% is the pipeline's: the 77 *list present*, 23
+*list partial* and 44 *no candidate table* filings below. The projected
+recovery across the addressable population is $11.41B (the sample had
+projected $10.37B).
+The last column is the same verdicts under `leave_out` (no call): the
+flagged rule is worth 74 filings and 12.7 points on the frame, against
+12 filings and 16 points on the sample, and 36,442 of the rows (15%)
+come from flagged pages and carry the mark.
+
+By where a filing came from: the 100-filing sample 47 / 53.4% — the
+same 47 filings and dollars as under v1, `compare` finding no filing
+whose outcome differs, although 74 of its 1,782 page verdicts changed
+(30 escalated to flagged, 27 the other way, 17 a different accepted
+reader); the other 510 of the 610, 229 / 46.9%; the 390 top-up in bands
+C and D, 131 / 35.2%.
+
+**What is not recovered.** 447 filings, 34.4% of the declared dollars,
+have nothing to read: 278 whose PDF is the IRS rendering and nothing
+else ($3.08B, 18.5%), 66 whose TEOS image is a 404 ($1.48B), 103 with no
+TEOS image at all ($1.17B). Of the 553 read: 77 *list present* but not
+reconciled ($1.38B, 8.3%), 23 *list partial* ($729M), 44 with no
+candidate table ($532M), 2 *list absent*. Pages with a stated total:
+298 matched, 694 did not.
+
+**The verdict mix, and where the projection missed.** Of the 9,926
+pages: agreed 3,920 (39.5%), escalated 3,161 (31.8%: 3.8 Flash 2,538,
+Sonnet 623), flagged 2,845 (28.7%), unreadable 0, no verdict 0. The
+cost gate had projected 52% disputed, 3.8 Flash resolving 39% of them,
+Sonnet a third of the rest, 21% flagged — rates measured on the sample
+(the dispute rate on its 1,782 pages under v1, the resolution rates on
+its ground-truth pages), and the sample under v2 reproduces them, which
+is a consistency check and nothing more. The frame:
+
+| pages | disputed | 3.8 Flash resolves | Sonnet resolves | flagged |
+|---|---|---|---|---|
+| all (9,926) | 60.5% | 42.3% | 18.0% | 28.7% |
+| the sample's (1,782) | 66.9% | 55.2% | 28.7% | 21.4% |
+| J&J's four years (3,330) | 64.9% | 76.1% | 27.3% | 11.3% |
+| the rest (6,596) | 58.3% | 23.2% | 16.3% | 37.4% |
+| the top-up's (579) | 62.2% | 18.3% | 11.6% | 44.9% |
+| band A / B / C / D | 55 / 61 / 66 / 57% | 32 / 46 / 15 / 22% | 37 / 18 / 8 / 14% | 24 / 27 / 52 / 38% |
+
+Sonnet resolved 18% of what reached it against the 33% projected, and
+3.8 Flash 42% against 39%; the base pair disputed 60.5% against 52%.
+Where the flagged pages are is the finding: not J&J, whose dense
+matching-gift pages the base pair disputes but 3.8 Flash resolves three
+quarters of, and which flags at 11%; the small filings of bands C and D
+— scanned letters, odd formats, a table in a paragraph — where no two of
+the four readers agree on a page half the time (band C 52%, the top-up
+45%). The sample had 34 such filings; the frame has 540, and its pages
+outside the sample flag at 30% against the sample's 21%. That is the
+line to read the 21%-against-29% gap on, and the reason the recovery
+rate falls from 53% on the sample to 49% on the frame while the count
+of flagged rows loaded rises to 15% of all rows.
+
 ## Ground truth
 
 [`placeholder_ground_truth.py`](../givingtuesday_datamart/exploratory/placeholder_ground_truth.py):
@@ -1150,13 +1236,151 @@ page, so the question may be moot.
      resumes from the tables. The one thing the rehearsal could not
      exercise is a gateway refusal or a timeout: the error path exists
      and is unit-tested, and `no_verdict` plus a re-run is the recovery.
+   **Frame run** (2026-09-23/24; Session 4: the 1,000-filing frame under
+   `POLICY_V2`, on the EC2 box, through one command; the results are
+   *The 1,000-filing frame under POLICY_V2* above). What the run needed,
+   in order, and what each step found:
+   - **The frame.** `sample --expand-1000` tops bands C and D up on top of
+     the 610 to the same sampling fraction (540 of the two bands' 9,055
+     filings, 5.96%: C 137 of 2,296, D 403 of 6,759), as the next draws
+     from the same seeded generator, so the 610 regenerate unchanged
+     inside the 1,000. `filing_images fetch` on the 390 new filings took
+     85 s from the laptop (180 fetched, 134 without an attachment, 48 with
+     no TEOS image, 28 unserved 404s, all 2022 images; the 610 made no
+     request). The frame as read: 1,000 filings of 677 filers, 831 with a
+     PDF, 553 with an attachment (278 are the IRS rendering and nothing
+     else, 103 have no TEOS image, 66 a 404), 9,926 attachment pages out
+     of 39,917 in the fetched PDFs, 579 of them the top-up's. Johnson &
+     Johnson is four years of the frame, not the one year of the sample —
+     2020, 2021, 2022 and 2023 at 550, 836, 1,089 and 855 pages — 3,330
+     pages, a third of the frame.
+   - **The cost gate** (`estimate`, `run`'s stage 3; from the laptop first
+     with `--dry-run`, 31 s, nothing bought): 8,144 pages without a Qwen
+     v4 reading, and at the rehearsal's per-page prices and re-weighted
+     rates a projection of $241.50 against the $400 cap. The run cost
+     **$221.64** by the rows' `usage` (every call's tokens, from
+     2026-09-23): Qwen 7,613 pages $19.30, Flash Lite 7,606 $46.89, 3.8
+     Flash at low 5,959 $54.21, Sonnet 2,953 $101.24 — Sonnet at $0.034 a
+     page against the $0.046 the sample priced it at, the other three
+     within 10% of theirs.
+   - **The box.** `zein_playground`, a t3.xlarge (4 vCPUs, 15 GB, 100 GB
+     disk with 22 GB free), Amazon Linux 2023, Python 3.12.6 in a venv
+     with the `ingest` extra (`openai` added to it: the gateway client
+     imports it), poppler-utils 22.08.0 from dnf, tmux and git-lfs already
+     there, TEOS and the gateway reachable, S3 through the account's keys
+     in `~/.aws` rather than an instance role, the datamart through
+     `~/config.ini`. Set up per [placeholder_ec2_runbook.md](placeholder_ec2_runbook.md)
+     in about ten minutes; the prerequisites stage passes in a second.
+   - **Rendering is the box's bottleneck, and it stalled the first attempt.**
+     Twenty minutes into a first try, answers fell from about a hundred a
+     minute to none: no refusal or timeout, but the four cores at 100% on
+     eight `pdftoppm` processes — each reader's four render workers on the
+     frame's giants (J&J 2022, 2023 and 2020), rendered whole, in
+     duplicate, one single-threaded process each at about 2 s a page (0.5
+     s alone; the laptop's M2 Pro does 0.4) — while every read job queued
+     behind them. `read_pages` now renders in chunks of 20 pages
+     (`RENDER_CHUNK`), one job per chunk, so the read pool consumes each
+     chunk as it lands (about 30 s each on the box) and a giant spreads
+     across the render workers.
+   - **Two races the chunks exposed, both in temp-file names keyed on the
+     process id.** With four chunk renders of one filing in one process,
+     `render`'s `tmp<pid>` prefix was shared, and the first chunk to
+     finish globbed the prefix and unlinked the PNGs the others were
+     still writing: an hour in, every read of those pages raised
+     `FileNotFoundError` before the gateway call (3,033 in Flash Lite,
+     2,045 in Qwen, unrecorded, so unpaid), and each reader exited on the
+     collected failure once its queue drained, Flash Lite with 4,575 pages
+     stored, Qwen 2,800. `render` now writes each `pdftoppm` run into a
+     directory of its own and raises when a promised PNG is absent, so a
+     page pdftoppm cannot produce is an error row for its chunk. The same
+     shape in `filing_images._stage`, the PDF download's `<pdf>.<pid>.tmp`:
+     two chunk jobs of J&J 2021 in the transcribe process staged the same
+     download and one rename took the file from the other, 19 error rows
+     (`pdf: FileNotFoundError`), read again by `run`'s second transcribe
+     with the PDF in the cache. Each staged download now has a name of
+     its own. The rule: nothing keyed on the pid is unique once render
+     jobs are per chunk.
+   - **Ctrl-C under `run`, on the box, three times.** With the readers as
+     child processes in the pane's process group, each Ctrl-C reached
+     both: the readers cancelled their queued pages (7,057 the first
+     time, 1,505 the last) and recorded the ones in flight, `run` waited
+     for them and exited, and the same command resumed within two
+     minutes at page granularity — prerequisites in a second, fetch 0
+     requests, the gate naming what was left, the smoke on stored pages.
+     The third stop was the worker trial: Qwen from 40 to 80 for its last
+     1,592 pages, +54% aggregate output (1,979 to 3,048 tokens a second)
+     at a fifth less speed per call (52 to 42 tokens a second), zero
+     errors, every answer 200 — the count stays at 80; the pages-a-minute
+     jump (54 to 240) was mostly the tail's lighter pages (775 output
+     tokens a page against 2,221).
+   - **Stages, wall time and cost.** End to end 22:37 to 02:20 UTC, 3 h
+     43 min, with the two stops and the crash inside it; the last start
+     ran 1 h 34 min from prerequisites to status. The base pair read for
+     2 h 16 min across the three starts, in parallel: Flash Lite 7,606
+     pages in 93 min at 81 a minute (12 workers, 6.4 s median, 1.01 calls
+     a page), Qwen 7,613 in 138 min at 55 a minute (40 then 80 workers,
+     41 s median, p90 75, 1.10 calls a page, 300 partial pages, every one
+     of them dense). 3.8 Flash at low: 5,959 disputed pages in 45 min at
+     131 a minute (24 workers, 12.0 s median, p90 17.4). Sonnet: 2,953 in
+     36 min at 82 a minute (24 workers, 16.8 s median, p90 38.3). The
+     second transcribe 42 s for the 20 pages, the final check 11 s. No
+     gateway refusal, timeout or error row in 24,131 pages bought; the
+     only error rows were the 20 above.
+   - **Zero-cost checks after the run.** The final stored-only pass inside
+     `run`: 0 pages bought, 0 verdict rows written, 11 s. `run` again on
+     the box as the resume check: 42 s end to end, every stage on stored
+     readings, 0 bought, 0 written. `verdicts --policy v2` on the
+     ground-truth pages: 58 / 2 / 23, the same two wrong pages as v1, 11
+     of 23 flagged right in Sonnet's reading. Traceability on the 9,926
+     verdicts: none without its accepted reading, none decided without
+     two readings, none flagged from a reader but Sonnet.
 5. ~~Decide the flagged-page policy before that run's load.~~ Decided
    (2026-09-22, the spec's decisions table): loaded from Sonnet's single
    reading with the verdict as the mark, `POLICY_V1["flagged"] =
    "load_single"`; `leave_out` is a flip of the rule, at no cost.
 6. Send GT the findings list; report the 2022 image batch to the IRS.
+7. **Before the load, check the flagged pages of the small filings by
+   hand** (Zein, 2026-09-24). Bands C and D flag half their pages — scanned
+   letters, odd formats, a table inside a paragraph — and the flagged rows
+   are 15% of everything the frame recovers. The ground truth's 11 of 23
+   flagged pages right in Sonnet's reading were dense pages, not these.
+   About 30 flagged pages drawn from bands C and D, transcribed by hand
+   against Sonnet's loaded reading, decide `load_single` against
+   `leave_out` for those bands on a measured number rather than the
+   sample's.
+8. Housekeeping from the frame run (2026-09-24): an instance role scoped
+   to the bucket for the box, in place of the account's keys in `~/.aws`
+   (the runbook lists what it needs); the two base readers render each
+   chunk twice when both start on the same filing, since they run as two
+   processes — a per-chunk lock in `render` would make it once (the
+   escalation readers and every later run already find the PNGs on disk,
+   so the render is a one-time cost apart from that overlap); Flash
+   Lite's first run at 24 workers is its throughput trial, as Qwen's 80
+   was.
 
 ## Open decisions
+
+Decided on 2026-09-24, after the frame run (Zein):
+
+- The band split stays at C 137 and D 403, the same sampling fraction for
+  both; the frame is read, and its C and D rates are set by how many
+  filings have anything to read, not by their count.
+- The smoke stage is gone (the review of PR #47). Nothing spends money
+  before a render has succeeded — S3 download, then pdftoppm, then the
+  gateway call, chunk by chunk — so the base readers' first chunk proves
+  within a minute what the smoke proved in fifty; and a smoke that stopped
+  on a page at `max_errors`, or on a first chunk without a grants table,
+  could stop a resumable run for good.
+- Renders stay unstored (the spec's non-goal) so long as one render on the
+  box serves every reader, which it does apart from the base pair's
+  overlap (item 8 above).
+- Worker counts: Qwen 80, Flash Lite 24, 3.8 Flash 24, Sonnet 24; nothing
+  in 24,131 pages found the gateway's limit, so raise where a trial can
+  watch the error rows.
+- The flagged rule stays `load_single` for now; item 7 above measures it
+  on the small filings before anything loads.
+
+Still open:
 
 - Whether recovered rows join `privategrants_current` or stay in their own
   table behind a view (recommended: the view; it keeps GT's data and ours

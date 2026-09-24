@@ -70,6 +70,7 @@ def render(monkeypatch):
     fake = _Render()
     monkeypatch.setattr(vlm, "render", fake)
     monkeypatch.setattr(pr.shutil, "which", lambda cmd, *args, **kwargs: "/opt/homebrew/bin/pdftoppm")
+    monkeypatch.setattr(pr, "_prove_pdftoppm", lambda: None)
     return fake
 
 
@@ -316,6 +317,19 @@ def test_the_pdf_is_materialised_in_the_render_pool_from_s3_when_the_cache_misse
     assert cached.sha256 != fetched.sha256
 
 
+def test_a_filings_chunks_download_and_hash_its_pdf_once(filings, render, tmp_path):
+    """Four render chunks of one cold filing (chunks are keyed on
+    ``page // RENDER_CHUNK``): one S3 GET, then every chunk renders from
+    the same local file."""
+    row = _seed(filings, tmp_path, OID, pages=60, attachment_from=1, payload=b"%PDF-1.4 sixty pages")
+    fi.pdf_path(tmp_path, OID).unlink()
+    s3 = _S3({row.s3_key: b"%PDF-1.4 sixty pages"})
+    store, client = pr.MemoryStore(), _client(60)
+    result = _read(store, filings, _pages(OID, *range(1, 61)), client, tmp_path, s3=s3)
+    assert len(result.responses) == 60 and s3.gets == [row.s3_key]
+    assert sorted((call[1], call[2]) for call in render.calls) == [(1, 19), (20, 39), (40, 59), (60, 60)]
+
+
 def test_the_s3_client_is_built_once_on_the_main_thread_and_shared_by_the_render_pool(filings, render, tmp_path, monkeypatch):
     payload = {oid: f"%PDF-1.4 {oid} in S3".encode() for oid in (OID, OID2)}
     rows = {oid: _seed(filings, tmp_path, oid, payload=payload[oid]) for oid in payload}
@@ -350,6 +364,79 @@ def test_a_pdf_that_cannot_be_materialised_is_an_error_per_page_not_a_crash(fili
     for row in result.failed.values():
         assert row.errors == 1 and row.last_error.startswith("pdf: RuntimeError: An error occurred (NoSuchKey)")
     assert caplog.text.count(f"{OID2}: pages 3-4 cannot be read this run: pdf: RuntimeError") == 1
+
+
+@pytest.mark.skipif(__import__("shutil").which("pdftoppm") is None, reason="poppler is not installed here")
+def test_the_one_page_fixture_renders_through_the_real_pdftoppm():
+    pr._prove_pdftoppm()                                            # raises on a broken poppler
+
+
+def test_a_pdftoppm_that_cannot_render_fails_with_its_stderr(monkeypatch):
+    def broken(pdf, first, last, out_dir, dpi=vlm.DPI):
+        raise subprocess.CalledProcessError(1, ["pdftoppm"], stderr=b"error while loading shared libraries: libpoppler")
+    monkeypatch.setattr(vlm, "render", broken)
+    monkeypatch.setattr(pr.shutil, "which", lambda cmd, *args, **kwargs: "/usr/bin/pdftoppm")
+    with pytest.raises(RuntimeError, match="installed but cannot render a page: error while loading shared"):
+        pr._require_pdftoppm()
+
+
+def test_a_page_pdftoppm_left_out_is_that_pages_error_and_its_span_mates_are_read(filings, render, tmp_path, monkeypatch):
+    class _Skips(_Render):
+        def __call__(self, pdf, first, last, out_dir, dpi=vlm.DPI):
+            paths = super().__call__(pdf, first, last, out_dir, dpi)
+            (out_dir / "p004.png").unlink()
+            return paths
+    monkeypatch.setattr(vlm, "render", _Skips())
+    store = pr.MemoryStore()
+    _seed(filings, tmp_path, OID)
+    client = _Client([(_answer(_rows(2)), "stop")] * 3)
+    got = _read(store, filings, _pages(OID, 3, 4, 5, 6), client, tmp_path)
+    assert set(got.responses) == {(OID, 3), (OID, 5), (OID, 6)} and list(got.failed) == [(OID, 4)]
+    assert "no PNG for the page (p004.png)" in got.failed[(OID, 4)].last_error and got.failed[(OID, 4)].errors == 1
+
+
+def _three_filings(filings, tmp_path, pages=20):
+    """Three fetched filings of ``pages`` attachment pages each, PDFs in the cache."""
+    ids = (OID, OID2, "202343149349101137")
+    for oid in ids:
+        _seed(filings, tmp_path, oid, pages=pages, attachment_from=1)
+    return [(oid, page) for oid in ids for page in range(1, pages + 1)]
+
+
+def test_the_breaker_stops_a_run_whose_every_call_fails_with_nothing_written(filings, render, tmp_path):
+    """A dead gateway: every page's calls raise inside the client, the first
+    fifty results are error rows from three filings, and the run stops
+    before any of them reaches the store."""
+    pages = _three_filings(filings, tmp_path)
+    store = pr.MemoryStore()
+    with pytest.raises(pr.SystemicFailure, match="looks systemic") as tripped:
+        _read(store, filings, pages, _Client([]), tmp_path)
+    assert store.rows == {} and "from 3 filings" in str(tripped.value) and "IndexError" in str(tripped.value)
+
+
+def test_the_breaker_stops_a_run_whose_every_render_fails_with_nothing_written(filings, render, tmp_path, monkeypatch):
+    def broken(pdf, first, last, out_dir, dpi=vlm.DPI):
+        raise RuntimeError("pdftoppm: cannot open the display")
+    monkeypatch.setattr(vlm, "render", broken)
+    pages = _three_filings(filings, tmp_path)
+    store = pr.MemoryStore()
+    with pytest.raises(pr.SystemicFailure, match="render: RuntimeError: pdftoppm: cannot open"):
+        _read(store, filings, pages, _client(60), tmp_path)
+    assert store.rows == {}
+
+
+def test_one_filing_that_cannot_be_rendered_keeps_its_error_rows_and_the_rest_are_read(filings, render, tmp_path, monkeypatch):
+    class _OneBad(_Render):
+        def __call__(self, pdf, first, last, out_dir, dpi=vlm.DPI):
+            if pdf.stem == OID2:
+                raise RuntimeError("Syntax Error: Couldn't read xref table")
+            return super().__call__(pdf, first, last, out_dir, dpi)
+    monkeypatch.setattr(vlm, "render", _OneBad())
+    pages = _three_filings(filings, tmp_path)
+    store = pr.MemoryStore()
+    got = _read(store, filings, pages, _client(40), tmp_path)
+    assert len(got.responses) == 40 and sorted(got.failed) == [(OID2, page) for page in range(1, 21)]
+    assert len(store.rows) == 60 and all(row.errors == 1 for (_, _, *_), row in store.rows.items() if row.object_id == OID2)
 
 
 def test_a_missing_pdftoppm_stops_before_any_render_or_call_unless_all_pages_are_stored(filings, render, tmp_path, monkeypatch):
@@ -479,9 +566,11 @@ def test_a_run_that_buys_nothing_raises_on_a_miss_before_any_render_or_call(fili
     client = _client(1)
     result = _read(store, filings, _pages(OID, 3), client, tmp_path, buy=False)
     assert len(result.responses) == 1 and client.json_modes == []
-    with pytest.raises(LookupError, match="buys nothing"):
+    with pytest.raises(pr.MissingReadings, match="buys nothing") as missing:
         _read(store, filings, _pages(OID, 3, 4), client, tmp_path, buy=False)
     assert client.json_modes == [] and len(render.calls) == 1 and len(store.rows) == 1
+    assert missing.value.why == "the run buys nothing" and [oid for oid, _ in missing.value.pages] == [OID]
+    assert missing.value.summary.endswith("and the run buys nothing") and "[" not in missing.value.summary
 
 
 # ---------------------------------------------------------------------------

@@ -62,10 +62,10 @@ import csv
 import functools
 import hashlib
 import logging
-import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
@@ -342,12 +342,16 @@ def pdf_path(cache_dir: Path, object_id: str) -> Path:
 
 
 def _stage(path: Path, payload: bytes) -> Path:
-    """Write the payload beside ``path`` under a pid-tagged name; the caller
-    moves it into place once it is known to be a PDF."""
+    """Write the payload beside ``path`` under a name of this call's own; the
+    caller moves it into place once it is known to be a PDF. A pid-tagged
+    name once let two render jobs of one filing, in one process, stage the
+    same download at once: the first's rename took the file from under the
+    second (the frame run, J&J 2021, 19 error rows)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    tmp.write_bytes(payload)
-    return tmp
+    with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp",
+                                     delete=False) as handle:
+        handle.write(payload)
+    return Path(handle.name)
 
 
 def _write_atomic(path: Path, payload: bytes) -> None:
