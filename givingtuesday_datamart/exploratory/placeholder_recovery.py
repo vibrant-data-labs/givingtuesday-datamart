@@ -42,7 +42,7 @@ it, and records where the filer's attachments start — the IRS-rendered
 pages before that point are the XML we already hold, and are never sent
 to a model. On this sample they are 62% of all pages.
 
-``estimate`` is the cost gate ``scripts/run_frame.sh`` runs before it spends:
+``estimate`` is the cost gate, ``run``'s stage 3, that runs before it spends:
 what ``transcribe`` would buy today from each reader, less the readings the
 table holds, at the per-page prices and the dispute and resolution rates the
 rehearsal measured; past the cap it exits so the run stops before a call.
