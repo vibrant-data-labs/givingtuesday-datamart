@@ -85,11 +85,12 @@ already, so on the box it makes zero TEOS requests and says so); the
 **cost gate** (the stored-only pass, which names the pages without a
 reading and buys nothing, then the projection by reader at the measured
 per-page prices and the rehearsal's dispute and resolution rates; past
-$400 the run stops); **smoke** (the frame's first fetched filing rendered
-and read through Qwen at one worker: its PNGs must exist, its rows must be
-readings, a page with a grants table must have parsed one); the two **base
-readers** as child processes of the `page_readings` CLI (Qwen at 80
-workers, Flash Lite at 12), each with its own log; **transcribe** for the
+$400 the run stops); **smoke** (the first render chunk, 20 pages, of the
+frame's first fetched filing rendered and read through Qwen at one worker:
+its PNGs must exist, its rows must be readings, a page with a grants table
+must have parsed one); the two **base readers** as child processes of the
+`page_readings` CLI (Qwen at 80 workers, Flash Lite at 24), each with its
+own log; **transcribe** for the
 escalation readers and the verdicts, again if any page was left without a
 verdict; the **final check** (the stored-only pass must buy nothing and
 write nothing); and the two **status** reports. Everything printed goes to
@@ -157,7 +158,9 @@ and the other readers decide it.
 $222 and 3 h 43 min of wall on the box under `POLICY_V2` on 2026-09-23/24,
 two stops included: the base pair 2 h 16 min in parallel (Flash Lite 81
 pages a minute at 12 workers, Qwen 55 at 40 then 80), 3.8 Flash at `low`
-45 min for 5,959 disputed pages, Sonnet 36 min for 2,953. The cost gate
+45 min for 5,959 disputed pages, Sonnet 36 min for 2,953. Flash Lite runs
+at 24 workers from the next run on (12 was never a throughput test); watch
+its error rows in the first minutes as the runbook says above. The cost gate
 stops the run if the projection passes $400; stop it yourself if
 `page_readings status` on the laptop projects past that over the pre-run
 total.

@@ -1339,8 +1339,45 @@ page, so the question may be moot.
    reading with the verdict as the mark, `POLICY_V1["flagged"] =
    "load_single"`; `leave_out` is a flip of the rule, at no cost.
 6. Send GT the findings list; report the 2022 image batch to the IRS.
+7. **Before the load, check the flagged pages of the small filings by
+   hand** (Zein, 2026-09-24). Bands C and D flag half their pages — scanned
+   letters, odd formats, a table inside a paragraph — and the flagged rows
+   are 15% of everything the frame recovers. The ground truth's 11 of 23
+   flagged pages right in Sonnet's reading were dense pages, not these.
+   About 30 flagged pages drawn from bands C and D, transcribed by hand
+   against Sonnet's loaded reading, decide `load_single` against
+   `leave_out` for those bands on a measured number rather than the
+   sample's.
+8. Housekeeping from the frame run (2026-09-24): an instance role scoped
+   to the bucket for the box, in place of the account's keys in `~/.aws`
+   (the runbook lists what it needs); the two base readers render each
+   chunk twice when both start on the same filing, since they run as two
+   processes — a per-chunk lock in `render` would make it once (the
+   escalation readers and every later run already find the PNGs on disk,
+   so the render is a one-time cost apart from that overlap); Flash
+   Lite's first run at 24 workers is its throughput trial, as Qwen's 80
+   was.
 
 ## Open decisions
+
+Decided on 2026-09-24, after the frame run (Zein):
+
+- The band split stays at C 137 and D 403, the same sampling fraction for
+  both; the frame is read, and its C and D rates are set by how many
+  filings have anything to read, not by their count.
+- The smoke reads one render chunk (20 pages) of the frame's first fetched
+  filing, not the whole filing: it proves the box can render, call and
+  parse, and 64 pages at one worker was 50 minutes of that proof.
+- Renders stay unstored (the spec's non-goal) so long as one render on the
+  box serves every reader, which it does apart from the base pair's
+  overlap (item 8 above).
+- Worker counts: Qwen 80, Flash Lite 24, 3.8 Flash 24, Sonnet 24; nothing
+  in 24,131 pages found the gateway's limit, so raise where a trial can
+  watch the error rows.
+- The flagged rule stays `load_single` for now; item 7 above measures it
+  on the small filings before anything loads.
+
+Still open:
 
 - Whether recovered rows join `privategrants_current` or stay in their own
   table behind a view (recommended: the view; it keeps GT's data and ours
