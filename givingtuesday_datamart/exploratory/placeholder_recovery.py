@@ -570,6 +570,11 @@ class _Tee:
         for stream in self.streams:
             stream.flush()
 
+    def __getattr__(self, name: str):
+        # Everything else a caller asks of sys.stdout (isatty, fileno,
+        # encoding) is answered by the pane's stream, the first one.
+        return getattr(self.streams[0], name)
+
 
 def _mirror_output(stack: contextlib.ExitStack, path: Path) -> None:
     """Everything printed or logged from here on goes to the pane and to ``path``."""

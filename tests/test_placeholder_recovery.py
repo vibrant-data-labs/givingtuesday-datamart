@@ -193,6 +193,15 @@ def test_run_drives_every_stage_and_ends_with_a_stored_only_check_that_buys_noth
     assert (tmp_path / "logs" / "run.log").read_text().count("] === ") == len(BANNERS)
 
 
+def test_tee_answers_for_the_pane_stream_beyond_write_and_flush():
+    import io
+    pane, log = io.StringIO(), io.StringIO()
+    tee = rec._Tee(pane, log)
+    tee.write("x")
+    assert pane.getvalue() == log.getvalue() == "x"
+    assert tee.isatty() is False and tee.encoding == pane.encoding
+
+
 def test_run_dry_run_stops_after_the_cost_gate_and_reads_nothing(run_stores, box, tmp_path, capsys):
     client = _Client([])
     _run(run_stores, _frame_csv(tmp_path), tmp_path, client=client, dry_run=True)
