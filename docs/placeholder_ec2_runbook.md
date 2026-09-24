@@ -88,7 +88,7 @@ per-page prices and the rehearsal's dispute and resolution rates; past
 $400 the run stops); **smoke** (the frame's first fetched filing rendered
 and read through Qwen at one worker: its PNGs must exist, its rows must be
 readings, a page with a grants table must have parsed one); the two **base
-readers** as child processes of the `page_readings` CLI (Qwen at 40
+readers** as child processes of the `page_readings` CLI (Qwen at 80
 workers, Flash Lite at 12), each with its own log; **transcribe** for the
 escalation readers and the verdicts, again if any page was left without a
 verdict; the **final check** (the stored-only pass must buy nothing and
@@ -154,7 +154,8 @@ until they have three errors, after which the reader is absent for the page
 and the other readers decide it.
 
 **What to expect.** About $250 and five hours under `POLICY_V2`: the base
-pair about 3 hours in parallel (Qwen-bound at 40 workers), 3.8 Flash at
+pair about 3 hours in parallel (Qwen-bound; 40 workers gave 53 pages a
+minute, 80 is being tried), 3.8 Flash at
 `low` and Sonnet about an hour each. The cost gate stops the run if the
 projection passes $400; stop it yourself if `page_readings status` on the
 laptop projects past that over the pre-run total.

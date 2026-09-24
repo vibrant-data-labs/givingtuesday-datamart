@@ -889,7 +889,7 @@ def _base_readers(
     children = []
     for model in models:
         name = model.split("/")[-1]                       # "qwen3-vl-instruct": the log's name
-        # The reader's worker count from page_verdicts.WORKERS (Qwen 40,
+        # The reader's worker count from page_verdicts.WORKERS (Qwen 80,
         # Flash Lite 12); the default for a model not listed there.
         workers = WORKERS.get(model, page_verdicts.DEFAULT_WORKERS)
         # The same command a person would type by hand: the page_readings
