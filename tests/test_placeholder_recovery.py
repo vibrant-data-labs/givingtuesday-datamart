@@ -233,6 +233,14 @@ def test_run_stops_when_a_base_reader_exits_non_zero(run_stores, box, tmp_path, 
     assert "qwen3-vl-instruct, gemini-3.5-flash-lite exited non-zero" in out and "run the same command again to resume" in out
 
 
+def test_the_smoke_reads_one_render_chunk_of_the_first_filing_at_most(tmp_path):
+    filings = fi.MemoryStore()
+    short = _seed(filings, tmp_path, OID, pages=6, attachment_from=3)               # 4 attachment pages
+    long = _seed(filings, tmp_path, "202323149349101837", pages=1113, attachment_from=25)
+    assert rec._smoke_span(short) == (3, 6)
+    assert rec._smoke_span(long) == (25, 25 + pr.RENDER_CHUNK - 1)
+
+
 def test_run_smoke_stops_when_no_page_parsed_as_a_grants_table(run_stores, box, tmp_path, capsys):
     client = _Client([(_answer([], kind="other"), "stop")] * 4)
     with pytest.raises(SystemExit):

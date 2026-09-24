@@ -754,7 +754,7 @@ def main() -> None:
     read = sub.add_parser("read", help="read every attachment page of the fetched filings in a frame CSV, or of the ids given")
     read.add_argument("filings", nargs="+", help="frame CSV path(s) or object ids")
     read.add_argument("--model", required=True, help="gateway model id, e.g. alibaba/qwen3-vl-instruct")
-    read.add_argument("--workers", type=int, required=True, help="Qwen 80, Flash Lite 12, 3.8 Flash and Sonnet 24 (page_verdicts.WORKERS)")
+    read.add_argument("--workers", type=int, required=True, help="Qwen 80, Flash Lite 24, 3.8 Flash and Sonnet 24 (page_verdicts.WORKERS)")
     read.add_argument("--prompt-version", default=PROMPT_VERSION)
     read.add_argument("--max-errors", type=int, default=MAX_ERRORS)
 

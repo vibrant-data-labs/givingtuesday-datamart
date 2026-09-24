@@ -796,10 +796,21 @@ def _stored_only(
     return None
 
 
+def _smoke_span(row: filing_images.FilingImage) -> tuple[int, int]:
+    """The pages the smoke reads: the filing's first render chunk of
+    attachment pages, at most ``RENDER_CHUNK`` of them. The smoke proves
+    the box can render, call and parse; a 64-page filing at one worker
+    was 50 minutes of that proof on a fresh frame (Zein, 2026-09-24)."""
+    first_page = row.attachment_from
+    last_page = min(first_page + row.attachment_pages - 1, first_page + page_readings.RENDER_CHUNK - 1)
+    return first_page, last_page
+
+
 def _smoke(stores: _Stores, rows: list[dict], policy: dict, cache: Path, max_errors: int) -> None:
-    """The frame's first fetched filing rendered and read through the first
-    base reader at one worker: its PNGs must exist, its rows must be
-    readings, and a page with a grants table must have parsed one."""
+    """The first render chunk of the frame's first fetched filing rendered
+    and read through the first base reader at one worker: its PNGs must
+    exist, its rows must be readings, and a page with a grants table must
+    have parsed one."""
     # The first filing in frame order that is fetched (a PDF with a hash on
     # the row) and has an attachment; the smoke reads that filing's pages.
     ids = [row["object_id"] for row in rows]
@@ -810,16 +821,15 @@ def _smoke(stores: _Stores, rows: list[dict], policy: dict, cache: Path, max_err
         _stop("no fetched filing with attachment pages in the frame; nothing to read")
     first = fetched[0]
     row = images[first]
-    # The attachment is one contiguous span of pages: attachment_pages of
-    # them, starting at attachment_from.
-    first_page = row.attachment_from
-    last_page = row.attachment_from + row.attachment_pages - 1
+    # The attachment is one contiguous span of pages starting at
+    # attachment_from; the smoke takes its first render chunk.
+    first_page, last_page = _smoke_span(row)
     pages = [(first, page) for page in range(first_page, last_page + 1)]
     # The first base reader (Qwen under v2), at one worker so the reader's
     # log is a plain sequence of pages.
     model = policy["base"][0]
-    _banner(f"smoke: {first} (the frame's first fetched filing, pages {first_page}-{last_page}) "
-            f"rendered and read through {model} at one worker")
+    _banner(f"smoke: {first} (the frame's first fetched filing, pages {first_page}-{last_page} of "
+            f"its {row.attachment_pages}) rendered and read through {model} at one worker")
     started = time.monotonic()
 
     # Render explicitly first, so a render failure is reported as one before
@@ -890,7 +900,7 @@ def _base_readers(
     for model in models:
         name = model.split("/")[-1]                       # "qwen3-vl-instruct": the log's name
         # The reader's worker count from page_verdicts.WORKERS (Qwen 80,
-        # Flash Lite 12); the default for a model not listed there.
+        # Flash Lite 24); the default for a model not listed there.
         workers = WORKERS.get(model, page_verdicts.DEFAULT_WORKERS)
         # The same command a person would type by hand: the page_readings
         # CLI on the frame CSV, with the model and the worker count.
@@ -979,9 +989,9 @@ def run(
     3. the cost gate: the stored-only pass (which names the pages without a
        reading, or passes buying and writing nothing) and ``estimate``'s
        projection; past ``cap`` the run stops, and ``dry_run`` stops here.
-    4. smoke: the frame's first fetched filing rendered and read through the
-       first base reader at one worker, with its PNGs, rows and a grants
-       table asserted.
+    4. smoke: the first render chunk (20 pages) of the frame's first fetched
+       filing rendered and read through the first base reader at one
+       worker, with its PNGs, rows and a grants table asserted.
     5. the base readers as child processes of the ``page_readings`` CLI, at
        ``WORKERS`` each, a log file each.
     6. ``transcribe`` under the policy, again if it left pages without a
