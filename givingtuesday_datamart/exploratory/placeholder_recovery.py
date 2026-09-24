@@ -654,10 +654,13 @@ def _describe_host() -> None:
 
 def _check_poppler() -> None:
     # Both poppler tools are needed: pdftoppm renders pages to PNGs for the
-    # readers, pdfimages finds where the filer's attachment starts at fetch.
-    for tool in ("pdftoppm", "pdfimages"):
-        if shutil.which(tool) is None:
-            _stop(f"{tool} is not on PATH: install poppler-utils (apt, dnf) or poppler (brew)")
+    # readers (proved on a one-page fixture, so "installed but broken"
+    # stops here), pdfimages finds where the filer's attachment starts.
+    try:
+        page_readings._require_pdftoppm()
+        filing_images._require_pdfimages()
+    except RuntimeError as exc:
+        _stop(str(exc))
     # ``pdftoppm -v`` prints its version to stderr; take whichever stream has it.
     poppler = subprocess.run(["pdftoppm", "-v"], capture_output=True, text=True)
     version = (poppler.stderr or poppler.stdout).strip().splitlines()

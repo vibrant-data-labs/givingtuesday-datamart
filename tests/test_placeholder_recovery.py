@@ -123,6 +123,7 @@ def box(monkeypatch):
     IMDS — with the render and the reader processes faked at the module edges."""
     monkeypatch.setenv("VERCEL_AI_GATEWAY_API_KEY", "k" * 60)
     monkeypatch.setattr(rec.shutil, "which", lambda cmd, *args, **kwargs: f"/usr/bin/{cmd}")
+    monkeypatch.setattr(pr, "_prove_pdftoppm", lambda: None)
     monkeypatch.setattr(rec.subprocess, "run",
                         lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, "", "pdftoppm version 24.04.0\n"))
     monkeypatch.setattr(rec.shutil, "disk_usage", lambda path: SimpleNamespace(total=1, used=0, free=100 * 1024 ** 3))

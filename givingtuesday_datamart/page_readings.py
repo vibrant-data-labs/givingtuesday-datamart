@@ -71,6 +71,7 @@ import math
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 from abc import ABC, abstractmethod
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -394,10 +395,52 @@ def _readable(row: filing_images.FilingImage | None) -> bool:
     return row is not None and row.fetched and bool(row.sha256)
 
 
+def _one_page_pdf() -> bytes:
+    """A valid one-page PDF, blank, 72 by 72 points: the fixture
+    ``_prove_pdftoppm`` renders. Built with its cross-reference table so no
+    poppler version has to reconstruct one."""
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>",
+               b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+               b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] >>"]
+    out, offsets = bytearray(b"%PDF-1.4\n"), []
+    for number, body in enumerate(objects, 1):
+        offsets.append(len(out))
+        out += f"{number} 0 obj\n".encode() + body + b"\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode()
+    for offset in offsets:
+        out += f"{offset:010d} 00000 n \n".encode()
+    out += f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    return bytes(out)
+
+
+def _prove_pdftoppm() -> None:
+    """Render the one-page fixture into a temporary directory, so a poppler
+    that is installed but cannot render (a broken library, a bad build)
+    fails here and not on the frame's first chunk."""
+    tmp = Path(tempfile.mkdtemp(prefix="pdftoppm-check-"))
+    try:
+        pdf = tmp / "one.pdf"
+        pdf.write_bytes(_one_page_pdf())
+        pngs = vlm_transcription.render(pdf, 1, 1, tmp / "out")
+        if not pngs or not pngs[0].exists():
+            raise RuntimeError("no PNG came out")
+    except Exception as exc:                              # noqa: BLE001
+        detail = exc.stderr if isinstance(exc, subprocess.CalledProcessError) and exc.stderr else str(exc)
+        if isinstance(detail, bytes):
+            detail = detail.decode(errors="replace")
+        raise RuntimeError("pdftoppm is installed but cannot render a page: "
+                           f"{detail.strip()[:300]}") from exc
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def _require_pdftoppm() -> None:
-    """Fail before any render or gateway call on a box without poppler."""
+    """Fail before any render or gateway call on a box without a working
+    poppler: not on PATH, or installed and unable to render the fixture."""
     if shutil.which("pdftoppm") is None:
         raise RuntimeError("pdftoppm is not on PATH; install poppler-utils (apt) or poppler (brew)")
+    _prove_pdftoppm()
 
 
 class MissingReadings(LookupError):

@@ -33,6 +33,7 @@ def render(monkeypatch):
     fake = _Render()
     monkeypatch.setattr(vlm, "render", fake)
     monkeypatch.setattr(pr.shutil, "which", lambda cmd, *args, **kwargs: "/opt/homebrew/bin/pdftoppm")
+    monkeypatch.setattr(pr, "_prove_pdftoppm", lambda: None)
     return fake
 
 

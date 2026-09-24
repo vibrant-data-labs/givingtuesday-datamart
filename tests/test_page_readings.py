@@ -70,6 +70,7 @@ def render(monkeypatch):
     fake = _Render()
     monkeypatch.setattr(vlm, "render", fake)
     monkeypatch.setattr(pr.shutil, "which", lambda cmd, *args, **kwargs: "/opt/homebrew/bin/pdftoppm")
+    monkeypatch.setattr(pr, "_prove_pdftoppm", lambda: None)
     return fake
 
 
@@ -350,6 +351,20 @@ def test_a_pdf_that_cannot_be_materialised_is_an_error_per_page_not_a_crash(fili
     for row in result.failed.values():
         assert row.errors == 1 and row.last_error.startswith("pdf: RuntimeError: An error occurred (NoSuchKey)")
     assert caplog.text.count(f"{OID2}: pages 3-4 cannot be read this run: pdf: RuntimeError") == 1
+
+
+@pytest.mark.skipif(__import__("shutil").which("pdftoppm") is None, reason="poppler is not installed here")
+def test_the_one_page_fixture_renders_through_the_real_pdftoppm():
+    pr._prove_pdftoppm()                                            # raises on a broken poppler
+
+
+def test_a_pdftoppm_that_cannot_render_fails_with_its_stderr(monkeypatch):
+    def broken(pdf, first, last, out_dir, dpi=vlm.DPI):
+        raise subprocess.CalledProcessError(1, ["pdftoppm"], stderr=b"error while loading shared libraries: libpoppler")
+    monkeypatch.setattr(vlm, "render", broken)
+    monkeypatch.setattr(pr.shutil, "which", lambda cmd, *args, **kwargs: "/usr/bin/pdftoppm")
+    with pytest.raises(RuntimeError, match="installed but cannot render a page: error while loading shared"):
+        pr._require_pdftoppm()
 
 
 def test_a_missing_pdftoppm_stops_before_any_render_or_call_unless_all_pages_are_stored(filings, render, tmp_path, monkeypatch):
