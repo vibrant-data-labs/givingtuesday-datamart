@@ -24,7 +24,10 @@ in [placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md).
   row backed by two readers that agree; 74 of the 407 lean on pages no
   two readers agreed on, loaded from the best reader and marked, and
   without those it is 333 filings and 36%. Of the 553 filings with an
-  attachment to read, 74% reconcile.
+  attachment to read, 74% reconcile and 75% of their dollars are
+  recovered, at a similar rate in every band: the difference between
+  bands is how many filings have anything to read, not how the readers
+  do on them.
 - Pages with 25 or more rows come out differently on every read. The
   page total hides it, because names shift against amounts while the sum
   barely moves.

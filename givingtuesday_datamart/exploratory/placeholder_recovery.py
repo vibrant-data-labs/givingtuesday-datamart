@@ -1175,8 +1175,9 @@ def report(
             frame[oid].append(page)
         accepted = accepted_readings(session, pages, policy)
     by_stratum: dict = collections.defaultdict(
-        lambda: {"n": 0, "declared": 0.0, "recovered": 0.0, "reconciled": 0,
-                 "rows": 0, "near": 0.0, "outcomes": collections.Counter()})
+        lambda: {"n": 0, "declared": 0.0, "recovered": 0.0, "reconciled": 0, "readable": 0,
+                 "readable_declared": 0.0, "rows": 0, "near": 0.0,
+                 "outcomes": collections.Counter()})
     pages_seen = collections.Counter()
     records = []
 
@@ -1225,6 +1226,12 @@ def report(
         bucket["n"] += 1
         bucket["declared"] += declared
         bucket["outcomes"][outcome] += 1
+        # A filing is readable when the IRS served its PDF and the filer
+        # attached something: the two denominators below separate what the
+        # readers reach from what the data allows.
+        if image is not None and image.fetched and image.attachment_from:
+            bucket["readable"] += 1
+            bucket["readable_declared"] += declared
         if result is not None and result.recovered:
             bucket["reconciled"] += result.paid.reconciled
             bucket["recovered"] += result.recovered   # credit the declared amount, not the transcribed sum
@@ -1254,21 +1261,37 @@ def report(
             "flagged_rows": flagged_rows,   # loaded from a flagged page's single reading, marked
         })
 
-    print(f"{'stratum':<9}{'n':>4}{'recon':>7}{'rate':>7}{'declared $M':>13}{'recovered $M':>14}{'grants':>9}")
-    total_declared = total_recovered = total_rows = 0.0
+    # Two denominators a band: every filing, and the filings that had a PDF
+    # with an attachment ("readable"). The gap between the two columns is
+    # data the IRS or the filer never supplied; the readable rate is what
+    # the readers and the selector achieve on what they can see.
+    print(f"{'stratum':<9}{'n':>4}{'readable':>9}{'recon':>7}{'of n':>7}{'of rdbl':>8}"
+          f"{'declared $M':>13}{'readable $M':>13}{'recovered $M':>14}{'grants':>9}")
+    total_declared = total_readable = total_recovered = total_rows = 0.0
     for label in sorted(by_stratum):
         b = by_stratum[label]
         rate = 100 * b["reconciled"] / b["n"] if b["n"] else 0
-        print(f"  {label:<7}{b['n']:>4}{b['reconciled']:>7}{rate:>6.0f}%"
-              f"{b['declared']/1e6:>13,.1f}{b['recovered']/1e6:>14,.1f}{b['rows']:>9,}")
+        readable_rate = 100 * b["reconciled"] / b["readable"] if b["readable"] else 0
+        print(f"  {label:<7}{b['n']:>4}{b['readable']:>9}{b['reconciled']:>7}{rate:>6.0f}%"
+              f"{readable_rate:>7.0f}%{b['declared']/1e6:>13,.1f}{b['readable_declared']/1e6:>13,.1f}"
+              f"{b['recovered']/1e6:>14,.1f}{b['rows']:>9,}")
         total_declared += b["declared"]
+        total_readable += b["readable_declared"]
         total_recovered += b["recovered"]
         total_rows += b["rows"]
-    print(f"  {'TOTAL':<7}{sum(b['n'] for b in by_stratum.values()):>4}"
-          f"{sum(b['reconciled'] for b in by_stratum.values()):>7}"
-          f"{'':>7}{total_declared/1e6:>13,.1f}{total_recovered/1e6:>14,.1f}{int(total_rows):>9,}")
+    n_all = sum(b["n"] for b in by_stratum.values())
+    n_readable = sum(b["readable"] for b in by_stratum.values())
+    n_reconciled = sum(b["reconciled"] for b in by_stratum.values())
+    print(f"  {'TOTAL':<7}{n_all:>4}{n_readable:>9}{n_reconciled:>7}"
+          f"{100 * n_reconciled / n_all if n_all else 0:>6.0f}%"
+          f"{100 * n_reconciled / n_readable if n_readable else 0:>7.0f}%"
+          f"{total_declared/1e6:>13,.1f}{total_readable/1e6:>13,.1f}{total_recovered/1e6:>14,.1f}"
+          f"{int(total_rows):>9,}")
     if total_declared:
-        print(f"\ndollar-weighted recovery on the sample: {100*total_recovered/total_declared:.1f}%")
+        readable_text = (f", {100*total_recovered/total_readable:.1f}% of the readable filings' "
+                         f"declared" if total_readable else "")
+        print(f"\ndollar-weighted recovery on the sample: {100*total_recovered/total_declared:.1f}% "
+              f"of declared{readable_text}")
         near = sum(b["near"] for b in by_stratum.values())
         print(f"present but 90-110% covered (row loss, not selection): ${near/1e6:,.1f}M "
               f"({100*near/total_declared:.1f}%)")

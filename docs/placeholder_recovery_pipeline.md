@@ -628,18 +628,27 @@ the session's $400 cap. Per-filing detail is
 `data/exploratory/placeholder_report_v2_1000.csv`; the sample's own v2
 report is `placeholder_report_v2.csv`.
 
-| band | filings | with an attachment | **POLICY_V2** | v2, flagged pages left out |
-|---|---|---|---|---|
-| A (over $100M) | 22 | 17 | **15 / $2,664M** | 12 / $2,001M |
-| B ($10M–$100M) | 438 | 281 | **201 / $5,299M** | 148 / $3,884M |
-| C | 137 | 64 | **51 / $177M** | 42 / $132M |
-| D | 403 | 191 | **140 / $36.5M** | 131 / $33.8M |
-| **all** | **1,000** | **553** | **407 / 49.1%** | **333 / 36.4%** |
+| band | filings | readable | **POLICY_V2** | of all filings | of readable | dollars, of all | dollars, of readable | v2, flagged pages left out |
+|---|---|---|---|---|---|---|---|---|
+| A (over $100M) | 22 | 17 | **15 / $2,664M** | 68% | 88% | 57.0% | 83.4% | 12 / $2,001M |
+| B ($10M–$100M) | 438 | 281 | **201 / $5,299M** | 46% | 72% | 46.4% | 71.2% | 148 / $3,884M |
+| C | 137 | 64 | **51 / $177M** | 37% | 80% | 39.5% | 75.9% | 42 / $132M |
+| D | 403 | 191 | **140 / $36.5M** | 35% | 73% | 36.7% | 73.8% | 131 / $33.8M |
+| **all** | **1,000** | **553** | **407 / $8,177M** | **41%** | **74%** | **49.1%** | **74.9%** | **333 / 36.4%** |
 
-Reconciled filings and declared dollars credited. **407 filings and
-49.1% of the $16.6B declared**, 235,622 grant rows; of the 553 filings
-that had an attachment to read, 74%. The projected recovery across the
-addressable population is $11.41B (the sample had projected $10.37B).
+Reconciled filings and declared dollars credited, on two denominators:
+every filing in the band, and the *readable* ones — a PDF served by the
+IRS with something attached by the filer. **407 filings and 49.1% of
+the $16.6B declared**, 235,622 grant rows; of the 553 readable filings,
+74%, and 74.9% of their $10.9B. The gap between the two denominators is
+data acquisition — the IRS's missing images and the filers' empty
+attachments — and it is what makes the band gradient: the readers
+reconcile 72–88% of readable filings in every band, but 77% of band A
+is readable against 64% of B and 47% of C and D. The gap between the
+readable rate and 100% is the pipeline's: the 77 *list present*, 23
+*list partial* and 44 *no candidate table* filings below. The projected
+recovery across the addressable population is $11.41B (the sample had
+projected $10.37B).
 The last column is the same verdicts under `leave_out` (no call): the
 flagged rule is worth 74 filings and 12.7 points on the frame, against
 12 filings and 16 points on the sample, and 36,442 of the rows (15%)
