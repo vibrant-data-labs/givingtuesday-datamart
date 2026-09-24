@@ -72,6 +72,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from abc import ABC, abstractmethod
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -462,15 +463,43 @@ class FilingUnreadable(Exception):
     be materialised, or pdftoppm failed. The message is the pages' error."""
 
 
-def _render_filing(row: filing_images.FilingImage, first: int, last: int, cache_dir: Path, s3) -> list[Path]:
+class _PdfOnce:
+    """``materialise`` once per filing per run, however many chunk jobs the
+    filing has: the first job to ask downloads (or hashes the cached file)
+    while the others wait on its future, so a 55-chunk filing is one S3
+    GET and one hash rather than four concurrent downloads and 55 hashes.
+    The in-process half of a per-chunk render lock; the base readers, as
+    two processes, still each do it once."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.futures: dict[str, Future] = {}
+
+    def pdf(self, row: filing_images.FilingImage, cache_dir: Path, s3) -> Path:
+        with self.lock:
+            future = self.futures.get(row.object_id)
+            first = future is None
+            if first:
+                future = self.futures[row.object_id] = Future()
+        if first:
+            try:
+                future.set_result(filing_images.materialise(row, cache_dir, s3=s3))
+            except BaseException as exc:                  # noqa: BLE001 — the waiters get it too
+                future.set_exception(exc)
+                raise
+        return future.result()
+
+
+def _render_filing(row: filing_images.FilingImage, first: int, last: int, cache_dir: Path, s3,
+                   pdfs: _PdfOnce) -> list[Path]:
     """Runs in the render pool: the filing's PDF onto local disk (from the
     cache when it hashes to the row, else S3 through the client the main
-    thread built), then its span of pages to PNGs. Takes the row, never
-    the session. A failure at either step is logged once here and raised
-    as ``FilingUnreadable`` for the filing's read jobs to store as error
-    rows."""
+    thread built; once per filing, through ``pdfs``), then its span of
+    pages to PNGs. Takes the row, never the session. A failure at either
+    step is logged once here and raised as ``FilingUnreadable`` for the
+    filing's read jobs to store as error rows."""
     try:
-        pdf = filing_images.materialise(row, cache_dir, s3=s3)
+        pdf = pdfs.pdf(row, cache_dir, s3)
     except Exception as exc:                              # noqa: BLE001
         raise _unreadable(row.object_id, first, last, "pdf", exc) from exc
     started = time.monotonic()
@@ -610,7 +639,8 @@ def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
     s3 = s3 if s3 is not None else filing_images._s3_client(RENDER_WORKERS)
     tally = result.bought
     with ThreadPoolExecutor(max_workers=RENDER_WORKERS) as renders, ThreadPoolExecutor(max_workers=workers) as pool:
-        rendered = {chunk: renders.submit(_render_filing, images[chunk[0]], first, last, cache_dir, s3)
+        pdfs = _PdfOnce()
+        rendered = {chunk: renders.submit(_render_filing, images[chunk[0]], first, last, cache_dir, s3, pdfs)
                     for chunk, (first, last) in spans.items()}
         futures = [pool.submit(_read_one, client, model, rendered[(page[0], page[1] // RENDER_CHUNK)], keys[page],
                                settings, prior, page_dir(cache_dir, page[0])) for page, prior in misses]

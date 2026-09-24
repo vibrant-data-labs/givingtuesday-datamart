@@ -317,6 +317,19 @@ def test_the_pdf_is_materialised_in_the_render_pool_from_s3_when_the_cache_misse
     assert cached.sha256 != fetched.sha256
 
 
+def test_a_filings_chunks_download_and_hash_its_pdf_once(filings, render, tmp_path):
+    """Four render chunks of one cold filing (chunks are keyed on
+    ``page // RENDER_CHUNK``): one S3 GET, then every chunk renders from
+    the same local file."""
+    row = _seed(filings, tmp_path, OID, pages=60, attachment_from=1, payload=b"%PDF-1.4 sixty pages")
+    fi.pdf_path(tmp_path, OID).unlink()
+    s3 = _S3({row.s3_key: b"%PDF-1.4 sixty pages"})
+    store, client = pr.MemoryStore(), _client(60)
+    result = _read(store, filings, _pages(OID, *range(1, 61)), client, tmp_path, s3=s3)
+    assert len(result.responses) == 60 and s3.gets == [row.s3_key]
+    assert sorted((call[1], call[2]) for call in render.calls) == [(1, 19), (20, 39), (40, 59), (60, 60)]
+
+
 def test_the_s3_client_is_built_once_on_the_main_thread_and_shared_by_the_render_pool(filings, render, tmp_path, monkeypatch):
     payload = {oid: f"%PDF-1.4 {oid} in S3".encode() for oid in (OID, OID2)}
     rows = {oid: _seed(filings, tmp_path, oid, payload=payload[oid]) for oid in payload}
