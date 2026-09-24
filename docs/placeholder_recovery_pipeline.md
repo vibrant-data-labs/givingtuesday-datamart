@@ -614,6 +614,83 @@ had. The three largest by declared amount:
   on is working as designed here, and `load_single` then loads readings
   the selector rightly cannot use.
 
+### The 1,000-filing frame under POLICY_V2
+
+The frame — 1,000 filings of 677 filers, 831 with a PDF, 553 with an
+attachment, 9,926 attachment pages — decided by the page gate as
+`POLICY_V2` (3.8 Flash at low reasoning effort, otherwise v1) on
+2026-09-23/24, on the EC2 box through `run` (the operational facts —
+the box, the stops, two races the chunked renders exposed, wall time and
+throughput — are the *Frame run* note under *Order of operations*, item
+4). The base pair bought 7,613 and 7,606 pages, 3.8 Flash 5,959, Sonnet
+2,953; **$221.64 in all**, against a pre-run projection of $241.50 and
+the session's $400 cap. Per-filing detail is
+`data/exploratory/placeholder_report_v2_1000.csv`; the sample's own v2
+report is `placeholder_report_v2.csv`.
+
+| band | filings | with an attachment | **POLICY_V2** | v2, flagged pages left out |
+|---|---|---|---|---|
+| A (over $100M) | 22 | 17 | **15 / $2,664M** | 12 / $2,001M |
+| B ($10M–$100M) | 438 | 281 | **201 / $5,299M** | 148 / $3,884M |
+| C | 137 | 64 | **51 / $177M** | 42 / $132M |
+| D | 403 | 191 | **140 / $36.5M** | 131 / $33.8M |
+| **all** | **1,000** | **553** | **407 / 49.1%** | **333 / 36.4%** |
+
+Reconciled filings and declared dollars credited. **407 filings and
+49.1% of the $16.6B declared**, 235,622 grant rows; of the 553 filings
+that had an attachment to read, 74%. The projected recovery across the
+addressable population is $11.41B (the sample had projected $10.37B).
+The last column is the same verdicts under `leave_out` (no call): the
+flagged rule is worth 74 filings and 12.7 points on the frame, against
+12 filings and 16 points on the sample, and 36,442 of the rows (15%)
+come from flagged pages and carry the mark.
+
+By where a filing came from: the 100-filing sample 47 / 53.4% — the
+same 47 filings and dollars as under v1, `compare` finding no filing
+whose outcome differs, although 74 of its 1,782 page verdicts changed
+(30 escalated to flagged, 27 the other way, 17 a different accepted
+reader); the other 510 of the 610, 229 / 46.9%; the 390 top-up in bands
+C and D, 131 / 35.2%.
+
+**What is not recovered.** 447 filings, 34.4% of the declared dollars,
+have nothing to read: 278 whose PDF is the IRS rendering and nothing
+else ($3.08B, 18.5%), 66 whose TEOS image is a 404 ($1.48B), 103 with no
+TEOS image at all ($1.17B). Of the 553 read: 77 *list present* but not
+reconciled ($1.38B, 8.3%), 23 *list partial* ($729M), 44 with no
+candidate table ($532M), 2 *list absent*. Pages with a stated total:
+298 matched, 694 did not.
+
+**The verdict mix, and where the projection missed.** Of the 9,926
+pages: agreed 3,920 (39.5%), escalated 3,161 (31.8%: 3.8 Flash 2,538,
+Sonnet 623), flagged 2,845 (28.7%), unreadable 0, no verdict 0. The
+cost gate had projected 52% disputed, 3.8 Flash resolving 39% of them,
+Sonnet a third of the rest, 21% flagged — rates measured on the sample
+(the dispute rate on its 1,782 pages under v1, the resolution rates on
+its ground-truth pages), and the sample under v2 reproduces them, which
+is a consistency check and nothing more. The frame:
+
+| pages | disputed | 3.8 Flash resolves | Sonnet resolves | flagged |
+|---|---|---|---|---|
+| all (9,926) | 60.5% | 42.3% | 18.0% | 28.7% |
+| the sample's (1,782) | 66.9% | 55.2% | 28.7% | 21.4% |
+| J&J's four years (3,330) | 64.9% | 76.1% | 27.3% | 11.3% |
+| the rest (6,596) | 58.3% | 23.2% | 16.3% | 37.4% |
+| the top-up's (579) | 62.2% | 18.3% | 11.6% | 44.9% |
+| band A / B / C / D | 55 / 61 / 66 / 57% | 32 / 46 / 15 / 22% | 37 / 18 / 8 / 14% | 24 / 27 / 52 / 38% |
+
+Sonnet resolved 18% of what reached it against the 33% projected, and
+3.8 Flash 42% against 39%; the base pair disputed 60.5% against 52%.
+Where the flagged pages are is the finding: not J&J, whose dense
+matching-gift pages the base pair disputes but 3.8 Flash resolves three
+quarters of, and which flags at 11%; the small filings of bands C and D
+— scanned letters, odd formats, a table in a paragraph — where no two of
+the four readers agree on a page half the time (band C 52%, the top-up
+45%). The sample had 34 such filings; the frame has 540, and its pages
+outside the sample flag at 30% against the sample's 21%. That is the
+line to read the 21%-against-29% gap on, and the reason the recovery
+rate falls from 53% on the sample to 49% on the frame while the count
+of flagged rows loaded rises to 15% of all rows.
+
 ## Ground truth
 
 [`placeholder_ground_truth.py`](../givingtuesday_datamart/exploratory/placeholder_ground_truth.py):

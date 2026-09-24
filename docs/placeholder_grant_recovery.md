@@ -2,8 +2,9 @@
 
 Vibrant Data Labs, September 22, 2026.
 
-Status: measured on a sample of 100 filings, read four times; an expanded
-frame of 610 is staged and waiting to be read. Not yet in the pipeline. The build plan is
+Status: measured on a frame of 1,000 filings under the page gate on
+September 24, 2026 ($222 in model cost), after a sample of 100 filings read
+four times. Not yet in the pipeline. The build plan and the measurements are
 in [placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md).
 
 ## Summary
@@ -18,18 +19,21 @@ in [placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md).
 - One read of the sample recovers 36 to 40 of 100 filings and 45% to 49%
   of the dollars, for $4 to $12 in model cost. The page gate — two cheap
   readers, a third and a fourth on the pages they dispute — recovers 47
-  filings and 53% for $63, with every accepted row backed by two readers
-  that agree; 12 of the 47 lean on pages no two readers agreed on,
-  loaded from the best reader and marked, and without those it is 35
-  filings and 37%.
+  filings and 53% of the sample for $63, and **407 of 1,000 filings and
+  49% of the dollars on the full frame for $222**, with every accepted
+  row backed by two readers that agree; 74 of the 407 lean on pages no
+  two readers agreed on, loaded from the best reader and marked, and
+  without those it is 333 filings and 36%. Of the 553 filings with an
+  attachment to read, 74% reconcile.
 - Pages with 25 or more rows come out differently on every read. The
   page total hides it, because names shift against amounts while the sum
   barely moves.
-- 39% of the dollars cannot be recovered this way. The IRS serves no PDF,
-  or the PDF has no list in it.
-- Next step: the 1,000-filing run on the expanded frame (9,347 pages,
-  about $270 and 7 hours at the measured rates with the third reader at
-  low reasoning effort), then a matcher pass on the recovered rows.
+- 34% of the dollars cannot be recovered this way. The IRS serves no PDF
+  (16%), or the PDF is the IRS's own rendering with nothing attached
+  (18%).
+- Next step: a matcher pass on the 235,622 recovered rows. The run is
+  repeatable from the stored readings at no cost, and one command runs
+  it on a box.
 
 ## The problem
 
