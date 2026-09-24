@@ -395,6 +395,50 @@ def test_a_page_pdftoppm_left_out_is_that_pages_error_and_its_span_mates_are_rea
     assert "no PNG for the page (p004.png)" in got.failed[(OID, 4)].last_error and got.failed[(OID, 4)].errors == 1
 
 
+def _three_filings(filings, tmp_path, pages=20):
+    """Three fetched filings of ``pages`` attachment pages each, PDFs in the cache."""
+    ids = (OID, OID2, "202343149349101137")
+    for oid in ids:
+        _seed(filings, tmp_path, oid, pages=pages, attachment_from=1)
+    return [(oid, page) for oid in ids for page in range(1, pages + 1)]
+
+
+def test_the_breaker_stops_a_run_whose_every_call_fails_with_nothing_written(filings, render, tmp_path):
+    """A dead gateway: every page's calls raise inside the client, the first
+    fifty results are error rows from three filings, and the run stops
+    before any of them reaches the store."""
+    pages = _three_filings(filings, tmp_path)
+    store = pr.MemoryStore()
+    with pytest.raises(pr.SystemicFailure, match="looks systemic") as tripped:
+        _read(store, filings, pages, _Client([]), tmp_path)
+    assert store.rows == {} and "from 3 filings" in str(tripped.value) and "IndexError" in str(tripped.value)
+
+
+def test_the_breaker_stops_a_run_whose_every_render_fails_with_nothing_written(filings, render, tmp_path, monkeypatch):
+    def broken(pdf, first, last, out_dir, dpi=vlm.DPI):
+        raise RuntimeError("pdftoppm: cannot open the display")
+    monkeypatch.setattr(vlm, "render", broken)
+    pages = _three_filings(filings, tmp_path)
+    store = pr.MemoryStore()
+    with pytest.raises(pr.SystemicFailure, match="render: RuntimeError: pdftoppm: cannot open"):
+        _read(store, filings, pages, _client(60), tmp_path)
+    assert store.rows == {}
+
+
+def test_one_filing_that_cannot_be_rendered_keeps_its_error_rows_and_the_rest_are_read(filings, render, tmp_path, monkeypatch):
+    class _OneBad(_Render):
+        def __call__(self, pdf, first, last, out_dir, dpi=vlm.DPI):
+            if pdf.stem == OID2:
+                raise RuntimeError("Syntax Error: Couldn't read xref table")
+            return super().__call__(pdf, first, last, out_dir, dpi)
+    monkeypatch.setattr(vlm, "render", _OneBad())
+    pages = _three_filings(filings, tmp_path)
+    store = pr.MemoryStore()
+    got = _read(store, filings, pages, _client(40), tmp_path)
+    assert len(got.responses) == 40 and sorted(got.failed) == [(OID2, page) for page in range(1, 21)]
+    assert len(store.rows) == 60 and all(row.errors == 1 for (_, _, *_), row in store.rows.items() if row.object_id == OID2)
+
+
 def test_a_missing_pdftoppm_stops_before_any_render_or_call_unless_all_pages_are_stored(filings, render, tmp_path, monkeypatch):
     _seed(filings, tmp_path, OID)
     store = pr.MemoryStore()

@@ -153,6 +153,19 @@ runs `transcribe` a second time for them, and a re-run reads them again
 until they have three errors, after which the reader is absent for the page
 and the other readers decide it.
 
+**The circuit breaker.** A failed render or gateway call is one error on
+its page, and one run retries a page three times (the reader, `transcribe`,
+the second `transcribe`), which is the limit — so a run on a box with a
+broken poppler or a dead key would leave every page's base rows at the
+limit, and the next run, on the fixed box, would skip the base pair and
+read the whole frame through 3.8 Flash and Sonnet at about $550 instead
+of $90. So a reader whose first fifty results are all errors from three
+or more filings stops with nothing written, `STOPPED:` and the first error
+on its log, and `run` stops with it; fix the box and run the same command
+again, every page still with its attempts. A single filing that cannot be
+read keeps its error rows as before, since its errors never span three
+filings.
+
 **What to expect.** The 1,000-filing frame (9,926 attachment pages) cost
 $222 and 3 h 43 min of wall on the box under `POLICY_V2` on 2026-09-23/24,
 two stops included: the base pair 2 h 16 min in parallel (Flash Lite 81

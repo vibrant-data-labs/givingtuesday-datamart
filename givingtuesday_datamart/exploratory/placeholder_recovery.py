@@ -93,6 +93,7 @@ from givingtuesday_datamart import (
 from givingtuesday_datamart.attachment_grants import (
     PLACEHOLDER, XML_SOURCES, candidate_tables, coverage, diagnose, extract_tables, is_pointer,
     load_elements, page_tables, xml_tables)
+from givingtuesday_datamart._internal.bulk import SystemicFailure
 from givingtuesday_datamart.page_readings import MAX_ERRORS, frame_pages, reading_key
 from givingtuesday_datamart.page_verdicts import (
     FLAGGED_RULES, POLICIES, POLICY_V1, WORKERS, AgreeResult, accepted_readings, agree,
@@ -1045,7 +1046,10 @@ def run(
         # Sonnet on what 3.8 Flash leaves), then writes a verdict per page.
         _banner(f"transcribe --policy {version}: the escalation readers and the verdicts")
         stage_started = time.monotonic()
-        result = _transcribe(stores, sample, policy, cache, max_errors, buy=True)
+        try:
+            result = _transcribe(stores, sample, policy, cache, max_errors, buy=True)
+        except SystemicFailure as exc:                    # read_pages' breaker: nothing written
+            _stop(str(exc))
         _note(f"transcribe done in {_elapsed(stage_started)}")
         # A page is left without a verdict when a reader failed on it this
         # run (a gateway error, say). Error rows are read again on the next
@@ -1054,7 +1058,10 @@ def run(
             _banner(f"second transcribe: {len(result.no_verdict)} pages were left without a "
                     "verdict (a reader failed on them this run); reading them again")
             stage_started = time.monotonic()
-            result = _transcribe(stores, sample, policy, cache, max_errors, buy=True)
+            try:
+                result = _transcribe(stores, sample, policy, cache, max_errors, buy=True)
+            except SystemicFailure as exc:
+                _stop(str(exc))
             _note(f"second transcribe done in {_elapsed(stage_started)}; "
                   f"{len(result.no_verdict)} pages still without a verdict")
         else:

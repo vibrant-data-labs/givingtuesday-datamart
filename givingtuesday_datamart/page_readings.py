@@ -71,6 +71,7 @@ import math
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -84,12 +85,17 @@ from typing import Iterable, Sequence
 from sqlalchemy import text
 
 from givingtuesday_datamart import filing_images, vlm_transcription
-from givingtuesday_datamart._internal.bulk import keyed_params, keyed_select, multi_row_insert, multi_row_params, upsert_as_done
+from givingtuesday_datamart._internal.bulk import (SystemicFailure, keyed_params, keyed_select, multi_row_insert,
+                                                   multi_row_params, upsert_as_done)
 from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart.filing_images import CACHE
 from givingtuesday_datamart.vlm_transcription import DPI, PROMPT_VERSION
 
 CHUNK = 200
+# The circuit breaker (``_systemic``): a run whose first results are all
+# error rows across this many filings is a broken box, not bad pages.
+BREAKER_ROWS = 50
+BREAKER_FILINGS = 3
 RENDER_WORKERS = 4
 RENDER_CHUNK = 20        # pages per render job; a 20-page chunk is about 40 s of pdftoppm on the box
 MAX_ERRORS = 3
@@ -525,6 +531,30 @@ def _unreadable(object_id: str, first: int, last: int, stage: str, exc: BaseExce
     return FilingUnreadable(message)
 
 
+def _systemic(rows: list[PageReading]) -> str | bool:
+    """``upsert_as_done``'s breaker for a reading run. A failed render or
+    gateway call is one error on its page, and ``run`` retries a page up to
+    ``MAX_ERRORS`` times in one invocation, so one run on a box with a
+    broken poppler or a dead key would leave every page's base rows at the
+    limit and the next run, on the fixed box, would read the whole frame
+    through the escalation readers. So: while every result is an error,
+    nothing is written; once ``BREAKER_ROWS`` of them span
+    ``BREAKER_FILINGS`` filings the run stops with nothing written and the
+    first error named; the first page read releases the run. A filing of
+    its own that cannot be read keeps its attempts, since its errors never
+    reach three filings."""
+    if any(row.response is not None for row in rows):
+        return True
+    filings = {row.object_id for row in rows}
+    if len(rows) < BREAKER_ROWS or len(filings) < BREAKER_FILINGS:
+        return False
+    first = rows[0]
+    return (f"the first {len(rows)} results of this run are all errors, from {len(filings)} filings: "
+            "that looks systemic (poppler, the gateway, S3, disk), not the pages', so nothing is written "
+            f"and every page keeps its attempts. The first: {first.object_id} p{first.page:03d}: "
+            f"{(first.last_error or '')[:200]}")
+
+
 def _read_one(client, model: str, rendered: Future, key: Key, request_settings: dict,
               prior: PageReading | None, pages_dir: Path) -> PageReading:
     """Runs in a worker thread: wait for the filing's render, read the page.
@@ -655,7 +685,7 @@ def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
             if sum(future.cancel() for future in rendered.values()):
                 logger.warning("stopping: the renders not yet started are cancelled")
 
-        for row in upsert_as_done(store, futures, CHUNK, on_stop=stop):
+        for row in upsert_as_done(store, futures, CHUNK, on_stop=stop, breaker=_systemic):
             page = (row.object_id, row.page)
             tally["pages"] += 1
             if row.response is None:
@@ -867,8 +897,13 @@ def main() -> None:
         if args.command == "read":
             ids = [f.object_id for token in args.filings for f in filing_images._read_frame(token)]
             pages = frame_pages(session, ids)
-            result = read_pages(session, pages, args.model, workers=args.workers, prompt_version=args.prompt_version,
-                                max_errors=args.max_errors, cache_dir=args.cache)
+            try:
+                result = read_pages(session, pages, args.model, workers=args.workers,
+                                    prompt_version=args.prompt_version, max_errors=args.max_errors,
+                                    cache_dir=args.cache)
+            except SystemicFailure as exc:
+                print(f"STOPPED: {exc}", file=sys.stderr)
+                sys.exit(1)
             print(f"{len(pages)} pages: {len(result.responses)} with a reading, {len(result.failed)} errored this run, "
                   f"{len(result.skipped)} skipped at {args.max_errors} errors")
             for (oid, page), row in sorted(result.skipped.items()):
