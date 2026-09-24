@@ -213,6 +213,13 @@ def _row(label, key, value, pool, classifier):
             "is_canary": ein in CANARIES, **({"classifier": classifier} if classifier else {})}
 
 
+def _print_bands(title: str, summary: list[tuple]) -> None:
+    """One draw's band table: filings picked of the band's pool, and dollars."""
+    print(title)
+    for label, pop_n, pick_n, pop_d, pick_d in summary:
+        print(f"  {label}  {pick_n:>3}/{pop_n:<5} ${pick_d/1e9:>6.2f}B of ${pop_d/1e9:>6.2f}B")
+
+
 def build_sample(out: Path, xml_rows_out: Path, expansions: Sequence[dict] = ()) -> None:
     """The 100-filing frame, or with ``expansions`` (``FRAMES``) the 610- and
     1,000-filing ones on top of it.
@@ -249,6 +256,7 @@ def build_sample(out: Path, xml_rows_out: Path, expansions: Sequence[dict] = ())
         for key, value in chosen:
             keys.append(key)
             picked.append(_row(label, key, value, pool, "v1" if expansions else ""))
+    _print_bands(f"the base draw, {len(picked)} filings:", summary)
 
     if expansions:
         # Only now, so the RNG state behind the base draw is untouched.
@@ -259,7 +267,7 @@ def build_sample(out: Path, xml_rows_out: Path, expansions: Sequence[dict] = ())
         already = set(keys)
         pools = {label: sorted([(k, v) for k, v in wide.items() if low <= v["amt"] < high],
                                key=lambda kv: -kv[1]["amt"]) for label, low, high, _ in STRATA}
-    for expansion in expansions:
+    for number, expansion in enumerate(expansions, 1):
         summary = []
         for label, _, _, _ in STRATA:
             pool = pools[label]
@@ -275,6 +283,7 @@ def build_sample(out: Path, xml_rows_out: Path, expansions: Sequence[dict] = ())
                 picked.append(_row(label, key, value, pool, "v2"))
             summary.append((label, len(pool), len(base) + len(extra), sum(v["amt"] for _, v in pool),
                             sum(float(r["placeholder_amt"]) for r in picked if r["stratum"] == label)))
+        _print_bands(f"after expansion {number}, {len(picked)} filings:", summary)
 
     picked.sort(key=lambda r: (r["stratum"], -r["placeholder_amt"]))
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -282,8 +291,6 @@ def build_sample(out: Path, xml_rows_out: Path, expansions: Sequence[dict] = ())
         writer = csv.DictWriter(handle, fieldnames=list(picked[0].keys()))
         writer.writeheader()
         writer.writerows(picked)
-    for label, pop_n, pick_n, pop_d, pick_d in summary:
-        print(f"  {label}  {pick_n:>3}/{pop_n:<5} ${pick_d/1e9:>6.2f}B of ${pop_d/1e9:>6.2f}B")
     print(f"\n{len(picked)} filings -> {out}")
 
     rows = [{"object_id": key[2], **item} for key in keys for item in itemised.get(key, [])]
