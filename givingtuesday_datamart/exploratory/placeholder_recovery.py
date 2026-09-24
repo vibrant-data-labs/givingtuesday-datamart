@@ -783,15 +783,13 @@ def _stored_only(
     which case the pass must have bought nothing and written nothing."""
     try:
         # ``buy=False``: stored readings only. When a reader has no reading
-        # for some page, ``read_pages`` raises LookupError before any render
-        # or gateway call, naming the reader and listing the first pages.
+        # for some page, ``read_pages`` raises MissingReadings before any
+        # render or gateway call, carrying the reader and the pages.
         result = agree(stores.verdicts, pages, policy, max_errors=max_errors, cache_dir=cache,
                        client=stores.client, filing_store=stores.filings,
                        reading_store=stores.readings, s3=stores.s3, buy=False)
-    except LookupError as exc:
-        # Keep the description ("N pages have no reading of <model> ..."),
-        # drop the page list that follows ": [".
-        return str(exc).split(": [")[0]
+    except page_readings.MissingReadings as exc:
+        return exc.summary
     print(summary(result))
     # It got through, so every reading was stored and nothing can have been
     # bought; and the verdicts already on the table under this policy are

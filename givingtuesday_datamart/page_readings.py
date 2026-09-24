@@ -400,6 +400,20 @@ def _require_pdftoppm() -> None:
         raise RuntimeError("pdftoppm is not on PATH; install poppler-utils (apt) or poppler (brew)")
 
 
+class MissingReadings(LookupError):
+    """``read_pages`` with ``buy=False`` (or under settings that are not
+    today's) found pages without a reading of the model: nothing was read.
+    Carries what a caller needs without parsing the message."""
+
+    def __init__(self, model: str, prompt_version: str, pages: list, why: str) -> None:
+        self.model, self.prompt_version, self.pages, self.why = model, prompt_version, list(pages), why
+        super().__init__(f"{self.summary}: {self.pages[:5]}")
+
+    @property
+    def summary(self) -> str:
+        return f"{len(self.pages)} pages have no reading of {self.model} {self.prompt_version} and {self.why}"
+
+
 class FilingUnreadable(Exception):
     """The render job could not produce a filing's PNGs — the PDF could not
     be materialised, or pdftoppm failed. The message is the pages' error."""
@@ -531,8 +545,7 @@ def read_pages(session, pages: Sequence[Page], model: str, *, workers: int,
         return result
     if not buy or settings != request(model):
         why = "the run buys nothing" if not buy else "the settings asked for are not today's, so nothing can be read under them"
-        raise LookupError(f"{len(misses)} pages have no reading of {model} {prompt_version} and {why}: "
-                          f"{[page for page, _ in misses[:5]]}")
+        raise MissingReadings(model, prompt_version, [page for page, _ in misses], why)
     _require_pdftoppm()
 
     # One render job per chunk of a filing's pages, keyed on the chunk the

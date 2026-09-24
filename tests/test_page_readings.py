@@ -479,9 +479,11 @@ def test_a_run_that_buys_nothing_raises_on_a_miss_before_any_render_or_call(fili
     client = _client(1)
     result = _read(store, filings, _pages(OID, 3), client, tmp_path, buy=False)
     assert len(result.responses) == 1 and client.json_modes == []
-    with pytest.raises(LookupError, match="buys nothing"):
+    with pytest.raises(pr.MissingReadings, match="buys nothing") as missing:
         _read(store, filings, _pages(OID, 3, 4), client, tmp_path, buy=False)
     assert client.json_modes == [] and len(render.calls) == 1 and len(store.rows) == 1
+    assert missing.value.why == "the run buys nothing" and [oid for oid, _ in missing.value.pages] == [OID]
+    assert missing.value.summary.endswith("and the run buys nothing") and "[" not in missing.value.summary
 
 
 # ---------------------------------------------------------------------------
