@@ -20,8 +20,8 @@ and the [production diagram](https://whimsical.com/FXWZBu4FE9RzpMYqWmupqd).
 
 - Private foundations must list every grant on Form 990-PF. From 2020
   to 2025, 12,265 filings put a "see attached" row there instead: 2.7%
-  of foundations that declare grants, 7.2% of the dollars they declare,
-  $40.1B. The list exists only as pages in the IRS's scanned image of
+  of foundations that report grants paid, 7.2% of the dollars on their
+  Part I line 25, $40.1B. The list exists only as pages in the IRS's scanned image of
   the return.
 - The method fetches that image, has vision-language models read the
   attached pages, and keeps a list only when it adds up to the total the
@@ -57,8 +57,9 @@ and the [production diagram](https://whimsical.com/FXWZBu4FE9RzpMYqWmupqd).
 
 | term | meaning |
 |---|---|
-| placeholder filing | a 990-PF whose grant list in the form is a "see attached" row (or similar) holding at least half of the declared total; the real list is in an attachment |
-| declared total | the grant dollars the foundation states on the form. In the population table it is Part I line 25, column (d), the form's top section; in the frame and the results it is the amount on the "see attached" row itself, Part XV line 3a (paid) or 3b (approved for future payment), and every recovered list has to add up to that within 0.5% |
+| placeholder filing | a 990-PF whose grant list in the form is a "see attached" row (or similar) instead of the grants themselves; the real list is in an attachment |
+| declared total | the amount the foundation wrote on its "see attached" row in the grants table, Part XV, with line 3a (paid) and line 3b (approved for future payment) kept separate; every recovered list has to add up to it within 0.5%, it is what gets credited, and the bands and every dollar figure below are cut on it |
+| grants paid, Part I line 25 | the whole year's grants from the form's top section, column (d); used only in the population table, where a filing is fetched when its pointer rows hold at least half of it; it differs from the declared total because it also counts the grants the filer itemised in the form and leaves out future payments |
 | IRS image | the PDF of the whole return the IRS publishes on its Tax Exempt Organization Search site (TEOS); fetching it is free |
 | attachment | the filer's own pages at the end of the image, after the IRS-rendered form pages; only these are sent to the models |
 | readable filing | a filing whose image the IRS served and that has an attachment |
@@ -93,14 +94,16 @@ what our matcher needs.
 ## Which filings need their PDF
 
 The rule, measured on the loaded datamart (`privategrants_current`
-joined to the declared totals in `basic_fields_pf_current`): fetch the
-PDF when pointer rows hold at least half of the declared total. A pointer
+joined to grants paid, Part I line 25, in `basic_fields_pf_current`):
+fetch the PDF when pointer rows hold at least half of that figure, the
+whole year's grants from the form's top section rather than the amount
+on the pointer row. A pointer
 row reads like "SEE ATTACHED", "STATEMENT 25" or "SCHEDULE ATTACHED". The
 query is `data/exploratory/placeholder_population_by_year.sql`, run by
 `placeholder_population.py`; the classes and the pattern's precision and
 recall are measured in `placeholder_classifier_assessment.sql`.
 
-| tax year | PF filings with grants | declared grants | placeholder filings | placeholder declared | share of filings | share of dollars |
+| tax year | PF filings with grants | grants paid, Part I line 25 | placeholder filings | their grants paid | share of filings | share of dollars |
 |---|---|---|---|---|---|---|
 | 2020 | 88,737 | $94.8B | 2,809 | $6.71B | 3.2% | 7.1% |
 | 2021 | 90,444 | $103.4B | 2,673 | $7.69B | 3.0% | 7.4% |
@@ -128,10 +131,12 @@ are separate totals and separate statements. Each is reconciled on its
 own.
 
 The frame was drawn from GivingTuesday's 2020 to 2024 extract of grant
-rows, where the same rule gives 9,515 filings whose placeholder rows
-carry $25.0B. That is the population the projections below scale to; the
-declared totals above are larger because a placeholder row rarely
-carries the whole declared total.
+rows, where every filing with a pointer row counts, with no half test,
+and the pointer rows themselves carry $25.0B across 9,515 filings. That
+is the population the projections below scale to, and its dollars are
+declared totals in the sense above. The table above is larger because it
+counts each filing's whole Part I line 25 and is measured on the loaded
+datamart, which also holds part of 2025.
 
 ## Where the documents come from
 
@@ -467,8 +472,8 @@ were found:
 13. Sonnet on the small filings' flagged pages: 40 of 57 exact, 94% of
     the dollars, and the misses are two-column tables, sliding amounts, a
     credit ledger's signs and a few misread rows.
-14. Placeholder filings are 2.7% of filers and 7.2% of declared grant
-    dollars, flat across years; the declared total and the placeholder
+14. Placeholder filings are 2.7% of filers and 7.2% of grants paid on
+    Part I line 25, flat across years; that line and the placeholder
     row are different denominators, and the projections use the latter.
 15. Paid and future-payment lists reconcile separately; a headline that
     mixes them is a point higher than the paid-only one.
