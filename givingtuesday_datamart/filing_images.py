@@ -2,12 +2,13 @@
 ``filing_images`` row per filing saying where it came from, what it holds,
 and what went wrong when nothing did.
 
-    python -m givingtuesday_datamart.filing_images fetch data/exploratory/placeholder_sample_expanded.csv
+    python -m givingtuesday_datamart.filing_images fetch data/exploratory/placeholder_sample_1000.csv
     python -m givingtuesday_datamart.filing_images backfill --dry-run
     python -m givingtuesday_datamart.filing_images status
     python -m givingtuesday_datamart.filing_images verify
 
-Part A of ``docs/placeholder_storage_spec.md``. The measurements behind
+``docs/placeholder_recovery_operations.md`` (Part A of the storage spec it
+was built from, now in git history). The measurements behind
 every choice here are in ``docs/placeholder_recovery_pipeline.md``.
 
 **Fetching.** ``fetch_filings`` resolves each object id through the IRS
@@ -94,6 +95,8 @@ PERMANENT = ("no_teos_image",)
 STAGING_CSVS = (Path("data/exploratory/placeholder_staging.csv"),
                 Path("data/exploratory/placeholder_staging_expanded.csv"))
 IMAGE_404_CSV = Path("data/exploratory/placeholder_404_images_expanded.csv")
+# Where the sample-era data files went on 2026-09-25 (staging_expanded among them).
+ARCHIVE_ZIP = "s3://givingtuesday-datamart/placeholder-recovery/archive/placeholder-sample-era-data-2026-09-25.zip"
 
 DDL = (
     """
@@ -647,6 +650,9 @@ def backfill(session, *, staging_csvs: Sequence[Path] = STAGING_CSVS,
     staged: dict[str, dict] = {}
     passes: dict[str, int] = {}
     for path in staging_csvs:
+        if not path.exists():                          # the 610-frame manifest is archived (ARCHIVE_ZIP)
+            logger.warning("backfill: %s is not in the tree; the sample-era CSVs are in %s", path, ARCHIVE_ZIP)
+            continue
         with path.open(newline="") as handle:
             for line in csv.DictReader(handle):
                 staged[line["object_id"]] = line
