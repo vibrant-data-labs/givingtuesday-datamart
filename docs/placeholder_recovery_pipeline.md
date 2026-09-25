@@ -1,11 +1,15 @@
 # Placeholder Grant Recovery — the pipeline, end to end
 
-*Sketch, September 21, 2026. Builds on
-[placeholder_grant_recovery.md](placeholder_grant_recovery.md), which holds
-the evidence for every choice below. Stages 1–4 are wired up for the
-100-filing sample (`placeholder_recovery.py`: `sample`, `stage`,
-`transcribe`, `report`); stage 0 exists as SQL; stages 5 and 6 are not
-built.*
+*The engineering log, September 21 to 25, 2026: the plan as it was made,
+every measurement in the order it was taken, the order of operations and
+the decisions with their evidence. It is history, not the current picture.
+The findings as of the 1,000-filing frame are in
+[placeholder_grant_recovery.md](placeholder_grant_recovery.md); how to run
+the pipeline, and the tables it writes, is in
+[placeholder_recovery_operations.md](placeholder_recovery_operations.md),
+which absorbed the storage spec and the EC2 runbook. Stages 0 to 4 and 6
+are built (`placeholder_recovery.py`: `sample`, `estimate`, `run`,
+`transcribe`, `report`); stage 5, the load into the datamart, is not.*
 
 ## The shape
 
@@ -913,7 +917,7 @@ page, so the question may be moot.
 4. The storage layer — filing images in S3 with a `filing_images`
    table, a `page_readings` cache with a parallel bulk cache-or-run,
    and `page_verdicts` under a versioned policy — per
-   [placeholder_storage_spec.md](placeholder_storage_spec.md), one
+   [placeholder_recovery_operations.md](placeholder_recovery_operations.md), one
    session per part. Then the 1,000-filing run on it.
 
    **Part A built** (2026-09-22,
@@ -1269,7 +1273,7 @@ page, so the question may be moot.
      imports it), poppler-utils 22.08.0 from dnf, tmux and git-lfs already
      there, TEOS and the gateway reachable, S3 through the account's keys
      in `~/.aws` rather than an instance role, the datamart through
-     `~/config.ini`. Set up per [placeholder_ec2_runbook.md](placeholder_ec2_runbook.md)
+     `~/config.ini`. Set up per [placeholder_recovery_operations.md](placeholder_recovery_operations.md)
      in about ten minutes; the prerequisites stage passes in a second.
    - **Rendering is the box's bottleneck, and it stalled the first attempt.**
      Twenty minutes into a first try, answers fell from about a hundred a

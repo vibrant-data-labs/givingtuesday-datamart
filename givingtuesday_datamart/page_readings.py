@@ -6,7 +6,8 @@ reads only what is missing.
     python -m givingtuesday_datamart.page_readings backfill --dry-run
     python -m givingtuesday_datamart.page_readings status
 
-Part B of ``docs/placeholder_storage_spec.md``, the readings half; the
+``docs/placeholder_recovery_operations.md`` (Part B of the storage spec it
+was built from, now in git history), the readings half; the
 verdicts are ``page_verdicts`` (``agree``), which reads through here. The
 measurements behind the choices here are in
 ``docs/placeholder_recovery_pipeline.md``.

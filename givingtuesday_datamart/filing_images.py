@@ -7,7 +7,8 @@ and what went wrong when nothing did.
     python -m givingtuesday_datamart.filing_images status
     python -m givingtuesday_datamart.filing_images verify
 
-Part A of ``docs/placeholder_storage_spec.md``. The measurements behind
+``docs/placeholder_recovery_operations.md`` (Part A of the storage spec it
+was built from, now in git history). The measurements behind
 every choice here are in ``docs/placeholder_recovery_pipeline.md``.
 
 **Fetching.** ``fetch_filings`` resolves each object id through the IRS

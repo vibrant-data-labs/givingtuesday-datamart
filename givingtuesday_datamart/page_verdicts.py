@@ -7,7 +7,8 @@ stored readings) and decides.
     python -m givingtuesday_datamart.page_verdicts agree data/exploratory/placeholder_sample_100.csv --policy v1 --stored-only
     python -m givingtuesday_datamart.page_verdicts status --policy v1
 
-Part B of ``docs/placeholder_storage_spec.md``, the verdicts half. The
+``docs/placeholder_recovery_operations.md`` (Part B of the storage spec it
+was built from, now in git history), the verdicts half. The
 policy and its numbers are the pipeline doc's *3b · Agree* and *Ground
 truth* sections.
 
