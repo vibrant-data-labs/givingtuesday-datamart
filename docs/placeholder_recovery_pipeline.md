@@ -9,7 +9,11 @@ the pipeline, and the tables it writes, is in
 [placeholder_recovery_operations.md](placeholder_recovery_operations.md),
 which absorbed the storage spec and the EC2 runbook. Stages 0 to 4 and 6
 are built (`placeholder_recovery.py`: `sample`, `estimate`, `run`,
-`transcribe`, `report`); stage 5, the load into the datamart, is not.*
+`transcribe`, `report`); stage 5, the load into the datamart, is not. The sample-era data files this
+log cites (the single-read reports, the 610-filing frame and its manifest,
+the engine differences) were archived on 2026-09-25 to
+`s3://givingtuesday-datamart/placeholder-recovery/archive/placeholder-sample-era-data-2026-09-25.zip`,
+with a manifest of hashes; they remain in git history as LFS objects.*
 
 ## The shape
 

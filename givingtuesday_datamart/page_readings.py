@@ -2,7 +2,7 @@
 by one model under one prompt, and ``read_pages``, the bulk cache-or-run that
 reads only what is missing.
 
-    python -m givingtuesday_datamart.page_readings read data/exploratory/placeholder_sample_expanded.csv --model alibaba/qwen3-vl-instruct --workers 40
+    python -m givingtuesday_datamart.page_readings read data/exploratory/placeholder_sample_1000.csv --model alibaba/qwen3-vl-instruct --workers 40
     python -m givingtuesday_datamart.page_readings backfill --dry-run
     python -m givingtuesday_datamart.page_readings status
 

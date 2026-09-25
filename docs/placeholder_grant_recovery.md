@@ -540,7 +540,8 @@ were found:
 | `data/exploratory/placeholder_population_by_year.sql`, `.csv` | the population by tax year |
 | `data/exploratory/placeholder_classifier_assessment.sql` | the classifier's classes, precision and recall |
 | `data/exploratory/placeholder_404_images_expanded.csv`, `placeholder_unreachable.csv` | the IRS's unserved images; the sample's out-of-reach filings with links |
-| earlier reports (`placeholder_report_qwen3_vl*.csv`, `_gemini_lite*.csv`, `_unstructured.csv`, `_single_*_v3.csv`), `placeholder_staging*.csv`, `placeholder_sample_expanded*.csv` | the sample-era reads and frames, kept for the engineering log |
+| `data/exploratory/placeholder_staging.csv` | the sample's fetch manifest, still read by the scorer |
+| `s3://givingtuesday-datamart/placeholder-recovery/archive/placeholder-sample-era-data-2026-09-25.zip` | the sample-era reads and frames (the single-read reports, the 610-filing frame and its manifest, the engine differences), archived on 2026-09-25 with a manifest of hashes; the engineering log discusses their numbers |
 
 ## Caveats
 
