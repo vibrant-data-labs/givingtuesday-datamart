@@ -58,7 +58,7 @@ and the [production diagram](https://whimsical.com/FXWZBu4FE9RzpMYqWmupqd).
 | term | meaning |
 |---|---|
 | placeholder filing | a 990-PF whose grant list in the form is a "see attached" row (or similar) holding at least half of the declared total; the real list is in an attachment |
-| declared total | Part I line 25 of the 990-PF, the grants the foundation says it paid in the year; every recovered list has to add up to it |
+| declared total | the grant dollars the foundation states on the form. In the population table it is Part I line 25, column (d), the form's top section; in the frame and the results it is the amount on the "see attached" row itself, Part XV line 3a (paid) or 3b (approved for future payment), and every recovered list has to add up to that within 0.5% |
 | IRS image | the PDF of the whole return the IRS publishes on its Tax Exempt Organization Search site (TEOS); fetching it is free |
 | attachment | the filer's own pages at the end of the image, after the IRS-rendered form pages; only these are sent to the models |
 | readable filing | a filing whose image the IRS served and that has an attachment |
