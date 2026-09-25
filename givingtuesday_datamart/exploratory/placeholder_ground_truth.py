@@ -710,6 +710,73 @@ def verdicts(policy: dict, *, session, filing_store=None, reading_store=None,
     return tally
 
 
+def flagged(policy: dict, *, session, out: Path | None = None, filing_store=None, reading_store=None) -> dict:
+    """The reading a ``load_single`` policy loads for a flagged page — the
+    last escalation reader's — against the truth, on the checked pages that
+    were drawn as flagged (their ``reason`` in the page draw says so):
+    pages exact, pair precision and recall, dollars right, and the shape of
+    each miss, by band. The 57 pages of 2026-09-24 are every flagged page
+    with a grants table in bands C and D of the 1,000-filing frame plus
+    eight non-grant pages. Prints the table and, with ``out``, writes one
+    row per page. Returns the tally by band."""
+    from givingtuesday_datamart.page_verdicts import accepted_readings
+
+    drawn = {(r["object_id"], int(r["page"])): r for r in csv.DictReader(PAGES_CSV.open()) if "flagged" in r["reason"]}
+    truth = {key: rs for key, rs in checked_truth().items() if key in drawn}
+    found = accepted_readings(session, list(truth), policy, filing_store=filing_store, reading_store=reading_store)
+    rows_out, by_band = [], collections.defaultdict(collections.Counter)
+    for key, records in sorted(truth.items()):
+        match = re.search(r"band ([A-D])", drawn[key]["reason"])
+        band = match.group(1) if match else "?"
+        want = collections.Counter(_truth_pairs(records))
+        verdict, response = found.get(key, (None, None))
+        got = reading_pairs.pairs(response) if response is not None else collections.Counter()
+        matched, n_got, n_want = sum((got & want).values()), sum(got.values()), sum(want.values())
+        lenient = _lenient_matches(list(got.elements()), list(want.elements()))
+        sum_got, sum_want = sum(a for _, a in got.elements()), sum(a for _, a in want.elements())
+        if got == want:
+            shape = "exact"
+        elif lenient == n_want == n_got:
+            shape = "spelling only"
+        elif abs(sum_got - sum_want) <= 1:
+            shape = "amounts slid, sum kept"
+        elif sum_want and abs(sum_got + sum_want) <= 1:
+            shape = "sign inverted"
+        elif n_got == n_want + 1:
+            shape = "a blank-amount row shifted the rest"
+        elif n_got < n_want or abs(sum_got) < abs(sum_want):
+            shape = "rows or a column dropped"
+        else:
+            shape = "rows differ"
+        b = by_band[band]
+        b["pages"] += 1; b["exact"] += shape == "exact"; b["spelling"] += shape == "spelling only"
+        b["matched"] += matched; b["lenient"] += lenient; b["got"] += n_got; b["want"] += n_want
+        b["dollars_want"] += abs(sum_want); b["dollars_right"] += sum(abs(a) * n for (_, a), n in (got & want).items())
+        b[f"shape:{shape}"] += 1
+        rows_out.append({"band": band, "object_id": key[0], "page": key[1], "filer_name": drawn[key]["filer_name"],
+                         "verdict": verdict.verdict if verdict else "", "reader": verdict.accepted_model if verdict else "",
+                         "truth_rows": n_want, "reader_rows": n_got, "pairs_matched": matched, "pairs_matched_lenient": lenient,
+                         "truth_sum": f"{sum_want:.2f}", "reader_sum": f"{sum_got:.2f}", "shape": shape})
+    total = collections.Counter()
+    for b in by_band.values():
+        total.update(b)
+    print(f"{len(truth)} flagged pages checked against the image, the accepted reading under policy {policy['version']}\n")
+    print("| band | pages | exact | spelling only | pair precision | pair recall | dollars right | misses |")
+    print("|---|---|---|---|---|---|---|---|")
+    for band, b in list(sorted(by_band.items())) + [("all", total)]:
+        misses = ", ".join(f"{k.split(':', 1)[1]} {v}" for k, v in sorted(b.items())
+                           if k.startswith("shape:") and k not in ("shape:exact", "shape:spelling only"))
+        print(f"| {band} | {b['pages']} | {b['exact']} | {b['spelling']} | {b['matched'] / max(b['got'], 1):.1%} | "
+              f"{b['matched'] / max(b['want'], 1):.1%} | {b['dollars_right'] / max(b['dollars_want'], 1):.1%} | {misses or '-'} |")
+    if out:
+        with out.open("w", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=list(rows_out[0]))
+            writer.writeheader()
+            writer.writerows(rows_out)
+        print(f"\nper-page detail -> {out}")
+    return by_band
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -745,7 +812,18 @@ def main() -> None:
     p.add_argument("--policy", default="v1", help="a registered version or a JSON file with the policy")
     p.add_argument("--flagged", default=None, choices=("load_single", "leave_out"),
                    help="the verdicts an override of the flagged rule decided, under <version>-<rule>")
+    p = sub.add_parser("flagged", help="score the reading a load_single policy loads for the checked flagged pages, by band")
+    p.add_argument("--policy", default="v2", help="a registered version or a JSON file with the policy")
+    p.add_argument("--out", type=Path, default=None, help="per-page CSV, e.g. data/exploratory/placeholder_flagged_check.csv")
     args = parser.parse_args()
+    if args.command == "flagged":
+        from givingtuesday_datamart._internal.db import get_session
+        from givingtuesday_datamart.ingestion import datamart_config
+        from givingtuesday_datamart.page_verdicts import load_policy
+
+        with get_session(config=datamart_config()) as session:
+            flagged(load_policy(args.policy), session=session, out=args.out)
+        return
     if args.command == "verdicts":
         from givingtuesday_datamart._internal.db import get_session
         from givingtuesday_datamart.ingestion import datamart_config
