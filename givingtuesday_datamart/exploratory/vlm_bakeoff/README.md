@@ -18,6 +18,13 @@ python run.py --provider openai  --models gpt-5-mini                   # OPENAI_
 python compare.py                                                      # one table across out/*/
 ```
 
+The run of 2026-09-21 is `results_2026-09-21.txt`: twenty model
+configurations on the 14 pages. Their raw responses, 280 files, are not in
+the repository. They are in
+`s3://givingtuesday-datamart/placeholder-recovery/archive/placeholder-vlm-bakeoff-2026-09-28.zip`
+with a manifest; unzip it here and `compare.py` prints the table again.
+A new run writes `out/`, which git ignores.
+
 `reference.json` holds the Unstructured selector's rows for the same pages
 (the reference, not ground truth, except for Siegel's declared total and
 the Wells Fargo p233 section total). Results and the decision are in

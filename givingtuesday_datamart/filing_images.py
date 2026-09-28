@@ -3,7 +3,6 @@
 and what went wrong when nothing did.
 
     python -m givingtuesday_datamart.filing_images fetch data/exploratory/placeholder_sample_1000.csv
-    python -m givingtuesday_datamart.filing_images backfill --dry-run
     python -m givingtuesday_datamart.filing_images status
     python -m givingtuesday_datamart.filing_images verify
 
@@ -13,8 +12,7 @@ every choice here are in ``docs/placeholder_recovery_pipeline.md``.
 
 **Fetching.** ``fetch_filings`` resolves each object id through the IRS
 index and TEOS (``irs_source``), downloads the newest image first with older
-ones as fallbacks — the loop that ``exploratory/placeholder_recovery.stage``
-ran, moved here with its status strings — hashes it, reads the page widths
+ones as fallbacks, hashes it, reads the page widths
 with ``pdfimages`` to find where the filer's attachment starts, uploads the
 PDF to ``s3://givingtuesday-datamart/irs/pdf/<object_id>.pdf`` and upserts
 the row. Downloads and uploads run in a thread pool; the database session is
@@ -37,8 +35,7 @@ download). Every failure keeps ``attempts`` and ``last_error``.
 that appears months later is fetched with ``refetch``, not by retrying.
 Every other failure is re-tried until it has three attempts, then left
 alone until ``refetch``; a 404 keeps its attempts because the 2022 batch
-may come back. The backfill re-does only its own ``upload_failed`` and
-``widths_failed`` rows. The unreachable set, the 404s by image year and the
+may come back. The unreachable set, the 404s by image year and the
 no-attachment filings are therefore queries on this table, not files.
 
 **Reading back.** ``local_pdf`` (a session and an id) and ``materialise``
@@ -92,11 +89,6 @@ FETCHED = ("fetched", "no_attachment")
 # keeps its attempts because the 2022 batch may come back (Zein, 2026-09-22).
 PERMANENT = ("no_teos_image",)
 
-STAGING_CSVS = (Path("data/exploratory/placeholder_staging.csv"),
-                Path("data/exploratory/placeholder_staging_expanded.csv"))
-IMAGE_404_CSV = Path("data/exploratory/placeholder_404_images_expanded.csv")
-# Where the sample-era data files went on 2026-09-25 (staging_expanded among them).
-ARCHIVE_ZIP = "s3://givingtuesday-datamart/placeholder-recovery/archive/placeholder-sample-era-data-2026-09-25.zip"
 
 DDL = (
     """
@@ -589,126 +581,6 @@ def materialise(row: FilingImage, cache_dir: Path = CACHE, *, bucket: str = BUCK
 
 
 # ---------------------------------------------------------------------------
-# Backfill from the exploratory staging run
-# ---------------------------------------------------------------------------
-
-
-def _transient(status: str) -> bool:
-    """A failure of ours, not the IRS's: worth another go without ``refetch``."""
-    return status.startswith(("upload_failed:", "widths_failed:"))
-
-
-def _backfill_one(staged: dict, *, pdf_dir: Path, bucket: str, prefix: str, s3) -> FilingImage:
-    """One cached PDF into S3 and a row, from the staging CSV's line for it.
-    The widths are read from the PDF, not copied, so the CSV's
-    ``attachment_from`` is checked rather than trusted."""
-    object_id = staged["object_id"]
-    local = pdf_dir / f"{object_id}.pdf"
-    key = f"{prefix}/{object_id}.pdf"
-    row = FilingImage(object_id=object_id, filerein=staged["filerein"], taxyear=int(staged["taxyear"]),
-                      index_year=None, teos_url=None, image_generated=None, status="fetched", attempts=1)
-    try:
-        payload = local.read_bytes()
-        try:
-            widths = irs_source.page_widths(local)
-        except subprocess.CalledProcessError as exc:
-            return _failed(row, None, "not_a_pdf", f"pdfimages: {exc.stderr or exc}"[:500])
-        except Exception as exc:                          # noqa: BLE001
-            return _failed(row, None, f"widths_failed:{type(exc).__name__}", str(exc)[:500])
-        _upload(s3, bucket, key, payload, hashlib.sha256(payload).digest())
-    except Exception as exc:                              # noqa: BLE001
-        return _failed(row, None, f"upload_failed:{type(exc).__name__}", str(exc)[:500])
-    start, attached = attachment_span(widths)
-    if (str(start or ""), str(attached)) != (staged["attachment_from"], staged["attachment_pages"]):
-        logger.warning("%s: pdf says attachment_from=%s pages=%s, staging CSV says %s/%s", object_id,
-                       start, attached, staged["attachment_from"], staged["attachment_pages"])
-    return _describe(row, payload, widths, key, datetime.fromtimestamp(local.stat().st_mtime, tz=timezone.utc))
-
-
-def backfill(session, *, staging_csvs: Sequence[Path] = STAGING_CSVS,
-             image_404_csv: Path | None = IMAGE_404_CSV, pdf_dir: Path = CACHE / "pdfs",
-             bucket: str = BUCKET, prefix: str = PREFIX, workers: int = 8, s3=None,
-             dry_run: bool = False) -> dict[str, str]:
-    """Load the exploratory ``stage`` results — cached PDFs and the staging
-    CSVs — into the table and S3 without a single TEOS request.
-
-    A one-off seed: a filing already in the table is left exactly as it is,
-    since a live fetch may have moved its ``attempts`` and filled the TEOS
-    fields the CSVs cannot supply. The exception is a row an earlier
-    backfill left as ``upload_failed`` or ``widths_failed``, which is done
-    again. The dry run sizes the whole upload without consulting the table.
-
-    ``staged`` and ``cached`` become ``fetched`` or ``no_attachment`` by the
-    PDF's own widths. Failures keep their status; ``attempts`` counts the
-    staging passes that observed the failure (one per CSV the id appears
-    in, plus the pass that produced the 404 list, which also gives those
-    rows their ``teos_url`` and ``image_generated``). The EIN and tax year
-    come from the CSVs; ``index_year`` and ``teos_url`` for fetched rows
-    would need TEOS, so they stay NULL until a ``refetch``.
-    """
-    _require_pdfimages()
-    staged: dict[str, dict] = {}
-    passes: dict[str, int] = {}
-    for path in staging_csvs:
-        if not path.exists():                          # the 610-frame manifest is archived (ARCHIVE_ZIP)
-            logger.warning("backfill: %s is not in the tree; the sample-era CSVs are in %s", path, ARCHIVE_ZIP)
-            continue
-        with path.open(newline="") as handle:
-            for line in csv.DictReader(handle):
-                staged[line["object_id"]] = line
-                passes[line["object_id"]] = passes.get(line["object_id"], 0) + 1
-    listed_404: dict[str, dict] = {}
-    if image_404_csv is not None and image_404_csv.exists():
-        with image_404_csv.open(newline="") as handle:
-            listed_404 = {line["object_id"]: line for line in csv.DictReader(handle)}
-
-    to_upload = [line for line in staged.values() if line["status"] in ("staged", "cached")]
-    failures = [line for line in staged.values() if line["status"] not in ("staged", "cached")]
-    missing = [line["object_id"] for line in to_upload if not (pdf_dir / f"{line['object_id']}.pdf").exists()]
-    if missing:
-        raise FileNotFoundError(f"{len(missing)} staged PDFs are not in {pdf_dir}: {missing[:5]}")
-    total = sum((pdf_dir / f"{line['object_id']}.pdf").stat().st_size for line in to_upload)
-    logger.info("backfill: %d filings in %d CSVs; %d PDFs, %.2f GB, to s3://%s/%s/; %d failure rows",
-                len(staged), len(staging_csvs), len(to_upload), total / 1e9, bucket, prefix, len(failures))
-    if dry_run:
-        return {line["object_id"]: line["status"] for line in staged.values()}
-
-    store = _store(session)
-    store.ensure_table()
-    prior = store.get(staged)
-    seeded = {oid for oid, row in prior.items() if not _transient(row.status)}
-    if seeded:
-        logger.info("backfill: %d filings are already in the table and are left as they are", len(seeded))
-    failures = [line for line in failures if line["object_id"] not in seeded]
-    to_upload = [line for line in to_upload if line["object_id"] not in seeded]
-    statuses: dict[str, str] = {oid: prior[oid].status for oid in seeded}
-
-    rows = []
-    for line in failures:
-        oid = line["object_id"]
-        url = listed_404[oid]["pdf_url"] if oid in listed_404 else None
-        rows.append(FilingImage(
-            object_id=oid, filerein=line["filerein"], taxyear=int(line["taxyear"]),
-            index_year=None, teos_url=url, image_generated=generated_on(url),
-            status=line["status"], attempts=passes[oid] + (1 if oid in listed_404 else 0),
-            last_error=f"{line['status']} ({url})" if url else line["status"],
-        ))
-        statuses[oid] = line["status"]
-    for start in range(0, len(rows), CHUNK):
-        store.upsert(rows[start:start + CHUNK])
-
-    s3 = s3 if s3 is not None else _s3_client(workers)
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(_backfill_one, line, pdf_dir=pdf_dir, bucket=bucket, prefix=prefix, s3=s3)
-                   for line in to_upload]
-        for n, row in enumerate(upsert_as_done(store, futures, CHUNK), 1):
-            statuses[row.object_id] = row.status
-            if n % CHUNK == 0 or n == len(futures):
-                logger.info("backfill: %d/%d PDFs done", n, len(futures))
-    return statuses
-
-
-# ---------------------------------------------------------------------------
 # Reports and verification
 # ---------------------------------------------------------------------------
 
@@ -778,12 +650,6 @@ def main() -> None:
     fetch.add_argument("filings", nargs="+", help="frame CSV path(s) or object ids")
     fetch.add_argument("--refetch", action="store_true", help="fetch even rows already fetched or out of attempts")
 
-    back = sub.add_parser("backfill", help="load the exploratory staging CSVs and cached PDFs; no TEOS")
-    back.add_argument("--staging", type=Path, nargs="+", default=list(STAGING_CSVS))
-    back.add_argument("--images-404", type=Path, default=IMAGE_404_CSV)
-    back.add_argument("--pdfs", type=Path, default=None, help="default: <cache>/pdfs")
-    back.add_argument("--dry-run", action="store_true", help="count and size the upload, then stop")
-
     sub.add_parser("status", help="rows by status; unserved images by generated year")
     sub.add_parser("verify", help="hash every object in S3 against its row")
     args = parser.parse_args()
@@ -803,12 +669,6 @@ def main() -> None:
                 counts[status] = counts.get(status, 0) + 1
             for status, n in sorted(counts.items(), key=lambda kv: -kv[1]):
                 print(f"  {status:<26}{n:>6}")
-        elif args.command == "backfill":
-            backfill(session, staging_csvs=args.staging, image_404_csv=args.images_404,
-                     pdf_dir=args.pdfs or args.cache / "pdfs", bucket=args.bucket,
-                     prefix=args.prefix, workers=args.workers, dry_run=args.dry_run)
-            if not args.dry_run:
-                print(status_report(session))
         elif args.command == "status":
             print(status_report(session))
         elif args.command == "verify":

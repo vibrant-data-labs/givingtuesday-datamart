@@ -3,7 +3,6 @@ by one model under one prompt, and ``read_pages``, the bulk cache-or-run that
 reads only what is missing.
 
     python -m givingtuesday_datamart.page_readings read data/exploratory/placeholder_sample_1000.csv --model alibaba/qwen3-vl-instruct --workers 40
-    python -m givingtuesday_datamart.page_readings backfill --dry-run
     python -m givingtuesday_datamart.page_readings status
 
 ``docs/placeholder_recovery_operations.md`` (Part B of the storage spec it
@@ -68,8 +67,6 @@ import argparse
 import hashlib
 import json
 import logging
-import math
-import re
 import shutil
 import subprocess
 import sys
@@ -101,7 +98,6 @@ RENDER_WORKERS = 4
 RENDER_CHUNK = 20        # pages per render job; a 20-page chunk is about 40 s of pdftoppm on the box
 MAX_ERRORS = 3
 RESPONSE_KEYS = ("page_kind", "heading", "rows", "totals")
-VLM_DIR = CACHE / "vlm"
 
 DDL = (
     """
@@ -208,36 +204,6 @@ def reading_key(object_id: str, page: int, image_sha256: str, model: str,
     return (object_id, page, image_sha256, dpi, model, prompt_version, settings_hash(settings))
 
 
-UNEVIDENCED = {"json_mode": None, "extras": None}
-
-
-def asked_json_first(stamps: Iterable[bool | None]) -> bool:
-    """Whether a run asked for JSON mode first, from its files' ``_json_mode``
-    stamps (the mode each kept answer came back under). ``transcribe`` only
-    ever falls back out of JSON mode, so one answer in it proves the run
-    asked for it; a run whose every answer is out of it did not. No stamps
-    at all is the v2 sample, which ran with JSON mode on."""
-    stamps = list(stamps)
-    return any(stamp is True for stamp in stamps) or not any(stamp is False for stamp in stamps)
-
-
-def file_settings(model: str, data: dict, json_first: bool) -> dict:
-    """The request settings a stored JSON reading evidences, for the backfill.
-
-    ``json_mode`` is the run's first-call mode (``asked_json_first``), which
-    is what ``request`` records for a live reading, so a page that fell back
-    out of JSON mode keys with the rest of its run. ``extras`` are the
-    model's ``REQUEST_EXTRAS``, which the runs that produced the files used;
-    the files do not stamp them. A file with no stamps at all never got an
-    answer (a transport error, before ``_ask`` stamps anything), so it
-    evidences nothing: both fields are None, the row keeps a hash of its
-    own, and no live key inherits its strike.
-    """
-    if not any(stamp in data for stamp in ("_json_mode", "_usage", "_finish")):
-        return dict(UNEVIDENCED)
-    return {"json_mode": json_first, "extras": vlm_transcription.REQUEST_EXTRAS.get(model, {})}
-
-
 # ---------------------------------------------------------------------------
 # The store
 # ---------------------------------------------------------------------------
@@ -321,7 +287,7 @@ def ensure_table(session) -> None:
 
 
 def reading_from_result(key: Key, request_settings: dict, data: dict, prior: PageReading | None = None, *,
-                        read_at: datetime | None = None, json_mode_default: bool | None = None) -> PageReading:
+                        read_at: datetime | None = None) -> PageReading:
     """A ``transcribe`` result (or a stored JSON file of one) as a row.
 
     A result with ``error`` or ``parse_error`` is an error row: ``errors`` is
@@ -333,7 +299,7 @@ def reading_from_result(key: Key, request_settings: dict, data: dict, prior: Pag
     """
     row = PageReading(*key, request=request_settings,
                       partial=bool(data.get("_partial")), usage=data.get("_usage"), finish=data.get("_finish"),
-                      attempts=data.get("_attempts"), json_mode=data.get("_json_mode", json_mode_default),
+                      attempts=data.get("_attempts"), json_mode=data.get("_json_mode"),
                       seconds=data.get("_seconds"))
     if read_at is not None:
         row.read_at = read_at
@@ -359,18 +325,6 @@ def reparse(row: PageReading) -> PageReading | None:
     if "parse_error" in data or "page_kind" not in data or not isinstance(data.get("rows"), list):
         return None
     return replace(row, response={k: data[k] for k in RESPONSE_KEYS if k in data}, partial=bool(data.get("_partial")))
-
-
-def _same(a: PageReading, b: PageReading) -> bool:
-    """Equal as stored: ``seconds`` is a Postgres ``real``, so it comes back
-    at float32 precision and is compared to that."""
-    x, y = asdict(a), asdict(b)
-    sa, sb = x.pop("seconds"), y.pop("seconds")
-    if x != y:
-        return False
-    if sa is None or sb is None:
-        return sa is sb
-    return math.isclose(sa, sb, rel_tol=1e-6)
 
 
 # ---------------------------------------------------------------------------
@@ -725,121 +679,6 @@ def frame_pages(filing_store, object_ids: Iterable[str]) -> list[Page]:
 
 
 # ---------------------------------------------------------------------------
-# Backfill from the JSON folders
-# ---------------------------------------------------------------------------
-
-
-_PAGE_FILE = re.compile(r"^p(\d+)\.json$")
-_FOLDER = re.compile(r"^(?P<model>.+?)(?:-(?P<version>v\d+))?$")
-# Experiments, not readings to keep (the spec's "What exists today").
-_SKIPPED_FOLDERS = (
-    (re.compile(r"-v\d+b$"), "a second read under identical settings: the key cannot hold two, "
-                             "and same-model agreement was rejected"),
-    (re.compile(r"-max-v\d+$"), "Sonnet at maximum reasoning, a 21-page experiment"),
-)
-
-
-def skipped_folder(name: str) -> str | None:
-    """Why a folder is not backfilled, or None."""
-    for pattern, reason in _SKIPPED_FOLDERS:
-        if pattern.search(name):
-            return reason
-    return None
-
-
-def folder_reader(name: str) -> tuple[str, str]:
-    """``<model with '/' as '__'>[-v<N>]`` → (model, prompt version); no
-    suffix is the sample's first prompt, v2."""
-    match = _FOLDER.match(name)
-    return match.group("model").replace("__", "/"), match.group("version") or "v2"
-
-
-def backfill(session, *, vlm_dir: Path = VLM_DIR, dry_run: bool = False, filing_store=None) -> dict:
-    """Load every ``<vlm_dir>/<folder>/<object_id>/pNNN.json`` into the table
-    without a gateway call.
-
-    Folder → reader by ``folder_reader``; the ``-v4b`` repeat reads and the
-    Sonnet maximum-reasoning folder are skipped and logged. Per file: the page
-    from the filename, ``image_sha256`` from ``filing_images`` (a filing not
-    in the table is listed under ``missing``, not a crash), ``dpi`` 200, the
-    stamps as ``reading_from_result`` reads them, ``read_at`` the file's
-    mtime, and ``request``/``request_hash`` from what the folder and the
-    file evidence (``asked_json_first``, ``file_settings``): the v2 files
-    carry only ``_attempts``, ``_finish``, ``_max_tokens``, ``_model``,
-    ``_seconds``, ``_usage`` and ran with JSON mode on, and the v3 Qwen run
-    asked for it first too (468 of its answers came back in it), so those
-    rows are keyed apart from Qwen v4, which ran without it. Idempotent: a
-    second run reads the stored rows back, finds nothing new or changed and
-    writes nothing. The folders are left where they are.
-
-    Returns ``{"readers": {(model, version): {files, rows, new, changed,
-    errors}}, "skipped": {folder: reason}, "missing": [object_id…],
-    "unreadable": [path…]}`` — ``unreadable`` the files that are not JSON
-    (an empty or half-written file a killed run left), listed and passed
-    over rather than aborting the run; a dry run stops after counting files
-    and touches no table.
-    """
-    plan: list[tuple[str, str, list[Path]]] = []
-    skipped: dict[str, str] = {}
-    for folder in sorted(p for p in vlm_dir.iterdir() if p.is_dir()):
-        if reason := skipped_folder(folder.name):
-            skipped[folder.name] = reason
-            logger.info("backfill: skipping %s: %s", folder.name, reason)
-            continue
-        model, version = folder_reader(folder.name)
-        files = sorted(path for path in folder.glob("*/p*.json") if _PAGE_FILE.match(path.name))
-        if model not in vlm_transcription.PRICES:
-            logger.warning("backfill: %s → %s is not a priced model; loaded, cost unknown", folder.name, model)
-        logger.info("backfill: %s → %s %s, %d files", folder.name, model, version, len(files))
-        plan.append((model, version, files))
-    readers: dict[tuple[str, str], dict] = {(model, version): {"files": len(files)} for model, version, files in plan}
-    if dry_run:
-        return {"readers": readers, "skipped": skipped, "missing": [], "unreadable": []}
-
-    store = _store(session)
-    store.ensure_table()
-    filings = filing_images._store(filing_store if filing_store is not None else session)
-    object_ids = {path.parent.name for _, _, files in plan for path in files}
-    images = filings.get(object_ids)
-    missing = sorted(oid for oid in object_ids if not _readable(images.get(oid)))
-    for oid in missing:
-        logger.error("backfill: %s is not a fetched filing_images row; its readings are not loaded", oid)
-
-    unreadable: list[str] = []
-    for model, version, files in plan:
-        readings: dict[Path, dict] = {}
-        for path in files:
-            try:
-                readings[path] = json.loads(path.read_text())
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-                logger.error("backfill: %s is not a JSON reading, passed over: %s", path, exc)
-                unreadable.append(str(path))
-        json_first = asked_json_first(data.get("_json_mode") for data in readings.values())
-        rows = []
-        for path, data in readings.items():
-            oid, page = path.parent.name, int(_PAGE_FILE.match(path.name).group(1))
-            if oid in missing:
-                continue
-            settings = file_settings(model, data, json_first)
-            key = reading_key(oid, page, images[oid].sha256, model, version, settings=settings)
-            rows.append(reading_from_result(key, settings, data, json_mode_default=settings["json_mode"],
-                                            read_at=datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)))
-        existing = store.get(row.key for row in rows)
-        # Only what the table lacks or holds differently is written: the
-        # idempotent re-run moves nothing over the wire.
-        to_write = [row for row in rows if row.key not in existing or not _same(existing[row.key], row)]
-        summary = readers[(model, version)]
-        summary.update(rows=len(rows), new=sum(row.key not in existing for row in rows),
-                       changed=sum(row.key in existing for row in to_write),
-                       errors=sum(row.response is None for row in rows))
-        for start in range(0, len(to_write), CHUNK):
-            store.upsert(to_write[start:start + CHUNK])
-        logger.info("backfill: %s %s: %d rows (%d new, %d changed, %d errors); %d written", model, version,
-                    len(rows), summary["new"], summary["changed"], summary["errors"], len(to_write))
-    return {"readers": readers, "skipped": skipped, "missing": missing, "unreadable": unreadable}
-
-
-# ---------------------------------------------------------------------------
 # Status
 # ---------------------------------------------------------------------------
 
@@ -879,18 +718,10 @@ def main() -> None:
     read.add_argument("--prompt-version", default=PROMPT_VERSION)
     read.add_argument("--max-errors", type=int, default=MAX_ERRORS)
 
-    back = sub.add_parser("backfill", help="load the JSON reading folders; no gateway call")
-    back.add_argument("--vlm-dir", type=Path, default=VLM_DIR)
-    back.add_argument("--dry-run", action="store_true", help="count files per (model, prompt version), then stop")
-
     sub.add_parser("status", help="rows by model and prompt version, with cost")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
-    if args.command == "backfill" and args.dry_run:
-        _print_backfill(backfill(None, vlm_dir=args.vlm_dir, dry_run=True))
-        return
-
     from givingtuesday_datamart._internal.db import get_session
     from givingtuesday_datamart.ingestion import datamart_config
 
@@ -909,24 +740,8 @@ def main() -> None:
                   f"{len(result.skipped)} skipped at {args.max_errors} errors")
             for (oid, page), row in sorted(result.skipped.items()):
                 print(f"  skipped {oid} p{page:03d}: {row.errors} errors, last: {(row.last_error or '')[:100]}")
-        elif args.command == "backfill":
-            _print_backfill(backfill(session, vlm_dir=args.vlm_dir))
-            print(status_report(session))
         elif args.command == "status":
             print(status_report(session))
-
-
-def _print_backfill(result: dict) -> None:
-    for folder, reason in result["skipped"].items():
-        print(f"skipped {folder}: {reason}")
-    for (model, version), summary in sorted(result["readers"].items()):
-        detail = "".join(f"  {k} {v}" for k, v in summary.items() if k != "files")
-        print(f"{model:<32}{version:<6}{summary['files']:>7} files{detail}")
-    if result["missing"]:
-        print(f"{len(result['missing'])} filings are not in filing_images; their readings were not loaded: "
-              f"{result['missing'][:10]}")
-    for path in result["unreadable"]:
-        print(f"not a JSON reading, passed over: {path}")
 
 
 if __name__ == "__main__":

@@ -9,11 +9,24 @@ the pipeline, and the tables it writes, is in
 [placeholder_recovery_operations.md](placeholder_recovery_operations.md),
 which absorbed the storage spec and the EC2 runbook. Stages 0 to 4 and 6
 are built (`placeholder_recovery.py`: `sample`, `estimate`, `run`,
-`transcribe`, `report`); stage 5, the load into the datamart, is not. The sample-era data files this
+`transcribe`, `report`); stage 5, the load into the datamart, is not:
+its design is in the stage 5 section. The sample-era data files this
 log cites (the single-read reports, the 610-filing frame and its manifest,
 the engine differences) were archived on 2026-09-25 to
 `s3://givingtuesday-datamart/placeholder-recovery/archive/placeholder-sample-era-data-2026-09-25.zip`,
-with a manifest of hashes; they remain in git history as LFS objects.*
+with a manifest of hashes; they remain in git history as LFS objects.
+The 100-filing sample's own files (the sample, its XML rows, its fetch
+manifest, its reports under both policies) followed on 2026-09-28, to
+`placeholder-sample-files-2026-09-28.zip` in the same folder: the frame
+contains the sample. Four commands this log mentions did their work once
+and were removed on 2026-09-28: `placeholder_recovery stage` (the fetch,
+now `filing_images fetch`), the `backfill` of `filing_images` and of
+`page_readings` (the one-off loads of the laptop's PDFs and reading
+folders into the tables), and the ground truth's `pick` (the first draw
+of pages, kept in `placeholder_gt_pages.csv`). They are in git history.
+The bake-off's 280 raw responses went to
+`placeholder-vlm-bakeoff-2026-09-28.zip` in the same folder; its harness
+and result table stay in `exploratory/vlm_bakeoff/`.*
 
 ## The shape
 
@@ -217,23 +230,56 @@ of the target.
 
 ### 5 · Accept and load
 
-**Output:** `privategrants_recovered` — one row per grant: filer, tax year,
-object id, recipient name, address cells, amount, purpose, status; and
-for lineage the PDF URL, original page number, OCR job id, selector
-version, target reconciled against, and error. A view unions it with
-`privategrants_current` for the matcher, tagged `match_source =
-'ocr_recovery'`.
+Not built. The design below was settled on 2026-09-28, on the
+measurements in the findings doc's *What the rows carry for matching*
+(`placeholder_recovered_rows.py`, commands `address` and `names`).
 
-Two policies to set, in order:
+**Output:** `privategrants_recovered`, one row per grant of a reconciled
+list. It is derived from `page_verdicts` and `page_readings` under a
+policy, so a load buys nothing and can be repeated.
 
-1. **Reconciled** (≤ 0.5%): load. 29 of the 100 sample filings.
-2. **Labelled, 90–110% covered**: load with coverage recorded, or re-OCR
-   the failing pages first. 14 filings and $1.55B in the sample — a quarter
-   of the money — and it is an OCR problem, not a selection problem. This
-   decision waits on the ground-truth set (stage 6).
+| columns | what |
+|---|---|
+| content | recipient name, address, status and purpose as read; amount, numeric with cents |
+| for the matcher | `state` and `zip5`, read off the end of the address, or the state off a name printed with its place ("Mayo Clinic, Rochester, MN"); `state_source`: address, name or empty. The street is not split from the city: the matcher scores the address as one string |
+| lineage | object id, filer EIN, tax year, image sha256, page, row ordinal, policy version, the page's verdict, the accepted model and request hash (the reading the row came from), the target (paid or future), the declared amount it reconciled against, the error, loaded at |
+| key | object id, policy version, target, page, ordinal; a reload deletes and rewrites a filing's rows under the policy |
 
-Future-payment lists (line 3b) are commitments, not payments. Capture
-them; do not load them into a grants table.
+What loads:
+
+1. **Reconciled** (within 0.5%): load. Rows the XML itemises took part in
+   the reconciliation and are not loaded: GivingTuesday's tables hold them.
+2. **Labelled, 90 to 110% covered**: not loaded until the coverage
+   threshold is decided (Open decisions). On the OCR sample this class
+   was 14 filings and $1.55B.
+3. **Future-payment lists** (line 3b): loaded with target `future` and
+   left out of the matcher's view. They are commitments, not payments.
+4. **Flagged pages**: their rows carry the verdict. Leaving them out is a
+   filter on the view, not a reload.
+
+Into the matcher: a view presents the paid rows in
+`privategrants_current`'s columns (the address as read, less the state
+and zip taken from its end, in `sigocpyrfaal1`; `state` and `zip5` in
+`sigocpyrfapo` and `sigocpyrfapc`), unioned with `privategrants_current`
+and tagged `match_source = 'ocr_recovery'`. `MATCHING_INPUT_SHAPE_VERSION`
+goes to 3. Three kinds of row:
+
+- **With a zip:** the matcher as it is. Zip narrows the search; name and
+  address are scored.
+- **With a state and no zip:** the matcher's exact-name tier, which asks
+  for the same state and no address.
+- **With neither:** a new tier. The cleaned name equals the name of
+  exactly one filer in the universe; `match_source =
+  'ocr_recovery_name_only'`, with the number of words in the cleaned name
+  beside it. A name several filers share is never matched. One-word names
+  are not excluded: uniqueness is the rule, and the label and the word
+  count let a consumer be stricter.
+
+The name cleaner (`clean_name`: punctuation, "&", a leading or trailing
+"the", the legal endings) replaces `normalize_org_name` in the matcher on
+the same rerun that takes the recovered rows in. It changes the matching
+of every grant row, not only the recovered ones; the regression gate and
+the corrections preflight are the checks.
 
 ### 6 · Report and gates
 
@@ -1388,13 +1434,20 @@ Decided on 2026-09-24, after the frame run (Zein):
 - The flagged rule stays `load_single` for now; item 7 above measures it
   on the small filings before anything loads.
 
+Decided on 2026-09-28, on the measurements of what the recovered rows
+carry (Zein; the design is stage 5 above):
+
+- Recovered rows stay in their own table, `privategrants_recovered`,
+  behind a view. `MATCHING_INPUT_SHAPE_VERSION` goes to 3 when the view
+  enters the matcher.
+- The loader reads the state and the zip off the address and does not
+  parse the rest. The matcher needs nothing more.
+- Rows with no address match on the name alone, when the cleaned name
+  belongs to exactly one filer. One-word names are not excluded.
+- The name cleaner goes into the main matcher, on the same rerun.
+
 Still open:
 
-- Whether recovered rows join `privategrants_current` or stay in their own
-  table behind a view (recommended: the view; it keeps GT's data and ours
-  separable and the matcher's input-shape version honest).
-- Bumping `MATCHING_INPUT_SHAPE_VERSION` when recovered rows enter the
-  matching views.
 - The coverage acceptance threshold, after ground truth.
 - What to do with "various" filers: twenty PDFs would tell.
 - Whether GT will run any of this upstream; the lists are in images they

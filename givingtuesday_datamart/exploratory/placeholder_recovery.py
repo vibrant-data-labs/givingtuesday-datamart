@@ -6,14 +6,13 @@ cheap part (the selector) changes.
 
     python -m givingtuesday_datamart.exploratory.placeholder_recovery sample
     python -m givingtuesday_datamart.exploratory.placeholder_recovery sample --expand-1000
-    python -m givingtuesday_datamart.exploratory.placeholder_recovery stage
     python -m givingtuesday_datamart.exploratory.placeholder_recovery estimate --policy v2 \\
         --sample data/exploratory/placeholder_sample_1000.csv
     python -m givingtuesday_datamart.exploratory.placeholder_recovery run --policy v2 \\
         --sample data/exploratory/placeholder_sample_1000.csv --cache /data/irs_index
-    python -m givingtuesday_datamart.exploratory.placeholder_recovery transcribe --policy v1
-    python -m givingtuesday_datamart.exploratory.placeholder_recovery report --policy v1 \\
-        --out data/exploratory/placeholder_report_v1.csv
+    python -m givingtuesday_datamart.exploratory.placeholder_recovery transcribe --policy v2
+    python -m givingtuesday_datamart.exploratory.placeholder_recovery report --policy v2 \\
+        --out data/exploratory/placeholder_report_v2_1000.csv
     python -m givingtuesday_datamart.exploratory.placeholder_recovery report \\
         --results ~/.cache/irs_index/unstructured
 
@@ -37,10 +36,10 @@ filing's own declaration. The exclusion is by EIN and by that flag, never by
 a name pattern: a name pattern also catches Amgen Foundation, Genentech
 Foundation and Ruth Lilly Foundation, which are ordinary grantmakers.
 
-``stage`` resolves each filing to its IRS PDF (see ``irs_source``), caches
-it, and records where the filer's attachments start — the IRS-rendered
-pages before that point are the XML we already hold, and are never sent
-to a model. On this sample they are 62% of all pages.
+The PDFs are fetched by ``filing_images`` (``fetch``, or ``run``'s second
+stage), which also records where the filer's attachments start — the
+IRS-rendered pages before that point are the XML we already hold, and are
+never sent to a model. On the sample they were 62% of all pages.
 
 ``estimate`` is the cost gate, ``run``'s stage 3, that runs before it spends:
 what ``transcribe`` would buy today from each reader, less the readings the
@@ -58,8 +57,7 @@ status reports, each stage under a timestamped banner.
 under a policy (``page_verdicts.agree``): each page is read by the policy's
 readers through ``page_readings.read_pages``, which reads only what the
 table lacks, so a rerun pays for nothing it has seen, and the verdicts are
-stored under the policy version. ``stage``'s manifest is not consulted:
-the pages come from ``filing_images``.
+stored under the policy version. The pages come from ``filing_images``.
 
 ``report`` runs the selector over the accepted readings — ``page_verdicts``
 joined to ``page_readings`` under a policy, with the verdict mix per
@@ -100,12 +98,14 @@ from givingtuesday_datamart.page_verdicts import (
     load_policy, reader_settings, summary, with_flagged)
 
 COMBINED_CSV = Path.home() / "Downloads" / "combined-grants-datamarts-gt_team_priority-20260915.csv"
+# Where ``sample`` writes the 100-filing sample. The frame
+# contains the sample (its rows are the frame's ``classifier = v1``), so the
+# sample's own files were archived on 2026-09-28 and every command defaults
+# to the frame: s3://givingtuesday-datamart/placeholder-recovery/archive/.
 SAMPLE_CSV = Path("data/exploratory/placeholder_sample_100.csv")
 XML_ROWS_CSV = Path("data/exploratory/placeholder_sample_xml_rows.csv")
-MANIFEST_CSV = Path("data/exploratory/placeholder_staging.csv")
 EXPANDED = {"sample": Path("data/exploratory/placeholder_sample_expanded.csv"),
-            "xml_rows": Path("data/exploratory/placeholder_sample_expanded_xml_rows.csv"),
-            "manifest": Path("data/exploratory/placeholder_staging_expanded.csv")}
+            "xml_rows": Path("data/exploratory/placeholder_sample_expanded_xml_rows.csv")}
 FRAME_1000 = {"sample": Path("data/exploratory/placeholder_sample_1000.csv"),
               "xml_rows": Path("data/exploratory/placeholder_sample_1000_xml_rows.csv")}
 CACHE = Path.home() / ".cache" / "irs_index"
@@ -304,73 +304,6 @@ def build_sample(out: Path, xml_rows_out: Path, expansions: Sequence[dict] = ())
         writer.writeheader()
         writer.writerows(rows)
     print(f"{len(rows)} XML-itemised rows for {len({r['object_id'] for r in rows})} of them -> {xml_rows_out}")
-
-
-def _fetch_pdf(object_id: str, cache: Path, local: Path) -> str:
-    """Download one filing's image into ``local``. Returns a staging status,
-    never raises. The loop — newest TEOS image first, older ones as
-    fallbacks, and the status strings — lives in ``filing_images.fetch_image``
-    now that the storage layer owns fetching; this keeps ``stage`` working
-    on the same statuses until it is retired."""
-    got = filing_images.fetch_image(object_id, cache)
-    if got.status != "fetched":
-        return got.status
-    local.write_bytes(got.payload)
-    return "staged"
-
-
-def stage(sample: Path, cache: Path, limit: int | None, manifest: Path) -> None:
-    rows = list(csv.DictReader(sample.open()))[:limit]
-    pdf_dir = cache / "pdfs"
-    pdf_dir.mkdir(parents=True, exist_ok=True)
-    results = []
-
-    for n, row in enumerate(rows, 1):
-        object_id = row["object_id"]
-        local = pdf_dir / f"{object_id}.pdf"
-        if local.exists() and local.stat().st_size > 0:
-            status = "cached"
-        else:
-            status = _fetch_pdf(object_id, cache, local)
-
-        size, pages, start = 0, 0, None
-        if status in ("staged", "cached"):
-            size = local.stat().st_size
-            widths = irs_source.page_widths(local)
-            pages, (start, attached) = len(widths), filing_images.attachment_span(widths)
-            print(f"  [{n}/{len(rows)}] {row['filer_name'][:32]:<32} {size/1e6:>6.1f} MB  {status:<7}"
-                  f" {pages:>4} pages, {attached:>4} attached")
-        else:
-            print(f"  [{n}/{len(rows)}] {row['filer_name'][:32]:<32} {'':>6}     {status}", file=sys.stderr)
-        results.append({"object_id": object_id, "filerein": row["filerein"],
-                        "stratum": row["stratum"], "taxyear": row["taxyear"],
-                        "placeholder_amt": row["placeholder_amt"],
-                        "status": status, "bytes": size, "pages": pages,
-                        "attachment_from": start or "",
-                        "attachment_pages": (pages - start + 1) if start else 0})
-
-    manifest.parent.mkdir(parents=True, exist_ok=True)
-    with manifest.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(results[0].keys()))
-        writer.writeheader()
-        writer.writerows(results)
-
-    print(f"\n{'status':<26}{'n':>5}{'declared $M':>14}{'pages':>8}{'attached':>10}")
-    by = collections.defaultdict(lambda: [0, 0.0, 0, 0])
-    for r in results:
-        b = by[r["status"]]
-        b[0] += 1
-        b[1] += float(r["placeholder_amt"])
-        b[2] += r["pages"]
-        b[3] += r["attachment_pages"]
-    for status, (n, dollars, pages, attached) in sorted(by.items(), key=lambda kv: -kv[1][1]):
-        print(f"  {status:<24}{n:>5}{dollars/1e6:>14,.1f}{pages:>8,}{attached:>10,}")
-    total_pages = sum(r["pages"] for r in results)
-    attached = sum(r["attachment_pages"] for r in results)
-    if total_pages:
-        print(f"\n{attached:,} of {total_pages:,} pages are the filer's attachments "
-              f"({attached/total_pages:.0%}); the rest is the IRS rendering the XML")
-    print(f"manifest -> {manifest}")
 
 
 def transcribe(
@@ -1338,17 +1271,11 @@ def main() -> None:
     p.add_argument("--expand-1000", action="store_true",
                    help="the 1,000-filing frame: C to 137 and D to 403, the same sampling fraction, on top of the 610")
 
-    p = sub.add_parser("stage", help="fetch the IRS PDFs and find where the attachments start")
-    p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
-    p.add_argument("--cache", type=Path, default=CACHE)
-    p.add_argument("--limit", type=int, default=None)
-    p.add_argument("--manifest", type=Path, default=MANIFEST_CSV)
-
     p = sub.add_parser("transcribe", help="decide the attachment pages under a policy, reading what the table lacks")
     p.add_argument("--policy", default="v1", help=f"a registered version ({', '.join(POLICIES)}) or a JSON file")
     p.add_argument("--flagged", choices=FLAGGED_RULES, default=None,
                    help="override the policy's flagged rule; the verdicts go under <version>-<rule>")
-    p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
+    p.add_argument("--sample", type=Path, default=FRAME_1000["sample"])
     p.add_argument("--cache", type=Path, default=CACHE)
     p.add_argument("--limit", type=int, default=None, help="the first N filings that have attachment pages")
     p.add_argument("--only", default=None, help="a single object id")
@@ -1357,7 +1284,7 @@ def main() -> None:
 
     p = sub.add_parser("estimate", help="the cost gate: what transcribe would buy today at the measured rates; exits past the cap")
     p.add_argument("--policy", default="v1", help=f"a registered version ({', '.join(POLICIES)}) or a JSON file")
-    p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
+    p.add_argument("--sample", type=Path, default=FRAME_1000["sample"])
     p.add_argument("--only", default=None, help="a single object id")
     p.add_argument("--cap", type=float, default=COST_CAP, help="dollars; zero or less for no cap")
 
@@ -1371,14 +1298,14 @@ def main() -> None:
     p.add_argument("--max-errors", type=int, default=MAX_ERRORS)
 
     p = sub.add_parser("report", help="score one engine's pages through the selector")
-    p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
+    p.add_argument("--sample", type=Path, default=FRAME_1000["sample"])
     p.add_argument("--policy", default="v1", help="the verdicts to read: a registered version or a JSON file")
     p.add_argument("--flagged", choices=FLAGGED_RULES, default=None,
                    help="read the verdicts an override of the flagged rule decided, under <version>-<rule>")
     p.add_argument("--results", type=Path, default=None,
                    help="the Unstructured baseline instead: a directory of <object_id>.pdf.json")
     p.add_argument("--out", type=Path, default=None)
-    p.add_argument("--xml-rows", type=Path, default=XML_ROWS_CSV)
+    p.add_argument("--xml-rows", type=Path, default=FRAME_1000["xml_rows"])
 
     p = sub.add_parser("compare", help="filing-level reconciliation across engines")
     p.add_argument("reports", nargs="+", metavar="NAME=CSV", help="report --out files, e.g. qwen=data/exploratory/x.csv")
@@ -1392,8 +1319,6 @@ def main() -> None:
         frame = "1000" if args.expand_1000 else "610" if args.expand else None
         paths = {"1000": FRAME_1000, "610": EXPANDED, None: {"sample": SAMPLE_CSV, "xml_rows": XML_ROWS_CSV}}[frame]
         build_sample(args.out or paths["sample"], args.xml_rows or paths["xml_rows"], FRAMES.get(frame, ()))
-    elif args.command == "stage":
-        stage(args.sample, args.cache, args.limit, args.manifest)
     else:
         from givingtuesday_datamart._internal.db import get_session
         from givingtuesday_datamart.ingestion import datamart_config
