@@ -50,8 +50,8 @@ and the [production diagram](https://whimsical.com/FXWZBu4FE9RzpMYqWmupqd).
   the $25.0B in placeholder rows.
 - Open before loading: the rule for flagged pages (load with a mark, as
   now, or leave out), the 3,091 "various" filings ($35.5B) the classifier
-  never sends to the PDF, and the matcher pass that turns 235,622
-  recovered rows into EINs.
+  never sends to the PDF, and the loader and matcher pass that turn
+  235,622 recovered rows into EINs, designed and not yet built.
 
 ## Terms
 
@@ -373,6 +373,85 @@ The 17 misses have four shapes:
 Band D is worse than band C because its pages are these shapes more
 often.
 
+## What the rows carry for matching
+
+A recovered grant has no EIN. The matcher finds one from the name and
+the place. It narrows its search by zip, or by an exact name when the
+state is the same, and it scores the address as one string. So a row
+needs a zip or a state. It never needs the street split from the city.
+
+Measured on the frame's 407 reconciled paid lists: 231,743 rows read
+from attachments, $7.23B. Code: `placeholder_recovered_rows.py`, commands
+`address` and `names`, from the tables at no model cost.
+
+| what the address gives | rows | of rows | dollars | of dollars |
+|---|---|---|---|---|
+| state and zip | 59,921 | 25.9% | $4.47B | 61.8% |
+| state, no zip | 12,776 | 5.5% | $0.72B | 10.0% |
+| no address, state printed in the name | 900 | 0.4% | $0.15B | 2.1% |
+| address text with no US state | 4,001 | 1.7% | $0.88B | 12.1% |
+| no address | 154,145 | 66.5% | $1.01B | 13.9% |
+
+- Rows with a zip or a state hold 74% of the dollars. They go through
+  the matcher as it is.
+- The missing addresses are the filer's doing, not the readers'. Of the
+  407 lists, 133 print a name and an amount and nothing else, and 210
+  give an address on every row. The large filers of band A print
+  addresses throughout.
+- Some filers print the place inside the name, "Mayo Clinic, Rochester,
+  MN". The state is read from there and the name kept without it.
+- Address text with no US state is mostly foreign grantees, and gifts of
+  stock where the list prints the shares in the address column.
+
+### Matching on the name
+
+Each row's name was matched, exactly, against the 1,075,565 names of the
+matcher's universe, 602,763 filers. A match counts only when the name
+belongs to one filer, or when the row's state picks one among several.
+A name several filers share is never guessed.
+
+| name cleaning | rows with a state, matched | rows without, matched | their dollars | state agrees |
+|---|---|---|---|---|
+| the matcher's normaliser today | 54.1% | 61.2% | 26.6% | 96.5% |
+| punctuation, "&", "the" and legal endings removed | 66.5% | 72.5% | 34.6% | 96.7% |
+| and abbreviations expanded | 67.0% | 72.9% | 34.9% | 96.6% |
+| and stopwords dropped | 67.4% | 73.0% | 35.1% | 96.6% |
+
+One level of cleaning is the whole gain: "The River Fund, Inc." becomes
+"river fund". Going further adds half a point and more shared names.
+
+The last column is the check on a name-only match. Where a row has a
+state, the matched filer's state should be the same, and it is 96.7% of
+the time. The misses mix true collisions (EPIC, Open Door Ministries)
+with national bodies listed at a local office (American Cancer Society,
+National Audubon Society), so the real rate is higher.
+
+| words in the cleaned name | matches with a state to check | state agrees | name-only matches | their dollars |
+|---|---|---|---|---|
+| 1 | 1,504 | 92.7% | 3,266 | $30M |
+| 2 | 8,108 | 95.3% | 18,133 | $128M |
+| 3 | 13,501 | 95.2% | 25,899 | $154M |
+| 4 or more | 24,714 | 98.1% | 67,367 | $340M |
+
+What it comes to, with the cleaned name:
+
+| rows | matched on the exact name | shared name, unresolved | no exact name |
+|---|---|---|---|
+| with a state: 73,597 rows, $5.34B | 66.5% of rows, 66.9% of dollars | 1.3%, 1.5% | 30.1%, 29.9% |
+| without: 158,146 rows, $1.88B | 72.5% of rows, 34.6% of dollars | 3.7%, 2.3% | 23.8%, 63.1% |
+
+Rows with a zip and no exact name still go to the matcher's scoring of
+name and address, so their figure is a floor. Rows without a state have
+no other route: $0.65B matches on the name alone, and $1.19B does not.
+That remainder is foreign grantees, donor-advised fund accounts,
+catch-all lines such as "other 501(c)(3) organizations", and
+organizations that file no return.
+
+The design that follows is stage 5 of the engineering log: the loader
+reads the state and zip and parses nothing else, rows without an address
+match on a name that belongs to exactly one filer and are labelled as
+such, and the name cleaner goes into the main matcher.
+
 ## Shipping the rest
 
 Reading the 8,515 filings of bands C and D not yet in the frame costs
@@ -483,6 +562,13 @@ were found:
     prefix between concurrent renders, and stop a run whose first fifty
     results are all errors before the attempt counter turns a broken box
     into a $550 re-read; Ctrl-C is safe and the same command resumes.
+18. The matcher needs a zip or a state, not a parsed address. Rows with
+    one hold 74% of the recovered dollars; two thirds of the rows have
+    no address at all, because the filer printed none.
+19. One level of name cleaning lifts exact matches by eleven points.
+    Abbreviations and stopwords add half a point.
+20. A name that belongs to one filer is in the row's state 96.7% of the
+    time, and 98.1% for names of four words or more.
 
 ## Decisions and their evidence
 
@@ -499,6 +585,9 @@ were found:
 | paid and future lists reconciled separately; the headline is paid-only | 15 frame filings reconcile only their future list | Sept 24 |
 | the frame's C and D split, 137 and 403 at one sampling fraction | rates set by availability, not count | Sept 24 |
 | PDFs kept indefinitely in S3, every reading keyed on the image hash and the request settings | the IRS loses images; a policy change is a new version and re-derives at no cost | Sept 22 |
+| the loader reads the state and zip off each address and parses nothing else | the matcher narrows by zip, or by exact name with the same state, and scores the address whole; 74% of dollars carry a zip or a state | Sept 28 |
+| rows with no address match on a name that belongs to exactly one filer, labelled; one-word names included | 114,665 rows and $0.65B; the state agrees 96.7% where it can be checked, 92.7% on one-word names, which are 3,266 rows and $30M | Sept 28 |
+| the name cleaner goes into the main matcher, on the rerun that takes the recovered rows | exact matches on rows with a state go from 54.1% to 66.5% | Sept 28 |
 
 ## Next steps
 
@@ -509,9 +598,12 @@ were found:
    way, so the choice can change after loading at no model cost.
 3. Test the "various" class: twenty PDFs would say whether its $35.5B
    belongs in the population.
-4. Load the recovered rows behind a view, separate from GT's rows, and
-   run the matcher on name and address. Bump the matching input-shape
-   version when they enter the matching views.
+4. Write the loader and run the matcher, as designed in *What the rows
+   carry for matching*: the recovered rows in their own table behind a
+   view, the state and zip read off each address, a name-only rule for
+   rows with no address, and the name cleaner in the main matcher. One
+   matcher rerun takes all of it; the matching input-shape version goes
+   to 3.
 5. Report the 2022 image batch to the IRS, with Wells Fargo as the
    example.
 
@@ -539,10 +631,12 @@ were found:
 | `givingtuesday_datamart/exploratory/placeholder_recovery.py` | `sample`, `estimate`, `run`, `transcribe`, `report`, `compare` |
 | `givingtuesday_datamart/exploratory/placeholder_ground_truth.py` | the hand-checked pages and the scorer: `verdicts`, `flagged`, `score` |
 | `givingtuesday_datamart/exploratory/placeholder_population.py` | the population by tax year |
+| `givingtuesday_datamart/exploratory/placeholder_recovered_rows.py` | what the recovered rows carry for the matcher: `address`, `names` |
 | `data/exploratory/placeholder_sample_1000.csv`, `_xml_rows.csv` | the frame, and the rows the XML itemises for it |
 | `data/exploratory/placeholder_report_v2_1000.csv`, `placeholder_report_v2.csv`, `placeholder_report_v1.csv` | per-filing outcomes on the frame and the sample under each policy |
 | `data/exploratory/placeholder_ground_truth.csv`, `placeholder_gt_pages.csv`, `placeholder_flagged_check.csv` | the 138 pages read from the image, the draw, and Sonnet's score on the flagged ones |
 | `data/exploratory/placeholder_population_by_year.sql`, `.csv` | the population by tax year |
+| `data/exploratory/placeholder_recovered_address.csv`, `placeholder_recovered_names.csv` | the frame's recovered rows by what their address gives, and their exact-name matches by cleaning level |
 | `data/exploratory/placeholder_classifier_assessment.sql` | the classifier's classes, precision and recall |
 | `data/exploratory/placeholder_404_images_expanded.csv`, `placeholder_unreachable.csv` | the IRS's unserved images; the sample's out-of-reach filings with links |
 | `data/exploratory/placeholder_staging.csv` | the sample's fetch manifest, still read by the scorer |
@@ -556,5 +650,7 @@ were found:
   paid lists only.
 - Ground truth measures the readers on 138 pages, not the selector's
   filing-level decisions.
-- Recovered grants have not been through the matcher.
+- Recovered grants have not been through the matcher. The name matches
+  in *What the rows carry for matching* are exact matches on a cleaned
+  name, a floor for rows with a zip, which the matcher also scores.
 - The "various" class is outside the population and untested.
