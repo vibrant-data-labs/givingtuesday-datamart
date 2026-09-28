@@ -177,6 +177,9 @@ config.ini
 
 data/exploratory/*.csv
 givingtuesday_datamart/exploratory/__marimo__/
+# raw model responses and rendered pages of the bake-off: archived, never committed
+givingtuesday_datamart/exploratory/vlm_bakeoff/out/
+givingtuesday_datamart/exploratory/vlm_bakeoff/pages*/
 !data/exploratory/gt_*.csv
 !data/exploratory/placeholder_*.csv
 

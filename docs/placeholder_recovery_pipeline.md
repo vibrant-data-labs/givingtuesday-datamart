@@ -23,7 +23,10 @@ and were removed on 2026-09-28: `placeholder_recovery stage` (the fetch,
 now `filing_images fetch`), the `backfill` of `filing_images` and of
 `page_readings` (the one-off loads of the laptop's PDFs and reading
 folders into the tables), and the ground truth's `pick` (the first draw
-of pages, kept in `placeholder_gt_pages.csv`). They are in git history.*
+of pages, kept in `placeholder_gt_pages.csv`). They are in git history.
+The bake-off's 280 raw responses went to
+`placeholder-vlm-bakeoff-2026-09-28.zip` in the same folder; its harness
+and result table stay in `exploratory/vlm_bakeoff/`.*
 
 ## The shape
 
