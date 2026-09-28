@@ -14,7 +14,11 @@ its design is in the stage 5 section. The sample-era data files this
 log cites (the single-read reports, the 610-filing frame and its manifest,
 the engine differences) were archived on 2026-09-25 to
 `s3://givingtuesday-datamart/placeholder-recovery/archive/placeholder-sample-era-data-2026-09-25.zip`,
-with a manifest of hashes; they remain in git history as LFS objects.*
+with a manifest of hashes; they remain in git history as LFS objects.
+The 100-filing sample's own files (the sample, its XML rows, its fetch
+manifest, its reports under both policies) followed on 2026-09-28, to
+`placeholder-sample-files-2026-09-28.zip` in the same folder: the frame
+contains the sample.*
 
 ## The shape
 

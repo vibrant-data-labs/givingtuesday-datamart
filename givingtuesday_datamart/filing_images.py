@@ -95,8 +95,8 @@ PERMANENT = ("no_teos_image",)
 STAGING_CSVS = (Path("data/exploratory/placeholder_staging.csv"),
                 Path("data/exploratory/placeholder_staging_expanded.csv"))
 IMAGE_404_CSV = Path("data/exploratory/placeholder_404_images_expanded.csv")
-# Where the sample-era data files went on 2026-09-25 (staging_expanded among them).
-ARCHIVE_ZIP = "s3://givingtuesday-datamart/placeholder-recovery/archive/placeholder-sample-era-data-2026-09-25.zip"
+# Where the sample-era data files went, on 2026-09-25 and 2026-09-28 (both manifests among them).
+ARCHIVE = "s3://givingtuesday-datamart/placeholder-recovery/archive/"
 
 DDL = (
     """
@@ -650,8 +650,8 @@ def backfill(session, *, staging_csvs: Sequence[Path] = STAGING_CSVS,
     staged: dict[str, dict] = {}
     passes: dict[str, int] = {}
     for path in staging_csvs:
-        if not path.exists():                          # the 610-frame manifest is archived (ARCHIVE_ZIP)
-            logger.warning("backfill: %s is not in the tree; the sample-era CSVs are in %s", path, ARCHIVE_ZIP)
+        if not path.exists():                          # both manifests are archived (ARCHIVE)
+            logger.warning("backfill: %s is not in the tree; the sample-era CSVs are under %s", path, ARCHIVE)
             continue
         with path.open(newline="") as handle:
             for line in csv.DictReader(handle):

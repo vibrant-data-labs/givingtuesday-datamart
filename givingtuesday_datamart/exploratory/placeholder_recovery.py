@@ -11,9 +11,9 @@ cheap part (the selector) changes.
         --sample data/exploratory/placeholder_sample_1000.csv
     python -m givingtuesday_datamart.exploratory.placeholder_recovery run --policy v2 \\
         --sample data/exploratory/placeholder_sample_1000.csv --cache /data/irs_index
-    python -m givingtuesday_datamart.exploratory.placeholder_recovery transcribe --policy v1
-    python -m givingtuesday_datamart.exploratory.placeholder_recovery report --policy v1 \\
-        --out data/exploratory/placeholder_report_v1.csv
+    python -m givingtuesday_datamart.exploratory.placeholder_recovery transcribe --policy v2
+    python -m givingtuesday_datamart.exploratory.placeholder_recovery report --policy v2 \\
+        --out data/exploratory/placeholder_report_v2_1000.csv
     python -m givingtuesday_datamart.exploratory.placeholder_recovery report \\
         --results ~/.cache/irs_index/unstructured
 
@@ -100,6 +100,10 @@ from givingtuesday_datamart.page_verdicts import (
     load_policy, reader_settings, summary, with_flagged)
 
 COMBINED_CSV = Path.home() / "Downloads" / "combined-grants-datamarts-gt_team_priority-20260915.csv"
+# Where ``sample`` and ``stage`` write the 100-filing sample. The frame
+# contains the sample (its rows are the frame's ``classifier = v1``), so the
+# sample's own files were archived on 2026-09-28 and every command defaults
+# to the frame: s3://givingtuesday-datamart/placeholder-recovery/archive/.
 SAMPLE_CSV = Path("data/exploratory/placeholder_sample_100.csv")
 XML_ROWS_CSV = Path("data/exploratory/placeholder_sample_xml_rows.csv")
 MANIFEST_CSV = Path("data/exploratory/placeholder_staging.csv")
@@ -1339,7 +1343,7 @@ def main() -> None:
                    help="the 1,000-filing frame: C to 137 and D to 403, the same sampling fraction, on top of the 610")
 
     p = sub.add_parser("stage", help="fetch the IRS PDFs and find where the attachments start")
-    p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
+    p.add_argument("--sample", type=Path, default=FRAME_1000["sample"])
     p.add_argument("--cache", type=Path, default=CACHE)
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--manifest", type=Path, default=MANIFEST_CSV)
@@ -1348,7 +1352,7 @@ def main() -> None:
     p.add_argument("--policy", default="v1", help=f"a registered version ({', '.join(POLICIES)}) or a JSON file")
     p.add_argument("--flagged", choices=FLAGGED_RULES, default=None,
                    help="override the policy's flagged rule; the verdicts go under <version>-<rule>")
-    p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
+    p.add_argument("--sample", type=Path, default=FRAME_1000["sample"])
     p.add_argument("--cache", type=Path, default=CACHE)
     p.add_argument("--limit", type=int, default=None, help="the first N filings that have attachment pages")
     p.add_argument("--only", default=None, help="a single object id")
@@ -1357,7 +1361,7 @@ def main() -> None:
 
     p = sub.add_parser("estimate", help="the cost gate: what transcribe would buy today at the measured rates; exits past the cap")
     p.add_argument("--policy", default="v1", help=f"a registered version ({', '.join(POLICIES)}) or a JSON file")
-    p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
+    p.add_argument("--sample", type=Path, default=FRAME_1000["sample"])
     p.add_argument("--only", default=None, help="a single object id")
     p.add_argument("--cap", type=float, default=COST_CAP, help="dollars; zero or less for no cap")
 
@@ -1371,14 +1375,14 @@ def main() -> None:
     p.add_argument("--max-errors", type=int, default=MAX_ERRORS)
 
     p = sub.add_parser("report", help="score one engine's pages through the selector")
-    p.add_argument("--sample", type=Path, default=SAMPLE_CSV)
+    p.add_argument("--sample", type=Path, default=FRAME_1000["sample"])
     p.add_argument("--policy", default="v1", help="the verdicts to read: a registered version or a JSON file")
     p.add_argument("--flagged", choices=FLAGGED_RULES, default=None,
                    help="read the verdicts an override of the flagged rule decided, under <version>-<rule>")
     p.add_argument("--results", type=Path, default=None,
                    help="the Unstructured baseline instead: a directory of <object_id>.pdf.json")
     p.add_argument("--out", type=Path, default=None)
-    p.add_argument("--xml-rows", type=Path, default=XML_ROWS_CSV)
+    p.add_argument("--xml-rows", type=Path, default=FRAME_1000["xml_rows"])
 
     p = sub.add_parser("compare", help="filing-level reconciliation across engines")
     p.add_argument("reports", nargs="+", metavar="NAME=CSV", help="report --out files, e.g. qwen=data/exploratory/x.csv")

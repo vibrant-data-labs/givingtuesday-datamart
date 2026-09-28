@@ -633,14 +633,14 @@ were found:
 | `givingtuesday_datamart/exploratory/placeholder_population.py` | the population by tax year |
 | `givingtuesday_datamart/exploratory/placeholder_recovered_rows.py` | what the recovered rows carry for the matcher: `address`, `names` |
 | `data/exploratory/placeholder_sample_1000.csv`, `_xml_rows.csv` | the frame, and the rows the XML itemises for it |
-| `data/exploratory/placeholder_report_v2_1000.csv`, `placeholder_report_v2.csv`, `placeholder_report_v1.csv` | per-filing outcomes on the frame and the sample under each policy |
+| `data/exploratory/placeholder_report_v2_1000.csv` | per-filing outcomes on the frame under `POLICY_V2`; the sample's 100 filings are in it, with the outcomes the sample's own report had |
 | `data/exploratory/placeholder_ground_truth.csv`, `placeholder_gt_pages.csv`, `placeholder_flagged_check.csv` | the 138 pages read from the image, the draw, and Sonnet's score on the flagged ones |
 | `data/exploratory/placeholder_population_by_year.sql`, `.csv` | the population by tax year |
 | `data/exploratory/placeholder_recovered_address.csv`, `placeholder_recovered_names.csv` | the frame's recovered rows by what their address gives, and their exact-name matches by cleaning level |
 | `data/exploratory/placeholder_classifier_assessment.sql` | the classifier's classes, precision and recall |
 | `data/exploratory/placeholder_404_images_expanded.csv`, `placeholder_unreachable.csv` | the IRS's unserved images; the sample's out-of-reach filings with links |
-| `data/exploratory/placeholder_staging.csv` | the sample's fetch manifest, still read by the scorer |
 | `s3://givingtuesday-datamart/placeholder-recovery/archive/placeholder-sample-era-data-2026-09-25.zip` | the sample-era reads and frames (the single-read reports, the 610-filing frame and its manifest, the engine differences), archived on 2026-09-25 with a manifest of hashes; the engineering log discusses their numbers |
+| `s3://givingtuesday-datamart/placeholder-recovery/archive/placeholder-sample-files-2026-09-28.zip` | the 100-filing sample's own files (the sample, its XML rows, its fetch manifest, its reports under both policies, the two single-reader policies), archived on 2026-09-28; the frame contains the sample |
 
 ## Caveats
 

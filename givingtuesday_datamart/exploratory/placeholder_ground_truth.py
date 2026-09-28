@@ -49,8 +49,12 @@ from pathlib import Path
 
 from givingtuesday_datamart import reading_pairs
 
-SAMPLE_CSV = Path("data/exploratory/placeholder_sample_100.csv")
+# The frame contains the 100-filing sample the pages were first drawn from,
+# so it is what names a filing here. ``pick`` and ``score`` also read the
+# sample's fetch manifest, archived on 2026-09-28 with the sample's files.
+SAMPLE_CSV = Path("data/exploratory/placeholder_sample_1000.csv")
 STAGING_CSV = Path("data/exploratory/placeholder_staging.csv")
+ARCHIVE = "s3://givingtuesday-datamart/placeholder-recovery/archive/placeholder-sample-files-2026-09-28.zip"
 PAGES_CSV = Path("data/exploratory/placeholder_gt_pages.csv")
 TRUTH_CSV = Path("data/exploratory/placeholder_ground_truth.csv")
 CACHE = Path.home() / ".cache" / "irs_index"
@@ -111,6 +115,9 @@ def _sample() -> dict[str, dict]:
 
 
 def _staged() -> dict[str, dict]:
+    if not STAGING_CSV.exists():
+        sys.exit(f"{STAGING_CSV} is not in the tree: pick and score read the sample's fetch manifest, "
+                 f"which is in {ARCHIVE}; unzip it into data/exploratory/")
     return {r["object_id"]: r for r in csv.DictReader(STAGING_CSV.open())}
 
 
