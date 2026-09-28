@@ -18,7 +18,12 @@ with a manifest of hashes; they remain in git history as LFS objects.
 The 100-filing sample's own files (the sample, its XML rows, its fetch
 manifest, its reports under both policies) followed on 2026-09-28, to
 `placeholder-sample-files-2026-09-28.zip` in the same folder: the frame
-contains the sample.*
+contains the sample. Four commands this log mentions did their work once
+and were removed on 2026-09-28: `placeholder_recovery stage` (the fetch,
+now `filing_images fetch`), the `backfill` of `filing_images` and of
+`page_readings` (the one-off loads of the laptop's PDFs and reading
+folders into the tables), and the ground truth's `pick` (the first draw
+of pages, kept in `placeholder_gt_pages.csv`). They are in git history.*
 
 ## The shape
 

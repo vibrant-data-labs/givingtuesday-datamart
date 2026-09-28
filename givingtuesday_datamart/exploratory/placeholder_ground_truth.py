@@ -4,19 +4,21 @@ Filing-level reconciliation cannot see a row whose amount slid onto its
 neighbour (the page sum barely moves), so the vision readers are scored
 here on (name, amount) pairs against pages transcribed from the image.
 
-    python -m givingtuesday_datamart.exploratory.placeholder_ground_truth pick
     python -m givingtuesday_datamart.exploratory.placeholder_ground_truth add OID PAGE < rows.txt
     python -m givingtuesday_datamart.exploratory.placeholder_ground_truth show OID PAGE
     python -m givingtuesday_datamart.exploratory.placeholder_ground_truth crop OID PAGE 0.3 0.7
     python -m givingtuesday_datamart.exploratory.placeholder_ground_truth score
     python -m givingtuesday_datamart.exploratory.placeholder_ground_truth verdicts --policy v1
 
-``pick`` draws the page sample: six pages from each cell of density
-(rows on the page: under 10, 10–24, 25–49, 50 and up, with Johnson &
-Johnson's 836 matching-gift pages as their own stratum) by reader
-agreement (all four stored readings identical on their pairs, or not),
-plus every attachment page of the near-miss filings small enough to read
-in full. ``add`` records one page's rows as read from the image — one
+The pages to check are listed in ``placeholder_gt_pages.csv``. The first
+83 were drawn on the sample: six pages from each cell of density (rows on
+the page: under 10, 10–24, 25–49, 50 and up, with Johnson & Johnson's 836
+matching-gift pages as their own stratum) by reader agreement (all four
+stored readings identical on their pairs, or not), plus every attachment
+page of the near-miss filings small enough to read in full. The frame's
+flagged pages from bands C and D were added by hand. The command that made
+the first draw is gone: running it again would replace the list.
+``add`` records one page's rows as read from the image — one
 ``name | amount`` per line on stdin — and then runs ``show``, which lays
 each reader's reading against the truth: pairs matched, pairs the reader
 has that the page does not, pairs it missed. ``crop`` renders part of a
@@ -41,7 +43,6 @@ import collections
 import csv
 import itertools
 import json
-import random
 import re
 import subprocess
 import sys
@@ -50,8 +51,8 @@ from pathlib import Path
 from givingtuesday_datamart import reading_pairs
 
 # The frame contains the 100-filing sample the pages were first drawn from,
-# so it is what names a filing here. ``pick`` and ``score`` also read the
-# sample's fetch manifest, archived on 2026-09-28 with the sample's files.
+# so it is what names a filing here. ``score`` also reads the sample's
+# fetch manifest, archived on 2026-09-28 with the sample's files.
 SAMPLE_CSV = Path("data/exploratory/placeholder_sample_1000.csv")
 STAGING_CSV = Path("data/exploratory/placeholder_staging.csv")
 ARCHIVE = "s3://givingtuesday-datamart/placeholder-recovery/archive/placeholder-sample-files-2026-09-28.zip"
@@ -84,8 +85,6 @@ JJ = "202213189349106261"
 # Near-miss filings small enough to read every attachment page of.
 NEAR_MISS = ["202321219349102697", "202343199349102594", "202243199349101479", "202443189349100829",
              "202402359349100400", "202423169349102352", "202303199349103605"]
-PER_CELL = 6
-SEED = 7
 TRUTH_FIELDS = ["object_id", "page", "n", "name", "amount", "note"]
 
 
@@ -106,72 +105,15 @@ def _reading(reader_dir: str, oid: str, page: int) -> dict | None:
     return data
 
 
-def _density(n: int) -> str:
-    return "<10" if n < 10 else "10-24" if n < 25 else "25-49" if n < 50 else "50+"
-
-
 def _sample() -> dict[str, dict]:
     return {r["object_id"]: r for r in csv.DictReader(SAMPLE_CSV.open())}
 
 
 def _staged() -> dict[str, dict]:
     if not STAGING_CSV.exists():
-        sys.exit(f"{STAGING_CSV} is not in the tree: pick and score read the sample's fetch manifest, "
+        sys.exit(f"{STAGING_CSV} is not in the tree: score reads the sample's fetch manifest, "
                  f"which is in {ARCHIVE}; unzip it into data/exploratory/")
     return {r["object_id"]: r for r in csv.DictReader(STAGING_CSV.open())}
-
-
-def pick(out: Path, per_cell: int, seed: int) -> None:
-    sample, staged = _sample(), _staged()
-    universe: list[dict] = []
-    for oid, entry in staged.items():
-        if entry.get("attachment_pages", "0") in ("", "0"):
-            continue
-        first, last = int(entry["attachment_from"]), int(entry["pages"])
-        for page in range(first, last + 1):
-            readings = {name: _reading(d, oid, page) for name, d in READERS.items()}
-            rows = {name: _rows(r) for name, r in readings.items() if r is not None}
-            if not rows or max(len(r) for r in rows.values()) == 0:
-                continue
-            n = max(len(r) for r in rows.values())
-            agree = len(rows) == 4 and len({tuple(sorted(_pairs(r))) for r in rows.values()}) == 1
-            totals = sorted({a for r in readings.values() if r for t in r.get("totals") or []
-                             if isinstance(t, dict) and (a := _amount(t.get("amount"))) is not None and a > 0})
-            universe.append({
-                "object_id": oid, "filer_name": sample[oid]["filer_name"], "taxyear": sample[oid]["taxyear"],
-                "page": page, "stratum": "J&J" if oid == JJ else _density(n),
-                "agree": "Y" if agree else "n", "max_rows": n,
-                "rows_by_reader": "|".join(f"{k}={len(rows.get(k, []))}" for k in READERS),
-                "printed_totals": "|".join(f"{t:.0f}" for t in totals), "reason": "",
-            })
-    rng = random.Random(seed)
-    cells: dict[tuple[str, str], list[dict]] = collections.defaultdict(list)
-    for row in universe:
-        cells[(row["stratum"], row["agree"])].append(row)
-    chosen: dict[tuple[str, int], dict] = {}
-    for cell in sorted(cells):
-        for row in rng.sample(cells[cell], min(per_cell, len(cells[cell]))):
-            row["reason"] = "random"
-            chosen[(row["object_id"], row["page"])] = row
-    for row in universe:
-        if row["object_id"] in NEAR_MISS:
-            key = (row["object_id"], row["page"])
-            if key not in chosen:
-                row["reason"] = "near_miss"
-                chosen[key] = row
-            else:
-                chosen[key]["reason"] = "random+near_miss"
-    rows = sorted(chosen.values(), key=lambda r: (r["object_id"], r["page"]))
-    with out.open("w", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
-    tally = collections.Counter((r["stratum"], r["agree"]) for r in rows)
-    print(f"{len(rows)} pages from {len(universe)} with rows; per cell:")
-    for cell in sorted(tally):
-        print(f"  {cell[0]:>6} {'agree' if cell[1] == 'Y' else 'differ':<7} {tally[cell]:>3}  (of {len(cells[cell])})")
-    print(f"near-miss pages: {sum(1 for r in rows if 'near_miss' in r['reason'])}")
-    print(f"-> {out}")
 
 
 def _truth() -> dict[tuple[str, int], list[dict]]:
@@ -787,8 +729,6 @@ def flagged(policy: dict, *, session, out: Path | None = None, filing_store=None
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    p = sub.add_parser("pick"); p.add_argument("--out", type=Path, default=PAGES_CSV)
-    p.add_argument("--per-cell", type=int, default=PER_CELL); p.add_argument("--seed", type=int, default=SEED)
     p = sub.add_parser("add"); p.add_argument("oid"); p.add_argument("page", type=int)
     p.add_argument("--kind", default="paid", choices=KINDS)
     p = sub.add_parser("seed", help="start a page from its best reading and list the disputed rows")
@@ -845,9 +785,7 @@ def main() -> None:
     if args.command == "policies":
         policies(args.frame_pages, args.dispute_rate)
         return
-    if args.command == "pick":
-        pick(args.out, args.per_cell, args.seed)
-    elif args.command == "add":
+    if args.command == "add":
         add(args.oid, args.page, sys.stdin.read(), kind=args.kind)
     elif args.command == "seed":
         seed(args.oid, args.page, args.kind)

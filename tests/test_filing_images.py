@@ -4,7 +4,6 @@ keeps what it is given."""
 
 from __future__ import annotations
 
-import csv
 import hashlib
 import io
 import logging
@@ -357,14 +356,12 @@ def test_a_pdf_poppler_cannot_read_is_not_a_pdf_and_is_not_uploaded(teos, tmp_pa
     assert not fi.pdf_path(tmp_path, OID).exists() and list(tmp_path.glob("pdfs/*")) == []   # nothing left in the cache
 
 
-def test_a_missing_pdfimages_stops_before_any_request(teos, tmp_path, staging, monkeypatch):
+def test_a_missing_pdfimages_stops_before_any_request(teos, tmp_path, monkeypatch):
     teos.add(OID, [("20230501", PDF)])
     monkeypatch.setattr(fi.shutil, "which", lambda cmd, *args, **kwargs: None)
     store = fi.MemoryStore()
     with pytest.raises(RuntimeError, match="poppler"):
         _fetch(store, [OID], tmp_path, _S3())
-    with pytest.raises(RuntimeError, match="poppler"):
-        fi.backfill(store, s3=_S3(), **staging)
     assert teos.requests == 0 and store.rows == {}
 
 
@@ -444,116 +441,6 @@ def test_verify_names_the_corrupt_and_the_missing_objects(teos, tmp_path):
     del s3.objects[("b", f"irs/pdf/{ids[2]}.pdf")]                    # gone
     assert sorted(fi.verify(store, bucket="b", s3=s3, workers=2)) == [ids[0], ids[2]]
     assert s3.gets.count(f"irs/pdf/{ids[1]}.pdf") == 2 and teos.requests == 6
-
-
-# ---------------------------------------------------------------------------
-# backfill
-# ---------------------------------------------------------------------------
-
-_STAGING = ["object_id", "filerein", "stratum", "taxyear", "placeholder_amt", "status", "bytes", "pages",
-            "attachment_from", "attachment_pages"]
-
-
-def _write(path, columns, rows):
-    with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=columns)
-        writer.writeheader()
-        writer.writerows(rows)
-
-
-@pytest.fixture
-def staging(tmp_path, teos):
-    pdfs = tmp_path / "pdfs"
-    pdfs.mkdir()
-    (pdfs / "202343149349101129.pdf").write_bytes(PDF)
-    (pdfs / "202343149349101130.pdf").write_bytes(PDF2)
-    teos.widths[PDF] = [IRS, IRS, FILER]
-    teos.widths[PDF2] = [IRS, WIDE]
-    fetched = {"object_id": "202343149349101129", "filerein": "731312965", "stratum": "A", "taxyear": "2022",
-               "placeholder_amt": "1.0", "status": "cached", "bytes": str(len(PDF)), "pages": "3",
-               "attachment_from": "3", "attachment_pages": "1"}
-    gone = {"object_id": "202123169349102217", "filerein": "731312965", "stratum": "A", "taxyear": "2020",
-            "placeholder_amt": "1.0", "status": "pdf_unavailable:404", "bytes": "0", "pages": "0",
-            "attachment_from": "", "attachment_pages": "0"}
-    none = {"object_id": "202133559349100018", "filerein": "451742989", "stratum": "B", "taxyear": "2020",
-            "placeholder_amt": "1.0", "status": "no_teos_image", "bytes": "0", "pages": "0",
-            "attachment_from": "", "attachment_pages": "0"}
-    flat = {"object_id": "202343149349101130", "filerein": "912073258", "stratum": "B", "taxyear": "2022",
-            "placeholder_amt": "1.0", "status": "staged", "bytes": str(len(PDF2)), "pages": "2",
-            "attachment_from": "", "attachment_pages": "0"}
-    _write(tmp_path / "staging.csv", _STAGING, [fetched, gone])
-    _write(tmp_path / "staging_expanded.csv", _STAGING, [fetched, gone, none, flat])
-    url = "https://apps.irs.gov/pub/epostcard/cor/731312965_202012_990PF_2022102620583278.pdf"
-    _write(tmp_path / "404.csv", ["object_id", "filer_name", "taxyear", "declared", "status", "image_generated", "pdf_url"],
-           [{"object_id": "202123169349102217", "filer_name": "Schusterman", "taxyear": "2020", "declared": "1.0",
-             "status": "pdf_unavailable:404", "image_generated": "202210", "pdf_url": url}])
-    return dict(staging_csvs=[tmp_path / "staging.csv", tmp_path / "staging_expanded.csv"],
-                image_404_csv=tmp_path / "404.csv", pdf_dir=pdfs, bucket="b", workers=2)
-
-
-def test_backfill_loads_the_csvs_and_pdfs_with_no_teos_request(teos, staging):
-    store, s3 = fi.MemoryStore(), _S3()
-    statuses = fi.backfill(store, s3=s3, **staging)
-    assert teos.requests == 0 and teos.lookups == []
-    assert statuses == {"202343149349101129": "fetched", "202123169349102217": "pdf_unavailable:404",
-                        "202133559349100018": "no_teos_image", "202343149349101130": "no_attachment"}
-    assert sorted(s3.puts) == ["irs/pdf/202343149349101129.pdf", "irs/pdf/202343149349101130.pdf"]
-
-    got = store.rows["202343149349101129"]
-    assert got.sha256 == hashlib.sha256(PDF).hexdigest() and got.bytes == len(PDF) and got.fetched_at is not None
-    assert (got.page_widths, got.attachment_from, got.attachment_pages) == ([IRS, IRS, FILER], 3, 1)
-    assert (got.filerein, got.taxyear, got.attempts, got.teos_url) == ("731312965", 2022, 1, None)
-    flat = store.rows["202343149349101130"]
-    assert (flat.status, flat.attachment_from, flat.attachment_pages, flat.s3_key) == (
-        "no_attachment", None, 0, "irs/pdf/202343149349101130.pdf")
-
-    gone = store.rows["202123169349102217"]
-    assert gone.image_generated == date(2022, 10, 26) and gone.teos_url.endswith("2022102620583278.pdf")
-    assert gone.attempts == 3                                 # two staging passes and the 404 listing
-    assert gone.sha256 is None and gone.s3_key is None and "404" in gone.last_error
-    assert store.rows["202133559349100018"].attempts == 1
-
-
-def test_backfill_is_a_one_off_seed_and_dry_run_touches_nothing(teos, staging, tmp_path):
-    store, s3 = fi.MemoryStore(), _S3()
-    fi.backfill(store, s3=s3, dry_run=True, **staging)
-    assert store.rows == {} and s3.puts == []
-    fi.backfill(store, s3=s3, **staging)
-    assert len(s3.puts) == 2 and len(store.rows) == 4 and teos.requests == 0
-
-    # A live refetch of the unlisted filing fills what the CSVs could not know
-    # about it (no_teos_image is permanent, so only refetch goes back to TEOS).
-    teos.add("202133559349100018", index=_index("202133559349100018", ein="451742989", period="202012", year="2021"))
-    _fetch(store, list(store.rows), tmp_path, s3)
-    assert teos.requests == 0
-    _fetch(store, ["202133559349100018"], tmp_path, s3, refetch=True)
-    live = store.rows["202133559349100018"]
-    assert (live.status, live.attempts, live.index_year) == ("no_teos_image", 2, "2021") and "TEOS lists no" in live.last_error
-    assert teos.requests == 1 and len(s3.puts) == 2
-
-    fi.backfill(store, s3=s3, **staging)
-    again = store.rows["202133559349100018"]
-    assert (again.attempts, again.index_year, again.last_error) == (2, "2021", live.last_error)
-    assert store.rows["202123169349102217"].attempts == 3 and store.rows["202123169349102217"].teos_url
-    assert len(s3.puts) == 2 and len(store.rows) == 4 and teos.requests == 1
-
-
-def test_backfill_records_an_s3_failure_and_carries_on(teos, staging):
-    store, s3 = fi.MemoryStore(), _FlakyS3(failures=1)
-    statuses = fi.backfill(store, s3=s3, **staging)
-    assert sorted(statuses.values()) == ["fetched", "no_teos_image", "pdf_unavailable:404", "upload_failed:RuntimeError"] or \
-        sorted(statuses.values()) == ["no_attachment", "no_teos_image", "pdf_unavailable:404", "upload_failed:RuntimeError"]
-    failed = next(r for r in store.rows.values() if r.status.startswith("upload_failed"))
-    assert failed.filerein and failed.taxyear == 2022 and failed.attempts == 1 and failed.s3_key is None
-    assert len(s3.puts) == 1 and teos.requests == 0
-    fi.backfill(store, s3=s3, **staging)                     # the seed finishes what it left undone
-    assert store.rows[failed.object_id].fetched and len(s3.puts) == 2 and teos.requests == 0
-
-
-def test_backfill_refuses_to_run_with_a_pdf_missing(teos, staging):
-    (staging["pdf_dir"] / "202343149349101130.pdf").unlink()
-    with pytest.raises(FileNotFoundError):
-        fi.backfill(fi.MemoryStore(), s3=_S3(), **staging)
 
 
 # ---------------------------------------------------------------------------
