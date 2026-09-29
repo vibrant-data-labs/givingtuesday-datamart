@@ -11,6 +11,13 @@ addressable ones (patient assistance and individual-dominant filings taken
 out), and the classes the rule leaves aside (mixed, withheld, "various").
 The share of dollars is the number the recovery doc quotes: 7.2% of
 declared grant dollars sit behind a placeholder row, 2020 to 2025.
+
+The CSV and the doc's table were measured on 2026-09-25 with three
+patient-assistance filers left out. The list is now the six of
+``data/placeholder_recovery/exclusions.csv``, so a run today leaves out
+Sanofi Cares and Merck too and gives lower figures. The work list
+(``placeholder_recovery work-list``) is the population a run reads: every
+tax year, six filers out, filings marked as grants to individuals kept.
 """
 
 from __future__ import annotations

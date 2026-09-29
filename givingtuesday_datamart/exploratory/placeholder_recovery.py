@@ -23,16 +23,18 @@ noise. Bands A is a census; B, C and D are sampled and extrapolated. The
 expanded frames — ``--expand``, 610 filings with B a census; ``--expand-1000``,
 C and D topped up to 1,000 — are drawn on top of the 100 from the same
 seeded generator, so every earlier frame regenerates unchanged inside the
-next. It also writes the rows the XML itemises for the sampled filings
-(named Part XV lines, the expenditure-responsibility statement): those
-never need transcribing, and the attachment routinely leaves them out.
+next. The frame is the extract's last use: a run's list now comes from the
+loaded tables (``givingtuesday_datamart.placeholder_recovery``, ``work-list``
+and ``run``), and the rows the extract itemised for the frame's filings left
+the search on 2026-09-28, since nothing from the extract is loaded.
 
-Two classes are excluded, for different reasons. Three named
-patient-assistance programs (Genentech Patient Foundation, Boehringer
-Ingelheim Cares, GlaxoSmithKline Patient Access) are $22.11B of donated
-medicine to individuals — no recipient organisation exists to match. Rows
-whose ``recipient_foundation_status`` is ``I`` are individuals by the
-filing's own declaration. The exclusion is by EIN and by that flag, never by
+Two classes are excluded from the frame, for different reasons. The
+patient-assistance programs of ``data/placeholder_recovery/exclusions.csv``
+(three when the frame was drawn, six since 2026-09-28; the three added are
+not in the extract) give donated medicine to individuals — no recipient
+organisation exists to match. Rows whose ``recipient_foundation_status`` is
+``I`` are individuals by the filing's own declaration; the work list keeps
+those and labels them. The exclusion is by EIN and by that flag, never by
 a name pattern: a name pattern also catches Amgen Foundation, Genentech
 Foundation and Ruth Lilly Foundation, which are ordinary grantmakers.
 
@@ -63,7 +65,10 @@ stored under the policy version. The pages come from ``filing_images``.
 joined to ``page_readings`` under a policy, with the verdict mix per
 filing beside the outcome — or, for the baseline, over an Unstructured
 job's ``<object_id>.pdf.json`` — and prints dollar-weighted recovery per
-stratum, the number the whole exercise is for.
+stratum, the number the whole exercise is for. The target is the paid
+amount alone, as the loader's is; ``--with-future`` adds the frame's
+future-payment amount as a second target, the rule the frame was first
+measured under.
 """
 
 from __future__ import annotations
@@ -89,13 +94,14 @@ from typing import NoReturn, Sequence
 from givingtuesday_datamart import (
     filing_images, irs_source, page_readings, page_verdicts, vlm_transcription)
 from givingtuesday_datamart.attachment_grants import (
-    PLACEHOLDER, XML_SOURCES, candidate_tables, coverage, diagnose, extract_tables, is_pointer,
-    load_elements, page_tables, xml_tables)
+    PLACEHOLDER, candidate_tables, coverage, diagnose, extract_tables, is_pointer, load_elements,
+    page_tables)
 from givingtuesday_datamart._internal.bulk import SystemicFailure
 from givingtuesday_datamart.page_readings import MAX_ERRORS, frame_pages, reading_key
 from givingtuesday_datamart.page_verdicts import (
     FLAGGED_RULES, POLICIES, POLICY_V1, WORKERS, AgreeResult, accepted_readings, agree,
     load_policy, reader_settings, summary, with_flagged)
+from givingtuesday_datamart.placeholder_recovery.exclusions import load_exclusions
 
 COMBINED_CSV = Path.home() / "Downloads" / "combined-grants-datamarts-gt_team_priority-20260915.csv"
 # Where ``sample`` writes the 100-filing sample. The frame
@@ -103,20 +109,15 @@ COMBINED_CSV = Path.home() / "Downloads" / "combined-grants-datamarts-gt_team_pr
 # sample's own files were archived on 2026-09-28 and every command defaults
 # to the frame: s3://givingtuesday-datamart/placeholder-recovery/archive/.
 SAMPLE_CSV = Path("data/exploratory/placeholder_sample_100.csv")
-XML_ROWS_CSV = Path("data/exploratory/placeholder_sample_xml_rows.csv")
-EXPANDED = {"sample": Path("data/exploratory/placeholder_sample_expanded.csv"),
-            "xml_rows": Path("data/exploratory/placeholder_sample_expanded_xml_rows.csv")}
-FRAME_1000 = {"sample": Path("data/exploratory/placeholder_sample_1000.csv"),
-              "xml_rows": Path("data/exploratory/placeholder_sample_1000_xml_rows.csv")}
+EXPANDED = Path("data/exploratory/placeholder_sample_expanded.csv")
+FRAME_1000 = Path("data/exploratory/placeholder_sample_1000.csv")
 CACHE = Path.home() / ".cache" / "irs_index"
 PF_SOURCES = ("990PF_P14_3A", "990PF_P14_3B")
 SEED = 20260921
 
-PATIENT_ASSISTANCE = {
-    "460500266": "Genentech Patient Foundation",
-    "311810072": "Boehringer Ingelheim Cares",
-    "200031992": "GlaxoSmithKline Patient Access",
-}
+# The filers left out, by EIN: data/placeholder_recovery/exclusions.csv is
+# the one place they are named.
+PATIENT_ASSISTANCE = {ein: row.filer_name for ein, row in load_exclusions().items()}
 CANARIES = {"451742989": "Siegel", "912073258": "Bezos"}
 STRATA = (("A", 1e8, float("inf"), None), ("B", 1e7, 1e8, 44),
           ("C", 1e6, 1e7, 22), ("D", 0.0, 1e6, 12))
@@ -145,6 +146,10 @@ PER_PAGE = {"alibaba/qwen3-vl-instruct": 0.0025, "google/gemini-3.5-flash-lite":
             "google/gemini-3.8-flash": 0.0091, "anthropic/claude-sonnet-5": 0.0343}
 DISPUTE_RATE = 0.605
 RESOLVE_RATES = {"google/gemini-3.8-flash": 0.423, "anthropic/claude-sonnet-5": 0.18}
+# What a frame filing cost in model calls, by band, the filings with nothing
+# to read among them (the findings doc, *Shipping the rest*): the price of a
+# filing nobody has fetched, whose pages are not yet known.
+PER_FILING = {"A": 1.35, "B": 0.59, "C": 0.066, "D": 0.020}
 COST_CAP = 400.0
 # The one-command run (``run``): the disk it needs under the cache and the
 # key its bucket write check uses.
@@ -152,9 +157,8 @@ MIN_FREE_GB = 15
 WRITE_CHECK_PREFIX = "irs/_run_check"
 
 
-def _read_population(pointer=None) -> tuple[dict, dict]:
-    """Placeholder filings from the combined extract, one record per filing,
-    and — keyed the same way — the rows the XML itemises for every filing.
+def _read_population(pointer=None) -> dict:
+    """Placeholder filings from the combined extract, one record per filing.
 
     ``pointer`` decides which recipient names are placeholders: the frozen
     ``PLACEHOLDER`` pattern the 100-filing frame was drawn with (default),
@@ -164,10 +168,9 @@ def _read_population(pointer=None) -> tuple[dict, dict]:
     per: dict = collections.defaultdict(
         lambda: {"amt": 0.0, "paid": 0.0, "future": 0.0, "rows": 0, "names": [], "filer": "",
                  "period": "", "status": collections.Counter()})
-    itemised: dict = collections.defaultdict(list)
     with COMBINED_CSV.open(newline="", encoding="utf-8", errors="replace") as handle:
         for row in csv.DictReader(handle):
-            if row["Source"] not in XML_SOURCES:
+            if row["Source"] not in PF_SOURCES or not pointer(row["recipient_name"] or ""):
                 continue
             match = _OBJECT_ID.search(row["URL"] or "")
             key = (row["FILEREIN"], row["TAXYEAR"], match.group(1) if match else "")
@@ -175,15 +178,6 @@ def _read_population(pointer=None) -> tuple[dict, dict]:
                 amount = float(row["total_grant_amount"] or 0)
             except ValueError:
                 amount = 0.0
-            if row["Source"] not in PF_SOURCES or not pointer(row["recipient_name"] or ""):
-                itemised[key].append({
-                    "source": row["Source"], "recipient_name": row["recipient_name"],
-                    "address": " ".join(filter(None, ((row.get(k) or "").strip() for k in (
-                        "recipient_address_line1", "recipient_address_line2", "recipient_city",
-                        "recipient_state", "recipient_postal_code")))),
-                    "status": (row.get("recipient_foundation_status") or "").strip(),
-                    "purpose": (row.get("grant_purpose") or "").strip(), "amount": amount})
-                continue
             record = per[key]
             record["amt"] += amount
             # Part XV line 3a (paid) and 3b (approved for future payment) are
@@ -195,7 +189,7 @@ def _read_population(pointer=None) -> tuple[dict, dict]:
             record["status"][(row["recipient_foundation_status"] or "").strip().upper()] += 1
             if row["recipient_name"] not in record["names"]:
                 record["names"].append(row["recipient_name"])
-    return per, itemised
+    return per
 
 
 def _addressable(population: dict) -> dict:
@@ -224,7 +218,7 @@ def _print_bands(title: str, summary: list[tuple]) -> None:
         print(f"  {label}  {pick_n:>3}/{pop_n:<5} ${pick_d/1e9:>6.2f}B of ${pop_d/1e9:>6.2f}B")
 
 
-def build_sample(out: Path, xml_rows_out: Path, expansions: Sequence[dict] = ()) -> None:
+def build_sample(out: Path, expansions: Sequence[dict] = ()) -> None:
     """The 100-filing frame, or with ``expansions`` (``FRAMES``) the 610- and
     1,000-filing ones on top of it.
 
@@ -236,7 +230,7 @@ def build_sample(out: Path, xml_rows_out: Path, expansions: Sequence[dict] = ())
     """
     import random
 
-    population, itemised = _read_population()
+    population = _read_population()
     addressable = _addressable(population)
     excluded = sum(v["amt"] for k, v in population.items() if k not in addressable)
     print(f"population {len(population):,} filings ${sum(v['amt'] for v in population.values())/1e9:.2f}B")
@@ -264,8 +258,7 @@ def build_sample(out: Path, xml_rows_out: Path, expansions: Sequence[dict] = ())
 
     if expansions:
         # Only now, so the RNG state behind the base draw is untouched.
-        wide, itemised = _read_population(is_pointer)
-        wide = _addressable(wide)
+        wide = _addressable(_read_population(is_pointer))
         print(f"broadened classifier: {len(wide):,} addressable filings "
               f"${sum(v['amt'] for v in wide.values())/1e9:.2f}B\n")
         already = set(keys)
@@ -296,14 +289,6 @@ def build_sample(out: Path, xml_rows_out: Path, expansions: Sequence[dict] = ())
         writer.writeheader()
         writer.writerows(picked)
     print(f"\n{len(picked)} filings -> {out}")
-
-    rows = [{"object_id": key[2], **item} for key in keys for item in itemised.get(key, [])]
-    with xml_rows_out.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["object_id", "source", "recipient_name", "address",
-                                                    "status", "purpose", "amount"])
-        writer.writeheader()
-        writer.writerows(rows)
-    print(f"{len(rows)} XML-itemised rows for {len({r['object_id'] for r in rows})} of them -> {xml_rows_out}")
 
 
 def transcribe(
@@ -381,16 +366,20 @@ def estimate(
     before it left open (``RESOLVE_RATES``) — less the readings the table
     already holds for it under the policy's settings, priced at ``PER_PAGE``.
     Every stored reading is credited, so where an escalation reader's stored
-    readings turn out not to be needed the projection is a little low. Prints
-    the projection by reader and in total and returns the total; past ``cap``
-    it stops with a message, so a run stops before it spends.
+    readings turn out not to be needed the projection is a little low. A
+    filing nobody has fetched has no pages to count yet: it is priced at
+    what a frame filing of its band cost (``PER_FILING``). After a fetch
+    there are none; under ``run --no-fetch`` they are most of a work list.
+    Prints the projection by reader and in total and returns the total; past
+    ``cap`` it stops with a message, so a run stops before it spends.
     """
     # The same session-or-store wrapping as ``transcribe``.
     filings = filing_images._store(filing_store if filing_store is not None else session)
     readings = page_readings._store(reading_store if reading_store is not None else session)
-    rows = csv.DictReader(sample.open())
-    ids = [row["object_id"] for row in rows if not only or row["object_id"] == only]
-    pages = frame_pages(filings, ids)
+    rows = [row for row in csv.DictReader(sample.open()) if not only or row["object_id"] == only]
+    ids = [row["object_id"] for row in rows]
+    never_fetched = _never_fetched(filings, rows)
+    pages = frame_pages(filings, [oid for oid in ids if oid not in never_fetched])
     # The filing rows themselves, for each PDF's sha256: a reading is keyed
     # on the image it was read from, so looking one up needs the hash.
     images = filings.get({oid for oid, _ in pages})
@@ -439,6 +428,7 @@ def estimate(
         total += dollars
         price_text = f"{price:.4f}" if price is not None else "?"
         print(f"  {model:<32}{want:>9,.0f}{have:>8,}{buy:>8,.0f}{price_text:>8}{dollars:>9.2f}")
+    total += _price_never_fetched(never_fetched)
     print(f"  {'total':<32}{'':>33}{total:>9.2f}")
     share = flagged / total_pages if total_pages else 0
     cap_text = f" against a cap of ${cap:,.0f}" if cap is not None else ""
@@ -447,6 +437,29 @@ def estimate(
     if cap is not None and total > cap:
         _stop(f"the projection ${total:,.0f} passes the cap of ${cap:,.0f}: "
               "stop and ask before spending")
+    return total
+
+
+def _never_fetched(filings, rows: list[dict]) -> dict[str, str]:
+    """The frame's filings ``filing_images`` has no row for, each with its
+    band (empty when the frame names none). A filing with a row was tried:
+    it is fetched, or the IRS did not serve it."""
+    held = filings.get(row["object_id"] for row in rows)
+    return {row["object_id"]: row.get("stratum") or "" for row in rows if row["object_id"] not in held}
+
+
+def _price_never_fetched(never_fetched: dict[str, str]) -> float:
+    """What the filings never fetched would cost to read, at the frame's cost
+    per filing by band; one line a band. A filing without a band, or with
+    one the frame did not measure, is counted and priced at nothing."""
+    total = 0.0
+    for band, n in sorted(collections.Counter(never_fetched.values()).items()):
+        price = PER_FILING.get(band)
+        dollars = n * price if price is not None else 0.0
+        total += dollars
+        label = f"never fetched, band {band}" if band else "never fetched, no band"
+        price_text = f"{price:.4f}" if price is not None else "?"
+        print(f"  {label:<32}{n:>9,}{0:>8,}{n:>8,}{price_text:>8}{dollars:>9.2f}")
     return total
 
 
@@ -682,6 +695,17 @@ def _check_disk(cache: Path) -> None:
 # --- the stages
 
 
+def _not_fetching(stores: _Stores, rows: list[dict]) -> None:
+    """The fetch stage under ``fetch=False``: what it would have tried, and
+    no request made."""
+    ids = [row["object_id"] for row in rows]
+    prior = stores.filings.get(ids)
+    retryable = sum(filing_images._retryable(prior.get(oid)) for oid in ids)
+    _note(f"no fetch asked for: 0 TEOS requests; {len(ids) - retryable} of {len(ids)} filings are fetched, "
+          f"permanent or out of attempts, and {retryable} would be tried, {len(ids) - len(prior)} of them "
+          "for the first time")
+
+
 def _fetch(stores: _Stores, rows: list[dict], cache: Path) -> None:
     """``fetch_filings`` on the frame; the log says first how many it will try."""
     # Count what fetch_filings will actually request before it runs, so the
@@ -838,6 +862,7 @@ def run(
     cap: float | None = COST_CAP,
     logs: Path | None = None,
     max_errors: int = MAX_ERRORS,
+    fetch: bool = True,
     filing_store=None,
     reading_store=None,
     verdict_store=None,
@@ -854,7 +879,9 @@ def run(
        head and a small put on the bucket, 15 GB free under the cache; the
        first thing missing stops the run with a message.
     2. fetch: ``fetch_filings`` on the frame; zero requests when everything
-       is stored, and the log says so.
+       is stored, and the log says so. With ``fetch`` false nothing is asked
+       of the IRS, the TEOS check included, and the cost gate prices the
+       filings never fetched by band.
     3. the cost gate: the stored-only pass (which names the pages without a
        reading, or passes buying nothing; a new policy version over stored
        readings writes its verdicts here at no cost) and ``estimate``'s
@@ -920,7 +947,8 @@ def run(
         # TEOS is checked with the frame's first EIN (a real filer, so a real
         # answer), the bucket through the S3 client just built.
         eins = [row["filerein"] for row in rows if row.get("filerein")]
-        _check_teos(eins[0] if eins else "731312965")
+        if fetch:
+            _check_teos(eins[0] if eins else "731312965")
         _check_bucket(stores.s3)
         _check_disk(cache)
         _note(f"prerequisites met in {_elapsed(started)}")
@@ -928,10 +956,14 @@ def run(
         # 2. fetch
         # Zero requests when every filing is already stored: the stage still
         # runs, and its first log line says so.
-        _banner("fetch: fetch_filings on the frame (stored filings make no request; failures "
-                f"retry to {filing_images.MAX_ATTEMPTS} attempts)")
         stage_started = time.monotonic()
-        _fetch(stores, rows, cache)
+        if fetch:
+            _banner("fetch: fetch_filings on the frame (stored filings make no request; failures "
+                    f"retry to {filing_images.MAX_ATTEMPTS} attempts)")
+            _fetch(stores, rows, cache)
+        else:
+            _banner("fetch: skipped, the run was asked not to fetch")
+            _not_fetching(stores, rows)
         _note(f"fetch done in {_elapsed(stage_started)}")
 
         # 3. the cost gate
@@ -940,7 +972,8 @@ def run(
         stage_started = time.monotonic()
         # ``frame_pages``: every attachment page of every fetched filing, the
         # unit every stage from here on works in.
-        pages = frame_pages(stores.filings, ids)
+        tried = stores.filings.get(ids)
+        pages = frame_pages(stores.filings, [oid for oid in ids if oid in tried])
         filings_with_pages = len({oid for oid, _ in pages})
         print(f"{filings_with_pages} filings with attachment pages, {len(pages):,} pages")
         # The stored-only pass. On a fresh frame it stops at the first reader
@@ -1027,10 +1060,10 @@ def report(
     session,
     sample: Path,
     out: Path | None,
-    xml_rows: Path | None,
     *,
     policy: dict = POLICY_V1,
     results: Path | None = None,
+    with_future: bool = False,
 ) -> None:
     """Score one engine's pages through the selector, filing by filing.
 
@@ -1042,13 +1075,17 @@ def report(
     feeds nothing. Each filing's verdict mix goes into the CSV beside its
     outcome. ``results`` is the Unstructured baseline instead: a folder of
     ``<object_id>.pdf.json``. Fetch outcomes come from ``filing_images``.
+
+    The target is the frame's paid amount, ``placeholder_paid``, and the
+    pages read are the selector's whole input, as in the loader.
+    ``with_future`` adds the frame's ``placeholder_future`` as a second
+    target, reconciled on its own and credited beside the paid list: the
+    rule the frame was first measured under. That amount came from
+    GivingTuesday's one-off extract and the loaded tables hold none, so it
+    is kept for the comparison and nothing is loaded by it.
     """
     rows = list(csv.DictReader(sample.open()))
     images = filing_images._store(session).get([r["object_id"] for r in rows])
-    itemised: dict[str, list] = collections.defaultdict(list)
-    if xml_rows and xml_rows.exists():
-        for r in csv.DictReader(xml_rows.open()):
-            itemised[r["object_id"]].append(r)
     accepted = {}
     frame: dict[str, list[int]] = collections.defaultdict(list)
     if results is None:
@@ -1064,9 +1101,10 @@ def report(
     records = []
 
     for row in rows:
-        declared = float(row["placeholder_amt"])
-        paid, future = float(row["placeholder_paid"]), float(row["placeholder_future"])
-        targets = (paid, future, paid + future)
+        paid = float(row["placeholder_paid"])
+        future = float(row.get("placeholder_future") or 0) if with_future else 0.0
+        declared = paid + future
+        targets = (paid, future, paid + future) if with_future else (paid,)
         oid = row["object_id"]
         image = images.get(oid)
         result, covered, tables = None, 0.0, None
@@ -1097,7 +1135,7 @@ def report(
             if mix["no_verdict"] == len(frame[oid]):
                 outcome = "missing_result"                   # agree has not run on this filing
             else:
-                tables = page_tables(readings, targets) + xml_tables(itemised.get(oid, ()), targets)
+                tables = page_tables(readings, targets)
         if tables is not None:
             result = extract_tables(tables, paid, future)
             outcome = result.paid.outcome
@@ -1133,7 +1171,6 @@ def report(
             "recovered": result.recovered if result else 0.0,
             "coverage": round(covered, 4) if covered else "",
             "grant_rows": len(result.rows) if result else 0,
-            "xml_rows": sum(1 for p in parts if p.reconciled for r in p.rows if r.page is None),
             "labelled": "|".join("Y" if p.labelled else "n" for p in parts if p.reconciled),
             "total_stated": "|".join("Y" if p.total_stated else "n" for p in parts if p.reconciled),
             "error_pct": "|".join(f"{p.error * 100:.3f}" for p in parts if p.reconciled),
@@ -1198,7 +1235,8 @@ def report(
         pop[label][1] * (by_stratum[label]["recovered"] / by_stratum[label]["declared"])
         for label in by_stratum if by_stratum[label]["declared"]
     )
-    print(f"\nprojected recovery across all addressable placeholder filings: ${projected/1e9:.2f}B")
+    print(f"\nprojected recovery across the frame's population, the extract's, whose dollars count future "
+          f"payments: ${projected/1e9:.2f}B")
 
     if out:
         with out.open("w", newline="") as handle:
@@ -1265,7 +1303,6 @@ def main() -> None:
 
     p = sub.add_parser("sample", help="build the stratified frame")
     p.add_argument("--out", type=Path, default=None)
-    p.add_argument("--xml-rows", type=Path, default=None)
     p.add_argument("--expand", action="store_true",
                    help="the expanded frame: band B in full, C to 100, D to 50, on top of the 100 (610 filings)")
     p.add_argument("--expand-1000", action="store_true",
@@ -1275,7 +1312,7 @@ def main() -> None:
     p.add_argument("--policy", default="v1", help=f"a registered version ({', '.join(POLICIES)}) or a JSON file")
     p.add_argument("--flagged", choices=FLAGGED_RULES, default=None,
                    help="override the policy's flagged rule; the verdicts go under <version>-<rule>")
-    p.add_argument("--sample", type=Path, default=FRAME_1000["sample"])
+    p.add_argument("--sample", type=Path, default=FRAME_1000)
     p.add_argument("--cache", type=Path, default=CACHE)
     p.add_argument("--limit", type=int, default=None, help="the first N filings that have attachment pages")
     p.add_argument("--only", default=None, help="a single object id")
@@ -1284,7 +1321,7 @@ def main() -> None:
 
     p = sub.add_parser("estimate", help="the cost gate: what transcribe would buy today at the measured rates; exits past the cap")
     p.add_argument("--policy", default="v1", help=f"a registered version ({', '.join(POLICIES)}) or a JSON file")
-    p.add_argument("--sample", type=Path, default=FRAME_1000["sample"])
+    p.add_argument("--sample", type=Path, default=FRAME_1000)
     p.add_argument("--only", default=None, help="a single object id")
     p.add_argument("--cap", type=float, default=COST_CAP, help="dollars; zero or less for no cap")
 
@@ -1298,14 +1335,15 @@ def main() -> None:
     p.add_argument("--max-errors", type=int, default=MAX_ERRORS)
 
     p = sub.add_parser("report", help="score one engine's pages through the selector")
-    p.add_argument("--sample", type=Path, default=FRAME_1000["sample"])
+    p.add_argument("--sample", type=Path, default=FRAME_1000)
     p.add_argument("--policy", default="v1", help="the verdicts to read: a registered version or a JSON file")
     p.add_argument("--flagged", choices=FLAGGED_RULES, default=None,
                    help="read the verdicts an override of the flagged rule decided, under <version>-<rule>")
     p.add_argument("--results", type=Path, default=None,
                    help="the Unstructured baseline instead: a directory of <object_id>.pdf.json")
     p.add_argument("--out", type=Path, default=None)
-    p.add_argument("--xml-rows", type=Path, default=FRAME_1000["xml_rows"])
+    p.add_argument("--with-future", action="store_true",
+                   help="add the frame's future-payment amount as a second target, as the frame was first measured")
 
     p = sub.add_parser("compare", help="filing-level reconciliation across engines")
     p.add_argument("reports", nargs="+", metavar="NAME=CSV", help="report --out files, e.g. qwen=data/exploratory/x.csv")
@@ -1317,8 +1355,8 @@ def main() -> None:
         return
     if args.command == "sample":
         frame = "1000" if args.expand_1000 else "610" if args.expand else None
-        paths = {"1000": FRAME_1000, "610": EXPANDED, None: {"sample": SAMPLE_CSV, "xml_rows": XML_ROWS_CSV}}[frame]
-        build_sample(args.out or paths["sample"], args.xml_rows or paths["xml_rows"], FRAMES.get(frame, ()))
+        path = {"1000": FRAME_1000, "610": EXPANDED, None: SAMPLE_CSV}[frame]
+        build_sample(args.out or path, FRAMES.get(frame, ()))
     else:
         from givingtuesday_datamart._internal.db import get_session
         from givingtuesday_datamart.ingestion import datamart_config
@@ -1336,7 +1374,8 @@ def main() -> None:
             elif args.command == "estimate":
                 estimate(session, args.sample, policy, args.cap if args.cap > 0 else None, only=args.only)
             else:
-                report(session, args.sample, args.out, args.xml_rows, policy=policy, results=args.results)
+                report(session, args.sample, args.out, policy=policy, results=args.results,
+                       with_future=args.with_future)
 
 
 if __name__ == "__main__":

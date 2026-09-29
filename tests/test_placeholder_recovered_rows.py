@@ -1,43 +1,13 @@
-"""``placeholder_recovered_rows``: the state and zip an address ends with, the
-place inside a name, the name cleaner, and the exact-name outcome. No
-database: the universe is three tuples."""
+"""``placeholder_recovered_rows``: the name cleaner, the exact-name outcome
+and what a row gives the matcher. No database: the universe is three
+tuples. The state and zip are ``placeholder_recovery.address``'s, tested in
+``test_recovery_address``."""
 
 from __future__ import annotations
 
 import pytest
 
 from givingtuesday_datamart.exploratory import placeholder_recovered_rows as rr
-
-
-@pytest.mark.parametrize("address, expected", [
-    ("711 Third Avenue, 10th Floor New York NY 10017", ("NY", "10017")),
-    ("322 N Greenwood Ave Tulsa OK 74120-1026", ("OK", "74120")),
-    ("505 HOWARD ST STE 100 San Francisco CA 94105 US", ("CA", "94105")),
-    ("2207 LINE AVE, Amarillo, TX 79106, US", ("TX", "79106")),
-    ("30 LAUREL ST Hartford CT 6106 US", ("CT", "06106")),             # the leading zero was lost
-    ("134 Cervantes, Taos, New Mexico, 87571", ("NM", "87571")),
-    ("Milwaukee, WI", ("WI", None)),
-    ("7 Derech Beit Lechem St Jerusalem 93553", (None, None)),          # a postcode, not a zip
-    ("Weinbergstrasse 35 Zurich Switzerland 8092", (None, None)),
-    ("210,000 shares Vanguard IDX Fund", (None, None)),
-    ("2411 SAN PEDRO AVE", (None, None)),
-    ("Notre Dame de", (None, None)),                                     # two letters, not a state
-    ("Kfar Saba, Israel", (None, None)),
-    ("", (None, None)),
-])
-def test_state_zip_reads_the_end_of_the_address_and_nothing_else(address, expected):
-    assert rr.state_zip(address) == expected
-
-
-@pytest.mark.parametrize("name, expected", [
-    ("Stanford University, Stanford, CA", ("Stanford University", "CA")),
-    ("OAK FARM SCHOOL, INC, AVILLA, IN", ("OAK FARM SCHOOL, INC", "IN")),
-    ("Boys & Girls Clubs of America", ("Boys & Girls Clubs of America", None)),
-    ("Smith, Jones, and Co", ("Smith, Jones, and Co", None)),           # "and Co" is not a place
-    ("Hawaii Community Foundation (HAWAII)", ("Hawaii Community Foundation (HAWAII)", None)),
-])
-def test_split_name_takes_the_place_off_a_name_printed_with_it(name, expected):
-    assert rr.split_name(name) == expected
 
 
 @pytest.mark.parametrize("name, expected", [

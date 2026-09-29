@@ -5,11 +5,11 @@
     python -m givingtuesday_datamart.exploratory.placeholder_recovered_rows names --policy v2 \
         --sample data/exploratory/placeholder_sample_1000.csv
 
-The rows are the ones a load would write: the attachment rows of every
-reconciled paid list, derived again from ``page_verdicts`` and
-``page_readings`` under the policy, at no model cost. Rows the XML itemises
-take part in the reconciliation, as in ``report``, and are left out of the
-count: GivingTuesday's tables already hold them.
+The rows are the ones a load would write for the frame's filings: the rows
+of every reconciled paid list, derived again from ``page_verdicts`` and
+``page_readings`` under the policy, at no model cost. The selection is the
+loader's (``placeholder_recovery.loader.select_paid``): the pages read are
+its whole input and the frame's paid amount its only target.
 
 ``address`` says what each row has for the matcher to work with. The
 matcher narrows its search by zip, or by an exact name when the state is
@@ -17,6 +17,7 @@ the same, and scores the address as one string; it never needs the street
 split from the city. So the question is state and zip, not parsing:
 ``state_zip`` reads them off the end of the address, and ``split_name``
 takes them from a name printed as "Stanford University, Stanford, CA".
+Both live with the loader, in ``placeholder_recovery.address``.
 
 ``names`` matches each row's name, exactly, against the names of the
 matcher's universe, at four levels of cleaning, and counts a match only
@@ -37,9 +38,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
 
-from givingtuesday_datamart.attachment_grants import extract_tables, page_tables, xml_tables
 from givingtuesday_datamart.page_readings import frame_pages
 from givingtuesday_datamart.page_verdicts import accepted_readings, load_policy
+from givingtuesday_datamart.placeholder_recovery.address import split_name, state_zip
+from givingtuesday_datamart.placeholder_recovery.loader import select_paid
 
 logger = logging.getLogger(__name__)
 
@@ -48,71 +50,6 @@ ADDRESS_OUT = Path("data/exploratory/placeholder_recovered_address.csv")
 NAMES_OUT = Path("data/exploratory/placeholder_recovered_names.csv")
 UNIVERSE_VIEWS = ("basic_fields_unique_names_view", "basic_fields_pf_unique_names_view",
                   "corrections_unique_names_view")
-
-USPS = frozenset(
-    "AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC "
-    "ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY PR VI GU".split())
-STATE_NAMES = {
-    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR", "california": "CA", "colorado": "CO",
-    "connecticut": "CT", "delaware": "DE", "district of columbia": "DC", "florida": "FL", "georgia": "GA",
-    "hawaii": "HI", "idaho": "ID", "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
-    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD", "massachusetts": "MA",
-    "michigan": "MI", "minnesota": "MN", "mississippi": "MS", "missouri": "MO", "montana": "MT",
-    "nebraska": "NE", "nevada": "NV", "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM",
-    "new york": "NY", "north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
-    "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC", "south dakota": "SD",
-    "tennessee": "TN", "texas": "TX", "utah": "UT", "vermont": "VT", "virginia": "VA", "washington": "WA",
-    "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY", "puerto rico": "PR"}
-_STATE_NAME = re.compile(
-    r"(?:^|[\s,])(" + "|".join(sorted(map(re.escape, STATE_NAMES), key=len, reverse=True)) + r")$", re.I)
-_STATE_CODE = re.compile(r"(^|[\s,])([A-Za-z]{2})\.?$")
-_COUNTRY = re.compile(r"[\s,]*\b(?:US|USA|U\.S\.A?\.?|United States(?: of America)?)\s*\.?$", re.I)
-_ZIP = re.compile(r"(?<!\d)(\d{5})(?:-?\d{4})?$")
-_ZIP4 = re.compile(r"(?<!\d)(\d{4})$")
-_NAME_TAIL = re.compile(r"^(.*?\S)\s*,\s*([^,\d]{2,30}?)\s*,\s*([A-Za-z]{2})\.?\s*$")
-
-
-def _state(text: str, *, strict: bool) -> str | None:
-    """The state a text ends with: a USPS code, or a state's name. ``strict``
-    is for a code with no zip after it, where "Notre Dame de" and "Supply Co"
-    also end in two letters: the code must be in capitals or follow a comma."""
-    found = _STATE_CODE.search(text)
-    if found and found.group(2).upper() in USPS and (
-            not strict or found.group(2).isupper() or found.group(1) == ","):
-        return found.group(2).upper()
-    found = _STATE_NAME.search(text)
-    return STATE_NAMES[found.group(1).lower()] if found else None
-
-
-def state_zip(address: str) -> tuple[str | None, str | None]:
-    """The state and five-digit zip an address ends with, and nothing else.
-
-    A trailing "US" is dropped. A zip counts only after a US state, so
-    "Jerusalem 93553" and "Zurich 8092" give nothing. Four digits after a
-    state are a zip that lost its leading zero ("Hartford CT 6106")."""
-    text = _COUNTRY.sub("", " ".join((address or "").split())).strip(" ,.")
-    if not text:
-        return None, None
-    found = _ZIP.search(text)
-    if found:
-        state = _state(text[:found.start()].strip(" ,."), strict=False)
-        return (state, found.group(1)) if state else (None, None)
-    found = _ZIP4.search(text)
-    if found:
-        state = _state(text[:found.start()].strip(" ,."), strict=False)
-        if state:
-            return state, "0" + found.group(1)
-    return _state(text, strict=True), None
-
-
-def split_name(name: str) -> tuple[str, str | None]:
-    """A name printed with its place, "Mayo Clinic, Rochester, MN": the name
-    and the state. Anything else comes back whole, with no state."""
-    found = _NAME_TAIL.match(" ".join((name or "").split()))
-    if found and found.group(3).upper() in USPS and len(found.group(1)) >= 3:
-        return found.group(1), found.group(3).upper()
-    return name, None
-
 
 # --- name cleaning -----------------------------------------------------------
 LEGAL = r"(?:inc|incorporated|corp|corporation|co|company|ltd|llc|nfp|pc|plc|lp|llp)"
@@ -174,15 +111,11 @@ class Row:
     amount: float
 
 
-def recovered_rows(session, sample: Path, policy: dict, xml_rows: Path | None = None, *,
+def recovered_rows(session, sample: Path, policy: dict, *,
                    filing_store=None, reading_store=None) -> tuple[list[Row], int]:
     """The rows a load would write for ``sample`` under ``policy``, and the
     number of filings they come from."""
     frame = list(csv.DictReader(sample.open()))
-    itemised: dict[str, list] = collections.defaultdict(list)
-    if xml_rows and xml_rows.exists():
-        for r in csv.DictReader(xml_rows.open()):
-            itemised[r["object_id"]].append(r)
     pages = frame_pages(filing_store if filing_store is not None else session, [r["object_id"] for r in frame])
     by_filing: dict[str, list[int]] = collections.defaultdict(list)
     for oid, page in pages:
@@ -196,15 +129,12 @@ def recovered_rows(session, sample: Path, policy: dict, xml_rows: Path | None = 
                     if accepted.get((oid, page), (None, None))[1] is not None}
         if not readings:
             continue
-        paid, future = float(r["placeholder_paid"]), float(r["placeholder_future"])
-        targets = (paid, future, paid + future)
-        result = extract_tables(page_tables(readings, targets) + xml_tables(itemised.get(oid, ()), targets),
-                                paid, future)
-        if not result.paid.reconciled:
+        found = select_paid(readings, float(r["placeholder_paid"]))
+        if not found.reconciled:
             continue
         filings += 1
         rows.extend(Row(r["stratum"], oid, r["filerein"], row.page, row.name, row.cells[1], row.amount)
-                    for row in result.paid.rows if row.page is not None)
+                    for row in found.rows)
     return rows, filings
 
 
@@ -400,7 +330,6 @@ def main() -> None:
     for command, out in (("address", ADDRESS_OUT), ("names", NAMES_OUT)):
         p = sub.add_parser(command)
         p.add_argument("--sample", type=Path, default=FRAME)
-        p.add_argument("--xml-rows", type=Path, default=None, help="default: <sample>_xml_rows.csv")
         p.add_argument("--policy", default="v2")
         p.add_argument("--out", type=Path, default=out)
     args = parser.parse_args()
@@ -411,11 +340,10 @@ def main() -> None:
     from givingtuesday_datamart.ingestion import datamart_config
 
     started = time.monotonic()
-    xml_rows = args.xml_rows or args.sample.with_name(f"{args.sample.stem}_xml_rows.csv")
     with get_session(config=datamart_config()) as session:
-        rows, filings = recovered_rows(session, args.sample, load_policy(args.policy), xml_rows)
+        rows, filings = recovered_rows(session, args.sample, load_policy(args.policy))
         names = universe(session) if args.command == "names" else []
-    print(f"{filings} reconciled paid lists, {len(rows):,} attachment rows, "
+    print(f"{filings} reconciled paid lists, {len(rows):,} rows, "
           f"${sum(row.amount for row in rows) / 1e9:.2f}B")
     if args.command == "address":
         table, by_filing = address_coverage(rows)
