@@ -448,7 +448,20 @@ beside the recovered rows would count the dollars twice.
 
 Into the matcher, not built: the matching views read the view, recovered
 rows are tagged `match_source = 'ocr_recovery'`, and
-`MATCHING_INPUT_SHAPE_VERSION` goes to 3. Three kinds of row:
+`MATCHING_INPUT_SHAPE_VERSION` goes to 3. Two things the chain after the
+matcher will meet, found on 2026-09-29:
+
+- **Cents.** `unioned_grants` casts the amount to a whole number
+  (`sigocpyamoun::bigint`), and no amount in `privategrants_current` has
+  a decimal point. 10,359 recovered rows in 83 filings do, $354.7M. The
+  cast fails on the first of them, so the amount is rounded for
+  `unioned_grants` or the cast changes.
+- **Labels.** `privategrants_w_recipients` takes every column of the
+  matcher's first view, so the labels reach it once that view reads this
+  one. `unioned_grants` names its columns, so they stop there unless
+  they are added.
+
+Three kinds of row:
 
 - **With a zip:** the matcher as it is. Zip narrows the search; name and
   address are scored.
