@@ -1,8 +1,9 @@
 # Placeholder recovery: operations
 
 Vibrant Data Labs, September 25, 2026; updated September 28. How the placeholder-recovery
-pipeline is run and what it writes: the three tables, the policies, the
-one command, how to watch and stop a run, and what a run costs. The
+pipeline is run and what it writes: the five tables and the view, the
+policies, the one command, how to watch and stop a run, and what a run
+costs. The
 findings are in [placeholder_grant_recovery.md](placeholder_grant_recovery.md);
 the engineering log, with the measurements behind every choice here, is
 [placeholder_recovery_pipeline.md](placeholder_recovery_pipeline.md).
@@ -11,7 +12,7 @@ September 22 to 24, both in git history.
 
 ## The shape
 
-Everything a run produces lands in S3 or in three datamart tables, so a
+Everything a run produces lands in S3 or in five datamart tables, so a
 laptop and a box share state through them and nothing is copied between
 machines. Every stage reads what the tables lack and buys only that, so
 the same command run again resumes, a completed stage makes no model
@@ -19,9 +20,21 @@ call, and a change of rule re-derives from stored readings for free.
 
 | table | one row per | key | written by |
 |---|---|---|---|
+| `pf_placeholder_filings` | filing to fetch and read: the work list | `object_id` | `placeholder_recovery.work_list.rebuild` |
 | `filing_images` | filing | `object_id` | `filing_images.fetch_filings` |
 | `page_readings` | page read by one model under one prompt and one request setting | `(object_id, page, image_sha256, dpi, model, prompt_version, request_hash)` | `page_readings.read_pages` |
 | `page_verdicts` | page decided under one policy | `(object_id, page, image_sha256, policy_version)` | `page_verdicts.agree` |
+| `privategrants_recovered` | grant of a list that adds up, under one policy | `(object_id, policy_version, target, page, row_ordinal)` | `placeholder_recovery.loader.load` |
+
+Consumers read one view, `privategrants_current_with_recovered_view`:
+`privategrants_current` with the recovered grants in place of the
+placeholder rows they replace.
+
+The first and the last table, the view and the commands that write them
+are the package `givingtuesday_datamart/placeholder_recovery/`, where
+the pipeline's production code goes from September 28 on. The three
+tables between them are modules of their own, and the frame's commands
+are still in `exploratory/`.
 
 The PDFs sit in `s3://givingtuesday-datamart/irs/pdf/<object_id>.pdf`,
 kept indefinitely, with the SHA-256 on the row and as the S3 checksum.
@@ -29,6 +42,22 @@ Rendered pages (`<cache>/pages200/<object_id>/pNNN.png`) are a local
 cache, not stored: one render on the box serves every reader.
 
 ## The tables
+
+**`pf_placeholder_filings`.** The work list, one row per placeholder
+filing: `object_id` (the 18 digits in the filing's url), `filerein`,
+`filer_name`, `taxyear`, `taxperend`, `declared_paid` (grants paid, Part
+I line 25 column (d)), `placeholder_paid` (the amounts on the
+placeholder rows, summed; the target a list must add up to),
+`placeholder_rows`, `placeholder_texts` (the first two), `band` (A at
+$100M and over, B at $10M, C at $1M, D below, on `placeholder_paid`),
+`filer_marked_individual`, `classifier_version`, `source_version` (the
+`_source_version` of the grant rows it was built from) and `built_at`.
+A filing is on the list when its placeholder rows sum to more than zero
+and to at least half of `declared_paid`. The command replaces the rows
+in one transaction, about a minute and a half for 24,518 filings. The
+filers left out are in `data/placeholder_recovery/exclusions.csv`, one
+row each with EIN, name, evidence and date, tracked as plain text so a
+pull request shows the row added.
 
 **`filing_images`.** The fetch outcome for a filing: `filerein`,
 `taxyear`, the IRS index year and TEOS URL, the date the IRS generated
@@ -69,6 +98,54 @@ and `decided_at`. A flagged page carries Sonnet's reading as accepted
 under the `load_single` rule; the mark is the verdict. Verdicts under
 `<version>-<rule>` are the same policy with the flagged rule overridden,
 derived without a model call.
+
+**`privategrants_recovered`.** One grant of a list that adds up to the
+filing's `placeholder_paid` within 0.5%, under one policy.
+
+| group | columns |
+|---|---|
+| key | `object_id`, `policy_version`, `target` (`paid`), `page`, `row_ordinal` |
+| content, as read | `recipient_name`, `recipient_address`, `recipient_status`, `purpose`; `amount`, numeric with cents |
+| for the matcher | `match_name` (the name, less a place printed at its end), `match_address` (the address, less the state and zip at its end), `state`, `zip5`, `state_source` (`address`, `name`, or NULL with no state) |
+| labels | `page_kind` (the reader's label for the row's page), `page_verdict` (`agreed`, `escalated`, `flagged`), `filer_marked_individual` |
+| lineage | `filerein`, `taxyear`, `image_sha256`, `dpi`, `prompt_version`, `accepted_model`, `accepted_hash`, `declared_amount` (the amount the list reconciled against), `reconciliation_error`, `work_list_source_version`, `loaded_at` |
+
+`row_ordinal` is the row's index in the accepted reading's `rows`, from
+0. So a loaded row joins to its reading on `(object_id, page,
+image_sha256, dpi, accepted_model, prompt_version, accepted_hash)`, to
+its own line there as `response->'rows'->row_ordinal`, and to its
+verdict on `(object_id, page, image_sha256, policy_version)`. A load
+buys nothing. For each filing it compares the rows the rule gives today
+with the rows stored: equal rows are left alone, with their `loaded_at`;
+anything else is deleted and written again in one transaction a filing.
+A full load also takes out the rows of a filing that left the work
+list.
+
+**`privategrants_current_with_recovered_view`.** `privategrants_current`'s
+28 columns under their own names, then `row_source`
+(`privategrants_current` or `placeholder_recovery`), the three labels,
+`state_source`, and the recovered row's key (`recovered_object_id`,
+`recovered_policy_version`, `recovered_page`, `recovered_row_ordinal`).
+
+- A loaded filing's placeholder rows are left out. They carry the whole
+  amount in `privategrants_current`, so beside the recovered rows they
+  would count the dollars twice. Grants the filer named in the form
+  itself stay.
+- A recovered row puts `match_name` in `sigocpyrbnbn1`, `match_address`
+  in `sigocpyrfaal1`, `state` in `sigocpyrfapo`, `zip5` in
+  `sigocpyrfapc`, the status in `sigocpyrfsta`, the purpose in
+  `sigocpypogoc` and the amount in `sigocpyamoun`. The columns that
+  describe the filing (filer name, period, url, source version) are
+  those of the placeholder row it replaces. So a list shows only while
+  the filing it was read from is the version `privategrants_current`
+  holds.
+- The view shows the rows of one policy, written into its definition.
+  Only the `view` command changes which. A load under another policy
+  leaves the view alone and says so.
+- `current_grants` rebuilds `privategrants_current` with `DROP ...
+  CASCADE`, which takes the view with it. `load` creates it again when
+  it is gone, and so does `view`. The matcher does not read the view
+  yet.
 
 ## How a page is decided
 
@@ -112,19 +189,19 @@ stored verdicts. Worker counts per reader (`page_verdicts.WORKERS`):
 Qwen 80, Flash Lite 24, 3.8 Flash 24, Sonnet 24; nothing in 24,131 page
 reads found the gateway's limit.
 
-## Not built yet
+## What is built, and what is not
 
-Two pieces were designed on September 28 and are not code. Until they
-are, a run takes a frame file, and nothing is loaded.
+| piece | state |
+|---|---|
+| the work list | built: `work-list` writes `pf_placeholder_filings`, and `run` reads it in place of a frame file, by tax year and with a limit |
+| the loader and the view | built: `load` writes `privategrants_recovered` and leaves the view; `check` holds the loaded rows to six rules |
+| the frame's rows, loaded | done: 398 filings, 221,969 rows, $7.03B under `v2` |
+| the extract's rows in the search | gone: the selector reads the pages and nothing else; the file is archived |
+| the matcher reading the view | not built: the name cleaner, the name-only tier and input shape version 3 go in on one rerun |
+| reading the work list | not run: no filing outside the frame is fetched. Tax years 2020 on are about $475, over the $400 cap; whether the IRS serves the images of earlier years is not measured |
 
-| piece | what it will do | today |
-|---|---|---|
-| the work list | at the start of a run, query the loaded tables for placeholder filings, over every tax year; drop the six excluded filers; skip what the tables already hold | `run --sample <frame CSV>`; the frame was drawn from GivingTuesday's one-off extract |
-| the loader | write `privategrants_recovered` from `page_verdicts` and `page_readings`, with the labels and lineage on every row, and the view the matcher reads | none |
-
-The rules both follow are in the engineering log, stages 0 and 5. The
-selector still reads the extract's itemised rows (`--xml-rows`) until
-the loader work takes them out.
+The rules the work list and the loader follow are in the engineering
+log, stages 0 and 5.
 
 ## Decisions already made
 
@@ -149,7 +226,8 @@ without a new measurement.
 | work list | built from the loaded tables, every tax year; never from GivingTuesday's one-off extract |
 | exclusions | six patient-assistance programs, by EIN; filings marked as grants to individuals are read and labelled |
 | what loads | lists within 0.5% of the declared total; rows from pages that were read only; rows from pages labelled expenditure responsibility only where a list needs them, labelled |
-| the view | drops a filing's placeholder row once its list is loaded |
+| targets | the work list's paid amount and no other; the loaded tables hold no future-payment amount, so no future-payment list loads |
+| the view | drops a filing's placeholder row once its list is loaded; shows one policy |
 
 ## Set up a box once
 
@@ -208,12 +286,35 @@ From the repo root, with the environment variables set:
 
 ```bash
 source ~/frame.env
-tmux -L frame new -s frame 'python -m givingtuesday_datamart.exploratory.placeholder_recovery run --policy v2 --sample data/exploratory/placeholder_sample_1000.csv --cache /data/irs_index'
+tmux -L frame new -s frame 'python -m givingtuesday_datamart.placeholder_recovery run --policy v2 --tax-years 2020-2025 --cache /data/irs_index'
 ```
 
 `-L frame` starts a tmux server of its own, which inherits the shell's
 environment; a session opened on a server that is already running would
 not see the variables.
+
+`run` rebuilds the work list from the loaded tables (`--keep-list` reads
+the table as it stands), takes the filings of `--tax-years` (every year
+when not given), largest placeholder amount first, and `--limit` of them
+at most. It writes them to `<logs>/work_list.csv` in the frame's
+columns, so the log directory holds the list the run covered, and runs
+that file through the stages below. `--sample <frame CSV>` runs a frame
+file instead, as before, and leaves the work list alone. Filings already
+fetched or read are skipped by the tables either way.
+
+`--no-fetch` asks the IRS for nothing, the TEOS check included. The cost
+gate then counts the pages of the filings the tables hold and prices the
+filings never fetched at what a frame filing of their band cost ($1.35,
+$0.59, $0.066, $0.020). With `--dry-run` that is the projection for a
+list nobody has approved fetching:
+
+```bash
+python -m givingtuesday_datamart.placeholder_recovery run --policy v2 --tax-years 2020-2025 --dry-run --no-fetch
+```
+
+On 2026-09-28 it found 12,822 filings, 992 of them fetched, and
+projected $474.72 for the 11,830 others. The cap of $400 stopped it
+there, as it should.
 
 `run` checks every prerequisite first (poppler, with `pdftoppm -v`
 printed and a one-page render tried; the gateway key and the datamart
@@ -225,9 +326,10 @@ message saying what. Then, each stage under a timestamped banner:
    laptop already makes zero TEOS requests, and the log says so.
 2. **the cost gate**: the stored-only pass, which names the pages without
    a reading and buys nothing, then the projection by reader at the
-   measured per-page prices and the frame's dispute and resolution rates;
-   past $400 (`--cap`) the run stops. `--dry-run` stops here, so the
-   projection can be committed before the box runs for real.
+   measured per-page prices and the frame's dispute and resolution rates,
+   and by band for the filings never fetched; past $400 (`--cap`) the
+   run stops. `--dry-run` stops here, so the projection can be committed
+   before the box runs for real.
 3. **the base readers**, as child processes of the `page_readings` CLI,
    each with its own log. Nothing spends before a render has succeeded,
    so their first chunk proves within a minute that the box can
@@ -237,6 +339,9 @@ message saying what. Then, each stage under a timestamped banner:
 5. **the final check**: the stored-only pass must buy nothing and write
    nothing.
 6. **status**: `page_readings status` and `page_verdicts status`.
+
+The load is a command of its own, run after a run or after a change of
+rule: `load --policy v2`, then `check --policy v2`.
 
 Everything printed goes to the pane and to `logs/run-<start>/run.log`;
 the readers' logs sit beside it. Detach with `Ctrl-b d`, reattach with
@@ -337,6 +442,9 @@ storage under a dollar a month.
 | base-pair wall time, 10,000 pages | under 6 h | 2 h 16 min for 9,926 pages in parallel |
 | cost of the frame | $300 to $430 as designed | $221.64 under v2 |
 | traceability | every loaded row joins to its verdict and two readings | 9,926 verdicts, 0 orphans |
+| a loaded row's lineage | one reading and one verdict a row, and the row's own line in the reading | 221,969 rows, 0 without either (`check`) |
+| a second load | writes nothing | 398 filings unchanged, 0 written |
+| no dollar counted twice | a loaded filing holds no more in the view than in `privategrants_current`, within 0.5% | 398 filings, 0 over |
 | ground-truth reproduction | 58 / 2 / 23 on the 83 sample pages | 58 / 2 / 23 under v2, the same two wrong pages |
 
 ## Housekeeping
@@ -347,13 +455,25 @@ storage under a dollar a month.
   when both start on the same filing.
 - Flash Lite at 24 workers is untested at scale; watch its error rows in
   the first minutes of the next run.
-- `report` should show paid and future lists as separate columns and
-  name the future-only reconciliations (15 filings, 800 rows on the
-  frame).
+- The selector's search for a run of pages builds the run's row list
+  again for every candidate, so a very large filing that does not add
+  up costs minutes: Johnson & Johnson 2021, 836 pages, takes 90 seconds,
+  and the frame's load spends 8 of its minutes there. Keeping a running
+  count would fix it. The selector was not touched in the loader work.
+- `load` reads the whole work list's filings before it starts. At
+  24,518 filings that is a second; it will want a filter by tax year
+  when the list is read in parts.
 
 ## Commands
 
 ```bash
+# the work list, the run over it, the load, the view, the checks
+python -m givingtuesday_datamart.placeholder_recovery work-list
+python -m givingtuesday_datamart.placeholder_recovery run --policy v2 --tax-years 2020-2025 --cache /data/irs_index [--limit N] [--keep-list] [--dry-run] [--no-fetch]
+python -m givingtuesday_datamart.placeholder_recovery load --policy v2 [--object-id ID] [--dry-run] [--flagged leave_out]
+python -m givingtuesday_datamart.placeholder_recovery view --policy v2
+python -m givingtuesday_datamart.placeholder_recovery check --policy v2
+
 # the frame and the population
 python -m givingtuesday_datamart.exploratory.placeholder_recovery sample --expand-1000
 python -m givingtuesday_datamart.exploratory.placeholder_population
@@ -370,7 +490,7 @@ python -m givingtuesday_datamart.page_verdicts status --policy v2
 python -m givingtuesday_datamart.exploratory.placeholder_recovery run --policy v2 --sample data/exploratory/placeholder_sample_1000.csv --cache /data/irs_index [--dry-run]
 python -m givingtuesday_datamart.exploratory.placeholder_recovery estimate --policy v2 --sample data/exploratory/placeholder_sample_1000.csv
 python -m givingtuesday_datamart.exploratory.placeholder_recovery transcribe --policy v2 --sample data/exploratory/placeholder_sample_1000.csv --stored-only
-python -m givingtuesday_datamart.exploratory.placeholder_recovery report --policy v2 --sample data/exploratory/placeholder_sample_1000.csv --out data/exploratory/placeholder_report_v2_1000.csv [--flagged leave_out]
+python -m givingtuesday_datamart.exploratory.placeholder_recovery report --policy v2 --sample data/exploratory/placeholder_sample_1000.csv --out data/exploratory/placeholder_report_v2_1000.csv [--flagged leave_out] [--with-future]
 
 # the scorer
 python -m givingtuesday_datamart.exploratory.placeholder_ground_truth verdicts --policy v2
