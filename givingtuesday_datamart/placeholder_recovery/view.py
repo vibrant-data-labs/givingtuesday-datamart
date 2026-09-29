@@ -1,7 +1,7 @@
 """The view consumers read: ``privategrants_current`` with the recovered
 grants in place of the placeholder rows they replace.
 
-``privategrants_current_with_recovered_view`` has ``privategrants_current``'s
+``privategrants_current_w_ocred`` has ``privategrants_current``'s
 columns under their own names, then where each row came from
 (``row_source``) and, for a recovered row, its labels and its key in
 ``privategrants_recovered``.
@@ -48,7 +48,7 @@ from sqlalchemy import text
 from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart.placeholder_recovery import classifier, loader
 
-VIEW = "privategrants_current_with_recovered_view"
+VIEW = "privategrants_current_w_ocred"
 CURRENT = "privategrants_current"
 FROM_CURRENT = "privategrants_current"
 FROM_RECOVERY = "placeholder_recovery"
