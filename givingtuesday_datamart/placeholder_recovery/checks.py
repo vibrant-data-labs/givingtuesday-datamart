@@ -16,11 +16,19 @@ Each is one query that counts what breaks a rule, so zero passes:
 ``double count``    a loaded filing that holds more dollars in the view than
                     in ``privategrants_current``, by more than the tolerance
 ``placeholder``     a loaded filing with a placeholder row still in the view
+``same rows``       a loaded filing where the view leaves out another number
+                    of rows than the work list counted as placeholders
 ==================  ==========================================================
 
+The work list and the view build their test for a placeholder row from the
+same patterns (``classifier``). ``same rows`` holds them to it on the data:
+what the view drops is what the work list counted, filing by filing.
+
 The primary keys of the three tables make "its row" one row at most, so a
-row that joins joins once. The two checks on the view read it one loaded
-filing at a time, through the (filerein, taxyear) index.
+row that joins joins once. The checks on the view read it one loaded
+filing at a time, through the (filerein, taxyear) index: each counts
+inside a LATERAL, which holds the planner to it. As an EXISTS the
+placeholder check ran the patterns over the whole view, four minutes.
 """
 
 from __future__ import annotations
@@ -83,9 +91,21 @@ CHECKS: Mapping[str, str] = {
     """,
     "placeholder": f"""
         SELECT count(*) FROM ({_LOADED}) l
-        WHERE EXISTS (SELECT 1 FROM {VIEW} g
-                      WHERE g.filerein = l.filerein AND g.taxyear = l.taxyear AND g.row_source = '{FROM_CURRENT}'
-                        AND {classifier.pointer_sql(classifier.name_sql('g'))})
+        CROSS JOIN LATERAL (SELECT count(*) AS n FROM {VIEW} g
+                            WHERE g.filerein = l.filerein AND g.taxyear = l.taxyear
+                              AND g.row_source = '{FROM_CURRENT}'
+                              AND {classifier.pointer_sql(classifier.name_sql('g'))}) p
+        WHERE p.n > 0
+    """,
+    "same rows": f"""
+        SELECT count(*) FROM ({_LOADED}) l
+        JOIN {work_list.TABLE} w ON w.object_id = l.object_id
+        CROSS JOIN LATERAL (SELECT count(*) AS n FROM privategrants_current g
+                            WHERE g.filerein = l.filerein AND g.taxyear = l.taxyear) c
+        CROSS JOIN LATERAL (SELECT count(*) AS n FROM {VIEW} g
+                            WHERE g.filerein = l.filerein AND g.taxyear = l.taxyear
+                              AND g.row_source = '{FROM_CURRENT}') v
+        WHERE c.n - v.n <> w.placeholder_rows
     """,
 }
 

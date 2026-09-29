@@ -402,9 +402,13 @@ no model cost:
 | a second load | writes nothing | the table's digest, its 221,969 rows and every `loaded_at` are the same after it |
 | lineage | every row joins to one reading and one verdict | 0 rows without a reading, 0 whose name is not the name on their line of it, 0 without a verdict |
 
-`check` runs the last four and two more (the work list holds the amount
+`check` runs the last four and three more (the work list holds the amount
 a list reconciled against; no placeholder row of a loaded filing is left
-in the view) in four minutes.
+in the view; the view leaves out as many rows of a filing as the work
+list counted as placeholders) in seven seconds. The work list and the
+view build their test for a placeholder row from the same patterns, in
+`classifier.py`, and the last check holds them to it on the data: 422
+rows left out, 422 counted, no filing where the two differ.
 
 What the build found that the design had not:
 

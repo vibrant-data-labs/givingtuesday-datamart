@@ -200,7 +200,7 @@ reads found the gateway's limit.
 | piece | state |
 |---|---|
 | the work list | built: `work-list` writes `pf_placeholder_filings`, and `run` reads it in place of a frame file, by tax year and with a limit |
-| the loader and the view | built: `load` writes `privategrants_recovered` and leaves the view; `check` holds the loaded rows to six rules |
+| the loader and the view | built: `load` writes `privategrants_recovered` and leaves the view; `check` holds the loaded rows to seven rules |
 | the frame's rows, loaded | done: 398 filings, 221,969 rows, $7.03B under `v2` |
 | the extract's rows in the search | gone: the selector reads the pages and nothing else; the file is archived |
 | the matcher reading the view | not built: the name cleaner, the name-only tier and input shape version 3 go in on one rerun |

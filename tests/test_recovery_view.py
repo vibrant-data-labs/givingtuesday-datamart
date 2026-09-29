@@ -64,8 +64,22 @@ def test_the_view_shows_one_policys_paid_rows():
         view.view_sql("v2'; DROP TABLE privategrants_current; --")
 
 
+def test_the_view_and_the_work_list_test_a_placeholder_row_the_same_way():
+    """One set of patterns, on one expression for the name, in both."""
+    from givingtuesday_datamart.placeholder_recovery import work_list
+
+    name = classifier.name_sql("g")
+    sql = view.view_sql("v2")
+    assert classifier.pointer_sql(name) in sql                                  # the view: the test on the name
+    assert f"SELECT {name} AS name" in work_list.QUERY                          # the work list: the same name,
+    assert classifier.pointer_sql("n.name") in work_list.QUERY                  # the same test on it
+    for pattern in (classifier.WITHHELD, *classifier.POINTER):
+        assert sql.count(f"'{pattern}'") == 2 and work_list.QUERY.count(f"'{pattern}'") == 1
+
+
 def test_every_check_reads_the_loaded_rows_of_one_policy():
-    assert list(checks.CHECKS) == ["reading", "verdict", "work list", "adds up", "double count", "placeholder"]
+    assert list(checks.CHECKS) == ["reading", "verdict", "work list", "adds up", "double count", "placeholder",
+                                   "same rows"]
     assert all(":version" in sql and loader.TABLE in sql for sql in checks.CHECKS.values())
     assert view.VIEW in checks.CHECKS["double count"] and view.VIEW in checks.CHECKS["placeholder"]
 
