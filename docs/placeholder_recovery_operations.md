@@ -26,7 +26,7 @@ call, and a change of rule re-derives from stored readings for free.
 | `page_verdicts` | page decided under one policy | `(object_id, page, image_sha256, policy_version)` | `page_verdicts.agree` |
 | `privategrants_recovered` | grant of a list that adds up, under one policy | `(object_id, policy_version, target, page, row_ordinal)` | `placeholder_recovery.loader.load` |
 
-Consumers read one view, `privategrants_current_w_ocred`:
+Consumers read one view, `privategrants_current_w_recovered`:
 `privategrants_current` with the recovered grants in place of the
 placeholder rows they replace.
 
@@ -124,7 +124,7 @@ anything else is deleted and written again in one transaction a filing.
 A full load also takes out the rows of a filing that left the work
 list.
 
-**`privategrants_current_w_ocred`.** `privategrants_current`'s
+**`privategrants_current_w_recovered`.** `privategrants_current`'s
 28 columns under their own names, then `row_source`
 (`privategrants_current` or `placeholder_recovery`), the labels,
 `state_source`, and the recovered row's key (`recovered_object_id`,

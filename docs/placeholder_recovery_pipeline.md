@@ -434,11 +434,11 @@ What the build found that the design had not:
 - **A load under another policy would have repointed the view.** The
   view shows one policy; only `view --policy` changes which.
 
-The view is `privategrants_current_w_ocred` (named by Zein on
+The view is `privategrants_current_w_recovered` (named by Zein on
 2026-09-29; built as `privategrants_current_with_recovered_view` and
-renamed in place): `privategrants_current` with the rows read from the
-images, `_w_` as in the matcher's `privategrants_w_recipients`. It
-presents the paid rows in
+renamed in place): `privategrants_current` with the rows of
+`privategrants_recovered`, `_w_` as in the matcher's
+`privategrants_w_recipients`. It presents the paid rows in
 `privategrants_current`'s columns (`match_name` in `sigocpyrbnbn1`;
 `match_address`, the address as read less the state and zip taken from
 its end, in `sigocpyrfaal1`; `state` and `zip5` in `sigocpyrfapo` and
@@ -1679,7 +1679,7 @@ Decided on 2026-09-29 (Zein):
 
 Still open:
 
-- Whether the view, `privategrants_current_w_ocred`, stays an object of
+- Whether the view, `privategrants_current_w_recovered`, stays an object of
   its own or becomes what the matcher's first view reads, with no name
   of its own.
 - Whether the IRS still serves the images of tax years before 2020:

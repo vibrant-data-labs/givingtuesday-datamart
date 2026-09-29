@@ -16,7 +16,7 @@ stages 0 and 5; how to run it is ``docs/placeholder_recovery_operations.md``.
 ``work_list``               ``pf_placeholder_filings``: one row per filing to fetch and read
 ``address``                 the state and zip an address ends with
 ``loader``                  ``privategrants_recovered``: one row per recovered grant
-``view``                    ``privategrants_current_w_ocred``
+``view``                    ``privategrants_current_w_recovered``
 ``run``                     ``run`` over the work list in place of a frame file
 ==========================  ==================================================
 """
