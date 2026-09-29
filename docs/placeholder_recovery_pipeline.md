@@ -42,7 +42,6 @@ flowchart LR
     M[matcher<br/>name + address → EIN]
     R[6 · report + gates]
     DB --> C0 --> C1 --> C2 --> C3 --> C4 --> C5 --> M
-    DB -- XML-itemised rows<br/>(named Part XV, expenditure responsibility) --> C4
     C4 --> R
     C1 -. no image / 404 .-> Q[queue: ProPublica,<br/>state registry, IRS report]
     C2 -. no attachment pages .-> R
@@ -55,10 +54,16 @@ and never modifies an upstream one. Anything can be rerun from its input.
 
 ### 0 · Classify — which filings need their PDF
 
-**Input:** `privategrants_current` (2020+) joined to the declared total in
-`basic_fields_pf` (Part I line 25, `arecgpdcprps`).
-**Output:** `pf_placeholder_filings` — one row per filer-year: object id,
-class, paid target, pointer text, classifier version.
+**Input:** `privategrants_current`, every tax year it holds, joined to
+the declared total in `basic_fields_pf` (Part I line 25, `arecgpdcprps`).
+The frame and the by-year table used 2020 on.
+**Output:** the work list, `pf_placeholder_filings` — one row per
+filer-year: object id, class, paid target, pointer text, whether the
+placeholder row is marked `I`, classifier version. Not built: the frame
+was a CSV file drawn from GivingTuesday's one-off extract, and `run`
+still takes a file. Decided on 2026-09-28: the list is built from the
+loaded tables at the start of each run, and that extract is no longer a
+source.
 
 The rule, measured in
 [placeholder_classifier_assessment.sql](../data/exploratory/placeholder_classifier_assessment.sql):
@@ -67,11 +72,20 @@ pattern) hold at least half its declared total. Everything else gets a
 class that says why not — *mixed*, *withheld* ("available upon request":
 no PDF will help), *various* (no pointer; untested), *pass-through* (one
 named recipient carrying the whole year), *itemised*. Patient-assistance
-EINs and status-`I` rows are excluded here, by EIN and flag, never by name.
+programs are excluded here by EIN, never by name: six of them since
+2026-09-28 (Genentech, GlaxoSmithKline, Boehringer Ingelheim, and from
+that date Sanofi Cares, Merck and Novartis). Filings whose placeholder
+row is marked `I` were excluded too until that date. They are now read,
+and labelled at the load: the mark also caught ordinary grantmakers.
 
-Over 2020–2025 that is ~13,000 fetch filings and $64.6B, of which ~4,600
-filings are patient assistance. The organisational remainder is the
-population: roughly 8,500 filings, $25–30B.
+Measured on the loaded tables on 2026-09-28, over tax years 2009 to
+2025: 24,539 placeholder filings and $81.3B declared. The six excluded
+programs are 21 filings and $32.7B. The work list is 24,518 filings and
+$48.7B, of which 12,822 filings are for tax years 2020 on and 743 carry
+the `I` mark. The extract the frame came from held 9,515 for 2020 to
+2024, where the loaded tables hold 12,115. The earlier figures in this
+log (~13,000 fetch filings, ~8,500 organisational) were estimates made
+before the classifier was measured.
 
 ### 1 · Resolve — the IRS's own copies
 
@@ -230,39 +244,70 @@ of the target.
 
 ### 5 · Accept and load
 
-Not built. The design below was settled on 2026-09-28, on the
-measurements in the findings doc's *What the rows carry for matching*
-(`placeholder_recovered_rows.py`, commands `address` and `names`).
+Not built. The design was settled on 2026-09-28 in two rounds: first on
+the measurements in the findings doc's *What the rows carry for
+matching* (`placeholder_recovered_rows.py`), then on what may load at
+all. Nothing below is code yet.
 
 **Output:** `privategrants_recovered`, one row per grant of a reconciled
 list. It is derived from `page_verdicts` and `page_readings` under a
 policy, so a load buys nothing and can be repeated.
 
-| columns | what |
-|---|---|
-| content | recipient name, address, status and purpose as read; amount, numeric with cents |
-| for the matcher | `state` and `zip5`, read off the end of the address, or the state off a name printed with its place ("Mayo Clinic, Rochester, MN"); `state_source`: address, name or empty. The street is not split from the city: the matcher scores the address as one string |
-| lineage | object id, filer EIN, tax year, image sha256, page, row ordinal, policy version, the page's verdict, the accepted model and request hash (the reading the row came from), the target (paid or future), the declared amount it reconciled against, the error, loaded at |
-| key | object id, policy version, target, page, ordinal; a reload deletes and rewrites a filing's rows under the policy |
+| columns | what | where it comes from |
+|---|---|---|
+| content | recipient name, address, status and purpose as read; amount, numeric with cents | the accepted reading's row in `page_readings.response` |
+| for the matcher | `state` and `zip5`; `state_source`: address, name or empty | read off the end of the address, or off a name printed with its place ("Mayo Clinic, Rochester, MN"). The street is not split from the city: the matcher scores the address as one string |
+| labels | `page_kind`, the reader's label for the page; `page_verdict`, agreed, escalated or flagged; `filer_marked_individual` | the reading; `page_verdicts`; the work list, from the placeholder row's status in `privategrants_current` |
+| lineage | object id, filer EIN, tax year, image sha256, page, row ordinal, policy version, the accepted model and request hash, the target (paid or future), the declared amount it reconciled against, the error, loaded at | the three tables and the work list |
+| key | object id, policy version, target, page, ordinal | a reload deletes and rewrites a filing's rows under the policy |
+
+The selector's `GrantRow` carries the page, the name, the amount and the
+five cells as read. It does not carry the page's label, so the loader
+looks the label up by page in the readings. No change to
+`page_readings` is needed.
 
 What loads:
 
-1. **Reconciled** (within 0.5%): load. Rows the XML itemises took part in
-   the reconciliation and are not loaded: GivingTuesday's tables hold them.
-2. **Labelled, 90 to 110% covered**: not loaded until the coverage
-   threshold is decided (Open decisions). On the OCR sample this class
-   was 14 filings and $1.55B.
-3. **Future-payment lists** (line 3b): loaded with target `future` and
+1. **Reconciled** lists, within 0.5%. The tolerance stays. It lets in a
+   coincidence now and then (three on the frame), and that is accepted.
+2. **Only rows from pages that were read.** Nothing from GivingTuesday's
+   one-off extract is loaded, and its rows leave the search. Grants named
+   in the form itself are already in `privategrants_current`. The
+   extract's expenditure-responsibility rows are in no table of ours and
+   stay out: one frame filing, $22.3M, no longer reconciles.
+3. **Labelled, 90 to 110% covered**: not loaded. On the frame this is 56
+   filings and $825M of paid grants. A tolerance that depends on the
+   filer's size is a later question.
+4. **Pages labelled expenditure responsibility**: their rows load only
+   in a filing whose list does not add up without them, and carry the
+   label. On the frame that is 67 rows in 4 filings. Ledger pages no list
+   needs, 1,863 rows and $886M on the frame, stay in `page_readings`.
+5. **Future-payment lists** (line 3b): loaded with target `future` and
    left out of the matcher's view. They are commitments, not payments.
-4. **Flagged pages**: their rows carry the verdict. Leaving them out is a
+   The loaded tables hold no future amounts, so on the work list there is
+   no future target to reconcile against; this applies to the frame.
+6. **Flagged pages**: their rows carry the verdict. Leaving them out is a
    filter on the view, not a reload.
+7. **Filings marked as grants to individuals**: read, loaded, and
+   labelled `filer_marked_individual`. A row's own status, where the
+   list prints one, is kept as read.
+
+What the tables cannot say: whether a row names a person. The readers
+returned a status for 21% of rows on paid-list pages and "I" for 406
+rows. About 1,330 scholarship filings on the work list carry no mark at
+all. Their rows will load with students' names, and the matcher will
+leave them unmatched. A text-only pass over the stored names could label
+persons later without reading a page again.
 
 Into the matcher: a view presents the paid rows in
 `privategrants_current`'s columns (the address as read, less the state
 and zip taken from its end, in `sigocpyrfaal1`; `state` and `zip5` in
 `sigocpyrfapo` and `sigocpyrfapc`), unioned with `privategrants_current`
-and tagged `match_source = 'ocr_recovery'`. `MATCHING_INPUT_SHAPE_VERSION`
-goes to 3. Three kinds of row:
+and tagged `match_source = 'ocr_recovery'`. **The view drops a filing's
+placeholder row once its list is loaded.** That row carries the whole
+amount in `privategrants_current`, so keeping it beside the recovered
+rows would count the dollars twice. `MATCHING_INPUT_SHAPE_VERSION` goes
+to 3. Three kinds of row:
 
 - **With a zip:** the matcher as it is. Zip narrows the search; name and
   address are scored.
@@ -1446,9 +1491,28 @@ carry (Zein; the design is stage 5 above):
   belongs to exactly one filer. One-word names are not excluded.
 - The name cleaner goes into the main matcher, on the same rerun.
 
+Decided on 2026-09-28, second round, on what may load (Zein; the
+evidence is in the findings doc's decisions table):
+
+- The work list is built from the loaded tables at the start of each
+  run, over every tax year they hold. GivingTuesday's one-off extract is
+  no longer a source: nothing from it is loaded or used in the search.
+- Six patient-assistance programs are left out, by EIN.
+- Filings marked as grants to individuals are read, and labelled at the
+  load.
+- Rows from pages labelled expenditure responsibility load only where a
+  list needs them, with the label.
+- The 0.5% tolerance stays, and lists within 10% of the total do not
+  load. A tolerance by filer size is a later question.
+- The view drops a filing's placeholder row once its list is loaded.
+
 Still open:
 
-- The coverage acceptance threshold, after ground truth.
+- Whether the IRS still serves the images of tax years before 2020:
+  11,696 filings on the work list, none fetched.
+- The cost cap for reading the 2020-on work list, about $475 against the
+  frame's cap of $400.
+- A label for rows that name a person.
 - What to do with "various" filers: twenty PDFs would tell.
 - Whether GT will run any of this upstream; the lists are in images they
   already link to.

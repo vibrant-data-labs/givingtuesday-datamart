@@ -1,6 +1,6 @@
 # Placeholder recovery: operations
 
-Vibrant Data Labs, September 25, 2026. How the placeholder-recovery
+Vibrant Data Labs, September 25, 2026; updated September 28. How the placeholder-recovery
 pipeline is run and what it writes: the three tables, the policies, the
 one command, how to watch and stop a run, and what a run costs. The
 findings are in [placeholder_grant_recovery.md](placeholder_grant_recovery.md);
@@ -112,6 +112,20 @@ stored verdicts. Worker counts per reader (`page_verdicts.WORKERS`):
 Qwen 80, Flash Lite 24, 3.8 Flash 24, Sonnet 24; nothing in 24,131 page
 reads found the gateway's limit.
 
+## Not built yet
+
+Two pieces were designed on September 28 and are not code. Until they
+are, a run takes a frame file, and nothing is loaded.
+
+| piece | what it will do | today |
+|---|---|---|
+| the work list | at the start of a run, query the loaded tables for placeholder filings, over every tax year; drop the six excluded filers; skip what the tables already hold | `run --sample <frame CSV>`; the frame was drawn from GivingTuesday's one-off extract |
+| the loader | write `privategrants_recovered` from `page_verdicts` and `page_readings`, with the labels and lineage on every row, and the view the matcher reads | none |
+
+The rules both follow are in the engineering log, stages 0 and 5. The
+selector still reads the extract's itemised rows (`--xml-rows`) until
+the loader work takes them out.
+
 ## Decisions already made
 
 Settled by measurement in September 2026; the evidence is in the
@@ -132,6 +146,10 @@ without a new measurement.
 | renders | not stored; one render on the box serves every reader |
 | tables | raw `CREATE TABLE IF NOT EXISTS`, no migration tool |
 | tests | no database in unit tests: in-memory stores and the fake gateway client; the data-dependent criteria run by hand |
+| work list | built from the loaded tables, every tax year; never from GivingTuesday's one-off extract |
+| exclusions | six patient-assistance programs, by EIN; filings marked as grants to individuals are read and labelled |
+| what loads | lists within 0.5% of the declared total; rows from pages that were read only; rows from pages labelled expenditure responsibility only where a list needs them, labelled |
+| the view | drops a filing's placeholder row once its list is loaded |
 
 ## Set up a box once
 
@@ -303,10 +321,12 @@ t3.xlarge:
 
 Rule of thumb: about 2.5 hours per 10,000 pages for the base pair in
 parallel and 1.5 hours for the escalation readers; about $0.02 to $0.03 a
-page all-in. The remaining 8,515 filings of bands C and D are about
-14,800 pages, about $270 and a day; the full population is about 24,700
-pages and $575, of which $304 is spent. The server is a few dollars a
-run and the S3 storage under a dollar a month.
+page all-in. The work list from the loaded tables, for tax years 2020
+on, leaves 11,830 filings to read: about 22,600 pages, about $475 and
+nine hours of reading. With the $304 already spent that is about $780.
+The 11,696 filings before 2020 would be up to $510 more, if the IRS
+serves their images. The server is a few dollars a run and the S3
+storage under a dollar a month.
 
 ## Success metrics, as measured on the frame run
 

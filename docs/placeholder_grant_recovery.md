@@ -1,11 +1,14 @@
 # Recovering the Grants Behind "SEE ATTACHMENT"
 
-Vibrant Data Labs, September 25, 2026.
+Vibrant Data Labs, September 25, 2026; updated September 28.
 
 Status: measured on a frame of 1,000 filings under the page gate on
 September 23 and 24, 2026, for $222 in model calls, after a sample of 100
-filings read four times. Ready to run on the remaining 8,515 filings; not
-yet loaded into the datamart.
+filings read four times. On September 28 the rules for loading were
+settled, and the work list moved from GivingTuesday's one-off extract to
+the loaded tables, where it is 24,518 filings across tax years 2009 to
+2025. The work-list command and the loader are designed and not built.
+Nothing is loaded into the datamart.
 
 This is the findings document. How the method was built and measured,
 step by step, is the engineering log,
@@ -28,12 +31,14 @@ and the [production diagram](https://whimsical.com/FXWZBu4FE9RzpMYqWmupqd).
   foundation declared. A page is loaded only when two different models
   agree on its rows; four are tried in turn.
 - On the 1,000-filing frame, every filing over $10M plus a 6% sample of
-  the rest, it recovered the lists of 407 filings: $8.03B, 48.3% of the
-  $16.6B those filings declared (49.1% counting 15 filings whose
-  future-payment list reconciled). Leaving out every page no two readers
-  agreed on, the floor is 333 filings and 36.4%. Bands A and B, every
-  filing over $10M, are a census and are done: 216 of 460 filings,
-  $7.82B.
+  the rest, it recovered the lists of 407 filings. Credited with their
+  paid list, and with their future-payment list where that reconciled
+  too, that is $8.03B, 48.3% of the $16.6B on the frame's placeholder
+  rows (49.1% counting 15 filings whose future-payment list alone
+  reconciled). In paid grants only it is $7.21B of $14.57B, 49.5%.
+  Leaving out every page no two readers agreed on, the floor is 333
+  filings and 36.4%. Bands A and B, every filing over $10M, are a census
+  and are done: 216 of 460 filings, $7.82B.
 - What stops recovery is the data, not the readers. 447 of the 1,000
   filings, 34% of the dollars, have nothing to read: the IRS serves no
   image (169) or the PDF is the IRS's own rendering with nothing
@@ -44,26 +49,36 @@ and the [production diagram](https://whimsical.com/FXWZBu4FE9RzpMYqWmupqd).
   left flagged are loaded from Sonnet alone with a mark; checked by hand
   on 57 such pages from the small filings, Sonnet had 40 pages exactly
   right and 94% of the dollars.
-- Bands C and D in full are 8,515 more filings, about $270 in model
-  calls and a day on one small EC2 server, adding an estimated 3,000
-  filings and $3.2B. Projected total: about 3,400 filings and $11.4B of
-  the $25.0B in placeholder rows.
-- Open before loading: the rule for flagged pages (load with a mark, as
-  now, or leave out), the 3,091 "various" filings ($35.5B) the classifier
-  never sends to the PDF, and the loader and matcher pass that turn
-  235,622 recovered rows into EINs, designed and not yet built.
+- The work list now comes from the loaded tables, not from
+  GivingTuesday's one-off extract, which held a quarter fewer filings.
+  After six patient-assistance programs are left out it is 24,518
+  filings, $48.7B, across tax years 2009 to 2025. For tax years 2020 on,
+  11,830 filings are still to read: about $475 in model calls, for an
+  estimated 4,600 filings and $15.0B of the $32.2B on their placeholder
+  rows. The 11,696 filings before 2020 would cost up to $510; whether the
+  IRS still serves their images is not yet measured.
+- The rules for loading were settled on September 28. A list loads when
+  it adds up within 0.5%. Every loaded row comes from a page that was
+  read. Rows from pages labelled expenditure responsibility load only
+  where a list needs them, and carry the label. Filings marked as grants
+  to individuals are read and labelled, not skipped.
+- Still open: the 3,091 "various" filings ($35.5B) the classifier never
+  sends to the PDF, the images of tax years before 2020, and the build
+  itself. The work-list command, the loader and the matcher pass that
+  turn the recovered rows into EINs are designed and not yet built.
 
 ## Terms
 
 | term | meaning |
 |---|---|
 | placeholder filing | a 990-PF whose grant list in the form is a "see attached" row (or similar) instead of the grants themselves; the real list is in an attachment |
+| work list | every placeholder filing in the loaded tables, less the excluded filers; what a run fetches and reads |
 | declared total | the amount the foundation wrote on its "see attached" row in the grants table, Part XV, with line 3a (paid) and line 3b (approved for future payment) kept separate; every recovered list has to add up to it within 0.5%, it is what gets credited, and the bands and every dollar figure below are cut on it |
 | grants paid, Part I line 25 | the whole year's grants from the form's top section, column (d); used only in the population table, where a filing is fetched when its pointer rows hold at least half of it; it differs from the declared total because it also counts the grants the filer itemised in the form and leaves out future payments |
 | IRS image | the PDF of the whole return the IRS publishes on its Tax Exempt Organization Search site (TEOS); fetching it is free |
 | attachment | the filer's own pages at the end of the image, after the IRS-rendered form pages; only these are sent to the models |
 | readable filing | a filing whose image the IRS served and that has an attachment |
-| bands | filings grouped by declared total: A over $100M, B $10M to $100M, C $1M to $10M, D under $1M |
+| bands | filings grouped by declared total: A over $100M, B $10M to $100M, C $1M to $10M, D under $1M; on the work list the paid amount alone decides |
 | the sample, the frame | the first 100 filings, drawn to develop the method; the 1,000 the method was tested on, which contain them |
 | readers | the vision-language models; the base pair (Qwen3-VL, Gemini 3.5 Flash Lite) reads every page, the escalation readers (Gemini 3.8 Flash, then Claude Sonnet 5) only the pages the base pair disagrees on |
 | page verdict | agreed (the base pair matched), escalated (an escalation reader matched an earlier reading), or flagged (no two readers agree) |
@@ -131,12 +146,65 @@ are separate totals and separate statements. Each is reconciled on its
 own.
 
 The frame was drawn from GivingTuesday's 2020 to 2024 extract of grant
-rows, where every filing with a pointer row counts, with no half test,
-and the pointer rows themselves carry $25.0B across 9,515 filings. That
-is the population the projections below scale to, and its dollars are
-declared totals in the sense above. The table above is larger because it
-counts each filing's whole Part I line 25 and is measured on the loaded
-datamart, which also holds part of 2025.
+rows, a one-off CSV, where every filing with a pointer row counts, with
+no half test, and the pointer rows themselves carry $25.0B across 9,515
+filings. The frame's results are measured on that population, and its
+dollars are declared totals in the sense above. The table above is
+larger because it counts each filing's whole Part I line 25 and is
+measured on the loaded datamart, which also holds part of 2025.
+
+### The work list, from the loaded tables
+
+Decided on September 28: the list of filings to read comes from the
+loaded tables, never from the one-off CSV, and it covers every tax year
+they hold. The CSV lacked a quarter of the filings. For 2020 to 2024 the
+loaded tables hold 12,115 placeholder filings against its 9,515, and
+none of the 40 largest missing ones appears anywhere in the file. Of the
+frame's 1,000 filings, 992 are in the loaded tables under the same
+object id, 989 of them with the same amount on the placeholder row; 7 of
+the other 8 are there as another version of the same return.
+
+| tax years | placeholder filings | on their placeholder rows | still to read | estimated model cost |
+|---|---|---|---|---|
+| before 2020 (2009 to 2019) | 11,696 | $16.3B | 11,696 | up to $510 |
+| 2020 on | 12,822 | $32.2B | 11,830 | about $475 |
+| all | 24,518 | $48.5B | 23,526 | |
+
+This was measured by a one-time query on 2026-09-28. The command that
+builds the list at the start of each run is not built yet. The count
+rises from 42 filings for tax year 2009 to 2,925 for 2020 and falls to
+2,012 for 2024. Whether the IRS still serves the images of the earlier
+years is not measured: every filing read so far was processed by the IRS
+in 2021 or later.
+
+Six filers are left out, by EIN. All are drug-makers' patient-assistance
+programs. They give medicine to patients, so there is no recipient
+organization to find. They hold 21 filings and $32.7B, 40% of all
+placeholder dollars.
+
+| filer | EIN | tax years | declared | left out since | evidence on the filing |
+|---|---|---|---|---|---|
+| Genentech Patient Foundation | 460500266 | 2020 to 2024 | $16.21B | the sample | placeholder row "Eligible Patients", purpose "Provide Prescription Drugs" |
+| Sanofi Cares North America | 431614543 | 2021 to 2023 | $6.16B | Sept 28 | purpose "to provide free drugs to ill, needy or infant patients" |
+| GlaxoSmithKline Patient Access | 200031992 | 2019 to 2024 | $4.23B | the sample | purpose "for the care of the ill and needy" |
+| Boehringer Ingelheim Cares Foundation | 311810072 | 2020 to 2024 | $3.92B | the sample | donated medicine, from the capture analysis of August |
+| Merck Patient Assistance Program | 010575520 | 2024 | $1.91B | Sept 28 | its four itemised years list individuals only |
+| Novartis Patient Assistance Foundation | 262502555 | 2010 | $0.24B | Sept 28 | purpose "to provide single sourced, life sustaining medications" |
+
+Exclusion stays by EIN, with the evidence recorded, never by a pattern
+on the name. Of 15 placeholder filers with "Cares", "Patient" or
+"Assistance" in the name, nine are ordinary corporate foundations such
+as Amcor Cares and Caleres Cares. A second signal was tried and set
+aside: the share of a filer's rows whose name sits in the form's person
+field. Some filing software puts organization names there, and the
+Howard G. Buffett Foundation, an ordinary grantmaker, scores 92% on it.
+
+Filings whose placeholder row is marked "I", for individual, are no
+longer skipped. There are 743 of them, $0.39B. Two thirds are
+scholarship funds; the rest include ordinary grantmakers such as CSX
+Foundation 2024. They are read like any other filing and labelled at
+the load. About 1,330 more scholarship filings, $0.45B, carry no such
+mark and are on the list in any case.
 
 ## Where the documents come from
 
@@ -243,8 +311,20 @@ earlier page ended with a total equal to a declared amount, its list is
 closed, and the next page starts a new one.
 
 The XML sometimes itemises a few grants beside the placeholder, and the
-expenditure-responsibility statement lists more. Those rows are exact and
-go into the search too. Hall 2023 reconciles only with them.
+expenditure-responsibility statement lists more. On the frame those rows
+went into the search too, taken from GivingTuesday's one-off extract.
+Decided on September 28: they leave the search with the extract.
+Without them, 60 of the 61 frame filings that had such rows and a read
+attachment still reconcile. Elbridge Stuart Foundation 2021, $22.3M,
+does not. The code reads them until the loader work takes them out.
+
+Pages the readers label as an expenditure-responsibility statement are a
+group of their own. They join a filing's list only when the paid pages
+do not add up without them. On the frame 287 such pages hold 1,930 rows
+and $889M, in 39 filings. Of those rows, 67 are in a reconciled list,
+$3.2M in 4 filings. The statement is a ledger that repeats a grant every
+year until the grantee has spent it, so the rest must not load as
+grants.
 
 ## Results on the frame
 
@@ -269,6 +349,42 @@ never the transcribed sum.
 | with flagged pages left out, the floor | 333 (33%): A 12, B 148, C 42, D 131 | $6.05B (36.4%) |
 | the 100-filing sample, for comparison | 47 (47%) | 53.3% |
 | the 390 filings added in bands C and D | 131 (34%) | 35.2% |
+
+The dollars above credit each of the 407 filings with its paid list and,
+where it reconciled too, its future-payment list. That adds $0.81B in 56
+filings, and 4 more reconciled only against the two together. In paid
+grants alone:
+
+| band | in frame | reconciled | paid grants declared | paid grants recovered | share |
+|---|---|---|---|---|---|
+| A | 22 | 15 | $4,134M | $2,507M | 60.6% |
+| B | 438 | 201 | $9,909M | $4,496M | 45.4% |
+| C | 137 | 51 | $429M | $173M | 40.4% |
+| D | 403 | 140 | $99M | $36M | 36.8% |
+| all | 1,000 | 407 | $14,571M | $7,213M | 49.5% |
+
+The loaded tables hold paid amounts only, so the work list and its
+estimates are in paid grants, at these rates.
+
+How closely the 407 lists add up to the declared paid total:
+
+| the rows are off by | filings | paid grants |
+|---|---|---|
+| under $1 | 314 (77%) | $3.67B |
+| under $100 | 5 | $0.01B |
+| under 0.1% | 39 | $2.34B |
+| 0.1% to 0.5% | 49 | $1.19B |
+
+A list that closes only inside the tolerance can be a coincidence. Three
+on the frame are. Bader Philanthropies 2022, Paso del Norte 2020 and
+Freeman 2020 each reach their total with the last few pages of an
+expenditure-responsibility ledger, off by $8,600 to $40,000, and those
+pages hold grants paid in earlier years. Field Family 2023 is the
+opposite case: its whole list is filed under that heading and adds up to
+the dollar. The 0.5% tolerance stays, decided on September 28, and the
+three are accepted as the price of it. The 56 filings whose list is
+present and covers 90% to 110% of the total, $825M of paid grants, do
+not load.
 
 What is not recovered:
 
@@ -454,23 +570,36 @@ such, and the name cleaner goes into the main matcher.
 
 ## Shipping the rest
 
-Reading the 8,515 filings of bands C and D not yet in the frame costs
-about $270 in model calls and a day on the box, and adds an estimated
-3,000 filings and $3.2B. With bands A and B a census, the projected total
-is about 3,400 filings and $11.4B of the $25.0B in placeholder rows.
+The first estimate, made on GivingTuesday's extract, was 8,515 filings
+still to read, about $270, and a projected total of 3,400 filings and
+$11.4B. The work list from the loaded tables is larger and replaces it.
+For tax years 2020 on, at the frame's rates in paid grants:
 
-| band | population | still to read | estimated cost | frame rate, filings / dollars | estimated filings recovered | estimated dollars |
-|---|---|---|---|---|---|---|
-| A | 22 | 0, done | | 68% / 57.0% | 15 | $2.66B |
-| B | 438 | 0, done | | 46% / 45.1% | 201 | $5.16B |
-| C | 2,296 | 2,159 | $142 | 37% / 39.3% | 855 | $2.79B |
-| D | 6,759 | 6,356 | $129 | 35% / 36.6% | 2,348 | $0.64B |
-| all | 9,515 | 8,515 | about $270 | | about 3,400 | $11.4B |
+| band | on the work list | on their placeholder rows | still to read | estimated cost | frame rate, filings / dollars | estimated filings recovered | estimated dollars |
+|---|---|---|---|---|---|---|---|
+| A | 29 | $6.96B | 11 | $15 | 68% / 60.6% | 20 | $4.2B |
+| B | 554 | $13.42B | 162 | $96 | 46% / 45.4% | 254 | $6.1B |
+| C | 3,029 | $9.45B | 2,851 | $188 | 37% / 40.4% | 1,128 | $3.8B |
+| D | 9,210 | $2.36B | 8,806 | $176 | 35% / 36.8% | 3,200 | $0.9B |
+| all | 12,822 | $32.19B | 11,830 | about $475 | | about 4,600 | $15.0B |
+
+Bands here are cut on the paid amount of the placeholder row, so they
+differ a little from the frame's, which counted future payments too. The
+173 large filings still to read were never in the extract. They include
+the Howard G. Buffett Foundation for five years and the 2024 filings of
+Musk, Bezos, Schusterman and Wyss. The A and B rates were measured on
+other large filers, not on these.
+
+Tax years before 2020 are 11,696 filings and $16.3B on their placeholder
+rows. Reading them would cost up to $510 and, if the IRS serves their
+images as it does recent ones, recover about 4,150 filings and $7.2B.
+That condition is untested. Fetching about 30 filings from each of
+those years costs nothing in model calls and would settle it.
 
 The C and D rates rest on 137 and 403 sampled filings, so they carry
 about 8 and 5 points of sampling error at 95%; the dollar estimates for
-C and D are $2.2B to $3.4B and $0.55B to $0.73B. Cost does not scale
-with filings because the small filings are small in every way the
+C and D are about $3.1B to $4.6B and $0.75B to $1.0B. Cost does not
+scale with filings because the small filings are small in every way the
 readers pay for:
 
 | | A | B | C | D |
@@ -482,10 +611,11 @@ readers pay for:
 | pages flagged | 24% | 27% | 52% | 38% |
 | model cost per filing in the frame | $1.35 | $0.59 | $0.066 | $0.020 |
 
-The full population, at the frame's rates: about 7,700 PDFs served (17
-GB in S3), 4,600 filings with an attachment, 24,700 pages; about $575 in
-model calls, of which $304 is spent; about 4 hours of reading per 10,000
-pages on one t3.xlarge; about 400,000 grant rows.
+The 2020-on work list, at the frame's rates: about 10,400 PDFs served,
+32,500 attachment pages of which 9,926 are read; about $780 in model
+calls in all, of which $304 is spent; about 4 hours of reading per
+10,000 pages on one t3.xlarge, so about 9 hours for the pages left;
+about 515,000 grant rows.
 
 ## What is out of reach
 
@@ -512,6 +642,15 @@ Other sources were checked on the sample:
 
 Recovering these is a data-acquisition problem, separate from the
 readers, and should not hold up loading what is recovered.
+
+Left out by decision, among what was read:
+
+- Lists that are present and do not add up within 0.5%: 77 filings on
+  the frame, 56 of them within 10% of the total, $825M of paid grants.
+- Rows on expenditure-responsibility ledgers that no list needs: 1,863
+  rows and $886M on the frame. They stay in `page_readings`.
+- Rows from GivingTuesday's one-off extract: none is loaded, and none
+  will be used in the search.
 
 ## What we learned
 
@@ -554,8 +693,9 @@ were found:
 14. Placeholder filings are 2.7% of filers and 7.2% of grants paid on
     Part I line 25, flat across years; that line and the placeholder
     row are different denominators, and the projections use the latter.
-15. Paid and future-payment lists reconcile separately; a headline that
-    mixes them is a point higher than the paid-only one.
+15. Paid and future-payment lists reconcile separately. Counting the 15
+    filings whose future-payment list alone reconciled adds a point to
+    the headline.
 16. The classifier excludes patient assistance and individuals by EIN and
     status flag, never by name, and leaves the "various" class untested.
 17. Operationally: render in chunks of 20 pages, never share a temp-file
@@ -569,6 +709,26 @@ were found:
     Abbreviations and stopwords add half a point.
 20. A name that belongs to one filer is in the row's state 96.7% of the
     time, and 98.1% for names of four words or more.
+21. The one-off extract the frame was drawn from lacked a quarter of the
+    placeholder filings in the loaded tables, 176 of them over $10M. The
+    work list has to come from the loaded tables.
+22. The loaded tables reach back to tax year 2009. Nearly half of all
+    placeholder filings are from before 2020.
+23. An expenditure-responsibility statement is a ledger across years,
+    not a list of the year's grants: of 282 such rows from filers seen
+    in several years, 179 repeat in another year's statement.
+24. The 0.5% tolerance can close on a coincidence. 77% of reconciled
+    lists close to the dollar; the three coincidences found all sit in
+    the 12% that close between 0.1% and 0.5%.
+25. The headline credits future-payment lists too. In paid grants alone
+    the frame recovers 49.5%.
+26. Six patient-assistance programs hold 40% of all placeholder dollars.
+    A name pattern cannot find them: nine of fifteen filers named like
+    them are ordinary foundations.
+27. Most lists print no status. The readers returned one for 21% of
+    rows on paid-list pages, and "I" for 406 rows. Nothing in the tables
+    says a row names a person; the matcher, which a person's name cannot
+    pass, is the backstop.
 
 ## Decisions and their evidence
 
@@ -582,29 +742,37 @@ were found:
 | prompt v4, 200 DPI | v4 inside run-to-run noise for Gemini, a small gain for Qwen; 130 DPI misread digits, 300 cost more for nothing | Sept 22 |
 | flagged pages loaded from Sonnet's reading, marked | 11 of 23 right on the sample; 40 of 57 and 94% of dollars on the small filings; leave-out gives 333 filings and 36.4% | Sept 22, measured Sept 24 |
 | a base reader out of attempts is absent for the page, which goes through the dispute path | a reader timing out three times on a dense page must not kill a page three other readers can decide | Sept 23 |
-| paid and future lists reconciled separately; the headline is paid-only | 15 frame filings reconcile only their future list | Sept 24 |
+| paid and future lists reconciled separately; the headline counts the filings whose paid list reconciled | 15 frame filings reconcile only their future list | Sept 24 |
 | the frame's C and D split, 137 and 403 at one sampling fraction | rates set by availability, not count | Sept 24 |
 | PDFs kept indefinitely in S3, every reading keyed on the image hash and the request settings | the IRS loses images; a policy change is a new version and re-derives at no cost | Sept 22 |
 | the loader reads the state and zip off each address and parses nothing else | the matcher narrows by zip, or by exact name with the same state, and scores the address whole; 74% of dollars carry a zip or a state | Sept 28 |
 | rows with no address match on a name that belongs to exactly one filer, labelled; one-word names included | 114,665 rows and $0.65B; the state agrees 96.7% where it can be checked, 92.7% on one-word names, which are 3,266 rows and $30M | Sept 28 |
 | the name cleaner goes into the main matcher, on the rerun that takes the recovered rows | exact matches on rows with a state go from 54.1% to 66.5% | Sept 28 |
+| the work list is built from the loaded tables at the start of each run, over every tax year they hold | the extract held 9,515 placeholder filings for 2020 to 2024, the loaded tables 12,115; 992 of the frame's 1,000 are found by object id | Sept 28 |
+| nothing from GivingTuesday's one-off extract is loaded or used in the search | 60 of the 61 frame filings with such rows reconcile without them; one filing, $22.3M, is lost | Sept 28 |
+| six patient-assistance programs are left out, by EIN | $32.7B, 40% of placeholder dollars; the purpose on the placeholder row says donated medicine; a name pattern misfires on nine filers of fifteen | Sept 28 |
+| filings marked as grants to individuals are read, and labelled at the load | the mark removes 743 filings and $0.39B, ordinary grantmakers among them; reading them costs about $20 | Sept 28 |
+| rows from pages labelled expenditure responsibility load only where a list needs them, with the label; ledger pages no list needs never load | 67 rows and $3.2M in 4 filings; the other 1,863 rows are a ledger across years, held for some filers and not others | Sept 28 |
+| the 0.5% tolerance stays; lists within 10% of the total do not load | a wider band on a $100M filing lets in $5M of unexplained rows; 56 filings and $825M stay out; a tolerance by filer size is a later question | Sept 28 |
 
 ## Next steps
 
-1. Run bands C and D in full: 8,515 filings, about $270, a day on the
-   box, through the one command in the operations doc.
-2. Decide the flagged rule for the load: load with a mark, as now, or
-   leave out. The measurement is above; the rows carry the mark either
-   way, so the choice can change after loading at no model cost.
-3. Test the "various" class: twenty PDFs would say whether its $35.5B
-   belongs in the population.
-4. Write the loader and run the matcher, as designed in *What the rows
-   carry for matching*: the recovered rows in their own table behind a
-   view, the state and zip read off each address, a name-only rule for
-   rows with no address, and the name cleaner in the main matcher. One
-   matcher rerun takes all of it; the matching input-shape version goes
-   to 3.
-5. Report the 2022 image batch to the IRS, with Wells Fargo as the
+1. Build the work-list command: the placeholder filings from the loaded
+   tables, less the six excluded filers, each with its object id, its
+   paid amount and its individual mark. `run` then reads it in place of
+   a frame file, and skips what the tables already hold.
+2. Fetch about 30 filings from each tax year before 2020, to learn
+   whether the IRS still serves their images. No model is called.
+3. Read the 2020-on work list: 11,830 filings, about $475, about nine
+   hours of reading on the box. The frame's cost cap was $400, so this
+   run needs its own.
+4. Build the loader as designed in stage 5 of the engineering log, take
+   the extract's rows out of the search, and run the matcher with the
+   name cleaner. One matcher rerun takes all of it; the matching
+   input-shape version goes to 3.
+5. Test the "various" class: twenty PDFs would say whether its $35.5B
+   belongs on the work list.
+6. Report the 2022 image batch to the IRS, with Wells Fargo as the
    example.
 
 ## For the GivingTuesday data team
@@ -632,7 +800,7 @@ were found:
 | `givingtuesday_datamart/exploratory/placeholder_ground_truth.py` | the hand-checked pages and the scorer: `verdicts`, `flagged`, `score` |
 | `givingtuesday_datamart/exploratory/placeholder_population.py` | the population by tax year |
 | `givingtuesday_datamart/exploratory/placeholder_recovered_rows.py` | what the recovered rows carry for the matcher: `address`, `names` |
-| `data/exploratory/placeholder_sample_1000.csv`, `_xml_rows.csv` | the frame, and the rows the XML itemises for it |
+| `data/exploratory/placeholder_sample_1000.csv`, `_xml_rows.csv` | the frame, drawn from GivingTuesday's one-off extract, and the rows that extract itemised for it; the second leaves the search with the loader work |
 | `data/exploratory/placeholder_report_v2_1000.csv` | per-filing outcomes on the frame under `POLICY_V2`; the sample's 100 filings are in it, with the outcomes the sample's own report had |
 | `data/exploratory/placeholder_ground_truth.csv`, `placeholder_gt_pages.csv`, `placeholder_flagged_check.csv` | the 138 pages read from the image, the draw, and Sonnet's score on the flagged ones |
 | `data/exploratory/placeholder_population_by_year.sql`, `.csv` | the population by tax year |
@@ -647,8 +815,15 @@ were found:
 
 - Bands A and B are exact. Bands C and D are a 6% sample: about 8 and 5
   points of error on their rates.
-- Credit is the declared amount, not the transcribed sum; the headline is
-  paid lists only.
+- Credit is the declared amount, not the transcribed sum. The 48.3%
+  headline credits future-payment lists where they reconciled; in paid
+  grants alone the frame recovers 49.5%.
+- The work list's counts come from a one-time query, and its costs and
+  recoveries from the frame's rates. The large filings new to the list
+  were never sampled, and no filing before tax year 2020 has been
+  fetched.
+- Nothing in the tables says whether a row names a person. Scholarship
+  lists will load students' names, which the matcher leaves unmatched.
 - Ground truth measures the readers on 138 pages, not the selector's
   filing-level decisions.
 - Recovered grants have not been through the matcher. The name matches
