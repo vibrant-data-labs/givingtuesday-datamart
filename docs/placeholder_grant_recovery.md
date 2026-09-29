@@ -480,13 +480,20 @@ three pages a future-payment list; the two after it carry no heading and
 took the label of a paid list.
 
 Nothing in the rule stops a placeholder amount from passing grants paid
-on Part I line 25. On 219 filings of the work list it does, by more than
-0.5% and by $254M in all; 9 of them are loaded, $47.8M over. The King
-Street Charitable Trust 2021 and 2023 are $41.1M of that: line 25 says
-$1.6M and $0.05M, the placeholder rows $25.2M and $17.6M, and the lists
-add up to the rows. The view holds what `privategrants_current` held for
-these filings, no more. Whether such a list should load is a decision
-not yet made.
+on Part I line 25. The rule reads column (d) of that line, which is on a
+cash basis. On 219 filings of the work list the placeholder amount
+passes it by more than 0.5%, $254M in all. For 100 of them it equals
+column (a), the expenses per books, and nothing is wrong: The King
+Street Charitable Trust 2021 gave $7.8M in cash and $17.4M not in cash,
+column (a) and the placeholder rows both say $25.2M, column (d) says
+$1.6M, and the list adds up to the rows. 112 filings pass both columns,
+by $111M.
+
+Of the loaded filings 9 pass column (d), and 7 of those equal column
+(a). Two pass both: Eden Hall 2022, by the $5.2M above, and Genentech
+Foundation 2021, by $0.1M. The view holds what `privategrants_current`
+held for these filings, no more. Whether a list loads when its
+placeholder amount passes both columns is a decision not yet made.
 
 The sample, read first, gave 47 filings and 55.7%; the frame added 540
 small filings the sample under-represented, and the rate came down.
@@ -751,8 +758,11 @@ Left out by decision, among what was read:
   `page_readings`.
 - Rows from GivingTuesday's one-off extract: none is loaded, and none is
   used in the search. One list, $22.3M, went with them.
-- Future-payment lists: none loads, since the loaded tables hold no
-  future amount to add up to. On the frame 56 had reconciled beside
+- Future-payment lists: none loads yet, since the loaded tables hold no
+  future amount to add up to. Decided on September 29: the amount will
+  come from GivingTuesday's future-payment datamart, which we have not
+  loaded, and the lists will load marked `future`. On the frame 56 had
+  reconciled beside
   their paid list, $0.81B, and 15 alone. Four lists that added up only
   against paid and future together, and one that needed the future
   total to find where its paid list began, went with them.
@@ -845,8 +855,10 @@ were found:
 29. The extract listed every version of a return. Six returns are in
     the frame twice, three of them reconciled twice. The load follows
     the loaded tables, which keep one version.
-30. A placeholder amount can pass grants paid on Part I line 25: 219
-    filings on the work list, $254M. A filer can enter its grants
+30. A placeholder amount can pass grants paid on Part I line 25, column
+    (d): 219 filings on the work list. Column (d) is on a cash basis,
+    and for 100 of them the amount is column (a), gifts not in cash
+    included. 112 pass both columns. A filer can enter its grants
     approved as a second row on line 3a, as Eden Hall 2022 did, and the
     list that adds up then holds both schedules.
 31. Finding the placeholder rows is one pass over 16.6 million grant
@@ -877,7 +889,8 @@ were found:
 | the name cleaner goes into the main matcher, on the rerun that takes the recovered rows | exact matches on rows with a state go from 54.2% to 66.6% | Sept 28 |
 | the work list is built from the loaded tables at the start of each run, over every tax year they hold | the extract held 9,515 placeholder filings for 2020 to 2024, the loaded tables 12,115; 992 of the frame's 1,000 are found by object id | Sept 28 |
 | nothing from GivingTuesday's one-off extract is loaded or used in the search | 406 of the frame's 407 lists reconcile without its rows; one filing, $22.3M, is lost | Sept 28, measured the same day |
-| the target is the paid amount on the work list; no future-payment list loads | the loaded tables hold no future amount; 5 of 406 lists are lost and none gained; to be confirmed | Sept 28, measured the same day |
+| the target is the paid amount on the work list; no future-payment list loads, until the future amount is in the loaded tables | the loaded tables hold no future amount; 5 of 406 lists are lost and none gained | Sept 28, measured the same day |
+| the future amount comes from GivingTuesday's future-payment datamart, `990PFPart14Grants3B`, loaded like the paid one; future lists then load marked `future`, outside the view | the datamart is published at the same version as the paid one and was never loaded; the filing's own XML is not the source | Sept 29 |
 | six patient-assistance programs are left out, by EIN | $32.7B, 40% of placeholder dollars; the purpose on the placeholder row says donated medicine; a name pattern misfires on nine filers of fifteen | Sept 28 |
 | filings marked as grants to individuals are read, and labelled at the load | the mark removes 743 filings and $0.39B, ordinary grantmakers among them; reading them costs about $20 | Sept 28 |
 | rows from pages labelled expenditure responsibility load only where a list needs them, with the label; ledger pages no list needs never load | 67 rows and $3.2M in 4 filings, loaded; the other 1,888 rows read are a ledger across years, held for some filers and not others | Sept 28 |
@@ -890,9 +903,12 @@ Done on September 28: the work-list command, `run` over the work list,
 the loader, the view and the checks; the extract's rows out of the
 search; the frame loaded.
 
-1. Confirm the decisions the build left open: that no future-payment
-   list loads, the name of the view, and whether a list loads when its
-   placeholder amount passes grants paid on line 25.
+1. Load GivingTuesday's future-payment datamart, `990PFPart14Grants3B`,
+   as a source; give the work list a future amount from it; load the
+   future lists marked `future`, outside the view.
+   Still to confirm: whether the view stays an object of its own, and
+   whether a list loads when its placeholder amount passes both columns
+   of line 25.
 2. Put the view into the matcher, with the name cleaner and the
    name-only tier. One matcher rerun takes all of it; the matching
    input-shape version goes to 3. The regression gate and the
@@ -961,8 +977,9 @@ search; the frame loaded.
   large filings new to the list were never sampled, and no filing before
   tax year 2020 has been fetched.
 - A loaded list adds up to the amount on the filing's placeholder rows.
-  On 9 loaded filings that amount passes grants paid on line 25, by
-  $47.8M in all, and one list holds grants approved for future payment.
+  On 2 loaded filings that amount passes both columns of line 25, by
+  $5.4M in all, and one of the two lists holds grants approved for
+  future payment.
 - Nothing in the tables says whether a row names a person. Scholarship
   lists will load students' names, which the matcher leaves unmatched.
 - Ground truth measures the readers on 138 pages, not the selector's

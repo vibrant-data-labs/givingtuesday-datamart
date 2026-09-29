@@ -226,7 +226,7 @@ without a new measurement.
 | work list | built from the loaded tables, every tax year; never from GivingTuesday's one-off extract |
 | exclusions | six patient-assistance programs, by EIN; filings marked as grants to individuals are read and labelled |
 | what loads | lists within 0.5% of the declared total; rows from pages that were read only; rows from pages labelled expenditure responsibility only where a list needs them, labelled |
-| targets | the work list's paid amount and no other; the loaded tables hold no future-payment amount, so no future-payment list loads |
+| targets | the work list's paid amount, until GivingTuesday's future-payment datamart (`990PFPart14Grants3B`) is loaded as a source; then a future amount too, and future lists load marked `future`, outside the view |
 | the view | drops a filing's placeholder row once its list is loaded; shows one policy |
 
 ## Set up a box once

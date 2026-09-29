@@ -127,9 +127,12 @@ and $48.49B on the placeholder rows; 743 marked; bands 29 / 554 / 3,029
   its return to name its grants, and Goldie Anna 2023 offers addresses
   "upon request", which the pattern reads as a list withheld.
 - **The amount on the rows can pass line 25.** The rule has a floor,
-  half of line 25, and no ceiling. 219 filings on the list hold more on
-  their placeholder rows than they declare paid, $254M in all. Eden Hall
-  2022 entered its grants approved as a second row on line 3a.
+  half of line 25 column (d), and no ceiling. 219 filings on the list
+  hold more on their placeholder rows than column (d), $254M in all.
+  Column (d) is on a cash basis: for 100 of the 219 the amount equals
+  column (a), `arecprexpnss`, as for King Street Charitable Trust, most
+  of whose gifts are not in cash. 112 pass both columns, $111M. Eden Hall 2022 entered its
+  grants approved as a second row on line 3a.
 - **The exclusions are a file**, `data/placeholder_recovery/exclusions.csv`,
   plain text. The frame's commands and the by-year population read the
   same file; with six filers in place of three the frame still
@@ -361,7 +364,12 @@ What loads:
    target comes from the work list, the loaded tables hold no future
    amount, and the frame's came from the extract, so there is nothing
    for such a list to add up to. Future-payment pages stay in
-   `page_readings`. To be confirmed.
+   `page_readings`. Decided on 2026-09-29 (Zein): the future amount
+   comes from GivingTuesday's future-payment datamart,
+   `990PFPart14Grants3B`, published at the same version as the paid one
+   and never loaded here. Once it is a source, the work list carries a
+   future amount and these lists load with target `future`, outside the
+   view. Not built.
 6. **Flagged pages**: their rows carry the verdict. Leaving them out is a
    filter on the view, not a reload.
 7. **Filings marked as grants to individuals**: read, loaded, and
@@ -400,7 +408,8 @@ What the build found that the design had not:
   on line 3a, grants paid and grants approved, so the target is both and
   the list that adds up is both schedules: 27 rows, $5.2M, are grants
   approved. Nine loaded filings hold more on their placeholder rows than
-  on line 25, $47.8M in all.
+  on line 25 column (d), $47.8M in all; seven of them equal column (a),
+  and two pass both, Eden Hall and Genentech Foundation 2021, $5.4M.
 - **The slow part of a load is the selector**, on very large filings
   that do not add up: its search for a run of pages builds the run's
   rows again for every candidate. Johnson & Johnson 2021 takes 90
@@ -1633,16 +1642,24 @@ evidence is in the findings doc's decisions table):
   load. A tolerance by filer size is a later question.
 - The view drops a filing's placeholder row once its list is loaded.
 
-Decided in the build of 2026-09-28, to be confirmed (Zein):
+Decided on 2026-09-29 (Zein):
 
-- The target is the work list's paid amount, so no future-payment list
-  loads. Five of the frame's 406 lists go with the future amount.
-- The view's name, `privategrants_current_with_recovered_view`.
+- Future-payment lists load, marked as such. The future amount comes
+  from GivingTuesday's future-payment datamart, `990PFPart14Grants3B`,
+  loaded as a source like the paid one, not from each filing's XML.
+  Until it is loaded the target is the paid amount alone, which costs
+  five of the frame's 406 lists.
+- Rows that name a person load as they are. The regular grants table
+  holds them too.
+- The cost cap is $800.
 
 Still open:
 
+- Whether the view stays an object of its own,
+  `privategrants_current_with_recovered_view`, or becomes what the
+  matcher's first view reads, with no name of its own.
 - Whether a list loads when the amount on its placeholder rows passes
-  grants paid on line 25: 219 filings on the work list, 9 loaded.
+  both columns of line 25: 112 filings on the work list, 2 loaded.
 - Whether the IRS still serves the images of tax years before 2020:
   11,696 filings on the work list, none fetched.
 - Reading the 2020-on work list: $475, inside the cap, which went from
