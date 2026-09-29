@@ -86,6 +86,9 @@ ADDED = (
     ("recovered_policy_version", "text", "r.policy_version"),
     ("recovered_page", "integer", "r.page"),
     ("recovered_row_ordinal", "integer", "r.row_ordinal"),
+    # Added on 2026-09-29. Last, since a view is replaced in place and takes
+    # new columns at its end only.
+    ("placeholder_exceeds_declared", "boolean", "r.placeholder_exceeds_declared"),
 )
 _VERSION = re.compile(r"[A-Za-z0-9_.-]+")
 _SHOWN = re.compile(r"policy_version = '([^']+)'")

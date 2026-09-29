@@ -375,6 +375,11 @@ What loads:
 7. **Filings marked as grants to individuals**: read, loaded, and
    labelled `filer_marked_individual`. A row's own status, where the
    list prints one, is kept as read.
+8. **Filings whose placeholder amount passes both columns of line 25**
+   (decided 2026-09-29): read, loaded, and labelled
+   `placeholder_exceeds_declared`. The list adds up to the amount on the
+   rows, which can hold more than the year's grants paid. 112 filings on
+   the work list; on the frame 2 loaded filings, 195 rows, $24.7M.
 
 What the tables cannot say: whether a row names a person. The readers
 returned a status for 21% of rows on paid-list pages and "I" for 406
@@ -1652,14 +1657,16 @@ Decided on 2026-09-29 (Zein):
 - Rows that name a person load as they are. The regular grants table
   holds them too.
 - The cost cap is $800.
+- A list loads when the amount on its placeholder rows passes both
+  columns of line 25, with the label `placeholder_exceeds_declared` on
+  the work list, on every row and in the view. 112 filings on the work
+  list, 2 loaded.
 
 Still open:
 
 - Whether the view stays an object of its own,
   `privategrants_current_with_recovered_view`, or becomes what the
   matcher's first view reads, with no name of its own.
-- Whether a list loads when the amount on its placeholder rows passes
-  both columns of line 25: 112 filings on the work list, 2 loaded.
 - Whether the IRS still serves the images of tax years before 2020:
   11,696 filings on the work list, none fetched.
 - Reading the 2020-on work list: $475, inside the cap, which went from

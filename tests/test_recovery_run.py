@@ -26,9 +26,10 @@ def _filing(object_id, year, paid, individual=False):
     paid = Decimal(paid)
     return wl.PlaceholderFiling(
         object_id=object_id, filerein="731312965", filer_name="A Foundation", taxyear=year,
-        taxperend=date(year, 12, 31), declared_paid=paid, placeholder_paid=paid, placeholder_rows=2,
-        placeholder_texts=["SEE STATEMENT 12", "SEE STATEMENT 13"], band=wl.band(paid),
-        filer_marked_individual=individual, classifier_version="v2", source_version="2026_06_16", built_at=AT)
+        taxperend=date(year, 12, 31), declared_paid=paid, declared_books=paid, placeholder_paid=paid,
+        placeholder_rows=2, placeholder_texts=["SEE STATEMENT 12", "SEE STATEMENT 13"], band=wl.band(paid),
+        filer_marked_individual=individual, placeholder_exceeds_declared=False, classifier_version="v2",
+        source_version="2026_06_16", built_at=AT)
 
 
 LIST = [_filing(OID, 2022, "382271662"), _filing(NEVER, 2021, "20000000"),
@@ -55,7 +56,8 @@ def test_the_chosen_filings_are_written_in_the_frames_columns(tmp_path):
         "taxperend": "2021-12-31", "object_id": NEVER, "placeholder_paid": Decimal("20000000"),
         "placeholder_rows": 2, "placeholder_text": "SEE STATEMENT 12 || SEE STATEMENT 13",
         "stratum_pop": 2, "stratum_pop_dollars": Decimal("35000000"),      # band B of the years asked for, not of the limit
-        "filer_marked_individual": False, "classifier": "v2", "source_version": "2026_06_16"}
+        "filer_marked_individual": False, "placeholder_exceeds_declared": False, "classifier": "v2",
+        "source_version": "2026_06_16"}
     path = run.write_frame(rows, tmp_path / "logs" / run.FRAME_FILE)
     read = list(csv.DictReader(path.open()))
     assert [r["object_id"] for r in read] == [OID, NEVER] and tuple(read[0]) == run.FRAME_COLUMNS
@@ -65,7 +67,7 @@ def test_the_chosen_filings_are_written_in_the_frames_columns(tmp_path):
 def test_choose_rebuilds_the_list_from_the_loaded_tables_first():
     store = wl.MemoryStore(LIST)
     row = {"filerein": "451742989", "taxyear": "2021", "declared_paid": Decimal("24452401"),
-           "placeholder_paid": Decimal("24452401"), "placeholder_rows": 1, "placeholder_texts": ["SEE Attachment 15"],
+           "declared_books": Decimal("24452401"), "placeholder_paid": Decimal("24452401"), "placeholder_rows": 1, "placeholder_texts": ["SEE Attachment 15"],
            "url": "https://example.org/202223169349100737_public.xml", "urls": 1, "filer_name": "Siegel",
            "taxperend": "2021-12-31", "source_version": "2026_06_16", "filer_marked_individual": False}
     rows = run.choose(None, store=store, rows=[row])

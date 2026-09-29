@@ -20,6 +20,9 @@ policy, so a load buys nothing and can be repeated.
 4. Rows from flagged pages, with the verdict on the row.
 5. Filings marked as grants to individuals, labelled
    ``filer_marked_individual``. A row's own status is kept as read.
+   Filings whose placeholder amount passes both columns of line 25,
+   labelled ``placeholder_exceeds_declared``: their list adds up to the
+   amount on the rows and may hold more than the year's grants paid.
 6. The target is the work list's paid amount. The loaded tables hold no
    future-payment amount, so no future-payment list loads.
 
@@ -92,6 +95,7 @@ DDL = (
         page_kind                text NOT NULL,            -- the reader's label for the page
         page_verdict             text NOT NULL,            -- agreed | escalated | flagged
         filer_marked_individual  boolean NOT NULL,
+        placeholder_exceeds_declared boolean NOT NULL DEFAULT false,   -- the target passes both columns of line 25
         filerein                 text NOT NULL,
         taxyear                  integer NOT NULL,
         image_sha256             text NOT NULL,
@@ -107,6 +111,8 @@ DDL = (
     )
     """,
     f"CREATE INDEX IF NOT EXISTS {TABLE}_filer_year ON {TABLE} (filerein, taxyear)",
+    # For a table made before 2026-09-29, when the label was added.
+    f"ALTER TABLE {TABLE} ADD COLUMN IF NOT EXISTS placeholder_exceeds_declared boolean NOT NULL DEFAULT false",
 )
 
 
@@ -133,6 +139,7 @@ class RecoveredGrant:
     page_kind: str
     page_verdict: str
     filer_marked_individual: bool
+    placeholder_exceeds_declared: bool
     filerein: str
     taxyear: int
     image_sha256: str
@@ -231,6 +238,7 @@ def grant_from_row(filing: PlaceholderFiling, row: GrantRow, ordinal: int, verdi
         match_name=match_name, match_address=match_address or None, state=state, zip5=zip5, state_source=source,
         page_kind=page_kind, page_verdict=verdict.verdict,
         filer_marked_individual=filing.filer_marked_individual,
+        placeholder_exceeds_declared=filing.placeholder_exceeds_declared,
         filerein=filing.filerein, taxyear=filing.taxyear, image_sha256=verdict.image_sha256, dpi=DPI,
         prompt_version=policy["prompt_version"], accepted_model=verdict.accepted_model,
         accepted_hash=verdict.accepted_hash, declared_amount=filing.placeholder_paid,
@@ -426,6 +434,7 @@ class LoadResult:
             self.dollars += row.amount
             for label, value in (("page_kind", row.page_kind), ("page_verdict", row.page_verdict),
                                  ("filer_marked_individual", str(row.filer_marked_individual).lower()),
+                                 ("placeholder_exceeds_declared", str(row.placeholder_exceeds_declared).lower()),
                                  ("address", row.address_kind)):
                 self.labels[label][value] += 1
                 self.label_dollars[label][value] += row.amount
@@ -549,7 +558,7 @@ def summary(result: LoadResult) -> str:
         f"rows taken out: {result.removed:,} filings",
     ]
     order = {"address": ADDRESS_KINDS}
-    for label in ("page_kind", "page_verdict", "filer_marked_individual", "address"):
+    for label in ("page_kind", "page_verdict", "filer_marked_individual", "placeholder_exceeds_declared", "address"):
         counts = result.labels.get(label, Counter())
         lines.append(f"\n  {label:<40}{'rows':>10}{'dollars':>14}")
         for value in order.get(label, sorted(counts, key=lambda v: -counts[v])):

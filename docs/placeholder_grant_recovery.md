@@ -463,6 +463,8 @@ What is loaded, 221,969 rows of 398 filings, by the labels on the rows:
 | | flagged | 28,620 | $1,286.4M |
 | the filer marked its grants as to individuals | yes | 117 | $0.2M |
 | | no | 221,852 | $7,033.7M |
+| the placeholder amount passes both columns of line 25 | yes | 195 | $24.7M |
+| | no | 221,774 | $7,009.3M |
 
 The 67 rows from expenditure-responsibility pages are in the four
 filings named above: Bader Philanthropies 2022 (28 rows), Paso del Norte
@@ -492,8 +494,11 @@ by $111M.
 Of the loaded filings 9 pass column (d), and 7 of those equal column
 (a). Two pass both: Eden Hall 2022, by the $5.2M above, and Genentech
 Foundation 2021, by $0.1M. The view holds what `privategrants_current`
-held for these filings, no more. Whether a list loads when its
-placeholder amount passes both columns is a decision not yet made.
+held for these filings, no more. Decided on September 29: such a list
+loads, and every row of it carries `placeholder_exceeds_declared`, so a
+consumer can leave it out. The work list carries the same mark on the
+112 filings, with both columns of line 25 beside the placeholder
+amount.
 
 The sample, read first, gave 47 filings and 55.7%; the frame added 540
 small filings the sample under-represented, and the rate came down.
@@ -906,9 +911,7 @@ search; the frame loaded.
 1. Load GivingTuesday's future-payment datamart, `990PFPart14Grants3B`,
    as a source; give the work list a future amount from it; load the
    future lists marked `future`, outside the view.
-   Still to confirm: whether the view stays an object of its own, and
-   whether a list loads when its placeholder amount passes both columns
-   of line 25.
+   Still to confirm: whether the view stays an object of its own.
 2. Put the view into the matcher, with the name cleaner and the
    name-only tier. One matcher rerun takes all of it; the matching
    input-shape version goes to 3. The regression gate and the
@@ -979,7 +982,8 @@ search; the frame loaded.
 - A loaded list adds up to the amount on the filing's placeholder rows.
   On 2 loaded filings that amount passes both columns of line 25, by
   $5.4M in all, and one of the two lists holds grants approved for
-  future payment.
+  future payment. Their 195 rows are marked
+  `placeholder_exceeds_declared`.
 - Nothing in the tables says whether a row names a person. Scholarship
   lists will load students' names, which the matcher leaves unmatched.
 - Ground truth measures the readers on 138 pages, not the selector's

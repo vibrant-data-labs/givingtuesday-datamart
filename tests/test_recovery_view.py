@@ -17,7 +17,11 @@ def test_the_view_shows_privategrants_currents_columns_then_its_own():
     assert "'placeholder_recovery'::text AS row_source, r.page_kind::text AS page_kind" in recovered
     assert [name for name, _, _ in view.ADDED] == [
         "row_source", "page_kind", "page_verdict", "filer_marked_individual", "state_source",
-        "recovered_object_id", "recovered_policy_version", "recovered_page", "recovered_row_ordinal"]
+        "recovered_object_id", "recovered_policy_version", "recovered_page", "recovered_row_ordinal",
+        "placeholder_exceeds_declared"]                  # new columns go last: the view is replaced in place
+    assert "r.recovered_row_ordinal" not in recovered and recovered.index(
+        "r.row_ordinal::integer AS recovered_row_ordinal") < recovered.index(
+        "r.placeholder_exceeds_declared::boolean AS placeholder_exceeds_declared")
 
 
 def test_a_recovered_row_fills_the_recipient_columns_and_takes_the_filings_from_the_row_it_replaces():

@@ -35,11 +35,13 @@ LIST = [_grant("River Fund Inc", 100, "711 Third Avenue New York NY 10017", "PC"
         _grant("Fondation de France", 50, "40 avenue Hoche Paris 75008")]
 
 
-def _filing(oid=OID, paid="300", filer_marked_individual=False):
+def _filing(oid=OID, paid="300", filer_marked_individual=False, declared=None):
+    declared = Decimal(declared or paid)
     return wl.PlaceholderFiling(
         object_id=oid, filerein="731312965", filer_name="A Foundation", taxyear=2022, taxperend=date(2022, 12, 31),
-        declared_paid=Decimal(paid), placeholder_paid=Decimal(paid), placeholder_rows=1,
+        declared_paid=declared, declared_books=declared, placeholder_paid=Decimal(paid), placeholder_rows=1,
         placeholder_texts=["SEE ATTACHED"], band="D", filer_marked_individual=filer_marked_individual,
+        placeholder_exceeds_declared=wl.exceeds_declared(Decimal(paid), declared, declared),
         classifier_version="v2", source_version="2026_06_16", built_at=AT)
 
 
@@ -85,7 +87,8 @@ def test_a_list_that_adds_up_loads_a_row_per_grant_with_its_labels_and_lineage(s
         recipient_status="PC", purpose="General support", amount=Decimal("100.00"),
         match_name="River Fund Inc", match_address="711 Third Avenue New York", state="NY", zip5="10017",
         state_source="address", page_kind="grants_paid_list", page_verdict="agreed",
-        filer_marked_individual=False, filerein="731312965", taxyear=2022, image_sha256=sha, dpi=200,
+        filer_marked_individual=False, placeholder_exceeds_declared=False, filerein="731312965", taxyear=2022,
+        image_sha256=sha, dpi=200,
         prompt_version="v4", accepted_model=QWEN, accepted_hash=pr.request_hash(QWEN),
         declared_amount=Decimal("300"), reconciliation_error=0.0, work_list_source_version="2026_06_16",
         loaded_at=AT)
@@ -176,6 +179,19 @@ def test_a_filing_marked_individual_loads_labelled_and_a_row_keeps_its_own_statu
     assert [r.filer_marked_individual for r in rows] == [True] * 3
     assert [r.recipient_status for r in rows] == ["I", "PC", None]
     assert dict(result.labels["filer_marked_individual"]) == {"true": 3}
+
+
+def test_a_list_whose_target_passes_line_25_loads_and_every_row_says_so(stores, tmp_path):
+    _read(stores, 3, [_grant(f"Paid Grantee {i}", 100) for i in range(3)])
+    _read(stores, 4, [_grant(f"Approved Grantee {i}", 100) for i in range(2)], heading="")
+    _decide(stores, tmp_path, 3, 4)
+    recovered = ld.MemoryStore()
+    result = _load(stores, recovered, _filing(paid="500", declared="300"))     # the rows hold 500, line 25 says 300
+    rows = recovered.for_filing(OID, "v2")
+    assert len(rows) == 5 and {r.placeholder_exceeds_declared for r in rows} == {True}
+    assert {r.declared_amount for r in rows} == {Decimal("500")}               # the list adds up to the rows
+    assert dict(result.labels["placeholder_exceeds_declared"]) == {"true": 5}
+    assert "placeholder_exceeds_declared" in ld.summary(result)
 
 
 def test_a_list_that_only_comes_close_does_not_load(stores, tmp_path):

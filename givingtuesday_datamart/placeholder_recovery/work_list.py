@@ -14,6 +14,14 @@ Part I line 25 column (d), ``arecgpdcprps``. The filers in
 whose rows are mostly marked "I", for individual, stays on the list and
 carries ``filer_marked_individual``.
 
+**The amount can be too large.** The rule has a floor and no ceiling. Line
+25 states grants paid twice: column (a) per books, gifts not in cash
+included, and column (d) in cash. A filing whose placeholder rows hold more
+than both, by more than the tolerance a list is held to, stays on the list
+and carries ``placeholder_exceeds_declared``: a filer can enter its grants
+approved for future payment as a second placeholder row, and the list that
+adds up then holds both schedules.
+
 **The build.** One query finds every placeholder filing (``QUERY``, about a
 minute), ``build`` turns its rows into the list, and ``rebuild`` replaces
 the table's rows in one transaction, so a reader sees the old list or the
@@ -37,6 +45,7 @@ from sqlalchemy import text
 
 from givingtuesday_datamart._internal.bulk import multi_row_insert, multi_row_params
 from givingtuesday_datamart._internal.logger import logger
+from givingtuesday_datamart.attachment_grants import DEFAULT_TOLERANCE
 from givingtuesday_datamart.irs_source import parse_object_id
 from givingtuesday_datamart.placeholder_recovery import classifier
 from givingtuesday_datamart.placeholder_recovery.exclusions import Exclusion, load_exclusions
@@ -59,18 +68,23 @@ DDL = (
         filer_name              text,
         taxyear                 integer NOT NULL,
         taxperend               date,
-        declared_paid           numeric(18,2) NOT NULL,   -- grants paid, Part I line 25 column (d)
+        declared_paid           numeric(18,2) NOT NULL,   -- grants paid, Part I line 25 column (d), in cash
+        declared_books          numeric(18,2),            -- the same line, column (a), per books
         placeholder_paid        numeric(18,2) NOT NULL,   -- the placeholder rows' amounts, summed
         placeholder_rows        integer NOT NULL,
         placeholder_texts       text[] NOT NULL,          -- the first two, largest amount first
         band                    text NOT NULL,            -- A | B | C | D, cut on placeholder_paid
         filer_marked_individual boolean NOT NULL,         -- the filing's rows are mostly marked "I"
+        placeholder_exceeds_declared boolean NOT NULL DEFAULT false,   -- placeholder_paid passes both columns of line 25
         classifier_version      text NOT NULL,
         source_version          text NOT NULL,            -- privategrants_current._source_version
         built_at                timestamptz NOT NULL
     )
     """,
     f"CREATE INDEX IF NOT EXISTS {TABLE}_filer_year ON {TABLE} (filerein, taxyear)",
+    # For a table made before 2026-09-29, when the two columns were added.
+    f"ALTER TABLE {TABLE} ADD COLUMN IF NOT EXISTS declared_books numeric(18,2)",
+    f"ALTER TABLE {TABLE} ADD COLUMN IF NOT EXISTS placeholder_exceeds_declared boolean NOT NULL DEFAULT false",
 )
 
 # One row per placeholder filing, the excluded filers' among them. The
@@ -93,14 +107,16 @@ placeholder AS (
     GROUP BY filerein, taxyear
 ),
 listed AS (
-    SELECT p.*, d.declared_paid
+    SELECT p.*, d.declared_paid, d.declared_books
     FROM placeholder p
-    JOIN (SELECT filerein, taxyear, {classifier.amount_sql('arecgpdcprps')} AS declared_paid
+    JOIN (SELECT filerein, taxyear, {classifier.amount_sql('arecgpdcprps')} AS declared_paid,
+                 {classifier.amount_sql('arecprexpnss')} AS declared_books
           FROM basic_fields_pf_current
           WHERE taxyear ~ '{classifier.TAX_YEAR}') d USING (filerein, taxyear)
     WHERE d.declared_paid > 0 AND p.placeholder_paid > 0 AND p.placeholder_paid >= 0.5 * d.declared_paid
 )
-SELECT l.filerein, l.taxyear, l.declared_paid, l.placeholder_paid, l.placeholder_rows, l.placeholder_texts,
+SELECT l.filerein, l.taxyear, l.declared_paid, l.declared_books, l.placeholder_paid, l.placeholder_rows,
+       l.placeholder_texts,
        f.url, f.urls, f.filer_name, f.taxperend, f.source_version, f.filer_marked_individual
 FROM listed l
 CROSS JOIN LATERAL (
@@ -125,11 +141,13 @@ class PlaceholderFiling:
     taxyear: int
     taxperend: date | None
     declared_paid: Decimal
+    declared_books: Decimal | None
     placeholder_paid: Decimal
     placeholder_rows: int
     placeholder_texts: list[str]
     band: str
     filer_marked_individual: bool
+    placeholder_exceeds_declared: bool
     classifier_version: str
     source_version: str
     built_at: datetime
@@ -143,6 +161,14 @@ _SELECT = f"SELECT {', '.join(COLUMNS)} FROM {TABLE}"
 def band(placeholder_paid: Decimal) -> str:
     """A at $100M and over, B at $10M, C at $1M, D below."""
     return next(label for label, floor in BANDS if placeholder_paid >= floor)
+
+
+def exceeds_declared(placeholder_paid: Decimal, declared_paid: Decimal, declared_books: Decimal | None,
+                     tolerance: float = DEFAULT_TOLERANCE) -> bool:
+    """Do the placeholder rows hold more than the filing declares paid, in
+    cash and per books both, by more than the tolerance?"""
+    declared = max(declared_paid, declared_books if declared_books is not None else declared_paid)
+    return placeholder_paid > declared * (1 + Decimal(str(tolerance)))
 
 
 def _texts(names: Iterable[str | None]) -> list[str]:
@@ -164,19 +190,22 @@ def _date(value: object) -> date | None:
 def filing_from_row(row: Mapping, built_at: datetime) -> PlaceholderFiling:
     """One row of ``QUERY`` as a work-list row. Raises ``ValueError`` when the
     url carries no object id, since nothing could fetch the filing."""
-    paid = Decimal(row["placeholder_paid"])
+    paid, declared = Decimal(row["placeholder_paid"]), Decimal(row["declared_paid"])
+    books = Decimal(row["declared_books"]) if row.get("declared_books") is not None else None
     return PlaceholderFiling(
         object_id=parse_object_id(row["url"] or ""),
         filerein=row["filerein"],
         filer_name=row["filer_name"],
         taxyear=int(row["taxyear"]),
         taxperend=_date(row["taxperend"]),
-        declared_paid=Decimal(row["declared_paid"]),
+        declared_paid=declared,
+        declared_books=books,
         placeholder_paid=paid,
         placeholder_rows=int(row["placeholder_rows"]),
         placeholder_texts=_texts(row["placeholder_texts"] or ()),
         band=band(paid),
         filer_marked_individual=bool(row["filer_marked_individual"]),
+        placeholder_exceeds_declared=exceeds_declared(paid, declared, books),
         classifier_version=classifier.CLASSIFIER_VERSION,
         source_version=row["source_version"],
         built_at=built_at,
@@ -370,6 +399,7 @@ def summary(found: WorkList) -> str:
              _line("the excluded filers", excluded),
              _line("the work list", listed),
              _line("  of which marked individual", [row for row in listed if row.filer_marked_individual]),
+             _line("  of which over line 25", [row for row in listed if row.placeholder_exceeds_declared]),
              _line(f"  tax years {MEASURED_FROM} on", recent),
              _line(f"  tax years before {MEASURED_FROM}", earlier)]
     versions = Counter(row.source_version for row in listed)

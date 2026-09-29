@@ -23,7 +23,8 @@ def _url(object_id):
 
 def _row(object_id="202223169349100737", ein=SIEGEL, year="2021", paid="24452401", declared="24452401", **over):
     """One row of the query, as the database returns it."""
-    return {"filerein": ein, "taxyear": year, "declared_paid": Decimal(declared), "placeholder_paid": Decimal(paid),
+    return {"filerein": ein, "taxyear": year, "declared_paid": Decimal(declared), "declared_books": Decimal(declared),
+            "placeholder_paid": Decimal(paid),
             "placeholder_rows": 1, "placeholder_texts": ["SEE Attachment 15"], "url": _url(object_id), "urls": 1,
             "filer_name": "Siegel Family Endowment", "taxperend": "2021-12-31", "source_version": "2026_06_16",
             "filer_marked_individual": False, **over}
@@ -33,8 +34,9 @@ def test_a_query_row_becomes_a_work_list_row():
     filing = wl.filing_from_row(_row(), BUILT)
     assert filing == wl.PlaceholderFiling(
         object_id="202223169349100737", filerein=SIEGEL, filer_name="Siegel Family Endowment", taxyear=2021,
-        taxperend=date(2021, 12, 31), declared_paid=Decimal("24452401"), placeholder_paid=Decimal("24452401"),
-        placeholder_rows=1, placeholder_texts=["SEE Attachment 15"], band="B", filer_marked_individual=False,
+        taxperend=date(2021, 12, 31), declared_paid=Decimal("24452401"), declared_books=Decimal("24452401"),
+        placeholder_paid=Decimal("24452401"), placeholder_rows=1, placeholder_texts=["SEE Attachment 15"], band="B",
+        filer_marked_individual=False, placeholder_exceeds_declared=False,
         classifier_version=classifier.CLASSIFIER_VERSION, source_version="2026_06_16", built_at=BUILT)
 
 
@@ -57,6 +59,24 @@ def test_a_filing_marked_individual_stays_on_the_list_and_carries_the_mark():
     found = wl.build([_row(filer_marked_individual=True), _row("202311019349101326", year="2022")], EXCLUDED, BUILT)
     assert [row.filer_marked_individual for row in found.filings] == [True, False]
     assert found.excluded == [] and found.unlisted == []
+
+
+@pytest.mark.parametrize("paid, cash, books, exceeds", [
+    ("18571800", "13360800", "13360800", True),       # Eden Hall 2022: grants approved entered beside grants paid
+    ("25219477", "1583543", "25219477", False),       # King Street 2021: gifts not in cash are in column (a) only
+    ("6070206", "5929795", "2803854", True),          # over the larger of the two
+    ("1004", "1000", "1000", False),                  # inside the tolerance a list is held to
+    ("1006", "1000", "1000", True),
+    ("1006", "1000", None, True),                     # column (a) is not a number: column (d) alone
+    ("900", "1000", "1200", False),
+])
+def test_a_placeholder_amount_over_both_columns_of_line_25_is_marked(paid, cash, books, exceeds):
+    books = Decimal(books) if books else None
+    assert wl.exceeds_declared(Decimal(paid), Decimal(cash), books) is exceeds
+    row = _row(paid=paid, declared=cash, declared_books=books)
+    filing = wl.filing_from_row(row, BUILT)
+    assert (filing.placeholder_exceeds_declared, filing.declared_books) == (exceeds, books)
+    assert wl.build([row], {}, BUILT).filings == [filing]                # marked, and on the list all the same
 
 
 def test_an_excluded_filer_is_left_out_by_ein_whatever_its_name():
@@ -107,13 +127,15 @@ def test_summary_counts_the_list_the_excluded_and_the_marked():
     assert lines["the excluded filers"][-4:] == ["1", "1", "$3.00B", "$3.00B"]
     assert lines["the work list"][-4:] == ["2", "2", "$0.02B", "$0.02B"]
     assert "of which marked individual" in text and "2026_06_16 (2 filings)" in text
+    over = next(line for line in text.splitlines() if "of which over line 25" in line)
+    assert over.split()[-4:] == ["0", "0", "$0.00B", "$0.00B"]
     assert [line.split() for line in text.splitlines() if line.strip().startswith(("2017", "2021"))] == [
         ["2017", "1", "$0.00B", "1"], ["2021", "1", "$0.02B", "0"]]
 
 
 def test_the_query_reads_the_loaded_tables_with_the_half_rule_and_no_year_floor():
     assert "FROM privategrants_current g" in wl.QUERY and "FROM basic_fields_pf_current" in wl.QUERY
-    assert "arecgpdcprps" in wl.QUERY
+    assert "arecgpdcprps" in wl.QUERY and "arecprexpnss" in wl.QUERY          # line 25, columns (d) and (a)
     assert "p.placeholder_paid > 0 AND p.placeholder_paid >= 0.5 * d.declared_paid" in wl.QUERY
     assert ">= '2020'" not in wl.QUERY
     assert classifier.pointer_sql("n.name") in wl.QUERY and classifier.prefilter_sql("g") in wl.QUERY

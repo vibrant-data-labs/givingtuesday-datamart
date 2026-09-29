@@ -38,7 +38,7 @@ FRAME_FILE = "work_list.csv"
 TEXT_SEPARATOR = " || "
 FRAME_COLUMNS = ("stratum", "filerein", "filer_name", "taxyear", "taxperend", "object_id", "placeholder_paid",
                  "placeholder_rows", "placeholder_text", "stratum_pop", "stratum_pop_dollars",
-                 "filer_marked_individual", "classifier", "source_version")
+                 "filer_marked_individual", "placeholder_exceeds_declared", "classifier", "source_version")
 
 
 def parse_tax_years(token: str) -> set[int]:
@@ -72,7 +72,9 @@ def frame_rows(chosen: Sequence[PlaceholderFiling], population: Iterable[Placeho
         "placeholder_rows": filing.placeholder_rows,
         "placeholder_text": TEXT_SEPARATOR.join(filing.placeholder_texts),
         "stratum_pop": count[filing.band], "stratum_pop_dollars": dollars[filing.band],
-        "filer_marked_individual": filing.filer_marked_individual, "classifier": filing.classifier_version,
+        "filer_marked_individual": filing.filer_marked_individual,
+        "placeholder_exceeds_declared": filing.placeholder_exceeds_declared,
+        "classifier": filing.classifier_version,
         "source_version": filing.source_version,
     } for filing in chosen]
 

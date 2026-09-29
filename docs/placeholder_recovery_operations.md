@@ -46,12 +46,15 @@ cache, not stored: one render on the box serves every reader.
 **`pf_placeholder_filings`.** The work list, one row per placeholder
 filing: `object_id` (the 18 digits in the filing's url), `filerein`,
 `filer_name`, `taxyear`, `taxperend`, `declared_paid` (grants paid, Part
-I line 25 column (d)), `placeholder_paid` (the amounts on the
-placeholder rows, summed; the target a list must add up to),
-`placeholder_rows`, `placeholder_texts` (the first two), `band` (A at
-$100M and over, B at $10M, C at $1M, D below, on `placeholder_paid`),
-`filer_marked_individual`, `classifier_version`, `source_version` (the
-`_source_version` of the grant rows it was built from) and `built_at`.
+I line 25 column (d), in cash), `declared_books` (the same line, column
+(a), per books), `placeholder_paid` (the amounts on the placeholder
+rows, summed; the target a list must add up to), `placeholder_rows`,
+`placeholder_texts` (the first two), `band` (A at $100M and over, B at
+$10M, C at $1M, D below, on `placeholder_paid`),
+`filer_marked_individual`, `placeholder_exceeds_declared` (the
+placeholder amount passes both columns of line 25 by more than 0.5%),
+`classifier_version`, `source_version` (the `_source_version` of the
+grant rows it was built from) and `built_at`.
 A filing is on the list when its placeholder rows sum to more than zero
 and to at least half of `declared_paid`. The command replaces the rows
 in one transaction, about a minute and a half for 24,518 filings. The
@@ -107,7 +110,7 @@ filing's `placeholder_paid` within 0.5%, under one policy.
 | key | `object_id`, `policy_version`, `target` (`paid`), `page`, `row_ordinal` |
 | content, as read | `recipient_name`, `recipient_address`, `recipient_status`, `purpose`; `amount`, numeric with cents |
 | for the matcher | `match_name` (the name, less a place printed at its end), `match_address` (the address, less the state and zip at its end), `state`, `zip5`, `state_source` (`address`, `name`, or NULL with no state) |
-| labels | `page_kind` (the reader's label for the row's page), `page_verdict` (`agreed`, `escalated`, `flagged`), `filer_marked_individual` |
+| labels | `page_kind` (the reader's label for the row's page), `page_verdict` (`agreed`, `escalated`, `flagged`), `filer_marked_individual`, `placeholder_exceeds_declared` |
 | lineage | `filerein`, `taxyear`, `image_sha256`, `dpi`, `prompt_version`, `accepted_model`, `accepted_hash`, `declared_amount` (the amount the list reconciled against), `reconciliation_error`, `work_list_source_version`, `loaded_at` |
 
 `row_ordinal` is the row's index in the accepted reading's `rows`, from
@@ -123,9 +126,12 @@ list.
 
 **`privategrants_current_with_recovered_view`.** `privategrants_current`'s
 28 columns under their own names, then `row_source`
-(`privategrants_current` or `placeholder_recovery`), the three labels,
+(`privategrants_current` or `placeholder_recovery`), the labels,
 `state_source`, and the recovered row's key (`recovered_object_id`,
 `recovered_policy_version`, `recovered_page`, `recovered_row_ordinal`).
+`placeholder_exceeds_declared` is the view's last column: it was added
+on September 29, and a view replaced in place takes new columns at its
+end.
 
 - A loaded filing's placeholder rows are left out. They carry the whole
   amount in `privategrants_current`, so beside the recovered rows they
@@ -227,6 +233,7 @@ without a new measurement.
 | exclusions | six patient-assistance programs, by EIN; filings marked as grants to individuals are read and labelled |
 | what loads | lists within 0.5% of the declared total; rows from pages that were read only; rows from pages labelled expenditure responsibility only where a list needs them, labelled |
 | targets | the work list's paid amount, until GivingTuesday's future-payment datamart (`990PFPart14Grants3B`) is loaded as a source; then a future amount too, and future lists load marked `future`, outside the view |
+| a placeholder amount over both columns of line 25 | the filing is read and its list loads, every row labelled `placeholder_exceeds_declared`; a consumer filters on it |
 | the view | drops a filing's placeholder row once its list is loaded; shows one policy |
 
 ## Set up a box once
