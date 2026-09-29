@@ -10,7 +10,7 @@ import io
 import json
 import logging
 import subprocess
-import time
+import threading
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -486,24 +486,53 @@ def test_an_interrupted_run_cancels_the_queued_renders_and_reads_and_records_the
     oids = [f"20240000000000000{i}" for i in range(6)]
     for oid in oids:
         _seed(filings, tmp_path, oid)
-    slow = render.__call__
-    monkeypatch.setattr(vlm, "render", lambda *args, **kwargs: (time.sleep(0.3), slow(*args, **kwargs))[1])
-    monkeypatch.setattr(pr, "RENDER_WORKERS", 1)
+    # The order is fixed by three gates, not by the clock (``no_sleep`` makes
+    # ``time.sleep`` a no-op in this file, so a sleep here orders nothing):
+    # the interrupt waits for the first render to be in progress and for
+    # the eight reads to be in flight, and the render is held until the
+    # stop has cancelled the renders behind it.
+    rendering, reading, stopped, never_stopped = threading.Event(), threading.Semaphore(0), threading.Event(), []
+    wait = 30                                             # a gate's limit, so a broken order fails the test, not hangs it
+    slow, read_one = render.__call__, pr._read_one
+
+    def held(*args, **kwargs):
+        rendering.set()
+        if not stopped.wait(wait):
+            never_stopped.append(args)
+            stopped.set()
+        return slow(*args, **kwargs)
+
+    def counted(*args, **kwargs):
+        reading.release()
+        return read_one(*args, **kwargs)
+
+    def upsert_as_done(*args, on_stop, **kwargs):
+        def stop():
+            try:
+                on_stop()
+            finally:
+                stopped.set()
+        return bulk.upsert_as_done(*args, on_stop=stop, **kwargs)
 
     def interrupted(futures_):
-        deadline = time.monotonic() + 5
-        while sum(f.running() for f in futures_) < 8:
-            if time.monotonic() > deadline:
+        if not rendering.wait(wait):
+            pytest.fail("the first render never started")
+        for _ in range(8):
+            if not reading.acquire(timeout=wait):
                 pytest.fail("the eight reads never started")
-            time.sleep(0.001)
         raise KeyboardInterrupt
         yield                                             # noqa: unreachable, makes this a generator
 
+    monkeypatch.setattr(vlm, "render", held)
+    monkeypatch.setattr(pr, "_read_one", counted)
+    monkeypatch.setattr(pr, "upsert_as_done", upsert_as_done)
+    monkeypatch.setattr(pr, "RENDER_WORKERS", 1)
     monkeypatch.setattr(bulk, "as_completed", interrupted)
     store, client = pr.MemoryStore(), _client(24)
     with pytest.raises(KeyboardInterrupt):
         pr.read_pages(store, [(oid, page) for oid in oids for page in (3, 4, 5, 6)], QWEN, workers=8,
                       cache_dir=tmp_path, client=client, filing_store=filings, s3=_S3())
+    assert not never_stopped, "the stop never cancelled the renders while the first was in progress"
     assert len(render.calls) == 1 and render.calls[0][0] == fi.pdf_path(tmp_path, oids[0])
     assert sorted(row.page for row in store.rows.values()) == [3, 4, 5, 6] and {row.object_id for row in store.rows.values()} == {oids[0]}
     assert len(client.json_modes) == 4 and store.commits == [4]
