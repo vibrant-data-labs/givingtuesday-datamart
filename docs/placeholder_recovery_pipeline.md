@@ -7,10 +7,17 @@ The findings as of the 1,000-filing frame are in
 [placeholder_grant_recovery.md](placeholder_grant_recovery.md); how to run
 the pipeline, and the tables it writes, is in
 [placeholder_recovery_operations.md](placeholder_recovery_operations.md),
-which absorbed the storage spec and the EC2 runbook. Stages 0 to 4 and 6
-are built (`placeholder_recovery.py`: `sample`, `estimate`, `run`,
-`transcribe`, `report`); stage 5, the load into the datamart, is not:
-its design is in the stage 5 section. The sample-era data files this
+which absorbed the storage spec and the EC2 runbook. Every stage is
+built. Stages 1 to 4 and 6 are the three table modules, the selector and
+`exploratory/placeholder_recovery.py` (`sample`, `estimate`, `run`,
+`transcribe`, `report`); stage 0, the work list, and stage 5, the load
+into the datamart, were built on 2026-09-28 in the package
+`givingtuesday_datamart/placeholder_recovery/` (`work-list`, `run`,
+`load`, `view`, `check`), and their sections say what was built and
+what was measured. The rows GivingTuesday's extract itemised for the
+frame, which stage 4 once took beside the pages, left the search the
+same day and went to `placeholder-frame-xml-rows-2026-09-28.zip` in the
+archive folder below. The sample-era data files this
 log cites (the single-read reports, the 610-filing frame and its manifest,
 the engine differences) were archived on 2026-09-25 to
 `s3://givingtuesday-datamart/placeholder-recovery/archive/placeholder-sample-era-data-2026-09-25.zip`,
@@ -55,15 +62,20 @@ and never modifies an upstream one. Anything can be rerun from its input.
 ### 0 · Classify — which filings need their PDF
 
 **Input:** `privategrants_current`, every tax year it holds, joined to
-the declared total in `basic_fields_pf` (Part I line 25, `arecgpdcprps`).
-The frame and the by-year table used 2020 on.
+the declared total in `basic_fields_pf_current` (Part I line 25,
+`arecgpdcprps`). The frame and the by-year table used 2020 on.
 **Output:** the work list, `pf_placeholder_filings` — one row per
-filer-year: object id, class, paid target, pointer text, whether the
-placeholder row is marked `I`, classifier version. Not built: the frame
-was a CSV file drawn from GivingTuesday's one-off extract, and `run`
-still takes a file. Decided on 2026-09-28: the list is built from the
-loaded tables at the start of each run, and that extract is no longer a
-source.
+filing: object id, filer, tax year and period end, grants paid on line
+25, the paid amount on the placeholder rows (the target), how many
+rows and their first two texts, the band, whether the filing's rows are
+mostly marked `I`, the classifier version, the source version of the
+rows and when it was built. Built on 2026-09-28
+(`placeholder_recovery/work_list.py`, command `work-list`). The frame
+was a CSV file drawn from GivingTuesday's one-off extract. Decided the
+same day: the list is built from the loaded tables at the start of each
+run, and that extract is no longer a source. `run` rebuilds the list,
+writes the filings it chose to `<logs>/work_list.csv` and reads that;
+`--sample` still runs a frame file.
 
 The rule, measured in
 [placeholder_classifier_assessment.sql](../data/exploratory/placeholder_classifier_assessment.sql):
@@ -86,6 +98,53 @@ the `I` mark. The extract the frame came from held 9,515 for 2020 to
 2024, where the loaded tables hold 12,115. The earlier figures in this
 log (~13,000 fetch filings, ~8,500 organisational) were estimates made
 before the classifier was measured.
+
+As built, 2026-09-28. The command reproduces the one-time query to the
+filing: 24,539, 21 and 24,518 filings; 5,253 filers; $48.66B declared
+and $48.49B on the placeholder rows; 743 marked; bands 29 / 554 / 3,029
+/ 9,210 for 2020 on and 9 / 291 / 2,144 / 9,252 before; source version
+`2026_06_16`. What was learned in building it:
+
+- **One pass, a minute and a half.** The one-time query built a
+  temporary table of every grant row and updated it twice, 12 to 15
+  minutes. The command finds the pointer rows in one query and reads the
+  other columns for the filings that passed, through the (filerein,
+  taxyear) index: 72 seconds to query, 90 to build the table. Most of
+  the saving is a cheap test before the pattern. Every alternative of
+  the pattern needs one of fifteen words (see, attach, sched, total,
+  grant and so on), so one expression on the raw name columns, which
+  Postgres runs in its parallel scan, leaves 1% of the rows for the five
+  regular expressions. A test holds the word list to the pattern.
+- **The pattern has one home.** `placeholder_recovery/classifier.py`
+  holds it as SQL. The work list's query and the view are built from it,
+  and a test holds it equal to the text in
+  `placeholder_population_by_year.sql`, where it was measured, and to
+  `is_pointer` on a set of names.
+- **The frame against the list.** 992 of the frame's 1,000 filings are
+  on the list, each with the same paid amount. Six of the other eight
+  are the second version of a return whose other version is on the list
+  and in the frame: the extract listed both. AmazonSmile 2023 amended
+  its return to name its grants, and Goldie Anna 2023 offers addresses
+  "upon request", which the pattern reads as a list withheld.
+- **The amount on the rows can pass line 25.** The rule has a floor,
+  half of line 25 column (d), and no ceiling. 219 filings on the list
+  hold more on their placeholder rows than column (d), $254M in all.
+  Column (d) is on a cash basis: for 100 of the 219 the amount equals
+  column (a), `arecprexpnss`, as for King Street Charitable Trust, most
+  of whose gifts are not in cash. 112 pass both columns, $111M. Eden Hall 2022 entered its
+  grants approved as a second row on line 3a.
+- **The exclusions are a file**, `data/placeholder_recovery/exclusions.csv`,
+  plain text. The frame's commands and the by-year population read the
+  same file; with six filers in place of three the frame still
+  regenerates byte for byte, since the three added are not in the
+  extract. The by-year table in the findings doc was measured with three
+  and was not run again.
+- **A dry run that fetches nothing.** `run --dry-run` fetches before it
+  projects, which for the work list would be 11,830 requests nobody has
+  approved. `--no-fetch` skips the fetch and the TEOS check, and the
+  cost gate prices a filing never fetched at what a frame filing of its
+  band cost. For 2020 on it prints $474.72. The frame's cap of $400
+  stopped it there; the cap is $800 since 2026-09-29.
 
 ### 1 · Resolve — the IRS's own copies
 
@@ -216,8 +275,9 @@ run's policy) about $270 (*Sample under POLICY_V1* below).
 
 ### 4 · Select — the reconciliation gate
 
-**Input:** the per-page JSON, the XML-itemised rows, the targets from
-the XML, the page map.
+**Input:** the per-page JSON and the target. Until 2026-09-28 also the
+rows GivingTuesday's extract itemised, and a future-payment target from
+the same extract; both are gone (stage 5).
 **Output:** `pf_recovery_results` — per filing and per target (paid,
 future): outcome, extracted sum, error, evidence (labelled / names),
 whether a stated total matched, coverage, pages in original numbering,
@@ -244,10 +304,13 @@ of the target.
 
 ### 5 · Accept and load
 
-Not built. The design was settled on 2026-09-28 in two rounds: first on
-the measurements in the findings doc's *What the rows carry for
+Built on 2026-09-28, the day the design was settled in two rounds:
+first on the measurements in the findings doc's *What the rows carry for
 matching* (`placeholder_recovered_rows.py`), then on what may load at
-all. Nothing below is code yet.
+all. The loader, the table and the view are
+`placeholder_recovery/loader.py` and `view.py`, commands `load`, `view`
+and `check`. The matcher's part, at the end of this section, is not
+built.
 
 **Output:** `privategrants_recovered`, one row per grant of a reconciled
 list. It is derived from `page_verdicts` and `page_readings` under a
@@ -256,15 +319,29 @@ policy, so a load buys nothing and can be repeated.
 | columns | what | where it comes from |
 |---|---|---|
 | content | recipient name, address, status and purpose as read; amount, numeric with cents | the accepted reading's row in `page_readings.response` |
-| for the matcher | `state` and `zip5`; `state_source`: address, name or empty | read off the end of the address, or off a name printed with its place ("Mayo Clinic, Rochester, MN"). The street is not split from the city: the matcher scores the address as one string |
+| for the matcher | `state` and `zip5`; `state_source`: address, name, or NULL with no state; `match_name` and `match_address`, the name and the address with the place taken off their end | read off the end of the address, or off a name printed with its place ("Mayo Clinic, Rochester, MN"). The street is not split from the city: the matcher scores the address as one string |
 | labels | `page_kind`, the reader's label for the page; `page_verdict`, agreed, escalated or flagged; `filer_marked_individual` | the reading; `page_verdicts`; the work list, from the placeholder row's status in `privategrants_current` |
-| lineage | object id, filer EIN, tax year, image sha256, page, row ordinal, policy version, the accepted model and request hash, the target (paid or future), the declared amount it reconciled against, the error, loaded at | the three tables and the work list |
+| lineage | object id, filer EIN, tax year, image sha256, DPI, prompt version, page, row ordinal, policy version, the accepted model and request hash, the target, the declared amount it reconciled against, the error, the work list's source version, loaded at | the three tables and the work list |
 | key | object id, policy version, target, page, ordinal | a reload deletes and rewrites a filing's rows under the policy |
 
-The selector's `GrantRow` carries the page, the name, the amount and the
-five cells as read. It does not carry the page's label, so the loader
-looks the label up by page in the readings. No change to
-`page_readings` is needed.
+Three things the design did not have, and why:
+
+- **`dpi` and `prompt_version`.** A reading is keyed on both, and the
+  sample's pages were read under two prompts. Without them a loaded row
+  joined to two readings.
+- **`row_ordinal` is the row's index in the reading's `rows`.** The
+  selector's `GrantRow` carries the page and the cells, not where the
+  row sat. The selector keeps the reading's order and leaves out totals
+  and pointers, so the loader finds each row as the next line of the
+  reading with its cells, and stops the load if one is not there. A
+  loaded row then points at its own line: `response->'rows'->row_ordinal`.
+- **`match_name` and `match_address`.** The view is SQL, and the place
+  is read off in Python. Storing the two lets the view hand them to the
+  matcher without a second reading of the rule.
+
+The selector's `GrantRow` does not carry the page's label either, so the
+loader looks the label up by page in the readings. No change to
+`page_readings` or to the selector was needed.
 
 What loads:
 
@@ -282,15 +359,27 @@ What loads:
    in a filing whose list does not add up without them, and carry the
    label. On the frame that is 67 rows in 4 filings. Ledger pages no list
    needs, 1,863 rows and $886M on the frame, stay in `page_readings`.
-5. **Future-payment lists** (line 3b): loaded with target `future` and
-   left out of the matcher's view. They are commitments, not payments.
-   The loaded tables hold no future amounts, so on the work list there is
-   no future target to reconcile against; this applies to the frame.
+5. **Future-payment lists** (line 3b): none loads. The design had them
+   loaded with target `future` and left out of the matcher's view. The
+   target comes from the work list, the loaded tables hold no future
+   amount, and the frame's came from the extract, so there is nothing
+   for such a list to add up to. Future-payment pages stay in
+   `page_readings`. Decided on 2026-09-29 (Zein): the future amount
+   comes from GivingTuesday's future-payment datamart,
+   `990PFPart14Grants3B`, published at the same version as the paid one
+   and never loaded here. Once it is a source, the work list carries a
+   future amount and these lists load with target `future`, outside the
+   view. Not built.
 6. **Flagged pages**: their rows carry the verdict. Leaving them out is a
    filter on the view, not a reload.
 7. **Filings marked as grants to individuals**: read, loaded, and
    labelled `filer_marked_individual`. A row's own status, where the
    list prints one, is kept as read.
+8. **Filings whose placeholder amount passes both columns of line 25**
+   (decided 2026-09-29): read, loaded, and labelled
+   `placeholder_exceeds_declared`. The list adds up to the amount on the
+   rows, which can hold more than the year's grants paid. 112 filings on
+   the work list; on the frame 2 loaded filings, 195 rows, $24.7M.
 
 What the tables cannot say: whether a row names a person. The readers
 returned a status for 21% of rows on paid-list pages and "I" for 406
@@ -299,15 +388,86 @@ all. Their rows will load with students' names, and the matcher will
 leave them unmatched. A text-only pass over the stored names could label
 persons later without reading a page again.
 
-Into the matcher: a view presents the paid rows in
-`privategrants_current`'s columns (the address as read, less the state
-and zip taken from its end, in `sigocpyrfaal1`; `state` and `zip5` in
-`sigocpyrfapo` and `sigocpyrfapc`), unioned with `privategrants_current`
-and tagged `match_source = 'ocr_recovery'`. **The view drops a filing's
-placeholder row once its list is loaded.** That row carries the whole
-amount in `privategrants_current`, so keeping it beside the recovered
-rows would count the dollars twice. `MATCHING_INPUT_SHAPE_VERSION` goes
-to 3. Three kinds of row:
+As built and measured on the frame, 2026-09-28, all from the tables at
+no model cost:
+
+| check | expected | found |
+|---|---|---|
+| the extract's rows leave the search | 407 lists become 406; Elbridge Stuart 2021 lost | 406; Elbridge Stuart 2021, $22.26M paid, the one list lost. Three lists had used such rows, six rows; The Wege Foundation 2020 and Bloch 2022 add up with one row fewer |
+| the paid amount as the only target | a handful of filings change | 5 lost, none gained, 401: four had reconciled only against paid and future together (T.L.L. Temple 2020, Glenn 2023, Northfield Bank 2022, Mitchelson 2021); Kenan 2020's future list closes on its total, which the selector no longer knows, so the paid pages after it continue it |
+| what the loader writes | 407 lists less the above | 398 filings, 221,969 rows, $7,034.0M in rows against $7,034.2M declared. The 401 less three: Caterpillar 2023, Comcast NBCUniversal 2021 and Triad 2021 are in the frame in two versions, both reconciled, and the loaded tables keep one |
+| rows by address | as `address` before, less the lists lost | state and zip 50,877; state only 12,461; state in the name 900; text with no US state 3,776; none 153,955. On the frame's 401 lists `address` gives 59,360 / 12,464 / 900 / 3,966 / 153,962, 230,652 rows |
+| expenditure-responsibility rows | 67 rows in 4 filings | 67 rows, $3.2M: Bader 2022 (28), Paso del Norte 2020 (19), Field Family 2023 (19), Freeman 2020 (1). Of 1,955 rows read from such pages, 1,888 are not loaded |
+| no double count | a loaded filing holds no more in the view than in `privategrants_current`, within 0.5% | 0 of 398 over; $7,163.2M in the view, $7,163.5M in `privategrants_current`; 422 placeholder rows dropped, 38 named rows kept |
+| a second load | writes nothing | the table's digest, its 221,969 rows and every `loaded_at` are the same after it |
+| lineage | every row joins to one reading and one verdict | 0 rows without a reading, 0 whose name is not the name on their line of it, 0 without a verdict |
+
+`check` runs the last four and three more (the work list holds the amount
+a list reconciled against; no placeholder row of a loaded filing is left
+in the view; the view leaves out as many rows of a filing as the work
+list counted as placeholders) in seven seconds. The work list and the
+view build their test for a placeholder row from the same patterns, in
+`classifier.py`, and the last check holds them to it on the data: 422
+rows left out, 422 counted, no filing where the two differ.
+
+What the build found that the design had not:
+
+- **Eight rows from a page labelled a future-payment list are loaded**,
+  in Eden Hall Foundation 2022. The filer entered two placeholder rows
+  on line 3a, grants paid and grants approved, so the target is both and
+  the list that adds up is both schedules: 27 rows, $5.2M, are grants
+  approved. Nine loaded filings hold more on their placeholder rows than
+  on line 25 column (d), $47.8M in all; seven of them equal column (a),
+  and two pass both, Eden Hall and Genentech Foundation 2021, $5.4M.
+- **The slow part of a load is the selector**, on very large filings
+  that do not add up: its search for a run of pages builds the run's
+  rows again for every candidate. Johnson & Johnson 2021 takes 90
+  seconds, and the frame's load spends 8 of its 9 to 10 minutes there.
+  `report` pays the same. The selector was left as it is.
+- **Writing 222,000 rows took 11 minutes** in statements of bound
+  parameters from the laptop. The loader now writes with psycopg2's
+  `execute_values`, about 800 rows a second from the laptop.
+- **The view's first form tested the pattern on every row** of
+  `privategrants_current`, minutes a query, because the planner chose
+  to filter before it joined. It now looks up each loaded filing's
+  placeholder row through the index, one lookup a filing.
+- **Rebuilding `privategrants_current` drops the view.** `current_grants`
+  rebuilds with DROP ... CASCADE. `load` creates the view again when it
+  is gone. When the matcher reads the view, the matching views will
+  have to be created after it.
+- **A load under another policy would have repointed the view.** The
+  view shows one policy; only `view --policy` changes which.
+
+The view is `privategrants_current_w_recovered` (named by Zein on
+2026-09-29; built as `privategrants_current_with_recovered_view` and
+renamed in place): `privategrants_current` with the rows of
+`privategrants_recovered`, `_w_` as in the matcher's
+`privategrants_w_recipients`. It presents the paid rows in
+`privategrants_current`'s columns (`match_name` in `sigocpyrbnbn1`;
+`match_address`, the address as read less the state and zip taken from
+its end, in `sigocpyrfaal1`; `state` and `zip5` in `sigocpyrfapo` and
+`sigocpyrfapc`), unioned with `privategrants_current`, with `row_source`
+saying where each row came from and the labels beside it. **The view
+drops a filing's placeholder row once its list is loaded.** That row
+carries the whole amount in `privategrants_current`, so keeping it
+beside the recovered rows would count the dollars twice.
+
+Into the matcher, not built: the matching views read the view, recovered
+rows are tagged `match_source = 'ocr_recovery'`, and
+`MATCHING_INPUT_SHAPE_VERSION` goes to 3. Two things the chain after the
+matcher will meet, found on 2026-09-29:
+
+- **Cents.** `unioned_grants` casts the amount to a whole number
+  (`sigocpyamoun::bigint`), and no amount in `privategrants_current` has
+  a decimal point. 10,359 recovered rows in 83 filings do, $354.7M. The
+  cast fails on the first of them, so the amount is rounded for
+  `unioned_grants` or the cast changes.
+- **Labels.** `privategrants_w_recipients` takes every column of the
+  matcher's first view, so the labels reach it once that view reads this
+  one. `unioned_grants` names its columns, so they stop there unless
+  they are added.
+
+Three kinds of row:
 
 - **With a zip:** the matcher as it is. Zip narrows the search; name and
   address are scored.
@@ -1506,12 +1666,31 @@ evidence is in the findings doc's decisions table):
   load. A tolerance by filer size is a later question.
 - The view drops a filing's placeholder row once its list is loaded.
 
+Decided on 2026-09-29 (Zein):
+
+- Future-payment lists load, marked as such. The future amount comes
+  from GivingTuesday's future-payment datamart, `990PFPart14Grants3B`,
+  loaded as a source like the paid one, not from each filing's XML.
+  Until it is loaded the target is the paid amount alone, which costs
+  five of the frame's 406 lists.
+- Rows that name a person load as they are. The regular grants table
+  holds them too.
+- The cost cap is $800.
+- A list loads when the amount on its placeholder rows passes both
+  columns of line 25, with the label `placeholder_exceeds_declared` on
+  the work list, on every row and in the view. 112 filings on the work
+  list, 2 loaded.
+
 Still open:
 
+- Whether the view, `privategrants_current_w_recovered`, stays an object of
+  its own or becomes what the matcher's first view reads, with no name
+  of its own.
 - Whether the IRS still serves the images of tax years before 2020:
   11,696 filings on the work list, none fetched.
-- The cost cap for reading the 2020-on work list, about $475 against the
-  frame's cap of $400.
+- Reading the 2020-on work list: $475, inside the cap, which went from
+  the frame's $400 to $800 on 2026-09-29 (Zein). The fetch and the read
+  themselves are not yet run.
 - A label for rows that name a person.
 - What to do with "various" filers: twenty PDFs would tell.
 - Whether GT will run any of this upstream; the lists are in images they

@@ -1,13 +1,17 @@
 -- Placeholder filings by tax year on the loaded datamart: every 990-PF
 -- filing that declares grants (basic_fields_pf_current, Part I line 25
 -- column d) against the filings the broadened classifier sends to the PDF
--- (pointer rows hold >= 50% of the declared total), with the three
+-- (pointer rows hold >= 50% of the declared total), with the
 -- patient-assistance EINs and filings whose grants go to individuals taken
 -- out as placeholder_recovery._addressable does. Same rules as
 -- placeholder_classifier_assessment.sql. Run by
 -- `python -m givingtuesday_datamart.exploratory.placeholder_population`,
--- which substitutes __PA__ with the PATIENT_ASSISTANCE EINs and writes
+-- which substitutes __PA__ with the EINs of
+-- data/placeholder_recovery/exclusions.csv (three when the CSV beside this
+-- file was written, six since 2026-09-28) and writes
 -- placeholder_population_by_year.csv; about 4 minutes.
+-- The v2 pattern below is the one placeholder_recovery/classifier.py holds
+-- for the work list and the view; a test keeps the two texts equal.
 CREATE TEMP TABLE pg AS
 SELECT filerein, taxyear::text AS taxyear,
        trim(regexp_replace(concat_ws(' ', sigocpyrpnam, sigocpyrbnbn1, sigocpyrbnbn2), '\s+', ' ', 'g')) AS name,

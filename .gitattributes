@@ -5,3 +5,9 @@
 # trail (docs/corrections-plan.md) — keep it a plain text blob, not an LFS
 # pointer, so reviews show the actual rows.
 data/corrections/*.csv -filter -diff -merge text
+
+# Placeholder recovery's exclusions: six filers, by EIN, each with its
+# evidence. Plain text for the same reason as the corrections registry.
+# The LFS attributes are reset, not unset: "-diff" would mark the file
+# binary and a pull request would hide the row it adds.
+data/placeholder_recovery/*.csv !filter !diff !merge text
