@@ -679,8 +679,8 @@ For tax years 2020 on, at the frame's rates in paid grants:
 | all | 12,822 | $32.19B | 11,830 | about $475 | | about 4,550 | $14.9B |
 
 The cost column is what `run --tax-years 2020-2025 --dry-run --no-fetch`
-prints: $474.72, with no request made of the IRS and no page read. It
-stops there, the projection being past the cap of $400.
+prints: $474.72, with no request made of the IRS and no page read. The
+cap is $800 since September 29; the frame's was $400.
 
 Bands here are cut on the paid amount of the placeholder row, so they
 differ a little from the frame's, which counted future payments too. The
@@ -900,8 +900,8 @@ search; the frame loaded.
 3. Fetch about 30 filings from each tax year before 2020, to learn
    whether the IRS still serves their images. No model is called.
 4. Read the 2020-on work list: 11,830 filings, about $475, about nine
-   hours of reading on the box. The frame's cost cap was $400, so this
-   run needs its own. Then `load` and `check`.
+   hours of reading on the box, inside the cap of $800. Then `load` and
+   `check`.
 5. Label the rows that name a person. A pass over the stored names
    reads no page.
 6. Test the "various" class: twenty PDFs would say whether its $35.5B

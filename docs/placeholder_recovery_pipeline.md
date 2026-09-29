@@ -140,7 +140,8 @@ and $48.49B on the placeholder rows; 743 marked; bands 29 / 554 / 3,029
   projects, which for the work list would be 11,830 requests nobody has
   approved. `--no-fetch` skips the fetch and the TEOS check, and the
   cost gate prices a filing never fetched at what a frame filing of its
-  band cost. For 2020 on it prints $474.72 and stops at the cap.
+  band cost. For 2020 on it prints $474.72. The frame's cap of $400
+  stopped it there; the cap is $800 since 2026-09-29.
 
 ### 1 · Resolve — the IRS's own copies
 
@@ -1644,8 +1645,9 @@ Still open:
   grants paid on line 25: 219 filings on the work list, 9 loaded.
 - Whether the IRS still serves the images of tax years before 2020:
   11,696 filings on the work list, none fetched.
-- The cost cap for reading the 2020-on work list, $475 against the
-  frame's cap of $400.
+- Reading the 2020-on work list: $475, inside the cap, which went from
+  the frame's $400 to $800 on 2026-09-29 (Zein). The fetch and the read
+  themselves are not yet run.
 - A label for rows that name a person.
 - What to do with "various" filers: twenty PDFs would tell.
 - Whether GT will run any of this upstream; the lists are in images they

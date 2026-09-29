@@ -198,7 +198,7 @@ reads found the gateway's limit.
 | the frame's rows, loaded | done: 398 filings, 221,969 rows, $7.03B under `v2` |
 | the extract's rows in the search | gone: the selector reads the pages and nothing else; the file is archived |
 | the matcher reading the view | not built: the name cleaner, the name-only tier and input shape version 3 go in on one rerun |
-| reading the work list | not run: no filing outside the frame is fetched. Tax years 2020 on are about $475, over the $400 cap; whether the IRS serves the images of earlier years is not measured |
+| reading the work list | not run: no filing outside the frame is fetched. Tax years 2020 on are about $475, inside the cap of $800; whether the IRS serves the images of earlier years is not measured |
 
 The rules the work list and the loader follow are in the engineering
 log, stages 0 and 5.
@@ -313,8 +313,10 @@ python -m givingtuesday_datamart.placeholder_recovery run --policy v2 --tax-year
 ```
 
 On 2026-09-28 it found 12,822 filings, 992 of them fetched, and
-projected $474.72 for the 11,830 others. The cap of $400 stopped it
-there, as it should.
+projected $474.72 for the 11,830 others. The cap was $400 then, the
+frame's, and stopped it. It is $800 since September 29, so the same
+command passes the gate and ends as a dry run does, with nothing
+bought.
 
 `run` checks every prerequisite first (poppler, with `pdftoppm -v`
 printed and a one-page render tried; the gateway key and the datamart
@@ -327,7 +329,7 @@ message saying what. Then, each stage under a timestamped banner:
 2. **the cost gate**: the stored-only pass, which names the pages without
    a reading and buys nothing, then the projection by reader at the
    measured per-page prices and the frame's dispute and resolution rates,
-   and by band for the filings never fetched; past $400 (`--cap`) the
+   and by band for the filings never fetched; past $800 (`--cap`) the
    run stops. `--dry-run` stops here, so the projection can be committed
    before the box runs for real.
 3. **the base readers**, as child processes of the `page_readings` CLI,

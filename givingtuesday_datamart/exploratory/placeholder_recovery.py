@@ -141,7 +141,7 @@ VERDICT_KINDS = ("agreed", "escalated", "flagged", "unreadable", "no_verdict")
 # projected $241.50 for a run that cost $221.64 only because the errors
 # offset: what a page bought from each reader cost, 3.8 Flash at reasoning
 # effort low; the share of pages the base pair disputes; and the share of
-# what reaches each escalation reader that it resolves. The cap is Session 4's.
+# what reaches each escalation reader that it resolves.
 PER_PAGE = {"alibaba/qwen3-vl-instruct": 0.0025, "google/gemini-3.5-flash-lite": 0.0062,
             "google/gemini-3.8-flash": 0.0091, "anthropic/claude-sonnet-5": 0.0343}
 DISPUTE_RATE = 0.605
@@ -150,7 +150,10 @@ RESOLVE_RATES = {"google/gemini-3.8-flash": 0.423, "anthropic/claude-sonnet-5": 
 # to read among them (the findings doc, *Shipping the rest*): the price of a
 # filing nobody has fetched, whose pages are not yet known.
 PER_FILING = {"A": 1.35, "B": 0.59, "C": 0.066, "D": 0.020}
-COST_CAP = 400.0
+# The projection a run stops at. $400 for the frame (Session 4), which cost
+# $222; $800 since 2026-09-29 (Zein), so the work list's tax years 2020 on,
+# projected at $475, pass and the whole list, about $985, does not.
+COST_CAP = 800.0
 # The one-command run (``run``): the disk it needs under the cache and the
 # key its bucket write check uses.
 MIN_FREE_GB = 15
