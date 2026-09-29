@@ -1044,6 +1044,67 @@ them. With the older widths measured, the same years are about 32,000
 pages, in the region of $700. The earlier estimate of "up to $510"
 assumed the frame's pages per filing.
 
+### The 2020-on work list, fetched and cut (2026-09-29)
+
+`run --policy v2 --tax-years 2020-2025 --keep-list --dry-run`, which
+fetches and stops at the cost gate. It began on the laptop (3,191
+filings in 12 minutes, four a second) and was moved to the box, where
+the other 8,802 took 14 minutes, ten a second, at the same eight
+workers. Eleven requests failed on the laptop's network; tried again
+from the box, nine were served and two were refused with a 404. No
+model was called.
+
+| tax year | fetched | PDF served | with an attachment | no image listed | 404 |
+|---|---|---|---|---|---|
+| 2020 | 2,679 | 1,491 | 894 | 935 | 251 |
+| 2021 | 2,574 | 2,081 | 1,197 | 22 | 470 |
+| 2022 | 2,340 | 2,230 | 1,276 | 108 | 0 |
+| 2023 | 2,123 | 1,888 | 1,018 | 234 | 0 |
+| 2024 | 1,964 | 1,956 | 1,341 | 8 | 0 |
+| 2025 | 150 | 127 | 69 | 23 | 0 |
+| all | 11,830 | 9,773 | 5,795 | 1,330 | 721 |
+
+Six filings ended on a network error from the box, at one attempt
+each. The 721 images refused were all generated in 2022. By band the
+table is in the findings doc, *Shipping the rest*. With the frame, the
+2020-on work list is 12,822 filings, 10,598 served (82.7%), 6,345 with
+an attachment (49.5%), 38,662 attachment pages.
+
+The cost gate, 2026-09-29T23:50Z:
+
+| reader | expects | stored | to buy | $ a page | $ |
+|---|---|---|---|---|---|
+| Qwen3-VL | 38,662 | 9,756 | 28,906 | 0.0025 | 72.27 |
+| Gemini 3.5 Flash Lite | 38,662 | 9,756 | 28,906 | 0.0062 | 179.22 |
+| Gemini 3.8 Flash | 23,391 | 5,907 | 17,484 | 0.0091 | 159.10 |
+| Claude Sonnet 5 | 13,496 | 3,409 | 10,087 | 0.0343 | 346.00 |
+| total | | | | | 756.58 |
+
+Before the fetch the same command with `--no-fetch` printed $474.72. The
+difference is pages and price. Pages: the per-filing prices stood for
+about 23,400 pages (the frame's share with an attachment and pages per
+filing, by band) and the filings hold 28,906. Band C has 13,416 where
+8,800 were expected: 59% of its filings have an attachment against the
+frame's 47%, at 8.0 pages against 6.6. Five filings of the Elsie &
+Marvin Dekelboum Family Foundation hold 1,550 pages, four of the Joe W
+and Dorothy D Brown Foundation 480. Price: the gate takes `PER_PAGE`,
+`DISPUTE_RATE` and `RESOLVE_RATES` from the frame's 9,926 pages, 8,088
+of which are band B's, and they come to 2.6 cents a page. The frame's
+own spend per attachment page, by band, from the readings' `usage`:
+
+| band | frame pages | reach 3.8 Flash | reach Sonnet | cents a page | pages to read | $ |
+|---|---|---|---|---|---|---|
+| A | 451 | 68% | 49% | 4.1 | 134 | 5 |
+| B | 8,088 | 60% | 33% | 2.7 | 3,287 | 89 |
+| C | 699 | 59% | 46% | 1.9 | 13,416 | 248 |
+| D | 518 | 57% | 45% | 1.6 | 12,069 | 188 |
+| all | 9,756 | | | | 28,906 | 530 |
+
+Bands C and D send more of their pages to Sonnet than band B does and
+still cost less a page, because their pages are short. The two bands'
+figures rest on 699 and 518 pages, so $530 is the low estimate and $757
+the gate's.
+
 ## Ground truth
 
 [`placeholder_ground_truth.py`](../givingtuesday_datamart/exploratory/placeholder_ground_truth.py):

@@ -1,6 +1,6 @@
 # Recovering the Grants Behind "SEE ATTACHMENT"
 
-Vibrant Data Labs, September 25, 2026; updated September 28.
+Vibrant Data Labs, September 25, 2026; updated September 29.
 
 Status: measured on a frame of 1,000 filings under the page gate on
 September 23 and 24, 2026, for $222 in model calls, after a sample of 100
@@ -9,8 +9,9 @@ settled, and the work list moved from GivingTuesday's one-off extract to
 the loaded tables, where it is 24,518 filings across tax years 2009 to
 2025. The work-list command and the loader were built the same day. The
 frame's lists are loaded: 398 filings, 221,969 grants, $7.03B. The
-matcher does not read them yet, and no filing outside the frame has been
-fetched.
+matcher does not read them yet. On September 29 the rest of the 2020-on
+work list was fetched, 11,830 filings, and none of it is read yet: the
+read is projected at $757 and waits on a decision.
 
 This is the findings document. How the method was built and measured,
 step by step, is the engineering log,
@@ -727,6 +728,42 @@ widths measured, a guess from this test puts the same years at about
 32,000 pages, in the region of $700. The count of filings with an
 attachment waits on that measurement too.
 
+**Fetched on September 29.** The 11,830 filings were fetched and cut,
+with no model called:
+
+| band | fetched | on their placeholder rows | PDF served | no image listed | 404 | with an attachment | attachment pages |
+|---|---|---|---|---|---|---|---|
+| A | 11 | $3.12B | 9 | 2 | 0 | 9 | 134 |
+| B | 162 | $3.74B | 148 | 8 | 6 | 128 | 3,287 |
+| C | 2,851 | $8.71B | 2,454 | 252 | 145 | 1,682 | 13,416 |
+| D | 8,806 | $2.26B | 7,162 | 1,068 | 570 | 3,976 | 12,069 |
+| all | 11,830 | $17.84B | 9,773 (82.6%) | 1,330 | 721 | 5,795 (49.0%) | 28,906 |
+
+Six more failed on the network and are tried again. The frame's rates
+were 81% served and 48% with an attachment. Every 404 is an image
+generated in 2022. Tax year 2020 is the weak one: 935 of its 2,679
+filings have no image listed. The filings with an attachment hold
+$12.1B of the $17.8B.
+
+The cost gate, on these pages, projects $756.58, under the cap of $800:
+Qwen $72, Flash Lite $179, 3.8 Flash $159 for 17,484 disputed pages,
+Sonnet $346 for 10,087. It is not $475 for two reasons. There are more
+pages, 28,906 against about 23,400: band C has 13,416 where the frame's
+rates gave 8,800, and a few small filers attach very long documents
+(Elsie & Marvin Dekelboum Family Foundation, 1,550 pages in five
+filings). And the gate prices every page at the frame's rate over all
+pages, 2.6 cents, which band B's dense pages set, where the $475 used
+the frame's cost per filing by band. At the frame's measured cost per
+page by band (A 4.1 cents, B 2.7, C 1.9, D 1.6) the same pages are
+about $530. The C and D figures rest on 699 and 518 frame pages. About
+11 to 12 hours of reading.
+
+Of the 173 large filings, 157 were served and 137 have an attachment.
+Howard G. Buffett Foundation 2020 and 2023 have no image listed; its
+2021, 2022 and 2024 have attachments of 8, 11 and 21 pages. The 2024
+filings of Musk, Bezos, Schusterman and Wyss have attachments of 3, 15,
+61 and 6 pages.
+
 The C and D rates rest on 137 and 403 sampled filings, so they carry
 about 8 and 5 points of sampling error at 95%; the dollar estimates for
 C and D are about $3.1B to $4.6B and $0.7B to $1.0B. Cost does not
@@ -940,9 +977,10 @@ search; the frame loaded.
    Tax years 2015 to 2019 are served, 2009 to 2014 are not. Next for
    them: measure the page widths of the IRS renderer before 2021, so
    the cut holds on those images; then project and read 2015 to 2019.
-4. Read the 2020-on work list: 11,830 filings, about $475, about nine
-   hours of reading on the box, inside the cap of $800. Then `load` and
-   `check`.
+4. Read the 2020-on work list. Fetched on September 29: 5,795 filings
+   with an attachment, 28,906 pages, projected at $757 by the cost gate
+   (about $530 at the frame's cost per page by band), 11 to 12 hours of
+   reading on the box, inside the cap of $800. Then `load` and `check`.
 5. Label the rows that name a person. A pass over the stored names
    reads no page.
 6. Test the "various" class: twenty PDFs would say whether its $35.5B
