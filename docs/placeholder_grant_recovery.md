@@ -194,9 +194,9 @@ one-time query had measured first, in a minute and a half: the query
 makes one pass over the 16.6 million grant rows, and a cheap test for
 the words a placeholder needs leaves 1% of them for the pattern. The
 count rises from 42 filings for tax year 2009 to 2,925 for 2020 and
-falls to 2,012 for 2024. Whether the IRS still serves the images of the
-earlier years is not measured: every filing read so far was processed by
-the IRS in 2021 or later.
+falls to 2,012 for 2024. The IRS serves the images of tax years 2015 on
+and none before 2014, measured on September 29 (see "Shipping the
+rest").
 
 Six filers are left out, by EIN. All are drug-makers' patient-assistance
 programs. They give medicine to patients, so there is no recipient
@@ -702,10 +702,30 @@ Musk, Bezos, Schusterman and Wyss. The A and B rates were measured on
 other large filers, not on these.
 
 Tax years before 2020 are 11,696 filings and $16.3B on their placeholder
-rows. Reading them would cost up to $510 and, if the IRS serves their
-images as it does recent ones, recover about 4,100 filings and $7.1B.
-That condition is untested. Fetching about 30 filings from each of
-those years costs nothing in model calls and would settle it.
+rows. On September 29, 30 filings from each of those tax years were
+fetched, 330 in all, with no model called
+(`data/placeholder_recovery/fetch_test_pre2020.csv`):
+
+| tax years | on the work list | on their placeholder rows | fetched | PDF served | 404 | no image listed |
+|---|---|---|---|---|---|---|
+| 2009 to 2013 | 2,617 | $2.48B | 150 | 0 | 0 | 150 |
+| 2014 | 1,135 | $1.39B | 30 | 3 | 0 | 27 |
+| 2015 to 2018 | 5,666 | $8.33B | 120 | 112 (93%) | 0 | 8 |
+| 2019 | 2,278 | $4.11B | 30 | 19 (63%) | 0 | 11 |
+
+The IRS site holds the images it generated from December 2016 on and
+none before. Tax years 2009 to 2014, 3,752 filings and $3.9B, are out
+of reach through it. Tax years 2015 to 2019, 7,944 filings and $12.4B,
+are served as well as recent years or better, about 6,800 PDFs.
+
+They cannot be read yet. The images generated before 2021 come from an
+older renderer with other page widths, so the cut takes every page for
+the filer's: on the 121 such images in the test, all 4,596 pages. Read
+whole, 2015 to 2019 would be about 189,000 pages and some $4,000, and
+the readers would be sent the IRS's own form pages. With the older
+widths measured, a guess from this test puts the same years at about
+32,000 pages, in the region of $700. The count of filings with an
+attachment waits on that measurement too.
 
 The C and D rates rest on 137 and 403 sampled filings, so they carry
 about 8 and 5 points of sampling error at 95%; the dollar estimates for
@@ -916,8 +936,10 @@ search; the frame loaded.
    name-only tier. One matcher rerun takes all of it; the matching
    input-shape version goes to 3. The regression gate and the
    corrections preflight are the checks.
-3. Fetch about 30 filings from each tax year before 2020, to learn
-   whether the IRS still serves their images. No model is called.
+3. Done on September 29: the fetch test for tax years before 2020.
+   Tax years 2015 to 2019 are served, 2009 to 2014 are not. Next for
+   them: measure the page widths of the IRS renderer before 2021, so
+   the cut holds on those images; then project and read 2015 to 2019.
 4. Read the 2020-on work list: 11,830 filings, about $475, about nine
    hours of reading on the box, inside the cap of $800. Then `load` and
    `check`.

@@ -63,7 +63,9 @@ row each with EIN, name, evidence and date, tracked as plain text so a
 pull request shows the row added.
 
 **`filing_images`.** The fetch outcome for a filing: `filerein`,
-`taxyear`, the IRS index year and TEOS URL, the date the IRS generated
+`taxyear`, the IRS index year (NULL for a filing no index lists, found
+by the frame's EIN and tax period: the IRS publishes an index from 2017
+on) and TEOS URL, the date the IRS generated
 the image (for the 404 report), `status`, `attempts`, `last_error`,
 `fetched_at`, `s3_key`, `sha256`, `bytes`, `pages`, `page_widths` (from
 `pdfimages -list`, one per page), `attachment_from` (the first page the
@@ -438,9 +440,11 @@ parallel and 1.5 hours for the escalation readers; about $0.02 to $0.03 a
 page all-in. The work list from the loaded tables, for tax years 2020
 on, leaves 11,830 filings to read: about 22,600 pages, about $475 and
 nine hours of reading. With the $304 already spent that is about $780.
-The 11,696 filings before 2020 would be up to $510 more, if the IRS
-serves their images. The server is a few dollars a run and the S3
-storage under a dollar a month.
+Of the 11,696 filings before 2020, the IRS serves tax years 2015 to
+2019 and nothing before 2014 (fetch test, 2026-09-29). Do not run
+them yet: the cut takes every page of an image generated before 2021
+for the filer's, which would be about 189,000 pages. The server is a
+few dollars a run and the S3 storage under a dollar a month.
 
 ## Success metrics, as measured on the frame run
 

@@ -959,6 +959,91 @@ line to read the 21%-against-29% gap on, and the reason the recovery
 rate falls from 53% on the sample to 49% on the frame while the count
 of flagged rows loaded rises to 15% of all rows.
 
+### The fetch test for tax years before 2020 (2026-09-29)
+
+Every filing read before this day was processed by the IRS in 2021 or
+later. The test: 330 filings of the work list, 30 from each tax year
+2009 to 2019, fetched through `filing_images fetch`, with no model
+called. The sample is `data/placeholder_recovery/fetch_test_pre2020.csv`:
+every band A filing of the year, up to 8 of band B and 10 of band C, the
+rest from band D, each band in the order of `md5(object_id)` (9 A, 78 B,
+104 C, 139 D). The results are the sample's rows in `filing_images`.
+
+The fetcher needed one change first. It resolved a filing through the
+IRS index of 2021 to 2026 only, so every return processed earlier would
+have ended as `lookup_failed`, which says nothing about the IRS. The IRS
+publishes `index_2017.csv` to `index_2020.csv` as well; a request for
+2010 to 2016 is redirected to an error page. `INDEX_YEARS` now starts at
+2017, and a filing no index lists is asked of TEOS by the EIN and tax
+period the frame gives, as a 990-PF; its row has no `index_year`. Where
+the index does list a work-list filing (18,882 of 24,518), its EIN and
+tax period equal the work list's in all but one.
+
+| tax year | on the work list | fetched | PDF served | 404 | no image listed | in an IRS index |
+|---|---|---|---|---|---|---|
+| 2009 | 42 | 30 | 0 | 0 | 30 | 0 |
+| 2010 | 364 | 30 | 0 | 0 | 30 | 0 |
+| 2011 | 528 | 30 | 0 | 0 | 30 | 0 |
+| 2012 | 733 | 30 | 0 | 0 | 30 | 0 |
+| 2013 | 950 | 30 | 0 | 0 | 30 | 0 |
+| 2014 | 1,135 | 30 | 3 | 0 | 27 | 2 |
+| 2015 | 1,290 | 30 | 26 | 0 | 4 | 26 |
+| 2016 | 1,409 | 30 | 29 | 0 | 1 | 30 |
+| 2017 | 1,436 | 30 | 28 | 0 | 2 | 30 |
+| 2018 | 1,531 | 30 | 29 | 0 | 1 | 29 |
+| 2019 | 2,278 | 30 | 19 | 0 | 11 | 13 |
+| all | 11,696 | 330 | 134 | 0 | 196 | 130 |
+
+TEOS holds the images the IRS generated from December 2016 on and none
+before: of the 174 sampled returns processed in 2010 to 2015, none has
+an image; of the 28 processed in 2016, 21 have one, generated between
+2016-12-14 and 2017-04-19. No image listed was refused: the 404s of the
+frame are a batch of 2022, and no image here is of that batch. Tax year
+2019 is served like the frame's 2020 (63% against 58%); 17 of its 30
+filings are in no index, since `index_2020.csv` lists 1,336 of the
+work list's 2,076 returns processed that year, and 9 of those 17 were
+served through the
+frame's EIN and tax period. The 2020 index and TEOS label some 990-PF
+returns `990PR` (653 work-list filings). A filing in no index is asked
+for as `990PF` only. Of the 22 sampled filings processed from 2016 on
+with no image, 20 have nothing listed for their tax period under any
+return type, one has a `990PR` image the index calls `990PF`, and one
+has a 990-T.
+
+**The cut does not hold on these images.** Of the 121 served images the
+IRS generated before 2021, every one has its attachment starting on
+page 1: 4,596 attachment pages of 4,596. The renderer of those years
+used other widths. The first page, always the IRS's, is 2240 px wide on
+92 of them, 2256 on 18, 2800 on 6, 2432 on 4, 2224 on 1; the five widths of
+`IRS_RENDERED_WIDTHS` (2246, 2259, 2440, 3062, 3081) appear on none.
+Pages looked at: on Kravis Foundation 2014 (`201602789349100410`) the
+2800 px pages are the IRS's form and the 2544 px pages are the filer's
+list of distributions; on Keith Campbell Foundation 2015
+(`201633199349100728`) a 2352 px page is the IRS's Schedule B. The 13 sampled images generated in 2021 and 2022 cut
+as the frame's do (9 with an attachment, 61 attachment pages of 633).
+
+With seven widths taken as the older renderer's (2240, 2256, 2352,
+2368, 2432, 2800, 3072), a guess from the counts and the three pages
+above and not a measurement, 74 of the 121 would have an attachment and
+1,462 pages would be the filer's. Weighted by band to the work list:
+
+| tax years | on the work list | on their placeholder rows | PDFs served, estimated | pages, read whole | pages, after a guessed cut |
+|---|---|---|---|---|---|
+| 2009 to 2013 | 2,617 | $2.48B | 0 | | |
+| 2014 | 1,135 | $1.39B | about 100 (9%) | 2,800 | 800 |
+| 2015 to 2018 | 5,666 | $8.33B | about 5,250 (93%) | 135,500 | 27,600 |
+| 2019 | 2,278 | $4.11B | about 1,530 (67%) | 53,800 | 4,600 |
+
+So tax years 2015 to 2019 are worth reading, 7,944 filings and $12.4B
+on their placeholder rows with a PDF for about 6,800 of them, and tax
+years 2009 to 2014 are out of reach through TEOS, 3,752 filings and
+$3.9B. But not with the cut as it stands: read whole, 2015 to 2019 are
+about 189,000 pages, some $4,000 at two cents a page, and the readers
+would be sent the IRS's form pages, which the cut exists to keep from
+them. With the older widths measured, the same years are about 32,000
+pages, in the region of $700. The earlier estimate of "up to $510"
+assumed the frame's pages per filing.
+
 ## Ground truth
 
 [`placeholder_ground_truth.py`](../givingtuesday_datamart/exploratory/placeholder_ground_truth.py):
