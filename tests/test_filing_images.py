@@ -20,6 +20,7 @@ from givingtuesday_datamart import irs_source
 IRS, WIDE, FILER = 2246, 2440, 2550      # IRS-rendered portrait, IRS landscape, a scanned letter page
 PDF, PDF2, HTML = b"%PDF-1.4 one", b"%PDF-1.4 two", b"<html>error page</html>"
 OID = "202343149349101129"
+OLD = "201631359349100103"                # processed in 2016: the IRS publishes no index for it
 
 
 def _index(oid, ein="731312965", period="202212", year="2023"):
@@ -42,6 +43,7 @@ class _Teos:
         self.lookups: list[str] = []
         self.index_passes: list[str] = []
         self.listings: list[str] = []
+        self.asked: list[tuple[str, str, str]] = []
         self.gets: list[str] = []
 
     def add(self, oid, images=(), *, index=None, widths=(IRS, IRS, FILER)):
@@ -71,6 +73,7 @@ class _Teos:
 
     def images(self, row):
         self.listings.append(row.object_id)
+        self.asked.append((row.ein, row.tax_period, row.return_type))
         listed = self.listing[row.object_id]
         if isinstance(listed, Exception):
             raise listed
@@ -176,7 +179,7 @@ def test_the_frame_is_indexed_in_one_pass_per_year_own_years_first(teos, tmp_pat
     teos.add("202200000000000002", index=_index("202200000000000002", year="2021"))  # listed late, as Caterpillar was
     found = fi._index_frame(["202400000000000001", "202200000000000002", "202400000000000009"], tmp_path)
     assert sorted(found) == ["202200000000000002", "202400000000000001"]
-    assert teos.index_passes == ["2022", "2024", "2021", "2023", "2025", "2026"]
+    assert teos.index_passes == ["2022", "2024", "2017", "2018", "2019", "2020", "2021", "2023", "2025", "2026"]
     teos.index_passes.clear()
     assert fi._index_frame(["202400000000000001"], tmp_path) and teos.index_passes == ["2024"]
     assert fi.fetch_image("202400000000000009", tmp_path, index=found).status == "lookup_failed:LookupError"
@@ -188,6 +191,33 @@ def test_a_frame_row_supplies_the_ein_and_tax_year_over_the_index(teos, tmp_path
     store = fi.MemoryStore()
     _fetch(store, [fi.Filing(OID, "111222333", 2019)], tmp_path, _S3())
     assert (store.rows[OID].filerein, store.rows[OID].taxyear) == ("111222333", 2019)
+
+
+def test_a_filing_in_no_index_is_found_by_the_frames_ein_and_tax_period(teos, tmp_path):
+    row = teos.add(OLD, [("20170628", PDF)], index=_index(OLD, ein="226062811", period="201512"))
+    del teos.index[OLD]
+    store = fi.MemoryStore()
+    assert _fetch(store, [fi.Filing(OLD, "226062811", 2015, "201512")], tmp_path, _S3()) == {OLD: "fetched"}
+    assert teos.asked == [("226062811", "201512", "990PF")]
+    got = store.rows[OLD]
+    assert (got.filerein, got.taxyear, got.index_year) == ("226062811", 2015, None)
+    assert got.teos_url == _url(row, "20170628") and got.image_generated == date(2017, 6, 28)
+    # Without the period there is nothing to ask TEOS with.
+    assert _fetch(fi.MemoryStore(), [fi.Filing(OLD, "226062811", 2015)], tmp_path, _S3()) == {
+        OLD: "lookup_failed:LookupError"}
+    assert len(teos.asked) == 1
+
+
+def test_the_index_row_is_used_over_the_frames_ein_and_tax_period(teos, tmp_path):
+    teos.add(OID, [("20230501", PDF)])
+    _fetch(fi.MemoryStore(), [fi.Filing(OID, "111222333", 2019, "201912")], tmp_path, _S3())
+    assert teos.asked == [("731312965", "202212", "990PF")]
+
+
+def test_a_frame_line_gives_the_tax_period_as_teos_keys_it():
+    line = {"object_id": OLD, "filerein": "226062811", "taxyear": "2015", "taxperend": "2015-12-31"}
+    assert fi.filing_of(line) == fi.Filing(OLD, "226062811", 2015, "201512")
+    assert fi.filing_of({"object_id": OLD, "taxperend": ""}) == fi.Filing(OLD)
 
 
 def test_all_irs_rendered_pages_is_no_attachment_and_still_fetched(teos, tmp_path):

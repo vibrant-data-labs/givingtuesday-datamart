@@ -11,7 +11,9 @@ was built from, now in git history). The measurements behind
 every choice here are in ``docs/placeholder_recovery_pipeline.md``.
 
 **Fetching.** ``fetch_filings`` resolves each object id through the IRS
-index and TEOS (``irs_source``), downloads the newest image first with older
+index and TEOS (``irs_source``), or through the frame's own EIN and tax
+period when no index lists the filing (the IRS publishes none before 2017;
+such a row has no ``index_year``), downloads the newest image first with older
 ones as fallbacks, hashes it, reads the page widths
 with ``pdfimages`` to find where the filer's attachment starts, uploads the
 PDF to ``s3://givingtuesday-datamart/irs/pdf/<object_id>.pdf`` and upserts
@@ -151,11 +153,37 @@ _SELECT = f"{_SELECT_ALL} WHERE object_id = ANY(:ids)"
 
 class Filing(NamedTuple):
     """What a caller may know about a filing before it is fetched. The EIN and
-    tax year come from the IRS index when not given; a frame CSV gives both."""
+    tax year come from the IRS index when not given; a frame CSV gives both.
+    ``tax_period`` is the period's end as TEOS keys it, ``YYYYMM``; with the
+    EIN it finds the images of a filing no IRS index lists."""
 
     object_id: str
     filerein: str | None = None
     taxyear: int | None = None
+    tax_period: str | None = None
+
+
+# A filing in no index is looked up as this return type: the filings the
+# recovery pipeline reads are 990-PF.
+RETURN_TYPE = "990PF"
+
+
+def filing_of(row: Mapping) -> Filing:
+    """A frame CSV's line as a ``Filing``; ``taxperend`` is "2015-12-31"."""
+    period = (row.get("taxperend") or "").replace("-", "")[:6]
+    return Filing(row["object_id"], row.get("filerein") or None,
+                  int(row["taxyear"]) if row.get("taxyear") else None,
+                  period if len(period) == 6 and period.isdigit() else None)
+
+
+def _known(filing: Filing) -> irs_source.IndexRow | None:
+    """The filing as the caller knows it, for one the IRS index does not
+    list: the IRS publishes no index before 2017. With no RETURN_ID every
+    image of the period is listed, as for an index row without one, and the
+    row's ``index_year`` stays NULL, which is how such a row is told apart."""
+    if not (filing.filerein and filing.tax_period):
+        return None
+    return irs_source.IndexRow(filing.filerein, filing.tax_period, "", RETURN_TYPE, filing.object_id, "", "")
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +286,8 @@ class Fetched(NamedTuple):
 
 
 def fetch_image(object_id: str, cache_dir: Path = CACHE, *,
-                index: Mapping[str, irs_source.IndexRow] | None = None) -> Fetched:
+                index: Mapping[str, irs_source.IndexRow] | None = None,
+                known: irs_source.IndexRow | None = None) -> Fetched:
     """Download one filing's image, newest TEOS image first with older ones
     as fallbacks.
 
@@ -270,7 +299,9 @@ def fetch_image(object_id: str, cache_dir: Path = CACHE, *,
     older tax years.
 
     ``index`` is the frame's rows from ``_index_frame``; without it the
-    filing is looked up on its own, a scan of the index CSVs.
+    filing is looked up on its own, a scan of the index CSVs. ``known`` is
+    the filing as the caller knows it (``_known``), used when no index
+    lists it.
     """
     try:
         if index is None:
@@ -278,7 +309,9 @@ def fetch_image(object_id: str, cache_dir: Path = CACHE, *,
         elif (row := index.get(object_id)) is None:
             raise LookupError(f"{object_id} not in index_{object_id[:4]}.csv or any other year")
     except Exception as exc:                              # noqa: BLE001 — not in any index CSV
-        return Fetched(f"lookup_failed:{type(exc).__name__}", None, None, None, str(exc)[:500])
+        if known is None:
+            return Fetched(f"lookup_failed:{type(exc).__name__}", None, None, None, str(exc)[:500])
+        row = known
     try:
         images = irs_source.images(row)
     except Exception as exc:                              # noqa: BLE001 — TEOS down or malformed
@@ -383,7 +416,7 @@ def _upload(s3, bucket: str, key: str, payload: bytes, digest: bytes) -> None:
 def _fetch_one(filing: Filing, prior: FilingImage | None, *, cache_dir: Path,
                bucket: str, prefix: str, s3, index: Mapping[str, irs_source.IndexRow] | None = None) -> FilingImage:
     """Runs in a worker thread: TEOS, hash, widths, S3. Never the session."""
-    got = fetch_image(filing.object_id, cache_dir, index=index)
+    got = fetch_image(filing.object_id, cache_dir, index=index, known=_known(filing))
     index = got.row
     base = prior if prior is not None else FilingImage(
         object_id=filing.object_id, filerein="", taxyear=None, index_year=None,
@@ -628,14 +661,12 @@ def verify(session, *, bucket: str = BUCKET, workers: int = 8, s3=None) -> list[
 
 
 def _read_frame(token: str) -> list[Filing]:
-    """A frame CSV (``object_id`` plus optional ``filerein``, ``taxyear``), or one bare id."""
+    """A frame CSV (``object_id`` plus optional ``filerein``, ``taxyear``, ``taxperend``), or one bare id."""
     path = Path(token)
     if not path.exists():
         return [Filing(irs_source.parse_object_id(token))]
     with path.open(newline="") as handle:
-        return [Filing(line["object_id"], line.get("filerein") or None,
-                       int(line["taxyear"]) if line.get("taxyear") else None)
-                for line in csv.DictReader(handle)]
+        return [filing_of(line) for line in csv.DictReader(handle)]
 
 
 def main() -> None:
