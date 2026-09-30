@@ -1,6 +1,6 @@
 # Recovering the Grants Behind "SEE ATTACHMENT"
 
-Vibrant Data Labs, September 25, 2026; updated September 28 and 29.
+Vibrant Data Labs, September 25, 2026; updated September 29.
 
 Status: measured on a frame of 1,000 filings under the page gate on
 September 23 and 24, 2026, for $222 in model calls, after a sample of 100
@@ -12,8 +12,9 @@ September 29 GivingTuesday's future-payment datamart became a source, so
 a filing's future amount is known and its future-payment list can load.
 The frame's lists are loaded: 399 filings, 222,105 grants paid, $7.07B,
 and beside them 3,873 grants approved for future payment, of 71 filings,
-$0.95B. The matcher does not read them yet, and no filing outside the
-frame has been read.
+$0.95B. The matcher does not read them yet. On September 29 the rest of
+the 2020-on work list was fetched, 11,830 filings, and none of it is
+read yet: the read is projected at $757 and waits on a decision.
 
 This is the findings document. How the method was built and measured,
 step by step, is the engineering log,
@@ -207,9 +208,9 @@ one-time query had measured first, in a minute and a half: the query
 makes one pass over the 16.6 million grant rows, and a cheap test for
 the words a placeholder needs leaves 1% of them for the pattern. The
 count rises from 42 filings for tax year 2009 to 2,925 for 2020 and
-falls to 2,012 for 2024. Whether the IRS still serves the images of the
-earlier years is not measured: every filing read so far was processed by
-the IRS in 2021 or later.
+falls to 2,012 for 2024. The IRS serves the images of tax years 2015 on
+and none before 2014, measured on September 29 (see "Shipping the
+rest").
 
 Since September 29 a filing on the list also carries a future amount:
 what its placeholder rows hold on line 3b, grants approved for future
@@ -840,10 +841,78 @@ Musk, Bezos, Schusterman and Wyss. The A and B rates were measured on
 other large filers, not on these.
 
 Tax years before 2020 are 11,696 filings and $16.3B on their placeholder
-rows. Reading them would cost up to $510 and, if the IRS serves their
-images as it does recent ones, recover about 4,100 filings and $7.1B.
-That condition is untested. Fetching about 30 filings from each of
-those years costs nothing in model calls and would settle it.
+rows. On September 29, 30 filings from each of those tax years were
+fetched, 330 in all, with no model called
+(`data/placeholder_recovery/fetch_test_pre2020.csv`):
+
+| tax years | on the work list | on their placeholder rows | fetched | PDF served | 404 | no image listed |
+|---|---|---|---|---|---|---|
+| 2009 to 2013 | 2,617 | $2.48B | 150 | 0 | 0 | 150 |
+| 2014 | 1,135 | $1.39B | 30 | 3 | 0 | 27 |
+| 2015 to 2018 | 5,666 | $8.33B | 120 | 112 (93%) | 0 | 8 |
+| 2019 | 2,278 | $4.11B | 30 | 19 (63%) | 0 | 11 |
+
+The IRS site holds the images it generated from December 2016 on and
+none before. Tax years 2009 to 2014, 3,752 filings and $3.9B, are out
+of reach through it. All 7,944 filings of tax years 2015 to 2019 were
+then fetched, the same day:
+
+| tax year | on the work list | on their placeholder rows | PDF served | their placeholder rows | no image listed | 404 |
+|---|---|---|---|---|---|---|
+| 2015 | 1,290 | $1.77B | 855 (66%) | $1.56B | 433 | 0 |
+| 2016 | 1,409 | $2.00B | 1,380 (98%) | $1.97B | 29 | 0 |
+| 2017 | 1,436 | $2.23B | 1,294 (90%) | $2.07B | 141 | 0 |
+| 2018 | 1,531 | $2.33B | 1,470 (96%) | $2.20B | 60 | 1 |
+| 2019 | 2,278 | $4.11B | 1,473 (65%) | $2.05B | 796 | 8 |
+| all | 7,944 | $12.44B | 6,472 (81%) | $9.86B | 1,459 | 9 |
+
+Four more ended on a network error.
+
+Most cannot be read yet. Of the 6,472 images, 5,533 were generated
+before 2021, by an older renderer with other page widths, and the cut
+takes every page of them for the filer's: all 147,181 pages. Read as
+they are cut, the readers would be sent the IRS's own form pages, at
+some $4,000. With the older widths measured, two guesses at them put
+the filer's pages at 20,000 to 26,000, in 2,100 to 3,200 filings: in
+the region of $500 to $700. The other 939 images, 885 of them tax year
+2019, were generated in 2021 or later and cut as the frame's do: 596
+with an attachment, 3,631 attachment pages.
+
+**Fetched on September 29.** The 11,830 filings were fetched and cut,
+with no model called:
+
+| band | fetched | on their placeholder rows | PDF served | no image listed | 404 | with an attachment | attachment pages |
+|---|---|---|---|---|---|---|---|
+| A | 11 | $3.12B | 9 | 2 | 0 | 9 | 134 |
+| B | 162 | $3.74B | 148 | 8 | 6 | 128 | 3,287 |
+| C | 2,851 | $8.71B | 2,454 | 252 | 145 | 1,682 | 13,416 |
+| D | 8,806 | $2.26B | 7,162 | 1,068 | 570 | 3,976 | 12,069 |
+| all | 11,830 | $17.84B | 9,773 (82.6%) | 1,330 | 721 | 5,795 (49.0%) | 28,906 |
+
+Six more failed on the network and are tried again. The frame's rates
+were 81% served and 48% with an attachment. Every 404 is an image
+generated in 2022. Tax year 2020 is the weak one: 935 of its 2,679
+filings have no image listed. The filings with an attachment hold
+$12.1B of the $17.8B.
+
+The cost gate, on these pages, projects $756.58, under the cap of $800:
+Qwen $72, Flash Lite $179, 3.8 Flash $159 for 17,484 disputed pages,
+Sonnet $346 for 10,087. It is not $475 for two reasons. There are more
+pages, 28,906 against about 23,400: band C has 13,416 where the frame's
+rates gave 8,800, and a few small filers attach very long documents
+(Elsie & Marvin Dekelboum Family Foundation, 1,550 pages in five
+filings). And the gate prices every page at the frame's rate over all
+pages, 2.6 cents, which band B's dense pages set, where the $475 used
+the frame's cost per filing by band. At the frame's measured cost per
+page by band (A 4.1 cents, B 2.7, C 1.9, D 1.6) the same pages are
+about $530. The C and D figures rest on 699 and 518 frame pages. About
+11 to 12 hours of reading.
+
+Of the 173 large filings, 157 were served and 137 have an attachment.
+Howard G. Buffett Foundation 2020 and 2023 have no image listed; its
+2021, 2022 and 2024 have attachments of 8, 11 and 21 pages. The 2024
+filings of Musk, Bezos, Schusterman and Wyss have attachments of 3, 15,
+61 and 6 pages.
 
 The C and D rates rest on 137 and 403 sampled filings, so they carry
 about 8 and 5 points of sampling error at 95%; the dollar estimates for
@@ -1062,11 +1131,15 @@ the checks extended to them.
    name-only tier. One matcher rerun takes all of it; the matching
    input-shape version goes to 3. The regression gate and the
    corrections preflight are the checks.
-3. Fetch about 30 filings from each tax year before 2020, to learn
-   whether the IRS still serves their images. No model is called.
-4. Read the 2020-on work list: 11,830 filings, about $475, about nine
-   hours of reading on the box, inside the cap of $800. Then `load` and
-   `check`.
+3. Done on September 29: the fetch test for tax years before 2020,
+   and the fetch of all of 2015 to 2019 (6,472 PDFs of 7,944). Tax
+   years 2009 to 2014 are not served. Next: measure the page widths of
+   the IRS renderer before 2021, so the cut holds on the 5,533 older
+   images; then project and read 2015 to 2019.
+4. Read the 2020-on work list. Fetched on September 29: 5,795 filings
+   with an attachment, 28,906 pages, projected at $757 by the cost gate
+   (about $530 at the frame's cost per page by band), 11 to 12 hours of
+   reading on the box, inside the cap of $800. Then `load` and `check`.
 5. Label the rows that name a person. A pass over the stored names
    reads no page.
 6. Test the "various" class: twenty PDFs would say whether its $35.5B
