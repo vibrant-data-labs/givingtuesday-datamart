@@ -264,6 +264,7 @@ reads found the gateway's limit.
 | the loader and the view | built: `load` writes `privategrants_recovered` and leaves the view; `check` holds the loaded rows to nine rules |
 | the future-payment source | built and loaded on 2026-09-29: `irs_990pf_grants_future`, `privategrants_future_current`, the future amount on the work list, the loader's target `future` |
 | the frame's rows, loaded | done under `v2`: paid, 399 filings, 222,105 rows, $7.07B; future, 71 filings, 3,873 rows, $0.95B |
+| the 2020-on work list's rows, loaded | first loaded on 2026-09-30, when this branch's rerun found the production read's verdicts in the tables (6,350 filings): paid 4,607 filings, 582,676 rows, $16.2B; future 173 filings, 6,531 rows, $1.27B; 24 filings add up only to the two amounts together; `check` passes on all of it. The read's own session reports it |
 | a list that adds up only to paid and future together | not loaded, counted by `load`: 4 filings on the frame; whether it should load is open |
 | the extract's rows in the search | gone: the selector reads the pages and nothing else; the file is archived |
 | the matcher reading the view | not built: the name cleaner, the name-only tier and input shape version 3 go in on one rerun |
