@@ -63,7 +63,9 @@ row each with EIN, name, evidence and date, tracked as plain text so a
 pull request shows the row added.
 
 **`filing_images`.** The fetch outcome for a filing: `filerein`,
-`taxyear`, the IRS index year and TEOS URL, the date the IRS generated
+`taxyear`, the IRS index year (NULL for a filing no index lists, found
+by the frame's EIN and tax period: the IRS publishes an index from 2017
+on) and TEOS URL, the date the IRS generated
 the image (for the 404 report), `status`, `attempts`, `last_error`,
 `fetched_at`, `s3_key`, `sha256`, `bytes`, `pages`, `page_widths` (from
 `pdfimages -list`, one per page), `attachment_from` (the first page the
@@ -204,7 +206,7 @@ reads found the gateway's limit.
 | the frame's rows, loaded | done: 398 filings, 221,969 rows, $7.03B under `v2` |
 | the extract's rows in the search | gone: the selector reads the pages and nothing else; the file is archived |
 | the matcher reading the view | not built: the name cleaner, the name-only tier and input shape version 3 go in on one rerun |
-| reading the work list | not run: no filing outside the frame is fetched. Tax years 2020 on are about $475, inside the cap of $800; whether the IRS serves the images of earlier years is not measured |
+| reading the work list | fetched, not read: tax years 2020 on are fetched and cut (2026-09-29), 28,906 pages to read, projected at $757, inside the cap of $800. Tax years 2015 to 2019 are fetched too, 6,472 PDFs, but 5,533 of the images need another cut; 2009 to 2014 are not served |
 
 The rules the work list and the loader follow are in the engineering
 log, stages 0 and 5.
@@ -323,7 +325,9 @@ On 2026-09-28 it found 12,822 filings, 992 of them fetched, and
 projected $474.72 for the 11,830 others. The cap was $400 then, the
 frame's, and stopped it. It is $800 since September 29, so the same
 command passes the gate and ends as a dry run does, with nothing
-bought.
+bought. On 2026-09-29, after the fetch, the dry run counted 6,345
+filings with attachment pages and 38,662 pages, 9,756 of them read, and
+projected $756.58 for the 28,906 others.
 
 `run` checks every prerequisite first (poppler, with `pdftoppm -v`
 printed and a one-page render tried; the gateway key and the datamart
@@ -436,11 +440,19 @@ t3.xlarge:
 Rule of thumb: about 2.5 hours per 10,000 pages for the base pair in
 parallel and 1.5 hours for the escalation readers; about $0.02 to $0.03 a
 page all-in. The work list from the loaded tables, for tax years 2020
-on, leaves 11,830 filings to read: about 22,600 pages, about $475 and
-nine hours of reading. With the $304 already spent that is about $780.
-The 11,696 filings before 2020 would be up to $510 more, if the IRS
-serves their images. The server is a few dollars a run and the S3
-storage under a dollar a month.
+on, leaves 11,830 filings to read. Fetched on 2026-09-29, they hold
+28,906 attachment pages in 5,795 filings: $757 by the cost gate, about
+$530 at the frame's cost per page by band, and 11 to 12 hours of
+reading. With the $304 already spent that is $830 to $1,060. A fetch
+takes about 15 minutes for 8,800 filings from the box, ten a second,
+and four a second from a laptop. The box has 20 GB free, so a fetch
+there uses a cache of its own (`--cache /data/irs_fetch`), deleted
+afterwards; the read takes each PDF from S3.
+Of the 11,696 filings before 2020, the IRS serves tax years 2015 to
+2019 (6,472 of 7,944, fetched 2026-09-29) and nothing before 2014. Do
+not run them yet: the cut takes every page of an image generated
+before 2021 for the filer's, 147,181 pages on 5,533 images. The server is a
+few dollars a run and the S3 storage under a dollar a month.
 
 ## Success metrics, as measured on the frame run
 

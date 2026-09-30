@@ -150,7 +150,9 @@ def index_rows(year: str, cache_dir: Path | None = None) -> Iterator[IndexRow]:
             )
 
 
-INDEX_YEARS = ("2021", "2022", "2023", "2024", "2025", "2026")
+# Every index the IRS publishes: a request for index_2010.csv to
+# index_2016.csv is redirected to an error page (2026-09-29).
+INDEX_YEARS = ("2017", "2018", "2019", "2020", "2021", "2022", "2023", "2024", "2025", "2026")
 
 
 def lookup(object_id: str, cache_dir: Path | None = None) -> IndexRow:

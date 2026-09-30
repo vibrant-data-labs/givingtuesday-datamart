@@ -724,11 +724,10 @@ def _fetch(stores: _Stores, rows: list[dict], cache: Path) -> None:
     else:
         _note(f"every one of the {len(ids)} filings is fetched, permanent or out of attempts: "
               "0 TEOS requests")
-    # A ``Filing`` carries the EIN and tax year with the object id; the TEOS
-    # lookup needs them, and the CSV may lack either, hence the fallbacks.
-    filings = [filing_images.Filing(row["object_id"], row.get("filerein") or None,
-                                    int(row["taxyear"]) if row.get("taxyear") else None)
-               for row in rows]
+    # A ``Filing`` carries the EIN, the tax year and the tax period with the
+    # object id; the TEOS lookup needs them, and the CSV may lack any, hence
+    # the fallbacks.
+    filings = [filing_images.filing_of(row) for row in rows]
     # fetch_filings: TEOS for the PDF's URL, the download, the attachment cut
     # (pdfimages), the upload to S3 and the filing_images row; it returns
     # each filing's status afterwards, whether fetched this time or before.
