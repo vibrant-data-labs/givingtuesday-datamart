@@ -14,7 +14,9 @@ built. Stages 1 to 4 and 6 are the three table modules, the selector and
 into the datamart, were built on 2026-09-28 in the package
 `givingtuesday_datamart/placeholder_recovery/` (`work-list`, `run`,
 `load`, `view`, `check`), and their sections say what was built and
-what was measured. On 2026-09-29 GivingTuesday's future-payment
+what was measured; the matcher's part of stage 5 was built on 2026-09-29
+and proved on a subset, and the run that puts it in the database is
+still to come. On 2026-09-29 GivingTuesday's future-payment
 datamart became a source, the work list took a future amount from it
 and the loader a second target, `future`; stages 0 and 5 have a dated
 entry each. The rows GivingTuesday's extract itemised for the
@@ -339,8 +341,8 @@ first on the measurements in the findings doc's *What the rows carry for
 matching* (`placeholder_recovered_rows.py`), then on what may load at
 all. The loader, the table and the view are
 `placeholder_recovery/loader.py` and `view.py`, commands `load`, `view`
-and `check`. The matcher's part, at the end of this section, is not
-built.
+and `check`. The matcher's part, at the end of this section, was built
+on 2026-09-29 and proved on a subset; the run is Zein's.
 
 **Output:** `privategrants_recovered`, one row per grant of a reconciled
 list. It is derived from `page_verdicts` and `page_readings` under a
@@ -550,39 +552,106 @@ drops a filing's placeholder row once its list is loaded.** That row
 carries the whole amount in `privategrants_current`, so keeping it
 beside the recovered rows would count the dollars twice.
 
-Into the matcher, not built: the matching views read the view, recovered
-rows are tagged `match_source = 'ocr_recovery'`, and
-`MATCHING_INPUT_SHAPE_VERSION` goes to 3. Two things the chain after the
-matcher will meet, found on 2026-09-29:
+Into the matcher, built on 2026-09-29 (the matcher session) and not yet
+run. The
+matcher's first view reads `privategrants_current_w_recovered`;
+`MATCHING_INPUT_SHAPE_VERSION` is 3. What went in, in the order the
+chain meets it:
 
-- **Cents.** `unioned_grants` casts the amount to a whole number
-  (`sigocpyamoun::bigint`), and no amount in `privategrants_current` has
-  a decimal point. 10,359 recovered rows in 83 filings do, $354.7M. The
-  cast fails on the first of them, so the amount is rounded for
-  `unioned_grants` or the cast changes.
-- **Labels.** `privategrants_w_recipients` takes every column of the
-  matcher's first view, so the labels reach it once that view reads this
-  one. `unioned_grants` names its columns, so they stop there unless
-  they are added.
+- **The view stays an object of its own.** Zein asked on 2026-09-29 why
+  it needs to be one; the alternative was to fold its SQL into the
+  matcher's first view. Kept, because three readers want one definition
+  of "current grants with the recovered ones in their place": the
+  matcher, `check` (four of its nine rules read the view) and anyone
+  who wants the recovered grants that did not match, since
+  `privategrants_w_recipients` holds matched rows only. Folded, the
+  loader's `ensure_view` would have had to rebuild the matcher's views.
+  The cost is one more object that `DROP ... CASCADE` takes with
+  `privategrants_current`; the matcher now creates it again at its start,
+  after the rebuild and before its own views, as `load` and `view` do.
+  The matcher names the policy it takes (`RECOVERED_POLICY`, `v2`), stops
+  before rebuilding anything when the view shows another, and writes the
+  policy and a digest of the rows into the checkpoint prefix. To reverse:
+  `Relations.grants` back to `privategrants_current`, and the nine label
+  columns out of `unioned_grants`.
+- **The grant keys are never NULL.** Found on the way: the matches come
+  back from pandas with '' for a missing value and the output join
+  compares keys with `=`, while the keys view left the city, state and
+  zip keys NULL where the column was. So a row with any of the three
+  NULL never reached `privategrants_w_recipients`: none of its 7.58M rows
+  has one, though 783 matched tuples in the join table have an empty
+  state. Every recovered grant has a NULL city (the readers return none
+  of its own), so none would have joined. The three keys are now '' where
+  NULL, like the name and address keys; on the subset that brought
+  {never_rows} rows and ${never_dollars}M of the sampled foundations'
+  grants into the output.
+- **The name cleaner, `clean_name`, in `grant_matching`, extends
+  `normalize_org_name` and does not replace it.** Two rows with the same
+  cleaned name block together and score 1 on the name; any other pair is
+  scored on the normalized names, as before. The first build scored the
+  cleaned names and moved every fuzzy score: Jaro-Winkler rewards a short
+  name, and with "corporation" gone "mit" passed the lowest name score
+  against "mit womens independent group" (0.79, from 0.70) and matched
+  it on the shared address, $52M in the sample; "new america" matched
+  "sdm of america", "american heart association" matched "ment ltd".
+  Measured on the subset before the change of course: 14,088 rows gained
+  on a name equal once cleaned, against 2,247 gained, 822 lost and 959
+  moved to another filer on a moved fuzzy score. The extension keeps the
+  first and none of the rest.
+- **Two rows without a state do not agree on it.** The exact-name tier
+  took '' = '' for agreement, which would have let a name several
+  filers share match a filer with no state. The state is scored as
+  missing where there is none.
+- **The name-only tier**, decided on 2026-09-28: a tuple with no state
+  and no zip, which no other tier matched, whose cleaned name belongs to
+  exactly one filer of the universe; `match_source = 'name_only'`,
+  `match_name_words` beside it. Uniqueness is asked of the whole
+  universe. A tuple with a state is not for this tier.
+- **Output names are parameters** (`Relations`: a prefix on everything
+  a run creates, the relation the grants are read from, the Schedule I
+  relation). The preflight, the gate and the subset tool take them, so a
+  change is proved beside production and never in it.
+- **Cents.** `unioned_grants` rounds the amount (`ROUND(::numeric)`):
+  the cast to a whole number failed on the first of the 10,359 recovered
+  rows with cents. The cents stay in `privategrants_recovered`; the
+  rounding nets to $131 over $354.7M.
+- **Labels and the key.** `unioned_grants` carries `match_name_words`,
+  `row_source`, `page_verdict`, `filer_marked_individual`,
+  `placeholder_exceeds_declared` and the recovered row's key
+  (`recovered_object_id`, `recovered_page`, `recovered_row_ordinal`).
+  The key is lineage, and it keeps the rows apart: `unioned_grants` is a
+  `UNION`, which keeps one of several identical rows, and 77,078 loaded
+  rows ($117M) repeat another row of their list, a payment of the same
+  amount to the same recipient. The same `UNION` collapses 130,157
+  regular matched rows ($2.84B) today; left as it is, flagged.
+- **The gate** holds the matched recovered rows to
+  `privategrants_recovered` per filing, in rows and positive dollars, as
+  it holds the regular rows to `privategrants`.
 
-Three kinds of row:
+Proved on a subset (`matching_subset`, 2026-09-29, the report and the
+examples in `data/exploratory/placeholder_matching_subset_*.csv`): the
+tuples of the recovered grants, of the gate's name classes and sentinel
+families, and of one in 25 of the labeled set's foundations ({sub_tuples}
+tuples, {sub_rows} rows), each matched against the whole universe
+before and after. Before agrees with the last full run on every one of
+its tuples, which is the harness's own check.
 
-- **With a zip:** the matcher as it is. Zip narrows the search; name and
-  address are scored.
-- **With a state and no zip:** the matcher's exact-name tier, which asks
-  for the same state and no address.
-- **With neither:** a new tier. The cleaned name equals the name of
-  exactly one filer in the universe; `match_source =
-  'ocr_recovery_name_only'`, with the number of words in the cleaned name
-  beside it. A name several filers share is never matched. One-word names
-  are not excluded: uniqueness is the rule, and the label and the word
-  count let a consumer be stricter.
+| | rows | dollars |
+|---|---|---|
+| recovered grants, matched | {rec_matched_rows_pct}% of {rec_rows} | {rec_matched_dollars_pct}% of ${rec_dollars}B |
+| by zip and name | {zip_rows} | ${zip_dollars}B |
+| by exact name and state | {state_rows} | ${state_dollars}B |
+| by the name alone | {name_rows} | ${name_dollars}B |
+| the sampled foundations' grants, matched before | {same_pct}% of {reg_rows} | |
+| gained on a name equal once cleaned | {gained_rows} | ${gained_dollars}M |
+| gained as a row that never joined | {never_rows} | ${never_dollars}M |
+| gained on the name alone | {nameonly_rows} | ${nameonly_dollars}M |
+| lost | {lost_rows} | ${lost_dollars}M |
+| moved to another filer | {moved_rows} | ${moved_dollars}M |
+| labeled pairs of the sampled foundations covered | {cov_before}% before, {cov_after}% after, of {cov_pairs} | |
 
-The name cleaner (`clean_name`: punctuation, "&", a leading or trailing
-"the", the legal endings) replaces `normalize_org_name` in the matcher on
-the same rerun that takes the recovered rows in. It changes the matching
-of every grant row, not only the recovered ones; the regression gate and
-the corrections preflight are the checks.
+The run's cost: the recovered grants add {pairs_added}M pairs to the
+{pairs_total}M of the last run, about {minutes} minutes at its rate.
 
 ### 6 · Report and gates
 
@@ -2325,8 +2394,25 @@ Built on 2026-09-29 (session 6), on the decision above:
 - The loader has a second target, `future`; its rows stay out of the
   view.
 
+Decided on 2026-09-29, in the matcher session (the reasons are in stage
+5):
+
+- The view stays an object of its own; the matcher's first view reads it
+  and creates it again after the rebuild that drops it.
+- The name cleaner extends the normaliser: the same cleaned name is the
+  same name; other names score as before.
+- The matcher's output names are parameters, so a change is proved on a
+  subset beside production.
+- `unioned_grants` rounds a recovered amount and carries five labels and
+  the recovered row's key.
+
 Still open:
 
+- The matcher rerun itself, and the gate's baselines after it.
+- `unioned_grants` is a `UNION` and keeps one of several identical
+  rows: 130,157 regular matched rows, $2.84B. The recovered rows escape
+  it by their key; whether the regular ones should is a question for
+  the rerun.
 - Whether a list that adds up only to the paid and the future amount
   together loads. Four filings on the frame; the case is in stage 5.
 - The paid rule halving on the repeated `basic_fields_pf` row beside
@@ -2335,9 +2421,6 @@ Still open:
   $24.4M left doubled), still to be made and gated. The third defect
   PR #57 found, forward-filled copies of one grant, wants a rule of its
   own; it is rare in the future-payment file.
-- Whether the view, `privategrants_current_w_recovered`, stays an object of
-  its own or becomes what the matcher's first view reads, with no name
-  of its own.
 - Whether the IRS still serves the images of tax years before 2020:
   11,696 filings on the work list, none fetched.
 - Reading the 2020-on work list: $475, inside the cap, which went from

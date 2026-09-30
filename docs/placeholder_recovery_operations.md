@@ -30,6 +30,13 @@ Consumers read one view, `privategrants_current_w_recovered`:
 `privategrants_current` with the recovered grants in place of the
 placeholder rows they replace. It shows grants paid. A future-payment
 list is loaded into the table, marked `future`, and is not in the view.
+Since September 29 the matcher's first view reads it, so the chain is
+`privategrants` -> `privategrants_current` ->
+`privategrants_current_w_recovered` ->
+`privategrants_w_column_keys_view` -> the matcher ->
+`privategrants_w_recipients` -> `unioned_grants`. The database holds the
+new chain only once the matcher has been rerun from this code (*The
+matcher rerun*, below).
 
 Two relations of the datamart feed the work list, and neither is
 written here: `privategrants_current`, the paid rows, and since
@@ -178,8 +185,32 @@ end.
   leaves the view alone and says so.
 - `current_grants` rebuilds `privategrants_current` with `DROP ...
   CASCADE`, which takes the view with it. `load` creates it again when
-  it is gone, and so does `view`. The matcher does not read the view
-  yet.
+  it is gone, and so does `view`. So does the matcher, whose own start
+  is that rebuild: it creates the view after the rebuild and before the
+  views that read it.
+- The matcher takes the rows of one policy, `grant_matching.RECOVERED_POLICY`
+  (`v2`; `--recovered-policy` for another). It stops before it rebuilds
+  anything when the view shows another policy.
+
+**What the matcher's output carries of a recovered grant.**
+`privategrants_w_recipients` takes every column of the view, so it holds
+the labels and the key. `unioned_grants`, which products read, names its
+columns; from input shape 3 it has nine more, after `match_source`:
+
+| column | what | on a row that is not recovered |
+|---|---|---|
+| `match_name_words` | words in the cleaned name of a match made on the name alone (`match_source = 'name_only'`) | NULL |
+| `row_source` | `privategrants_current`, `placeholder_recovery`, or `grants_to_domestic_organizations_current` for a Schedule I row | never NULL |
+| `page_verdict` | `agreed`, `escalated` or `flagged` | NULL |
+| `filer_marked_individual` | the filer marked the list as grants to individuals | NULL |
+| `placeholder_exceeds_declared` | the list may hold more than the year's grants paid | NULL |
+| `recovered_object_id`, `recovered_page`, `recovered_row_ordinal` | the row's key in `privategrants_recovered`, which leads to its page | NULL |
+
+`grant_amount` is whole dollars, as it always was: a recovered amount
+with cents is rounded there, and keeps its cents in
+`privategrants_recovered`. A label is NULL on a row it does not apply to,
+so a filter reads `page_verdict IS DISTINCT FROM 'flagged'`, not `<>`.
+The page's kind and `state_source` stay in `privategrants_w_recipients`.
 
 ## The future amount
 
@@ -286,7 +317,7 @@ engineering log, 2026-09-30) and the check to run on the next read.
 | the 2020-on work list's rows, loaded | first loaded on 2026-09-30, when this branch's rerun found the production read's verdicts in the tables (6,350 filings): paid 4,607 filings, 582,676 rows, $16.2B; future 173 filings, 6,531 rows, $1.27B; 24 filings add up only to the two amounts together; `check` passes on all of it. The read's own session reports it |
 | a list that adds up only to paid and future together | not loaded, counted by `load`: 4 filings on the frame; whether it should load is open |
 | the extract's rows in the search | gone: the selector reads the pages and nothing else; the file is archived |
-| the matcher reading the view | not built: the name cleaner, the name-only tier and input shape version 3 go in on one rerun |
+| the matcher reading the view | built on September 29 and proved on a subset; not run. The name cleaner, the name-only tier, the view and input shape version 3 go in on one rerun, which is Zein's (*The matcher rerun*) |
 | reading the work list | fetched, not read: tax years 2020 on are fetched and cut (2026-09-29), 28,906 pages to read, projected at $757, inside the cap of $800. Tax years 2015 to 2019 are fetched and cut too (the older renderers' widths measured 2026-09-29), 22,827 pages, projected at $598; 2009 to 2014 are not served |
 
 The rules the work list and the loader follow are in the engineering
@@ -318,7 +349,78 @@ without a new measurement.
 | targets | the work list's paid amount and, since 2026-09-29, its future amount, from GivingTuesday's future-payment datamart (`990PFPart14Grants3B`); each list is searched for on its own; future lists load marked `future`, outside the view |
 | doubled blocks in the future-payment file | halved when every row is paired and the filing's `basic_fields_pf` row is repeated; nothing else is halved. The paid rule still tests against line 25; Zein chose on 2026-09-30 to add the repeated row beside it (PR #57 measured it), a change still to be made and gated |
 | a placeholder amount over both columns of line 25 | the filing is read and its list loads, every row labelled `placeholder_exceeds_declared`; a consumer filters on it |
-| the view | drops a filing's placeholder row once its list is loaded; shows one policy |
+| the view | drops a filing's placeholder row once its list is loaded; shows one policy; stays an object of its own, which the matcher's first view reads |
+| the name cleaner | `grant_matching.clean_name`, for every grant: punctuation, "&", a leading or trailing "the" and the legal endings; one level and no more. It says when two names are the same; names that are not score on the normalized name, as before |
+| rows with no state and no zip | match on a cleaned name that belongs to exactly one filer of the universe, `match_source = 'name_only'`, with the words of the name beside it; a name several filers share never matches; a row with a state matches on the name only where the state agrees |
+| two rows without a state | do not agree on the state |
+| amounts in `unioned_grants` | whole dollars; a recovered amount is rounded, its cents stay in `privategrants_recovered` |
+
+## The matcher rerun
+
+Built on September 29 and proved on a subset, not run: the run that puts
+the recovered grants, the name cleaner and the name-only tier into
+`privategrants_w_recipients` and `unioned_grants` is Zein's, on the big
+box, from the merged code. In order:
+
+```bash
+# 1. the loaded rows are what the run takes in: hold them to their rules
+python -m givingtuesday_datamart.placeholder_recovery check --policy v2
+
+# 2. the corrections registry, held to the matcher as it now is (hours: see below)
+python -m givingtuesday_datamart.corrections_preflight
+
+# 3. the run: rebuilds the _current tables, creates the view of current and
+#    recovered grants and the matching views on it, matches, writes the two
+#    output tables. Resumable; the checkpoint prefix is new, so the first
+#    start computes every chunk.
+python -m givingtuesday_datamart.grant_matching
+
+# 4. the gate, then the recovered rows' own checks
+python -m givingtuesday_datamart.matching_regression_checks
+python -m givingtuesday_datamart.placeholder_recovery check --policy v2
+```
+
+What to expect:
+
+- The run takes the recovered grants of policy `v2`
+  (`grant_matching.RECOVERED_POLICY`; `--recovered-policy` for another)
+  and stops before it rebuilds anything when the view shows another
+  policy. The policy and a digest of the rows (their count, sum and
+  latest `loaded_at`) are in the checkpoint prefix
+  (`.../corr_<hash>/rec_v2_<digest>/shape_v3`) and in the build's
+  `source_runs`, so a load between two starts of the run makes the
+  second start compute from scratch: do not load while it runs.
+- The recovered grants add 49.6M pairs to the 982M
+  of the last run, 5.0%, about 25 minutes at that run's
+  rate; the rest of the change costs seconds. The preflight is another
+  matter: with 17 filers in the registry its name families are large
+  (the ASPCA's is 108,000 tuples and 38 million pairs under the old
+  code, 40 million under the new), and it runs for hours on a laptop.
+- The gate's baselines are the August 4 run's. The counts that will
+  move, and are to be set in the commit that accepts the run (the
+  runbook): every count of matched rows, up by the recovered grants and
+  the cleaner; `placeholder rows matched`, since the loaded filings'
+  placeholder rows are gone from the input; the two labeled-pair
+  coverages. The two new hard rules hold the matched recovered rows to
+  `privategrants_recovered`, per filing.
+- `unioned_grants` has nine new columns (*The tables*). Products name
+  their columns and see them only when they ask.
+
+**Proving a change without the run.** `matching_subset` runs the
+matcher's own pieces on a subset of the grant tuples, twice (before and
+after the change), and writes under `scratch_matcher_`; the gate and the
+preflight read a prefix too. Nothing of production's is written. A read
+of every grant holds a lock a load of recovered grants waits for, so the
+subset takes a copy of the recovered rows first and reads that.
+
+```bash
+python -m givingtuesday_datamart.matching_subset build --workers 4     # ~40 min on a laptop
+python -m givingtuesday_datamart.matching_subset report
+python -m givingtuesday_datamart.matching_regression_checks --prefix scratch_matcher_
+python -m givingtuesday_datamart.corrections_preflight --prefix scratch_matcher_preflight_ --grants scratch_matcher_grants
+python -m givingtuesday_datamart.matching_subset drop
+python -m givingtuesday_datamart.matching_subset drop --prefix scratch_matcher_preflight_
+```
 
 ## Set up a box once
 
@@ -594,6 +696,12 @@ python -m givingtuesday_datamart.placeholder_recovery run --policy v2 --tax-year
 python -m givingtuesday_datamart.placeholder_recovery load --policy v2 [--object-id ID] [--dry-run] [--flagged leave_out]
 python -m givingtuesday_datamart.placeholder_recovery view --policy v2
 python -m givingtuesday_datamart.placeholder_recovery check --policy v2
+
+# the matcher: the run (Zein's), its gate, the corrections preflight, a change proved on a subset
+python -m givingtuesday_datamart.grant_matching [--recovered-policy v2] [--no-resume]
+python -m givingtuesday_datamart.matching_regression_checks [--fast] [--prefix scratch_matcher_]
+python -m givingtuesday_datamart.corrections_preflight [--prefix scratch_matcher_preflight_ --grants scratch_matcher_grants]
+python -m givingtuesday_datamart.matching_subset build|report|drop
 
 # the frame and the population
 python -m givingtuesday_datamart.exploratory.placeholder_recovery sample --expand-1000
