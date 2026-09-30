@@ -59,8 +59,9 @@ and the [production diagram](https://whimsical.com/FXWZBu4FE9RzpMYqWmupqd).
   filings, $48.7B, across tax years 2009 to 2025. For tax years 2020 on,
   11,830 filings are still to read: about $475 in model calls, for an
   estimated 4,550 filings and $14.9B of the $32.2B on their placeholder
-  rows. The 11,696 filings before 2020 would cost up to $510; whether the
-  IRS still serves their images is not yet measured.
+  rows. Of the 11,696 filings before 2020, the IRS serves tax years 2015
+  to 2019 and nothing before 2014; those years hold 2,686 filings with
+  an attachment, 22,827 pages, projected at $598 (September 29).
 - The rules for loading were settled on September 28. A list loads when
   it adds up within 0.5%. Every loaded row comes from a page that was
   read. Rows from pages labelled expenditure responsibility load only
@@ -74,8 +75,8 @@ and the [production diagram](https://whimsical.com/FXWZBu4FE9RzpMYqWmupqd).
   recovered grants in place of the placeholder rows, so no dollar is
   counted twice.
 - Still open: the 3,091 "various" filings ($35.5B) the classifier never
-  sends to the PDF, the images of tax years before 2020, the read of the
-  work list, and the matcher pass that turns the recovered rows into
+  sends to the PDF, the read of the work list for tax years 2015 on,
+  and the matcher pass that turns the recovered rows into
   EINs, which is designed and not yet built.
 
 ## Terms
@@ -730,15 +731,41 @@ then fetched, the same day:
 
 Four more ended on a network error.
 
-Most cannot be read yet. Of the 6,472 images, 5,533 were generated
-before 2021, by an older renderer with other page widths, and the cut
-takes every page of them for the filer's: all 147,181 pages. Read as
-they are cut, the readers would be sent the IRS's own form pages, at
-some $4,000. With the older widths measured, two guesses at them put
-the filer's pages at 20,000 to 26,000, in 2,100 to 3,200 filings: in
-the region of $500 to $700. The other 939 images, 885 of them tax year
-2019, were generated in 2021 or later and cut as the frame's do: 596
-with an attachment, 3,631 attachment pages.
+**The older renderers, measured on September 29.** Of the 6,472
+images, 5,544 were generated before June 2021 by five older IRS
+renderers, at page widths of their own, and the cut had taken every
+page of them for the filer's. The widths were measured on 951 of those
+images, 30,331 pages, with the words at the top of each page read by
+OCR and every page that spoke against a cut looked at; the first
+page's width names the renderer, and each has its set
+(`irs_source.RENDERED_WIDTHS`; the pipeline log has the tables). The
+rows were cut again from their stored widths, no PDF opened and no
+model called: 2,101 of the 5,544 have an attachment, 19,461 pages. No
+filing of 2020 on and no filing already read changed. The other images
+of these years cut as before: 910 of the current renderer, 567 with an
+attachment and 2,944 pages, and 18 paper returns scanned whole, 422
+pages. The cost gate, on the pages, projects $598 for tax years 2015
+to 2019 (about $435 at the frame's cost per page by band), 2,686
+filings and 22,827 pages, under the cap of $800; about nine hours of
+reading:
+
+| tax year | on the work list | PDF served | with an attachment | attachment pages | on their placeholder rows, with an attachment |
+|---|---|---|---|---|---|
+| 2015 | 1,290 | 855 | 532 | 7,554 | $1.21B |
+| 2016 | 1,409 | 1,380 | 624 | 5,269 | $1.11B |
+| 2017 | 1,436 | 1,294 | 314 | 2,574 | $0.87B |
+| 2018 | 1,531 | 1,470 | 462 | 3,181 | $1.06B |
+| 2019 | 2,278 | 1,473 | 754 | 4,249 | $1.47B |
+| all | 7,944 | 6,472 | 2,686 (42% of served) | 22,827 | $5.73B of $12.44B |
+
+Fewer of the older images hold an attachment than the frame's 48% of
+served: 62% of those generated in 2017, but 22% to 35% of those
+generated in 2018 to 2020, and 48 more of the latter were looked at
+and end on the IRS's own pages. Filers who attach a PDF on every
+2021-on image have one on 73% of their 2017 images and 33% to 56% of
+their 2018-to-2020 ones. Whether the IRS's images of those years leave
+the attachment out is not known and cannot be told from what is
+stored.
 
 **Fetched on September 29.** The 11,830 filings were fetched and cut,
 with no model called:
@@ -986,10 +1013,14 @@ search; the frame loaded.
    input-shape version goes to 3. The regression gate and the
    corrections preflight are the checks.
 3. Done on September 29: the fetch test for tax years before 2020,
-   and the fetch of all of 2015 to 2019 (6,472 PDFs of 7,944). Tax
-   years 2009 to 2014 are not served. Next: measure the page widths of
-   the IRS renderer before 2021, so the cut holds on the 5,533 older
-   images; then project and read 2015 to 2019.
+   the fetch of all of 2015 to 2019 (6,472 PDFs of 7,944; 2009 to 2014
+   are not served), the older renderers' widths measured and the 5,547
+   older images cut again from their stored widths. Next: read tax
+   years 2015 to 2019, 2,686 filings with an attachment, 22,827 pages,
+   projected at $598 (about $435 at the frame's cost per page by band),
+   about nine hours on the box, inside the cap of $800; with the
+   2020-on read that is $1,355 by the gate, so the two runs need two
+   decisions or one cap raised. Then `load` and `check`.
 4. Read the 2020-on work list. Fetched on September 29: 5,795 filings
    with an attachment, 28,906 pages, projected at $757 by the cost gate
    (about $530 at the frame's cost per page by band), 11 to 12 hours of
