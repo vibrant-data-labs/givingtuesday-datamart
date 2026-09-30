@@ -5,7 +5,7 @@ GT's extracts emit a row for every filing version of a filer-year
 blocks outright — see GitHub issues #33 (grants) and #34 (basic fields)
 for the full evidence. The staging tables stay byte-faithful to the
 source (that invariant is what proved the bug was upstream); correction
-happens here, in four materialized relations consumers read instead of
+happens here, in the materialized relations consumers read instead of
 raw staging:
 
 * ``public.grants_to_domestic_organizations_current`` (990 Schedule I)
@@ -45,6 +45,40 @@ raw staging:
        conservative (residual doubles survive among sparse itemizers; a
        legitimate filer can't be halved unless it itemizes ~2x its own
        declared total).
+
+* ``public.privategrants_future_current`` (990-PF Part XV line 3b, grants
+  approved for future payment)
+    Built after ``privategrants_current``, which it reads.
+    1. latest_url — ``MAX(url)``, as for the paid rows. A filer-year whose
+       paid rows are held under a later url is left out whole: the return
+       was filed again without these rows (25 filer-years, 55 rows,
+       $18.4M, measured 2026-09-29), and keeping them would mix two
+       versions of one return.
+    2. pair_collapse — the doubling is in this file too, and it is the
+       filing that is doubled, not the block: measured 2026-09-29, 316 of
+       the 3,099 filings the IRS processed in 2025 and 2026 have every
+       line-item tuple an even number of times, against 12 of the 23,118
+       processed before; in 311 of the 316 the paid block of the same
+       filing is all even as well, and no filing has a doubled paid block
+       beside a future block that is not. The paid rule's second test
+       cannot be copied: it leans on grants paid, Part I line 25, and no
+       column of ``basic_fields_pf`` holds a total approved for future
+       payment. So the evidence is borrowed from the paid block. Collapse
+       where BOTH hold: (a) every tuple's multiplicity in the filing's
+       future rows is even, and (b) ``privategrants_current`` holds the
+       same filing (same url) with ``pair_collapse``, that is, the paid
+       rule found the filing's paid block doubled against the filer's own
+       declared total. Half of each tuple's copies are kept, as for the
+       paid rows. 299 filings, 9,168 rows and $4.05B before halving.
+       What this cannot catch: a doubled filing whose paid block the paid
+       rule could not judge. Of the 17 other all-even filings of 2025 and
+       2026, 12 have an all-even paid block and declare $0 on line 25, 4
+       have no paid rows at all, and one has a paid row that is not
+       doubled; $14.8M before halving, the largest $12.0M (EIN 820561001,
+       tax year 2024). They are kept whole, so at most $7.4M is counted
+       twice. A filing legitimately all even in its future rows is halved
+       only if its paid block was judged doubled, which the paid rule
+       decides on the declared total.
 
 * ``public.basic_fields_current`` (990 filer financials, issue #34)
 * ``public.basic_fields_pf_current`` (990-PF filer financials)
@@ -90,13 +124,16 @@ Builds are DROP + CREATE TABLE AS (idempotent) with (filerein) and
 (filerein, taxyear) indexes + ANALYZE. The DROP cascades to the matching
 views that read ``privategrants_current``; the matching pipeline rebuilds
 these tables and then recreates its views at the start of every run
-(grant_matching._do_match_records). Standalone rebuild:
+(grant_matching._do_match_records). Standalone rebuild, of every relation
+or of the ones named:
 
     python -m givingtuesday_datamart.current_grants
+    python -m givingtuesday_datamart.current_grants --only privategrants_future_current
 """
 
 from __future__ import annotations
 
+import argparse
 from typing import Iterable
 
 from sqlalchemy import text
@@ -209,6 +246,22 @@ _PF_ALL_COLS = [
     "sigocpyrfapo", "sigocpyrfsta", "sigocpyrpnam", "sigocpyrrela",
     "taxperbegin", "taxperend", "taxyear", "url", "_source_version",
     "_source_url", "_ingested_at", "_ingest_run_id",
+]
+# The future-payment rows: 3A's columns under the prefix SIGOCAFF, less the
+# person's name, which 3B does not have.
+_PF_FUTURE_CONTENT_COLS = [
+    "filername1", "filername2", "sigocaffamou", "sigocaffpogo",
+    "sigocaffrbnb1", "sigocaffrbnb2", "sigocaffrfaa1", "sigocaffrfaa2",
+    "sigocaffrfaci", "sigocaffrfaco", "sigocaffrfapc", "sigocaffrfaps",
+    "sigocaffrfstat", "sigocaffrrel", "taxperbegin", "taxperend",
+]
+_PF_FUTURE_ALL_COLS = [
+    "filerein", "filername1", "filername2", "filesha256", "sigocaffamou",
+    "sigocaffpogo", "sigocaffrbnb1", "sigocaffrbnb2", "sigocaffrfaa1",
+    "sigocaffrfaa2", "sigocaffrfaci", "sigocaffrfaco", "sigocaffrfapc",
+    "sigocaffrfaps", "sigocaffrfstat", "sigocaffrrel", "taxperbegin",
+    "taxperend", "taxyear", "url", "_source_version", "_source_url",
+    "_ingested_at", "_ingest_run_id",
 ]
 
 
@@ -375,6 +428,88 @@ LEFT JOIN pf_filings pf
 WHERE NOT _collapse OR _copy_rank <= _n_copies / 2;
 """
 
+# Reads privategrants_current, so it is built after it: for the url the
+# paid rows of a filer-year are held under, and for what the paid rule
+# decided about the filing (see the module docstring).
+_PF_FUTURE_CURRENT_DDL = f"""
+DROP TABLE IF EXISTS public.privategrants_future_current CASCADE;
+CREATE TABLE public.privategrants_future_current AS
+WITH kept_url AS (
+    -- one url per filer-year: MAX(url), as for the paid rows
+    SELECT DISTINCT ON (filerein, taxyear)
+           filerein, taxyear, url,
+           COUNT(*) OVER (PARTITION BY filerein, taxyear) AS n_urls_for_year
+    FROM (
+        SELECT DISTINCT filerein, taxyear, url FROM public.privategrants_future
+    ) u
+    ORDER BY filerein, taxyear, url DESC
+),
+paid AS (
+    -- the same filers in the paid relation: the url it holds for each
+    -- filer-year, and whether its rule found the paid block doubled
+    SELECT g.filerein, g.taxyear, MAX(g.url) AS url,
+           BOOL_OR(g.dedup_rule LIKE '%pair_collapse%') AS collapsed
+    FROM public.privategrants_current g
+    WHERE g.filerein IN (SELECT filerein FROM kept_url)
+    GROUP BY 1, 2
+),
+pf_filings AS (
+    SELECT filerein, taxyear, COUNT(DISTINCT filesha256) AS n_filings_for_year
+    FROM public.basic_fields_pf
+    GROUP BY 1, 2
+),
+hashed AS (
+    SELECT g.*,
+           g.ctid AS _ctid,
+           k.n_urls_for_year,
+           {_content_hash(_PF_FUTURE_CONTENT_COLS)} AS _h,
+           COALESCE(p.collapsed AND p.url = g.url, FALSE) AS _paid_collapsed
+    FROM public.privategrants_future g
+    JOIN kept_url k
+      ON k.filerein = g.filerein
+     AND k.taxyear IS NOT DISTINCT FROM g.taxyear
+     AND k.url IS NOT DISTINCT FROM g.url
+    LEFT JOIN paid p
+      ON p.filerein = g.filerein AND p.taxyear IS NOT DISTINCT FROM g.taxyear
+    -- the paid rows are held under a later url: the return was filed
+    -- again without these rows, and they are left out
+    WHERE p.url IS NULL OR p.url <= g.url
+),
+copies AS (
+    SELECT h.*,
+           ROW_NUMBER() OVER (
+               PARTITION BY h.filerein, h.taxyear, h._h ORDER BY h._ctid
+           ) AS _copy_rank,
+           COUNT(*) OVER (
+               PARTITION BY h.filerein, h.taxyear, h._h
+           ) AS _n_copies
+    FROM hashed h
+),
+ranked AS (
+    -- every tuple's multiplicity is even AND the paid rule collapsed the
+    -- same filing's paid block. Windows, not a join to the filer-years
+    -- that pass: the planner takes the joins above for a handful of rows
+    -- and would nest a loop over every row here.
+    SELECT c.*,
+           (BOOL_AND(c._n_copies % 2 = 0) OVER fy
+            AND BOOL_OR(c._paid_collapsed) OVER fy) AS _collapse
+    FROM copies c
+    WINDOW fy AS (PARTITION BY c.filerein, c.taxyear)
+)
+SELECT {", ".join(f"ranked.{c}" for c in _PF_FUTURE_ALL_COLS)},
+       n_urls_for_year,
+       COALESCE(pf.n_filings_for_year, 0) AS n_filings_for_year,
+       COALESCE(NULLIF(CONCAT_WS('+',
+           CASE WHEN n_urls_for_year > 1 THEN 'latest_url' END,
+           CASE WHEN _collapse THEN 'pair_collapse' END
+       ), ''), 'passthrough') AS dedup_rule
+FROM ranked
+LEFT JOIN pf_filings pf
+  ON pf.filerein = ranked.filerein
+ AND pf.taxyear IS NOT DISTINCT FROM ranked.taxyear
+WHERE NOT _collapse OR _copy_rank <= _n_copies / 2;
+"""
+
 _INDEX_DDL = {
     "basic_fields_current": [
         "CREATE INDEX ix_bf_current_filerein ON public.basic_fields_current (filerein)",
@@ -401,6 +536,11 @@ _INDEX_DDL = {
         "CREATE INDEX ix_pg_current_filerein_taxyear ON public.privategrants_current (filerein, taxyear)",
         "ANALYZE public.privategrants_current",
     ],
+    "privategrants_future_current": [
+        "CREATE INDEX ix_pgf_current_filerein ON public.privategrants_future_current (filerein)",
+        "CREATE INDEX ix_pgf_current_filerein_taxyear ON public.privategrants_future_current (filerein, taxyear)",
+        "ANALYZE public.privategrants_future_current",
+    ],
 }
 
 
@@ -412,8 +552,13 @@ _BASIC_FIELDS_TABLES = (
 _GRANTS_TABLES = (
     ("grants_to_domestic_organizations_current", _SCHED_I_CURRENT_DDL),
     ("privategrants_current", _PF_CURRENT_DDL),
+    # after privategrants_current, which it reads
+    ("privategrants_future_current", _PF_FUTURE_CURRENT_DDL),
 )
 _TABLES = _BASIC_FIELDS_TABLES + _GRANTS_TABLES
+# The relations the matching views are defined over: rebuilding one drops
+# the views with it.
+_MATCHING_VIEW_TABLES = ("grants_to_domestic_organizations_current", "privategrants_current")
 
 
 def _build_one(connection, table: str, ddl: str) -> int:
@@ -497,7 +642,7 @@ def stale_basic_fields_current(connection) -> list[str]:
 
 
 def build_current_relations(connection) -> dict[str, int]:
-    """(Re)build all four `_current` relations. Returns row counts.
+    """(Re)build every `_current` relation. Returns row counts.
 
     NOTE: the DROP ... CASCADE removes any views defined over
     ``privategrants_current`` (the matching keys/unique views). Callers
@@ -515,18 +660,28 @@ if __name__ == "__main__":
     # a later step must not roll an earlier table back.
     from givingtuesday_datamart.grant_matching import create_or_replace_views
 
-    for _table, _ddl in _TABLES:
+    _parser = argparse.ArgumentParser(prog="python -m givingtuesday_datamart.current_grants")
+    _parser.add_argument("--only", action="append", choices=[t for t, _ in _TABLES], default=None,
+                         help="rebuild this relation and no other; may be passed several times")
+    _only = _parser.parse_args().only
+    _wanted = [(t, d) for t, d in _TABLES if _only is None or t in _only]
+
+    for _table, _ddl in _wanted:
         with get_session(config=datamart_config()) as session:
             _build_one(session.connection(), _table, _ddl)
     with get_session(config=datamart_config()) as session:
         conn = session.connection()
-        create_or_replace_views(conn)
+        if any(t in _MATCHING_VIEW_TABLES for t, _ in _wanted):
+            create_or_replace_views(conn)
         rules = conn.execute(text("""
             SELECT 'sched_i' AS side, dedup_rule, COUNT(*) AS rows
             FROM public.grants_to_domestic_organizations_current GROUP BY 1, 2
             UNION ALL
             SELECT 'pf', dedup_rule, COUNT(*)
             FROM public.privategrants_current GROUP BY 1, 2
+            UNION ALL
+            SELECT 'pf_future', dedup_rule, COUNT(*)
+            FROM public.privategrants_future_current GROUP BY 1, 2
             UNION ALL
             SELECT 'basic_fields', dedup_rule, COUNT(*)
             FROM public.basic_fields_current GROUP BY 1, 2
