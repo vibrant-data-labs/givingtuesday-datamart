@@ -262,8 +262,8 @@ def test_a_view_that_shows_another_policy_stops_the_run():
 
 
 def test_a_run_under_a_prefix_never_touches_the_view():
-    connection = Connection(None)
-    gm.create_or_replace_views(connection, gm.Relations(prefix="scratch_matcher_",
-                                                        grants="scratch_matcher_grants_subset"))
-    assert not any(view.VIEW in sql for sql in connection.ran)
-    assert any("scratch_matcher_corrections_org_identities" in sql for sql in connection.ran)
+    for grants in ("scratch_matcher_grants_subset", view.VIEW):
+        connection = Connection(None)
+        gm.create_or_replace_views(connection, gm.Relations(prefix="scratch_matcher_", grants=grants))
+        assert not any(f"VIEW public.{view.VIEW}" in sql for sql in connection.ran)
+        assert any("scratch_matcher_corrections_org_identities" in sql for sql in connection.ran)

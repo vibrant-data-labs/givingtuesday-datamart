@@ -664,11 +664,13 @@ def create_or_replace_views(
     created first (IF NOT EXISTS) because corrections_unique_names_view
     references it — without this, view creation would fail on a fresh
     database before the loader ever runs. So is the view of current and
-    recovered grants, when the run reads its grants from it.
+    recovered grants, when the run reads its grants from it: by a
+    production run only, since a run under a prefix creates nothing of
+    production's.
     """
     logger.info(f"Creating/replacing grant matching views in public.{relations.prefix}*")
     connection.execute(text(_CORRECTIONS_TABLE_DDL.format(table=relations.of(_CORRECTIONS_TABLE))))
-    if relations.grants == recovered_view.VIEW:
+    if relations.grants == recovered_view.VIEW and not relations.prefix:
         _ensure_recovered_view(connection, recovered_policy)
     for ddl in _view_ddl(relations):
         connection.execute(text(ddl))
