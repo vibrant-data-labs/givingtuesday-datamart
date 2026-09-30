@@ -250,8 +250,8 @@ def filing_rows(filing: PlaceholderFiling, accepted: Accepted, policy: Mapping,
                 loaded_at: datetime) -> list[RecoveredGrant]:
     """The rows a filing loads under the policy: its paid list when the
     accepted readings hold one that adds up, else nothing. A page with no
-    accepted reading (unreadable, or flagged under ``leave_out``) gives the
-    selector nothing."""
+    accepted reading (unreadable, ``not_a_list``, or flagged under
+    ``leave_out``) gives the selector nothing."""
     readings = {page: response for page, (_, response) in accepted.items() if response is not None}
     if not readings:
         return []
@@ -425,11 +425,13 @@ class LoadResult:
     declared: Decimal = Decimal(0)
     labels: dict[str, Counter] = field(default_factory=lambda: defaultdict(Counter))
     label_dollars: dict[str, Counter] = field(default_factory=lambda: defaultdict(Counter))
+    by_filing: dict[str, tuple[int, Decimal]] = field(default_factory=dict)     # object id -> (rows, dollars)
 
     def count(self, rows: Sequence[RecoveredGrant]) -> None:
         self.loaded += 1
         self.rows += len(rows)
         self.declared += rows[0].declared_amount
+        self.by_filing[rows[0].object_id] = (len(rows), sum((row.amount for row in rows), Decimal(0)))
         for row in rows:
             self.dollars += row.amount
             for label, value in (("page_kind", row.page_kind), ("page_verdict", row.page_verdict),

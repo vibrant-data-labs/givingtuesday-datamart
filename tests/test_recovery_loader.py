@@ -169,6 +169,19 @@ def test_rows_from_a_flagged_page_load_and_carry_the_verdict(stores, tmp_path):
     assert recovered.loaded("v2-leave_out") == set() and recovered.loaded("v2") == {OID}
 
 
+def test_a_page_both_base_readers_call_other_and_empty_loads_nothing_beside_the_list_that_does(stores, tmp_path):
+    _read(stores, 3, LIST)
+    _read(stores, 4, [], kind="other")                          # both base readers: other, no rows; nothing else stored
+    _decide(stores, tmp_path, 3, 4, policy=pv.POLICY_V3)        # decided from the base pair alone, at no cost
+    assert stores[2].rows[(OID, 4, stores[0].rows[OID].sha256, "v3")].verdict == "not_a_list"
+    recovered = ld.MemoryStore()
+    result = _load(stores, recovered, _filing(), policy=pv.POLICY_V3)
+    rows = recovered.for_filing(OID, "v3")
+    assert [(r.page, r.page_verdict, r.policy_version) for r in rows] == [(3, "agreed", "v3")] * 3
+    assert (result.loaded, result.rows, result.by_filing) == (1, 3, {OID: (3, Decimal("300.00"))})
+    assert result.labels["page_verdict"] == {"agreed": 3}
+
+
 def test_a_filing_marked_individual_loads_labelled_and_a_row_keeps_its_own_status(stores, tmp_path):
     _read(stores, 3, [_grant("Jane Student", 100, status="I"), _grant("State University", 100, status="PC"),
                       _grant("John Student", 100)])

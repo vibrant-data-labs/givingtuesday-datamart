@@ -63,6 +63,21 @@ def test_estimate_credits_stored_readings_under_the_policys_own_settings(frame):
     assert _estimate(frame) == pytest.approx(len(pages) * rec.DISPUTE_RATE * rec.PER_PAGE[FLASH])
 
 
+def test_estimate_under_v3_sends_fewer_pages_to_the_escalation_readers(frame, capsys):
+    filings, readings, _ = frame
+    n = len(pr.frame_pages(filings, [OID]))
+    dispute, resolve = rec.rates(pv.POLICY_V3)
+    assert rec.rates(pv.POLICY_V2) == (rec.DISPUTE_RATE, rec.RESOLVE_RATES)
+    assert dispute < rec.DISPUTE_RATE and resolve[FLASH] > rec.RESOLVE_RATES[FLASH] and resolve[SONNET] > rec.RESOLVE_RATES[SONNET]
+    total = _estimate(frame, policy=pv.POLICY_V3)
+    disputes = n * dispute
+    assert total == pytest.approx(n * (rec.PER_PAGE[QWEN] + rec.PER_PAGE[GEMINI]) + disputes * rec.PER_PAGE[FLASH]
+                                  + disputes * (1 - resolve[FLASH]) * rec.PER_PAGE[SONNET])
+    assert total < _estimate(frame)
+    out = capsys.readouterr().out
+    assert f"under policy v3; {dispute:.0%} disputed by the base pair, gemini-3.8-flash resolves {resolve[FLASH]:.0%}" in out
+
+
 def test_estimate_stops_past_the_cap(frame, capsys):
     with pytest.raises(SystemExit):
         _estimate(frame, cap=0.001)

@@ -99,7 +99,7 @@ from givingtuesday_datamart.attachment_grants import (
 from givingtuesday_datamart._internal.bulk import SystemicFailure
 from givingtuesday_datamart.page_readings import MAX_ERRORS, frame_pages, reading_key
 from givingtuesday_datamart.page_verdicts import (
-    FLAGGED_RULES, POLICIES, POLICY_V1, WORKERS, AgreeResult, accepted_readings, agree,
+    FLAGGED_RULES, POLICIES, POLICY_V1, VERDICTS, WORKERS, AgreeResult, accepted_readings, agree,
     load_policy, reader_settings, summary, with_flagged)
 from givingtuesday_datamart.placeholder_recovery.exclusions import load_exclusions
 
@@ -133,7 +133,7 @@ EXPANSION = {"B": None, "C": 100, "D": 50}
 EXPANSION_1000 = {"B": None, "C": 137, "D": 403}
 FRAMES = {"610": (EXPANSION,), "1000": (EXPANSION, EXPANSION_1000)}
 _OBJECT_ID = re.compile(r"(?<!\d)(\d{18})(?!\d)")
-VERDICT_KINDS = ("agreed", "escalated", "flagged", "unreadable", "no_verdict")
+VERDICT_KINDS = VERDICTS + ("no_verdict",)
 # The cost gate's numbers (``estimate``), measured on the 1,000-filing frame
 # run of 2026-09-24 — 9,926 attachment pages under POLICY_V2, the pipeline
 # doc's *The 1,000-filing frame under POLICY_V2* — replacing the rehearsal's
@@ -146,6 +146,25 @@ PER_PAGE = {"alibaba/qwen3-vl-instruct": 0.0025, "google/gemini-3.5-flash-lite":
             "google/gemini-3.8-flash": 0.0091, "anthropic/claude-sonnet-5": 0.0343}
 DISPUTE_RATE = 0.605
 RESOLVE_RATES = {"google/gemini-3.8-flash": 0.423, "anthropic/claude-sonnet-5": 0.18}
+# Under the not_a_list rule (``POLICY_V3``) a page both base readers call
+# ``other`` and empty reaches no escalation reader, so fewer pages enter
+# and the readers resolve more of what does. Measured on the 38,834 pages
+# decided under v2 by 2026-09-30 — the frame and the 2020-on read, where
+# such pages are 22.0% of all pages (10.4% of the frame's, 26.0% of the
+# read's) — as the same v2 verdicts with those pages taken out of the
+# dispute path: on that basis v2 itself is 59.8% disputed, 29.2% and 13.4%
+# resolved, 36.7% flagged. The frame's own rates under v3 would be 50.2%,
+# 51.0% and 25.4%; the wider basis is the one the rule was measured on.
+RATES_BY_RULE = {
+    None: (DISPUTE_RATE, RESOLVE_RATES),
+    "empty_other": (0.378, {"google/gemini-3.8-flash": 0.462, "anthropic/claude-sonnet-5": 0.278}),
+}
+
+
+def rates(policy: dict) -> tuple[float, dict[str, float]]:
+    """The dispute rate and the resolve rates the cost gate projects the
+    policy with, by its not_a_list rule."""
+    return RATES_BY_RULE[policy.get("not_a_list")]
 # What a frame filing cost in model calls, by band, the filings with nothing
 # to read among them (the findings doc, *Shipping the rest*): the price of a
 # filing nobody has fetched, whose pages are not yet known.
@@ -364,9 +383,9 @@ def estimate(
 ) -> float:
     """The cost gate: what ``transcribe`` under ``policy`` would buy today and
     what it would cost. Each reader is expected to see a share of the frame's
-    attachment pages — every page for a base reader, ``DISPUTE_RATE`` of them
-    for the first escalation reader, and for each later one what the reader
-    before it left open (``RESOLVE_RATES``) — less the readings the table
+    attachment pages — every page for a base reader, the policy's dispute
+    rate of them for the first escalation reader, and for each later one
+    what the reader before it left open (``rates``) — less the readings the table
     already holds for it under the policy's settings, priced at ``PER_PAGE``.
     Every stored reading is credited, so where an escalation reader's stored
     readings turn out not to be needed the projection is a little low. A
@@ -390,25 +409,27 @@ def estimate(
 
     # the pages each reader is expected to see
     # A base reader sees every page. The first escalation reader sees the
-    # pages the base pair disputes, DISPUTE_RATE of them (one base reader
-    # means no pair and no disputes). Each escalation reader after that sees
-    # what the reader before it left unresolved. What the last one leaves is
-    # flagged, not read again.
+    # pages the base pair disputes, the policy's dispute rate of them (one
+    # base reader means no pair and no disputes; under a not_a_list rule the
+    # pages the pair calls empty and other never enter). Each escalation
+    # reader after that sees what the reader before it left unresolved. What
+    # the last one leaves is flagged, not read again.
+    dispute_rate, resolve_rates = rates(policy)
     expected: dict[str, float] = {model: float(total_pages) for model in policy["base"]}
-    entering = total_pages * DISPUTE_RATE if len(policy["base"]) > 1 else 0.0
+    entering = total_pages * dispute_rate if len(policy["base"]) > 1 else 0.0
     for model in policy["escalation"]:
         expected[model] = entering
-        entering *= 1 - RESOLVE_RATES.get(model, 0.0)     # what this reader leaves open
+        entering *= 1 - resolve_rates.get(model, 0.0)     # what this reader leaves open
     flagged = entering
 
     # The header line: "... 52% disputed by the base pair, gemini-3.8-flash
     # resolves 39%, claude-sonnet-5 resolves 33%".
-    rates = ", ".join(f"{model.split('/')[-1]} resolves {rate:.0%}"
-                      for model, rate in RESOLVE_RATES.items() if model in policy["escalation"])
+    resolving = ", ".join(f"{model.split('/')[-1]} resolves {rate:.0%}"
+                          for model, rate in resolve_rates.items() if model in policy["escalation"])
     filings_with_pages = len({oid for oid, _ in pages})
     print(f"{filings_with_pages} filings, {total_pages:,} attachment pages under policy "
-          f"{policy['version']}; {DISPUTE_RATE:.0%} disputed by the base pair"
-          + (f", {rates}" if rates else ""))
+          f"{policy['version']}; {dispute_rate:.0%} disputed by the base pair"
+          + (f", {resolving}" if resolving else ""))
     print(f"  {'reader':<32}{'expects':>9}{'stored':>8}{'to buy':>8}{'$/page':>8}{'$':>9}")
     total = 0.0
     for model, want in expected.items():

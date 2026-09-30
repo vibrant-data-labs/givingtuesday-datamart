@@ -6,6 +6,7 @@ stored readings) and decides.
     python -m givingtuesday_datamart.page_verdicts agree data/exploratory/placeholder_sample_1000.csv --policy v2
     python -m givingtuesday_datamart.page_verdicts agree data/exploratory/placeholder_sample_1000.csv --policy v2 --stored-only
     python -m givingtuesday_datamart.page_verdicts status --policy v2
+    python -m givingtuesday_datamart.page_verdicts base-pair --policy v2
 
 ``docs/placeholder_recovery_operations.md`` (Part B of the storage spec it
 was built from, now in git history), the verdicts half. The
@@ -32,6 +33,18 @@ run's own settings rather than today's (the sample's Qwen v3); such a
 policy is a re-derivation and can buy nothing. A single-reader policy
 (one base reader, no escalation) marks every page it can read ``agreed``
 with itself, which is how a stored full-sample read is scored.
+
+``POLICY_V3`` is v2 plus one rule, ``"not_a_list": "empty_other"``: a page
+both base readers label ``other`` and return no (name, amount) pair for
+is ``not_a_list`` — decided by the base pair alone, no escalation reader
+consulted, no reading accepted, so nothing loads from it. Two empty
+readings still do not *agree* (``reading_pairs.agree_on`` is the scorer's
+rule and is untouched): under v2 such a page is a dispute that goes to
+both escalation readers and ends flagged, 8,536 of 8,541 times on the
+38,834 pages decided by 2026-09-30, at 20% of the escalation spend, and
+no loaded filing takes a row from one (the pipeline doc, 2026-09-30).
+``base-pair`` reports what the base pair said on every page decided under
+a policy, in the four classes that measurement used.
 
 **The rows.** A verdict is keyed by the page, the image it was decided on
 (``filing_images.sha256``, as the readings are) and the policy version; a
@@ -61,7 +74,7 @@ from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 from sqlalchemy import text
 
@@ -75,8 +88,15 @@ from givingtuesday_datamart.vlm_transcription import DPI
 
 CHUNK = 200
 DEFAULT_WORKERS = 8
-VERDICTS = ("agreed", "escalated", "flagged", "unreadable")
+VERDICTS = ("agreed", "escalated", "flagged", "not_a_list", "unreadable")
 FLAGGED_RULES = ("load_single", "leave_out")
+# The one not_a_list rule: both base readers label the page ``other`` and
+# return no (name, amount) pair. Absent from a policy, no page is decided so.
+NOT_A_LIST_RULES = ("empty_other",)
+OTHER = "other"
+# The labels under which a reader calls a page a list (the prompt's other
+# three ``page_kind`` values); ``base_pair_report`` classes pages by them.
+LIST_LABELS = ("grants_paid_list", "grants_future_list", "expenditure_responsibility")
 
 POLICY_V1 = {
     "version": "v1",
@@ -103,7 +123,12 @@ POLICY_V2 = {
     "prompt_version": "v4",
     "flagged": "load_single",
 }
-POLICIES = {"v1": POLICY_V1, "v2": POLICY_V2}
+# v2 plus the not_a_list rule (2026-09-30): a page both base readers call
+# ``other`` and empty is decided by them alone. Everything else, the readers
+# and their settings included, is v2's, so v3 re-derives from v2's stored
+# readings at no cost and reads a new page the same way up to the rule.
+POLICY_V3 = {**POLICY_V2, "version": "v3", "not_a_list": "empty_other"}
+POLICIES = {"v1": POLICY_V1, "v2": POLICY_V2, "v3": POLICY_V3}
 # Worker counts; the escalation stages run as their own pools. The base
 # pair's held on the sample's full reads (Qwen at 40 for 1,700 pages with
 # every call answered 200). The escalation readers' 8 came from the 83-page
@@ -135,10 +160,10 @@ DDL = (
         page              integer NOT NULL,
         image_sha256      text NOT NULL,
         policy_version    text NOT NULL,
-        verdict           text NOT NULL,      -- agreed | escalated | flagged | unreadable
+        verdict           text NOT NULL,      -- agreed | escalated | flagged | not_a_list | unreadable
         accepted_model    text,               -- the reading to use, with its
-        accepted_hash     text,               --   request_hash; NULL when flagged
-        matched_models    text[],             -- the two that agreed
+        accepted_hash     text,               --   request_hash; NULL when nothing loads
+        matched_models    text[],             -- the two that agreed (on the rows, or that there are none)
         readers_consulted integer NOT NULL,
         decided_at        timestamptz NOT NULL DEFAULT now(),
         PRIMARY KEY (object_id, page, image_sha256, policy_version)
@@ -292,7 +317,8 @@ def _same(a: Verdict, b: Verdict) -> bool:
 
 def check_policy(policy: dict) -> None:
     """A policy names a version, one or two base readers, an escalation
-    order of readers not among them, a prompt version and a flagged rule."""
+    order of readers not among them, a prompt version, a flagged rule and,
+    with two base readers, may name a not_a_list rule."""
     missing = [k for k in ("version", "base", "escalation", "prompt_version") if k not in policy]
     if missing:
         raise ValueError(f"the policy lacks {missing}")
@@ -305,6 +331,11 @@ def check_policy(policy: dict) -> None:
         raise ValueError("a reader appears twice in the policy; a model agreeing with itself is not agreement")
     if policy.get("flagged", "load_single") not in FLAGGED_RULES:
         raise ValueError(f"the flagged rule is one of {FLAGGED_RULES}, not {policy.get('flagged')!r}")
+    if policy.get("not_a_list") is not None:
+        if policy["not_a_list"] not in NOT_A_LIST_RULES:
+            raise ValueError(f"the not_a_list rule is one of {NOT_A_LIST_RULES}, not {policy['not_a_list']!r}")
+        if len(base) != 2:
+            raise ValueError("the not_a_list rule is the base pair's word; it needs two base readers")
     for model in policy.get("settings", {}):
         if model not in base + escalation:
             raise ValueError(f"settings for {model}, which the policy does not read with")
@@ -350,6 +381,12 @@ def reader_hash(policy: dict, model: str) -> str:
     return settings_hash(reader_settings(policy, model))
 
 
+def says_not_a_list(kind: str, found: Pairs) -> bool:
+    """One reader's word on a page under the ``empty_other`` rule: the page
+    is labelled ``other`` and the reading holds no (name key, amount) pair."""
+    return kind == OTHER and not found
+
+
 # ---------------------------------------------------------------------------
 # agree
 # ---------------------------------------------------------------------------
@@ -393,7 +430,10 @@ def agree(session, pages: Sequence[Page], policy: dict = POLICY_V1, *, workers: 
     2. Equal, non-empty pairs (``reading_pairs.agree_on``) → ``agreed``:
        the accepted reading is the first base reader's, ``matched_models``
        both. One base reader and no escalation → every page read is
-       ``agreed`` with itself.
+       ``agreed`` with itself. Under a ``not_a_list`` rule, a page both
+       base readers label ``other`` and return no pair for → ``not_a_list``:
+       no reading accepted, ``matched_models`` both, and no escalation
+       reader sees it.
     3. Otherwise the disputed subset goes to each escalation reader in turn.
        A reading equal to any earlier one → ``escalated``, ``matched_models``
        the two, the accepted reading the escalation reader's: the pairs are
@@ -429,6 +469,7 @@ def agree(session, pages: Sequence[Page], policy: dict = POLICY_V1, *, workers: 
     version, prompt_version = policy["version"], policy["prompt_version"]
     base, escalation = list(policy["base"]), list(policy["escalation"])
     rule = policy.get("flagged", "load_single")
+    not_a_list = policy.get("not_a_list")
     wanted: list[Page] = list(dict.fromkeys((str(oid), int(page)) for oid, page in pages))
     images = filings.get({oid for oid, _ in wanted})
     unfetched = sorted({oid for oid, _ in wanted if not page_readings._readable(images.get(oid))})
@@ -438,6 +479,7 @@ def agree(session, pages: Sequence[Page], policy: dict = POLICY_V1, *, workers: 
 
     result = AgreeResult()
     read: dict[Page, dict[str, Pairs]] = {page: {} for page in wanted}
+    kinds: dict[Page, dict[str, str]] = {page: {} for page in wanted}      # each reader's page_kind
     consulted: dict[Page, int] = dict.fromkeys(wanted, 0)
     pending: list[Verdict] = []
 
@@ -478,6 +520,7 @@ def agree(session, pages: Sequence[Page], policy: dict = POLICY_V1, *, workers: 
             consulted[page] += 1
         for page, response in got.responses.items():
             read[page][model] = pairs(response)
+            kinds[page][model] = str(response.get("page_kind") or "")
         for page, row in got.failed.items():
             result.no_verdict[page] = (f"{model} failed this run ({row.errors} of {max_errors} errors): "
                                        f"{(row.last_error or '')[:120]}")
@@ -492,16 +535,21 @@ def agree(session, pages: Sequence[Page], policy: dict = POLICY_V1, *, workers: 
         consult(model, open_pages)                        # a reader out of attempts is absent for the page
         open_pages = [page for page in open_pages if page not in result.no_verdict]
     disputed: list[Page] = []
+    not_lists = 0
     for page in open_pages:
         present = [model for model in base if model in read[page]]
         if len(present) == len(base) and (len(base) == 1 or agree_on(read[page][base[0]], read[page][base[1]])):
             decide(page, "agreed", accepted=base[0], matched=base)
+        elif not_a_list and len(present) == 2 and all(says_not_a_list(kinds[page][m], read[page][m]) for m in base):
+            decide(page, "not_a_list", matched=base)          # the base pair's word; nothing to load
+            not_lists += 1
         else:
             disputed.append(page)
     absent = sum(1 for page in disputed if any(model not in read[page] for model in base))
-    logger.info("agree %s: %d pages, %d agreed by %s, %d disputed (%d with a base reader out of attempts), "
-                "%d without a verdict this run", version, len(wanted), len(open_pages) - len(disputed),
-                " + ".join(base), len(disputed), absent, len(result.no_verdict))
+    logger.info("agree %s: %d pages, %d agreed by %s, %d not a list, %d disputed (%d with a base reader out of "
+                "attempts), %d without a verdict this run", version, len(wanted),
+                len(open_pages) - len(disputed) - not_lists, " + ".join(base), not_lists, len(disputed), absent,
+                len(result.no_verdict))
     flush("the base pair")
 
     for stage, model in enumerate(escalation):
@@ -610,6 +658,95 @@ def status_report(session, policy_version: str | None = None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# What the base pair said
+# ---------------------------------------------------------------------------
+
+# The classes of ``base_pair_report``, in the order the not_a_list rule was
+# measured in (2026-09-30). The first is the rule itself; the second is the
+# wider rule that was measured and not adopted (neither base reader calls
+# the page a list, but one returns rows, or a label is neither a list's
+# nor ``other``).
+CLASSES = ("both other, no rows", "neither a list, otherwise", "one a list", "both a list", "a base reader absent")
+_BASE_PAIR = """
+    SELECT v.object_id, v.page, v.verdict, v.readers_consulted, p.model, p.response->>'page_kind' AS kind,
+           CASE WHEN p.model = ANY(CAST(:base AS text[])) THEN p.response->'rows' END AS rows, p.usage
+    FROM page_verdicts v
+    JOIN page_readings p ON p.object_id = v.object_id AND p.page = v.page AND p.image_sha256 = v.image_sha256
+     AND p.dpi = :dpi AND p.prompt_version = :prompt_version AND p.response IS NOT NULL
+     AND (p.model, p.request_hash) IN (SELECT * FROM unnest(CAST(:models AS text[]), CAST(:hashes AS text[])))
+    WHERE v.policy_version = :version
+"""
+
+
+def base_pair_class(kinds: Mapping[str, str], found: Mapping[str, Pairs], base: Sequence[str]) -> str:
+    """Which of ``CLASSES`` a page is in, from each base reader's label and
+    pairs (absent when the reader could not read the page)."""
+    if any(model not in kinds for model in base):
+        return CLASSES[4]
+    lists = sum(kinds[model] in LIST_LABELS for model in base)
+    if lists == 2:
+        return CLASSES[3]
+    if lists == 1:
+        return CLASSES[2]
+    if all(says_not_a_list(kinds[model], found[model]) for model in base):
+        return CLASSES[0]
+    return CLASSES[1]
+
+
+def base_pair_report(session, policy: dict) -> str:
+    """Every page decided under the policy's version, by what its base pair
+    said: pages, how many reached the last escalation reader, how many
+    ended flagged, and what the escalation readers' readings of them cost
+    at list prices (``vlm_transcription.PRICES`` over the readings'
+    ``usage``), with each class's share of that spend. The readings are the
+    policy's own — its prompt version, each reader's settings — so the
+    table says what the policy's escalation bought, class by class."""
+    base, escalation = list(policy["base"]), list(policy["escalation"])
+    models = base + escalation
+    params = {"version": policy["version"], "dpi": DPI, "prompt_version": policy["prompt_version"], "base": base,
+              "models": models, "hashes": [reader_hash(policy, model) for model in models]}
+    pages: dict[Page, dict] = {}
+    for row in session.execute(text(_BASE_PAIR).execution_options(stream_results=True), params).mappings():
+        page = pages.setdefault((row["object_id"], row["page"]), {
+            "verdict": row["verdict"], "consulted": row["readers_consulted"], "kinds": {}, "pairs": {}, "cost": 0.0})
+        if row["model"] in base:
+            page["kinds"][row["model"]] = str(row["kind"] or "")
+            page["pairs"][row["model"]] = pairs({"rows": row["rows"]})
+        else:
+            usage = row["usage"] or {}
+            page["cost"] += vlm_transcription.cost(row["model"], usage.get("in") or 0, usage.get("out") or 0) or 0.0
+    return base_pair_table(pages, policy)
+
+
+def base_pair_table(pages: Mapping[Page, Mapping], policy: dict) -> str:
+    """The report over pages as ``base_pair_report`` collects them: per page
+    the verdict, ``readers_consulted``, the base readers' ``kinds`` and
+    ``pairs``, and the escalation readers' ``cost``."""
+    base, escalation = list(policy["base"]), list(policy["escalation"])
+    everyone = len(base) + len(escalation)
+    last = escalation[-1].split("/")[-1] if escalation else "no escalation reader"
+    by_class = {cls: {"pages": 0, "last": 0, "flagged": 0, "cost": 0.0} for cls in CLASSES}
+    for page in pages.values():
+        tally = by_class[base_pair_class(page["kinds"], page["pairs"], base)]
+        tally["pages"] += 1
+        tally["last"] += page["consulted"] == everyone
+        tally["flagged"] += page["verdict"] == "flagged"
+        tally["cost"] += page["cost"]
+    total = sum(tally["cost"] for tally in by_class.values())
+    lines = [f"{len(pages):,} pages decided under {policy['version']}, by what the base pair said "
+             f"({' + '.join(base)}); escalation at list prices",
+             f"  {'the base pair said':<28}{'pages':>8}{'to ' + last:>22}{'flagged':>9}{'$':>10}{'share':>7}"]
+    for cls, tally in by_class.items():
+        if tally["pages"]:
+            share = tally["cost"] / total if total else 0.0
+            lines.append(f"  {cls:<28}{tally['pages']:>8,}{tally['last']:>22,}{tally['flagged']:>9,}"
+                         f"{tally['cost']:>10,.2f}{share:>7.0%}")
+    lines.append(f"  {'all':<28}{len(pages):>8,}{sum(t['last'] for t in by_class.values()):>22,}"
+                 f"{sum(t['flagged'] for t in by_class.values()):>9,}{total:>10,.2f}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -629,6 +766,10 @@ def main() -> None:
 
     status = sub.add_parser("status", help="verdicts by policy version, and per model the pages it decided")
     status.add_argument("--policy", default=None, help="one version only")
+
+    base_pair = sub.add_parser("base-pair", help="the pages decided under a policy by what the base pair said, "
+                                                 "with what escalating each class cost")
+    base_pair.add_argument("--policy", default="v2", help=f"a registered version ({', '.join(POLICIES)}) or a JSON file")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
@@ -647,6 +788,8 @@ def main() -> None:
                 print(f"  no verdict {oid} p{page:03d}: {why}")
         elif args.command == "status":
             print(status_report(session, args.policy))
+        elif args.command == "base-pair":
+            print(base_pair_report(session, load_policy(args.policy)))
 
 
 if __name__ == "__main__":
