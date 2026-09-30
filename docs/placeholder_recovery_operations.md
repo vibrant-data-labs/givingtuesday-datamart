@@ -206,7 +206,7 @@ reads found the gateway's limit.
 | the frame's rows, loaded | done: 398 filings, 221,969 rows, $7.03B under `v2` |
 | the extract's rows in the search | gone: the selector reads the pages and nothing else; the file is archived |
 | the matcher reading the view | not built: the name cleaner, the name-only tier and input shape version 3 go in on one rerun |
-| reading the work list | fetched, not read: tax years 2020 on are fetched and cut (2026-09-29), 28,906 pages to read, projected at $757, inside the cap of $800. Tax years 2015 to 2019 are served by the IRS but their images need another cut; 2009 to 2014 are not served |
+| reading the work list | fetched, not read: tax years 2020 on are fetched and cut (2026-09-29), 28,906 pages to read, projected at $757, inside the cap of $800. Tax years 2015 to 2019 are fetched too, 6,472 PDFs, but 5,533 of the images need another cut; 2009 to 2014 are not served |
 
 The rules the work list and the loader follow are in the engineering
 log, stages 0 and 5.
@@ -449,9 +449,9 @@ and four a second from a laptop. The box has 20 GB free, so a fetch
 there uses a cache of its own (`--cache /data/irs_fetch`), deleted
 afterwards; the read takes each PDF from S3.
 Of the 11,696 filings before 2020, the IRS serves tax years 2015 to
-2019 and nothing before 2014 (fetch test, 2026-09-29). Do not run
-them yet: the cut takes every page of an image generated before 2021
-for the filer's, which would be about 189,000 pages. The server is a
+2019 (6,472 of 7,944, fetched 2026-09-29) and nothing before 2014. Do
+not run them yet: the cut takes every page of an image generated
+before 2021 for the filer's, 147,181 pages on 5,533 images. The server is a
 few dollars a run and the S3 storage under a dollar a month.
 
 ## Success metrics, as measured on the frame run

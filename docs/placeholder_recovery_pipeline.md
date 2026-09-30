@@ -1044,6 +1044,32 @@ them. With the older widths measured, the same years are about 32,000
 pages, in the region of $700. The earlier estimate of "up to $510"
 assumed the frame's pages per filing.
 
+**All of tax years 2015 to 2019, fetched the same day.** `filing_images
+fetch` on the work list's 7,944 filings of those years, from the box,
+after the 2020-on fetch had ended so that one fetcher at a time asked
+the IRS: 6,472 served (5.1 GB, 174,757 pages), 1,459 with no image
+listed, 9 refused with a 404, 4 network errors. By tax year the table
+is in the findings doc. The sample had put tax year 2015 at 26 of 30;
+the census is 855 of 1,290, since 545 of that year's filings are in no
+index and fewer of those have an image. Images by the year the IRS
+generated them: 110 of 2016, 1,534 of 2017, 1,283 of 2018, 1,271 of
+2019, 1,335 of 2020, 875 of 2021, 59 of 2022, 5 of 2023.
+
+Every one of the 5,533 images generated before 2021 has its attachment
+starting on page 1, and none has a page at one of the five widths of
+`IRS_RENDERED_WIDTHS`. The widths on them, by the number of images they
+appear on (pages in brackets): 2256 on 5,197 (15,788), 2240 on 4,674
+(87,520), 2432 on 3,993 (12,361), 3072 on 2,561 (2,890), 2544 on 1,844
+(15,770), 2272 on 1,449 (1,449), 2320 on 965 (965), 2304 on 463 (463),
+2800 on 219 (4,807), 2368 on 212 (212), 2352 on 208 (208). A width
+that appears once an image is a form page of the IRS's. 2544 is the
+filer's on the one image looked at. With the seven widths of the test
+taken as the IRS's, 3,206 images would have an attachment and 25,684
+pages; with nine more (2224, 2272, 2304, 2320, 2336, 2384, 3040, 3056,
+3408), 2,105 images and 19,617 pages. Neither set is measured: the
+pages at each width have to be looked at, as they were for the five
+widths of today's renderer.
+
 ### The 2020-on work list, fetched and cut (2026-09-29)
 
 `run --policy v2 --tax-years 2020-2025 --keep-list --dry-run`, which

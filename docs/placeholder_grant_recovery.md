@@ -716,17 +716,29 @@ fetched, 330 in all, with no model called
 
 The IRS site holds the images it generated from December 2016 on and
 none before. Tax years 2009 to 2014, 3,752 filings and $3.9B, are out
-of reach through it. Tax years 2015 to 2019, 7,944 filings and $12.4B,
-are served as well as recent years or better, about 6,800 PDFs.
+of reach through it. All 7,944 filings of tax years 2015 to 2019 were
+then fetched, the same day:
 
-They cannot be read yet. The images generated before 2021 come from an
-older renderer with other page widths, so the cut takes every page for
-the filer's: on the 121 such images in the test, all 4,596 pages. Read
-whole, 2015 to 2019 would be about 189,000 pages and some $4,000, and
-the readers would be sent the IRS's own form pages. With the older
-widths measured, a guess from this test puts the same years at about
-32,000 pages, in the region of $700. The count of filings with an
-attachment waits on that measurement too.
+| tax year | on the work list | on their placeholder rows | PDF served | their placeholder rows | no image listed | 404 |
+|---|---|---|---|---|---|---|
+| 2015 | 1,290 | $1.77B | 855 (66%) | $1.56B | 433 | 0 |
+| 2016 | 1,409 | $2.00B | 1,380 (98%) | $1.97B | 29 | 0 |
+| 2017 | 1,436 | $2.23B | 1,294 (90%) | $2.07B | 141 | 0 |
+| 2018 | 1,531 | $2.33B | 1,470 (96%) | $2.20B | 60 | 1 |
+| 2019 | 2,278 | $4.11B | 1,473 (65%) | $2.05B | 796 | 8 |
+| all | 7,944 | $12.44B | 6,472 (81%) | $9.86B | 1,459 | 9 |
+
+Four more ended on a network error.
+
+Most cannot be read yet. Of the 6,472 images, 5,533 were generated
+before 2021, by an older renderer with other page widths, and the cut
+takes every page of them for the filer's: all 147,181 pages. Read as
+they are cut, the readers would be sent the IRS's own form pages, at
+some $4,000. With the older widths measured, two guesses at them put
+the filer's pages at 20,000 to 26,000, in 2,100 to 3,200 filings: in
+the region of $500 to $700. The other 939 images, 885 of them tax year
+2019, were generated in 2021 or later and cut as the frame's do: 596
+with an attachment, 3,631 attachment pages.
 
 **Fetched on September 29.** The 11,830 filings were fetched and cut,
 with no model called:
@@ -973,10 +985,11 @@ search; the frame loaded.
    name-only tier. One matcher rerun takes all of it; the matching
    input-shape version goes to 3. The regression gate and the
    corrections preflight are the checks.
-3. Done on September 29: the fetch test for tax years before 2020.
-   Tax years 2015 to 2019 are served, 2009 to 2014 are not. Next for
-   them: measure the page widths of the IRS renderer before 2021, so
-   the cut holds on those images; then project and read 2015 to 2019.
+3. Done on September 29: the fetch test for tax years before 2020,
+   and the fetch of all of 2015 to 2019 (6,472 PDFs of 7,944). Tax
+   years 2009 to 2014 are not served. Next: measure the page widths of
+   the IRS renderer before 2021, so the cut holds on the 5,533 older
+   images; then project and read 2015 to 2019.
 4. Read the 2020-on work list. Fetched on September 29: 5,795 filings
    with an attachment, 28,906 pages, projected at $757 by the cost gate
    (about $530 at the frame's cost per page by band), 11 to 12 hours of
