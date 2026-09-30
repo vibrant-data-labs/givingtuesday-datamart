@@ -197,7 +197,7 @@ python -m givingtuesday_datamart.placeholder_recovery check --policy v2
 | step | what it writes | measured, 2026-09-29 |
 |---|---|---|
 | `sources refresh` | `public.privategrants_future`, as published, with an index on `filerein` | 459,866 rows, 290 MB, 81 seconds; a default refresh takes it too |
-| `current_grants --only` | `public.privategrants_future_current` | 441,359 rows, 298 MB, about 90 seconds |
+| `current_grants --only` | `public.privategrants_future_current` | 441,358 rows, 298 MB, about 90 seconds |
 | `work-list` | `placeholder_future` and `placeholder_future_rows` on every filing of the list | 1,104 filings with an amount, $7.10B; 86 seconds |
 | `load` | rows with `target = 'future'` beside the paid ones | 71 filings, 3,873 rows on the frame |
 
@@ -208,9 +208,10 @@ and touches nothing else: `privategrants_current` is not rebuilt, so
 the view is not dropped. Its rules: the latest url of a filer-year; no
 rows of a filer-year whose paid rows are held under a later url; a
 doubled block halved when every row of it is paired and the filing's
-own row in `basic_fields_pf` is repeated under one sha, which is what
-GivingTuesday's doubled batches do to every extract at once (314
-filings). It reads `privategrants_current` for the url only. The
+own row in `basic_fields_pf` is repeated, which is what GivingTuesday's
+doubled batches do to every extract at once, and what an amended copy
+stamped with the original url does too (315 filings). It reads
+`privategrants_current` for the url only. The
 evidence is in the findings doc, *Future-payment lists*, and in the
 module's docstring.
 
@@ -297,7 +298,7 @@ without a new measurement.
 | exclusions | six patient-assistance programs, by EIN; filings marked as grants to individuals are read and labelled |
 | what loads | lists within 0.5% of the declared total; rows from pages that were read only; rows from pages labelled expenditure responsibility only where a list needs them, labelled |
 | targets | the work list's paid amount and, since 2026-09-29, its future amount, from GivingTuesday's future-payment datamart (`990PFPart14Grants3B`); each list is searched for on its own; future lists load marked `future`, outside the view |
-| doubled blocks in the future-payment file | halved when every row is paired and the filing's `basic_fields_pf` row is repeated under one sha; nothing else is halved. The paid rule still tests against line 25; whether it should use the repeated row too is measured separately |
+| doubled blocks in the future-payment file | halved when every row is paired and the filing's `basic_fields_pf` row is repeated; nothing else is halved. The paid rule still tests against line 25; Zein chose on 2026-09-30 to add the repeated row beside it (PR #57 measured it), a change still to be made and gated |
 | a placeholder amount over both columns of line 25 | the filing is read and its list loads, every row labelled `placeholder_exceeds_declared`; a consumer filters on it |
 | the view | drops a filing's placeholder row once its list is loaded; shows one policy |
 

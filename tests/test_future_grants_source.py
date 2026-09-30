@@ -69,7 +69,7 @@ def test_a_block_is_halved_only_when_all_even_and_the_filings_basic_fields_row_i
     ddl = cg._PF_FUTURE_CURRENT_DDL
     doubled = ddl[ddl.index("CREATE TEMP TABLE _pf_doubled"):ddl.index("CREATE INDEX ON _pf_doubled")]
     assert "FROM public.basic_fields_pf" in doubled and "GROUP BY url" in doubled
-    assert "HAVING COUNT(*) > 1 AND COUNT(DISTINCT filesha256) = 1" in doubled         # one sha: not an amendment
+    assert "HAVING COUNT(*) > 1;" in doubled                # one sha (a batch's double) or two (an amended copy)
     assert "LEFT JOIN _pf_doubled d ON d.url = g.url" in ddl and "(d.url IS NOT NULL) AS _doubled" in ddl
     assert ddl.rstrip().endswith("DROP TABLE _pf_doubled;")
     assert "BOOL_AND(c._n_copies % 2 = 0) OVER fy" in ddl and "BOOL_OR(c._doubled) OVER fy" in ddl

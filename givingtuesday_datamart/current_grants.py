@@ -65,23 +65,27 @@ raw staging:
        ``basic_fields_pf`` holds a total approved for future payment. The
        evidence is the filing's own row in ``basic_fields_pf`` instead: a
        doubled filing is doubled in every extract of the batch, so its
-       basic-fields row is there twice under one url and one sha (15,845
-       urls, every one processed in 2025 or 2026; measured 2026-09-30).
-       Of the 316, 315 have that repeated row and the one that does not
-       has unpaired paid rows, a genuine repeat; no filing with a repeated
-       row has unpaired future rows. Collapse where BOTH hold: (a) every
-       tuple's multiplicity in the filing's future rows is even, and (b)
-       ``basic_fields_pf`` holds the filing's url more than once under a
-       single ``filesha256``. Half of each tuple's copies are kept, as for
-       the paid rows: 315 filings. What this cannot catch: a doubled
-       filing whose basic-fields row was not doubled with it, of which
-       none is known. A filer that really lists every pledge twice is
-       halved only if its basic-fields row is repeated too, of which none
-       is known either. The rule first built here, on 2026-09-29, borrowed
-       the paid rule's verdict on the same filing (``pair_collapse`` in
-       ``privategrants_current``) and reached 299 of the 316; the 17 it
-       could not judge, up to $7.4M counted twice, the repeated row
-       reaches, and the two of them checked against their XML are doubled.
+       basic-fields row is there twice under one url (15,845 urls under
+       one sha, every one processed in 2025 or 2026; measured 2026-09-30),
+       and an amended copy stamped with the original url doubles the
+       rows the same way, with a second sha under the url (one such
+       filing here, PR #57 checked the shape on the paid side). Of the
+       316, 315 have the repeated row under one sha and one under two;
+       the one that has neither has unpaired paid rows, a genuine repeat;
+       no filing with a repeated row has unpaired future rows. Collapse
+       where BOTH hold: (a) every tuple's multiplicity in the filing's
+       future rows is even, and (b) ``basic_fields_pf`` holds the filing's
+       url more than once. Half of each tuple's copies are kept, as for
+       the paid rows: 315 filings under the url kept. What this cannot
+       catch: a doubled filing whose basic-fields row was not doubled with
+       it, of which none is known. A filer that really lists every pledge
+       twice is halved only if its basic-fields row is repeated too, of
+       which none is known either. The rule first built here, on
+       2026-09-29, borrowed the paid rule's verdict on the same filing
+       (``pair_collapse`` in ``privategrants_current``) and reached 299 of
+       the 316; the 17 it could not judge, up to $7.4M counted twice, the
+       repeated row reaches, and the two of them checked against their
+       XML are doubled.
 
 * ``public.basic_fields_current`` (990 filer financials, issue #34)
 * ``public.basic_fields_pf_current`` (990-PF filer financials)
@@ -439,12 +443,13 @@ WHERE NOT _collapse OR _copy_rank <= _n_copies / 2;
 # basic_fields_pf once per row of the future table.
 _PF_FUTURE_CURRENT_DDL = f"""
 CREATE TEMP TABLE _pf_doubled AS
-    -- a filing GT's batch emitted twice: its basic-fields row is there
-    -- twice under one url and one sha
+    -- a filing whose rows are in every extract twice: one GT's batch
+    -- emitted twice (its basic-fields row twice under one url and one
+    -- sha), or an amended copy stamped with the original url (two shas)
     SELECT url
     FROM public.basic_fields_pf
     GROUP BY url
-    HAVING COUNT(*) > 1 AND COUNT(DISTINCT filesha256) = 1;
+    HAVING COUNT(*) > 1;
 CREATE INDEX ON _pf_doubled (url);
 ANALYZE _pf_doubled;
 DROP TABLE IF EXISTS public.privategrants_future_current CASCADE;

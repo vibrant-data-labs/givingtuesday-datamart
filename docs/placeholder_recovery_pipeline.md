@@ -154,7 +154,7 @@ As built, 2026-09-29 (session 6): the future amount.
 
 - **A second relation.** `privategrants_future_current`, from
   GivingTuesday's `990PFPart14Grants3B` (source
-  `irs_990pf_grants_future`, 459,866 rows as published, 441,359 kept).
+  `irs_990pf_grants_future`, 459,866 rows as published, 441,358 kept).
   The work list reads a filing's placeholder rows there with the same
   pattern, on that table's two name columns, and takes them only under
   the url the paid rows have.
@@ -490,9 +490,10 @@ when the paid rule had halved the same filing's paid block, 299
 filings, and left 17 whole that the paid rule could not judge, up to
 $7.4M counted twice. On 2026-09-30 the evidence changed to the filing's
 own row in `basic_fields_pf`, which a doubled batch repeats under one
-url and one sha: 315 of the 316 have it, the 316th is a genuine repeat,
-and no filing with the repeated row has unpaired rows. 314 filings are
-halved under the url kept. The paid rule does not use the repeated row;
+url and one sha, and which an amended copy stamped with the original
+url repeats under two: 315 of the 316 have it, the 316th is a genuine
+repeat, and no filing with the repeated row has unpaired rows. 315
+filings are halved under the url kept. The paid rule does not use the repeated row;
 it agrees with it on 10,154 of the 10,259 filings it halves. Measured
 the same day in PR #57, since it moves matcher inputs: the row would
 add 113 filings and $24.4M on the paid side, plus 2,383 nameless $0
@@ -2115,11 +2116,12 @@ Still open:
 
 - Whether a list that adds up only to the paid and the future amount
   together loads. Four filings on the frame; the case is in stage 5.
-- Whether the paid rule should halve on the repeated `basic_fields_pf`
-  row beside its line-25 test, as the future rule now does on the row
-  alone: PR #57 measured 113 filings and $24.4M left doubled, and a
-  third defect, forward-filled copies of one grant, that wants a rule of
-  its own.
+- The paid rule halving on the repeated `basic_fields_pf` row beside
+  its line-25 test, as the future rule now does on the row alone:
+  decided on 2026-09-30 (Zein, on PR #57's measurement: 113 filings and
+  $24.4M left doubled), still to be made and gated. The third defect
+  PR #57 found, forward-filled copies of one grant, wants a rule of its
+  own; it is rare in the future-payment file.
 - Whether the view, `privategrants_current_w_recovered`, stays an object of
   its own or becomes what the matcher's first view reads, with no name
   of its own.
