@@ -227,6 +227,23 @@ B is the recommendation. What it does not do, and what should follow it:
    but it is a matcher-input change and goes through the regression gate
    like any other.
 
+### The future-payment table
+
+`privategrants_future_current` (PR #55) faced the same doubling with no
+line 25 to test against, and since September 30 halves a future block
+when every row is paired AND the filing's basic row is repeated: the
+A-shaped rule, on its own. Under B the paid and future rules agree on
+every batch double (12,650 filer-years here, 314 there) and differ only
+where the paid rule's line-25 test fires without a repeated basic row,
+the 10 amended copies and the 95 forward fills, which have no known
+future-side counterpart. The future rule no longer borrows the paid
+verdict, so B does not cascade into it and the two rebuild independently.
+Two things for that side to look at: the 12 pre-2025 filings whose future
+rows are all paired (PR #55's own count) are the place an amended copy or
+a forward fill of `GrantOrContriApprvForFutGrp` would sit, and the
+forward-fill signature (one tuple, N copies) can be checked there without
+a declared total by counting the XML's empty future groups.
+
 ## 6. Files
 
 - `givingtuesday_datamart/exploratory/pf_doubling_basic_rows.py` and
