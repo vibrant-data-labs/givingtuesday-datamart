@@ -43,9 +43,10 @@ address with the state and zip taken off their end (``address``); the view
 hands those to the matcher.
 
 **Reloading.** A load makes the table hold, for each filing in its scope,
-the rows the rule gives today, of both targets: a filing whose stored rows are those rows is
-left alone, with its ``loaded_at``; any other has its rows under the policy
-deleted and written in one transaction. So a second load writes nothing.
+the rows the rule gives today, of both targets: a filing whose stored rows
+are those rows is left alone, with its ``loaded_at``; any other has its
+rows under the policy deleted and written in one transaction. So a second
+load writes nothing.
 
 **Tests.** The store is the small interface the other tables use, and the
 work list, filings, readings and verdicts are injectable, so nothing here
@@ -633,10 +634,10 @@ def _millions(amount: Decimal) -> str:
 
 
 def _lists(target: str, found: Lists) -> list[str]:
-    return [f"  loaded: the {target} list adds up{found.loaded:>{37 - len(target)},}",
-            f"    rows                            {found.rows:>10,}",
-            f"    dollars, the rows' amounts      {_millions(found.dollars):>10}",
-            f"    dollars, the declared amounts   {_millions(found.declared):>10}"]
+    lines = ((f"loaded: the {target} list adds up", f"{found.loaded:,}"), ("  rows", f"{found.rows:,}"),
+             ("  dollars, the rows' amounts", _millions(found.dollars)),
+             ("  dollars, the declared amounts", _millions(found.declared)))
+    return [f"  {label:<34}{value:>10}" for label, value in lines]
 
 
 def summary(result: LoadResult) -> str:

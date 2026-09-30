@@ -54,7 +54,7 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="find and count; write nothing")
 
     for command, text in (("view", f"create {view.VIEW}, or replace it, for a policy's rows"),
-                          ("check", "lineage, the work list, the sums and the double count, on the loaded rows")):
+                          ("check", "lineage, the work list, the sums, the double count and the future rows, on the loaded rows")):
         p = sub.add_parser(command, help=text)
         p.add_argument("--policy", default="v2", help=policy_help)
         p.add_argument("--flagged", choices=FLAGGED_RULES, default=None)

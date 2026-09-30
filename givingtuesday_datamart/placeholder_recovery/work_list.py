@@ -96,7 +96,7 @@ DDL = (
     # For a table made before 2026-09-29, when the two columns were added.
     f"ALTER TABLE {TABLE} ADD COLUMN IF NOT EXISTS declared_books numeric(18,2)",
     f"ALTER TABLE {TABLE} ADD COLUMN IF NOT EXISTS placeholder_exceeds_declared boolean NOT NULL DEFAULT false",
-    # For a table made before 2026-09-30, when the future amount was added.
+    # For a table made before the future amount was added, later on 2026-09-29.
     f"ALTER TABLE {TABLE} ADD COLUMN IF NOT EXISTS placeholder_future numeric(18,2) NOT NULL DEFAULT 0",
     f"ALTER TABLE {TABLE} ADD COLUMN IF NOT EXISTS placeholder_future_rows integer NOT NULL DEFAULT 0",
 )
