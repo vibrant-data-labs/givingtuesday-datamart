@@ -193,7 +193,10 @@ form pages; 2259, 2440, 3062 and 3081 px supporting statements), cropped
 to content; attachments are full 2550×3300 pages or whatever the scanner
 produced. `pdfimages -list` reads the boundary without rendering
 (`irs_source.attachment_start`), and only the pages after it are rendered
-for the model. On the sample that is 1,782 of 4,746 pages (38%): half the
+for the model. Those five widths are the renderer's in use since June
+2021; the images generated before it come from five older renderers
+with widths of their own, measured on 2026-09-29 (the entry below), and
+the first page's width says which set applies. On the sample that is 1,782 of 4,746 pages (38%): half the
 pages in bands A and B, 7% in C, 1% in D. Twenty-six of the 85 staged
 filings have no attachment page at all and are *absent* by construction —
 no model call, no false positive from the form's own money tables.
@@ -1214,6 +1217,163 @@ Bands C and D send more of their pages to Sonnet than band B does and
 still cost less a page, because their pages are short. The two bands'
 figures rest on 699 and 518 pages, so $530 is the low estimate and $757
 the gate's.
+
+### The older renderers' widths, measured (2026-09-29)
+
+The cut takes a page for the IRS's when its width is one the renderer
+produces, and the five widths known until now were measured on images
+generated in 2021 or later. The 5,533 images of tax years 2015 to 2019
+generated before 2021 have none of them, so every page was the
+filer's. This measured what those renderers produced, with no request
+to the IRS and no model called: the PDFs from S3, the words at the top
+of each page read with tesseract (`exploratory/renderer_widths.py`;
+`data/placeholder_recovery/renderer_widths.csv` and
+`renderer_widths_sample.csv`).
+
+**The renderers.** The first page of an image is always the IRS's form
+page 1, and its width names the renderer. Six have been used, and the
+older ones at multiples of 16 px:
+
+| first page | images generated | tax years | images | with an attachment after the measurement | attachment pages |
+|---|---|---|---|---|---|
+| 2800 | 2016-12 to 2017-01 | 2014, 2015 | 221 | 102 | 1,162 |
+| 2224 | 2017-02 to 2017-04 | 2015 | 32 | 14 | 354 |
+| 2256 | 2017-02 to 2017-10 | 2015 | 522 | 375 | 5,337 |
+| 2432 | 2017-09 to 2018-09 | 2015 | 81 | 42 | 683 |
+| 2240 | 2017-08 to 2021-01 | 2016 to 2019 | 4,691 | 1,571 | 11,947 |
+| 2246 | 2021-06 on | 2018 on | 11,514 | unchanged | unchanged |
+
+Seventeen images of tax years 2018 and 2019 generated on 2021-01-11
+and 12 are the 2240 renderer's, so the date does not separate the
+renderers and the first page's width does. Eighteen more images have a
+first page of 2560, 2576 or 2592 px and every page the same: paper
+returns scanned whole, stamped "RECEIVED", the form pages included.
+They stay cut at page 1, 422 pages.
+
+**The sample.** For every width seen on any page of those images, 40
+images carrying it (150 for 2544, the width most in doubt, on 1,846
+images), drawn with a fixed seed, plus every image of the two smallest
+renderers: 968 images, 30,737 pages, 951 of them of the five older
+renderers (563 of 2240, 186 of 2256, 89 of 2800, 81 of 2432, 32 of
+2224). The page images were extracted with `pdfimages`, nothing
+rendered, and the top 220 px of each read with tesseract. A page
+carries the IRS's mark when that strip has the e-file banner, a form
+page's or Schedule B's header ("Form 990-PF (2016) Page 4"), a
+statement's "TY 2016" title or an additional-data title.
+
+**The widths.** With the mark, every width sorts by renderer:
+
+| renderer | the IRS's widths (sample images, pages) | what they are |
+|---|---|---|
+| 2240 | 2240 (563, 10,936); 2432 (462, 1,327); 2256 (563, 563); 3072 (298, 354); 2272 (272, 272); 2320 (175, 175); 2304 (91, 91); 3056 (51, 53) | form pages; supporting statements; form page 10; landscape statements; Schedule B page 4; Schedule B page 3, two forms; landscape statements |
+| 2256 | 2256 (186, 4,026); 3072 (101, 113); 2368 (107, 107); 2352 (106, 106); 2384 (44, 44) | form pages; landscape statements; Schedule B page 4; Schedule B page 3; form page 13 |
+| 2800 | 2800 (89, 2,060); 3408 (63, 70); 3392 (5, 5) | form pages; landscape statements; landscape continuation tables |
+| 2432 | 2432 (81, 1,785); 3072 (43, 55) | form pages; landscape statements |
+| 2224 | 2224 (32, 674); 3040 (15, 18); 2336 (9, 10); 2320 (7, 7) | form pages; landscape statements; Schedule B page 4 and form page 13; Schedule B page 3 |
+
+Every other width is the filer's: 2544 above all (the filer's letter
+page, 2550 px, comes out at 2544 on these images: 1,850 sample pages
+under 2240 and 4,668 in all, 24 of them looked at, every one a filer's
+list or statement), 2550, 2528, 2496, 2480, 2464 and 2512 (scanner
+widths), 3296 and 3280 (a letter page on its side). Of the 7,513 sample
+pages from a cut on, 104 carry the mark, in 13 images: ten are filers'
+own lists headed "Form 990-PF Part XV Line 3", three are the IRS's,
+below. Of the 22,818 pages before a cut, 312 carry no mark; rendered
+at 40 DPI and looked at, every one is an IRS continuation table
+(investments, depreciation, Schedule B, the loan schedules) with no
+header of its own. The page at the cut is letter-shaped on 617 of the
+640 sample images with a cut; the other 23 were looked at, 20 the
+filer's and 3 the IRS's.
+
+**Where the cut is early.** Three sample images, and one more in the
+population, cut on an IRS page whose width is its content's: a "General
+Explanation Attachment" of long text at 2256 under 2224
+(`201623089349100002`), a "Distribution from Corpus Election" at 2288
+under 2240 (`202142219339302639`), an expenditure-responsibility
+statement stored on its side at 2100 under 2800 (`201642929349100654`),
+and a "Beginning of Restricted Zone" separator page at 2544 before Form
+4562 (`201941039349100104`). They read 40 IRS pages in excess and lose
+nothing; they are not in the sets, since a width that one image
+produces is not a renderer's. In the population, 4 of the 2,104 older
+images with a cut have a page at their form's width after it; on the
+2246 renderer it is 650 of 6,915.
+
+**One set or one a renderer.** One union of all six sets changes the
+cut on two 2020-on filings not yet read (`202240679349100709`, whose
+last page is the filer's list at 3072; `202232779349100608`, two pages
+of a Foundation Source grant list at 3056): under 2246 those widths are
+the filer's, under 2240 the IRS's. And 3392 is the IRS's under 2800 and
+a filer's list on its side under 2256 (`201700449349100405`). So
+`irs_source.RENDERED_WIDTHS` holds one set per first-page width, and
+`attachment_start` reads the first page. A date would not do: the 17
+January 2021 images above, and the 516 rows of the first frame carry no
+date. On the 11,514 images whose first page is 2246 the cut is the
+same before and after, and on the 553 filings with readings.
+
+**The re-cut.** `filing_images recut` applies the rule to the stored
+`page_widths` of every fetched row and writes the rows it cuts
+differently, no PDF opened (a dry run first, then the write,
+2026-09-30T00:40Z): 5,547 rows, all of the five older renderers, 147,547
+pages that were all the filer's and are now 19,483 in 2,104 images;
+3,443 images have no attachment at all and their status is
+`no_attachment`. No row of the 2246 renderer and no read filing
+changed; a second pass changes nothing.
+
+**Fewer attachments from 2018.** Of the 2240 renderer's images
+generated in 2017, 62% have an attachment (497 of 800); of those
+generated in 2018, 2019 and 2020, 22%, 25% and 35% (1,066 of 3,874);
+the 2246 renderer's, 60%. The last page of 48 more images generated
+2018 on and cut as having no attachment was looked at: every one is
+the IRS's (a taxes schedule, Schedule B page 4). So the images end on
+the IRS's rendering, and the filer's PDF is not in them. The 983 filers
+who attach a PDF on every one of their 2021-on images have one on 73%
+of their images generated in 2017 and on 33% to 56% of those generated
+in 2018 to 2020. Whether the IRS's images of those years leave the
+attachment out, or filers of those years sent their lists another way,
+is not known and cannot be told from what is stored. The public XML's
+`binaryAttachmentCnt` is 0 even on Kravis 2014, whose image has three
+pages of the filer's, so it says nothing (a dead end, checked on three
+filings from GivingTuesday's mirror).
+
+**The projection, tax years 2015 to 2019** (`run --policy v2
+--tax-years 2015-2019 --keep-list --dry-run --no-fetch`,
+2026-09-30T00:45Z; no fetch, nothing bought): 7,944 filings on the
+list, 6,472 served, 2,686 with attachment pages, 22,827 pages, 29%
+projected flagged:
+
+| reader | expects | stored | to buy | $ a page | $ |
+|---|---|---|---|---|---|
+| Qwen3-VL | 22,827 | 0 | 22,827 | 0.0025 | 57.07 |
+| Gemini 3.5 Flash Lite | 22,827 | 0 | 22,827 | 0.0062 | 141.53 |
+| Gemini 3.8 Flash | 13,810 | 0 | 13,810 | 0.0091 | 125.67 |
+| Claude Sonnet 5 | 7,969 | 0 | 7,969 | 0.0343 | 273.32 |
+| total | | | | | 597.59 |
+
+Under the cap of $800. At the frame's cost per page by band (A 4.1
+cents on 293 pages, B 2.7 on 3,534, C 1.9 on 8,047, D 1.6 on 10,953)
+about $435; about nine hours of reading at the 2020-on rate. By
+renderer and by tax year:
+
+| images of tax years 2015 to 2019 | filings | PDF served | with an attachment | attachment pages | $ on their placeholder rows, with an attachment |
+|---|---|---|---|---|---|
+| the five older renderers | 5,544 | 5,544 | 2,101 (38%) | 19,461 | $4.57B of $8.41B |
+| the 2246 renderer | 910 | 910 | 567 (62%) | 2,944 | $1.13B of $1.42B |
+| scanned whole | 18 | 18 | 18 | 422 | $0.02B |
+| no image served | 1,472 | 0 | 0 | 0 | of $2.58B |
+| all | 7,944 | 6,472 | 2,686 | 22,827 | $5.73B of $12.44B |
+
+| tax year | on the list | served | with an attachment | pages | $ with an attachment |
+|---|---|---|---|---|---|
+| 2015 | 1,290 | 855 | 532 | 7,554 | $1.21B |
+| 2016 | 1,409 | 1,380 | 624 | 5,269 | $1.11B |
+| 2017 | 1,436 | 1,294 | 314 | 2,574 | $0.87B |
+| 2018 | 1,531 | 1,470 | 462 | 3,181 | $1.06B |
+| 2019 | 2,278 | 1,473 | 754 | 4,249 | $1.47B |
+
+The largest attachments are Johnson & Johnson Family 2015 and 2017
+(650 and 521 pages), Watson W Wise 2015 (380), State Street 2019 and
+2018 (272 and 256). Band B holds 3,534 of the pages and $2.43B of the
+$5.73B; band D 10,953 pages and $0.50B.
 
 ## Ground truth
 

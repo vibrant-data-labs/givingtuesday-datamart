@@ -37,7 +37,9 @@ tables at 2440–3081 px), cropped to content; a filer's attachment is a full
 letter page (2550 px) or whatever their scanner produced. ``pdfimages -list``
 reads the widths without rendering anything, so the boundary is free, and
 only the attachment pages need transcribing. A filing whose image is all
-IRS-rendered pages has no attachment at all.
+IRS-rendered pages has no attachment at all. The widths are the
+renderer's, and the IRS has used six: page 1 is always the IRS's form
+page 1, and its width says which (``RENDERED_WIDTHS``).
 """
 
 from __future__ import annotations
@@ -68,10 +70,33 @@ _PDF_TOKEN = re.compile(r"_(\d{8})(\d+)\.pdf$")
 _UA = {"User-Agent": "vdl-givingtuesday-datamart/irs_source"}
 
 # Image widths, in pixels at 300 DPI, of the pages the IRS renders from the
-# XML. Measured on 85 filings: 2246 (form pages), 2259 (Part VIII), 2440,
-# 3062 and 3081 (supporting statements, landscape). Anything else is the
-# filer's.
-IRS_RENDERED_WIDTHS = frozenset({2246, 2259, 2440, 3062, 3081})
+# XML, by renderer. Page 1 of an image is the IRS's form page 1 and its
+# width names the renderer; a page at a width not in that renderer's set is
+# the filer's.
+#
+# 2246 renders the images generated from June 2021 on. Measured on 85
+# filings: 2246 (form pages), 2259 (Part VIII), 2440, 3062 and 3081
+# (supporting statements, landscape).
+#
+# The other five rendered the images generated from December 2016 to
+# January 2021, tax years 2014 to 2019, at multiples of 16. Measured on
+# 2026-09-29 on 951 images, 30,331 pages
+# (data/placeholder_recovery/renderer_widths.csv): form pages at the first
+# page's width, and 2256 for form page 10 under 2240; supporting statements
+# at 2432, and landscape at 3040, 3056, 3072, 3392 and 3408; Schedule B
+# pages 3 and 4 at 2272, 2304, 2320, 2336, 2352 and 2368; form page 13 at
+# 2336 and 2384. The filer's letter page, 2550 px, is 2544 on these images.
+#
+# One set for all six would be wrong: 3056 and 3072 are a supporting
+# statement under 2240 and a filer's list under 2246.
+RENDERED_WIDTHS: dict[int, frozenset[int]] = {
+    2246: frozenset({2246, 2259, 2440, 3062, 3081}),
+    2240: frozenset({2240, 2256, 2272, 2304, 2320, 2432, 3056, 3072}),
+    2256: frozenset({2256, 2352, 2368, 2384, 3072}),
+    2800: frozenset({2800, 3392, 3408}),
+    2432: frozenset({2432, 3072}),
+    2224: frozenset({2224, 2320, 2336, 3040}),
+}
 
 
 class IndexRow(NamedTuple):
@@ -215,9 +240,12 @@ def page_widths(pdf: Path) -> list[int]:
 
 def attachment_start(widths: Sequence[int]) -> int | None:
     """First page (1-based) of the filer's attachments, or None when the
-    image is the IRS rendering and nothing else."""
+    image is the IRS rendering and nothing else. An image whose first page
+    is no renderer's is a paper return scanned whole: every page is the
+    filer's."""
+    rendered = RENDERED_WIDTHS.get(widths[0], frozenset()) if widths else frozenset()
     for page, width in enumerate(widths, 1):
-        if width not in IRS_RENDERED_WIDTHS:
+        if width not in rendered:
             return page
     return None
 
