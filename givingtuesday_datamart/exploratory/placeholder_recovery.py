@@ -102,6 +102,7 @@ from givingtuesday_datamart.page_verdicts import (
     FLAGGED_RULES, POLICIES, POLICY_V1, VERDICTS, WORKERS, AgreeResult, accepted_readings, agree,
     load_policy, reader_settings, summary, with_flagged)
 from givingtuesday_datamart.placeholder_recovery.exclusions import load_exclusions
+from givingtuesday_datamart.placeholder_recovery.loader import selector_input
 
 COMBINED_CSV = Path.home() / "Downloads" / "combined-grants-datamarts-gt_team_priority-20260915.csv"
 # Where ``sample`` writes the 100-filing sample. The frame
@@ -1144,13 +1145,11 @@ def report(
         elif results is not None:
             outcome = "missing_result"
         else:
-            readings: dict[int, dict] = {}
             for page in frame[oid]:
                 verdict, response = accepted.get((oid, page), (None, None))
                 mix[verdict.verdict if verdict else "no_verdict"] += 1
                 if response is None:
                     continue
-                readings[page] = response
                 if verdict.verdict == "flagged":
                     flagged_pages.add(page)
                 pages_seen[vlm_transcription.total_check(response)] += 1
@@ -1158,6 +1157,10 @@ def report(
             if mix["no_verdict"] == len(frame[oid]):
                 outcome = "missing_result"                   # agree has not run on this filing
             else:
+                # The selector's input as the loader builds it: the accepted
+                # readings, and an empty ``other`` page for a not_a_list verdict.
+                readings = selector_input({page: accepted[(oid, page)] for page in frame[oid]
+                                           if (oid, page) in accepted})
                 tables = page_tables(readings, targets)
         if tables is not None:
             result = extract_tables(tables, paid, future)
