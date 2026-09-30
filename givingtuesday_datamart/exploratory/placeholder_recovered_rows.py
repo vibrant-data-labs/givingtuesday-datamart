@@ -24,6 +24,7 @@ matcher's universe, at four levels of cleaning, and counts a match only
 when the name belongs to one organization (or the row's state picks one
 among several). Where a row has a state, the matched organization's state
 is the check on the name-only match a row without an address would get.
+The level chosen is the matcher's ``clean_name`` since input shape 3.
 """
 
 from __future__ import annotations
@@ -32,12 +33,12 @@ import argparse
 import collections
 import csv
 import logging
-import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
 
+from givingtuesday_datamart.grant_matching import clean_name, normalize_org_name
 from givingtuesday_datamart.page_readings import frame_pages
 from givingtuesday_datamart.page_verdicts import accepted_readings, load_policy
 from givingtuesday_datamart.placeholder_recovery.address import split_name, state_zip
@@ -52,7 +53,6 @@ UNIVERSE_VIEWS = ("basic_fields_unique_names_view", "basic_fields_pf_unique_name
                   "corrections_unique_names_view")
 
 # --- name cleaning -----------------------------------------------------------
-LEGAL = r"(?:inc|incorporated|corp|corporation|co|company|ltd|llc|nfp|pc|plc|lp|llp)"
 ABBREVIATIONS = {
     "univ": "university", "assn": "association", "assoc": "association", "fdn": "foundation",
     "fndn": "foundation", "fnd": "foundation", "ctr": "center", "cntr": "center", "centre": "center",
@@ -65,21 +65,7 @@ ABBREVIATIONS = {
 STOPWORDS = frozenset({"the", "of", "for", "and", "a", "an", "at", "in", "on", "to"})
 
 
-def clean_name(name: str) -> str:
-    """The one level of cleaning that pays: lower case, apostrophes out,
-    "&" to "and", every other mark to a space, a leading or trailing "the"
-    dropped, and the legal endings (Inc, Corp, LLC) dropped. Measured on the
-    frame it lifts exact unique matches by eleven points over the matcher's
-    ``normalize_org_name``; abbreviations and stopwords add a fraction of a
-    point and more collisions."""
-    text = re.sub(r"['’`]", "", (name or "").lower()).replace("&", " and ")
-    text = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]+", " ", text)).strip()
-    text = re.sub(r" the$", "", re.sub(r"^the ", "", text))
-    return re.sub(r"(?: " + LEGAL + r")+$", "", text).strip()
-
-
-def _today(name: str) -> str:
-    from givingtuesday_datamart.grant_matching import normalize_org_name
+def _before(name: str) -> str:
     return normalize_org_name(" ".join((name or "").lower().split()))
 
 
@@ -93,7 +79,7 @@ def _no_stopwords(name: str) -> str:
 
 CHOSEN = "cleaned"
 LEVELS: tuple[tuple[str, Callable[[str], str]], ...] = (
-    ("the matcher's normaliser today", _today), (CHOSEN, clean_name),
+    ("the matcher's normaliser before input shape 3", _before), (CHOSEN, clean_name),
     ("cleaned, abbreviations expanded", _abbreviated), ("cleaned, abbreviations, stopwords out", _no_stopwords))
 
 
