@@ -237,45 +237,49 @@ def run_preflight(relations: Relations = Relations()) -> int:
     uniq_grant_names = pd.Series(grants["compare_name"].unique())
     logger.info(f"unique grant names: {len(uniq_grant_names):,}")
     report_rows = []
-    with get_session(config=config) as session:
-        conn = session.connection()
-        for ein, fam in keyed.groupby("filerein_key", sort=True):
-            fam_names = set(fam["full_name"])
-            fam_zips = set(fam["clean_zip"])
-            family_names: set[str] = set()
-            for cname in sorted(set(fam["compare_name"])):
-                sims = uniq_grant_names.map(
-                    lambda n: jellyfish.jaro_winkler_similarity(cname, n)
-                )
-                family_names.update(uniq_grant_names[sims >= FAMILY_NAME_JW_MIN])
-            g_slice = grants[
-                grants["compare_name"].isin(family_names) | grants["full_name"].isin(fam_names)
-            ]
-            u_slice = universe[
-                universe["clean_zip"].isin(set(g_slice["clean_zip"]) | fam_zips)
-                | universe["full_name"].isin(set(g_slice["full_name"]) | fam_names)
-            ]
-            logger.info(
-                f"family {ein}: {len(fam)} correction rows, "
-                f"{len(g_slice):,} name-family grant tuples, "
-                f"{len(u_slice):,} universe rows in slice"
+    # The scoring of one family can take the better part of an hour, and a
+    # connection left idle that long can be gone by the time the family's
+    # rows are counted; so the connection is opened after the scoring and
+    # closed with the family.
+    for ein, fam in keyed.groupby("filerein_key", sort=True):
+        fam_names = set(fam["full_name"])
+        fam_zips = set(fam["clean_zip"])
+        family_names: set[str] = set()
+        for cname in sorted(set(fam["compare_name"])):
+            sims = uniq_grant_names.map(
+                lambda n: jellyfish.jaro_winkler_similarity(cname, n)
             )
-            winners = match_slice(u_slice, g_slice)
-            wu = winners.merge(
-                universe[_KEY8 + ["source"]].add_suffix("_univ"),
-                left_on="basic_fields_df_index",
-                right_index=True,
-            ).merge(
-                grants[_KEY7 + ["clean_zip"]],
-                left_on="private_foundations_df_index",
-                right_index=True,
-            )
-            n_corr_won = int((wu["source_univ"] == "correction").sum())
-            logger.info(
-                f"family {ein}: {len(wu):,} family tuples matched; "
-                f"corrections won {n_corr_won}"
-            )
+            family_names.update(uniq_grant_names[sims >= FAMILY_NAME_JW_MIN])
+        g_slice = grants[
+            grants["compare_name"].isin(family_names) | grants["full_name"].isin(fam_names)
+        ]
+        u_slice = universe[
+            universe["clean_zip"].isin(set(g_slice["clean_zip"]) | fam_zips)
+            | universe["full_name"].isin(set(g_slice["full_name"]) | fam_names)
+        ]
+        logger.info(
+            f"family {ein}: {len(fam)} correction rows, "
+            f"{len(g_slice):,} name-family grant tuples, "
+            f"{len(u_slice):,} universe rows in slice"
+        )
+        winners = match_slice(u_slice, g_slice)
+        wu = winners.merge(
+            universe[_KEY8 + ["source"]].add_suffix("_univ"),
+            left_on="basic_fields_df_index",
+            right_index=True,
+        ).merge(
+            grants[_KEY7 + ["clean_zip"]],
+            left_on="private_foundations_df_index",
+            right_index=True,
+        )
+        n_corr_won = int((wu["source_univ"] == "correction").sum())
+        logger.info(
+            f"family {ein}: {len(wu):,} family tuples matched; "
+            f"corrections won {n_corr_won}"
+        )
 
+        with get_session(config=config) as session:
+            conn = session.connection()
             for line in fam.itertuples():
                 label = line.label
 
