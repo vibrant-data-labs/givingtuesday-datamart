@@ -22,17 +22,18 @@ AT = datetime(2026, 9, 28, 12, 0, tzinfo=timezone.utc)
 NEVER = "202400000000000001"
 
 
-def _filing(object_id, year, paid, individual=False):
+def _filing(object_id, year, paid, individual=False, future="0"):
     paid = Decimal(paid)
     return wl.PlaceholderFiling(
         object_id=object_id, filerein="731312965", filer_name="A Foundation", taxyear=year,
         taxperend=date(year, 12, 31), declared_paid=paid, declared_books=paid, placeholder_paid=paid,
-        placeholder_rows=2, placeholder_texts=["SEE STATEMENT 12", "SEE STATEMENT 13"], band=wl.band(paid),
+        placeholder_rows=2, placeholder_texts=["SEE STATEMENT 12", "SEE STATEMENT 13"],
+        placeholder_future=Decimal(future), placeholder_future_rows=int(Decimal(future) > 0), band=wl.band(paid),
         filer_marked_individual=individual, placeholder_exceeds_declared=False, classifier_version="v2",
         source_version="2026_06_16", built_at=AT)
 
 
-LIST = [_filing(OID, 2022, "382271662"), _filing(NEVER, 2021, "20000000"),
+LIST = [_filing(OID, 2022, "382271662"), _filing(NEVER, 2021, "20000000", future="7500000"),
         _filing("202400000000000002", 2021, "15000000", True), _filing("201900000000000003", 2018, "500")]
 
 
@@ -54,7 +55,8 @@ def test_the_chosen_filings_are_written_in_the_frames_columns(tmp_path):
     assert rows[1] == {
         "stratum": "B", "filerein": "731312965", "filer_name": "A Foundation", "taxyear": 2021,
         "taxperend": "2021-12-31", "object_id": NEVER, "placeholder_paid": Decimal("20000000"),
-        "placeholder_rows": 2, "placeholder_text": "SEE STATEMENT 12 || SEE STATEMENT 13",
+        "placeholder_future": Decimal("7500000"), "placeholder_rows": 2, "placeholder_future_rows": 1,
+        "placeholder_text": "SEE STATEMENT 12 || SEE STATEMENT 13",
         "stratum_pop": 2, "stratum_pop_dollars": Decimal("35000000"),      # band B of the years asked for, not of the limit
         "filer_marked_individual": False, "placeholder_exceeds_declared": False, "classifier": "v2",
         "source_version": "2026_06_16"}

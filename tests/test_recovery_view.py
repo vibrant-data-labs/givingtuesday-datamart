@@ -60,6 +60,7 @@ def test_the_view_shows_one_policys_paid_rows():
     sql = view.view_sql("v2-leave_out")
     assert sql.count("policy_version = 'v2-leave_out' AND target = 'paid'") == 1
     assert sql.count("r.policy_version = 'v2-leave_out' AND r.target = 'paid'") == 1
+    assert sql.count("target = ") == 2 and "'future'" not in sql      # a future-payment list is loaded, not shown
     with pytest.raises(ValueError, match="cannot be written into the view"):
         view.view_sql("v2'; DROP TABLE privategrants_current; --")
 
@@ -73,21 +74,44 @@ def test_the_view_and_the_work_list_test_a_placeholder_row_the_same_way():
     assert classifier.pointer_sql(name) in sql                                  # the view: the test on the name
     assert f"SELECT {name} AS name" in work_list.QUERY                          # the work list: the same name,
     assert classifier.pointer_sql("n.name") in work_list.QUERY                  # the same test on it
-    for pattern in (classifier.WITHHELD, *classifier.POINTER):
-        assert sql.count(f"'{pattern}'") == 2 and work_list.QUERY.count(f"'{pattern}'") == 1
+    for pattern in (classifier.WITHHELD, *classifier.POINTER):                  # once on the paid rows, once
+        assert sql.count(f"'{pattern}'") == 2 and work_list.QUERY.count(f"'{pattern}'") == 2   # on the future ones
 
 
 def test_every_check_reads_the_loaded_rows_of_one_policy():
-    assert list(checks.CHECKS) == ["reading", "verdict", "work list", "adds up", "double count", "placeholder",
-                                   "same rows"]
+    assert list(checks.CHECKS) == ["reading", "verdict", "work list", "adds up", "one target", "future outside",
+                                   "double count", "placeholder", "same rows"]
     assert all(":version" in sql and loader.TABLE in sql for sql in checks.CHECKS.values())
     assert view.VIEW in checks.CHECKS["double count"] and view.VIEW in checks.CHECKS["placeholder"]
 
 
+def test_the_future_rows_are_held_to_the_rules_the_paid_rows_are():
+    for name in ("reading", "verdict", "work list", "adds up", "one target"):      # every target's rows
+        assert "target = " not in checks.CHECKS[name], name
+    held = checks.CHECKS["work list"]
+    assert "WHEN 'paid' THEN w.placeholder_paid" in held and "WHEN 'future' THEN w.placeholder_future" in held
+    assert "IS DISTINCT FROM" in held                   # a target the work list has no amount for fails
+    for name in ("double count", "placeholder", "same rows"):                      # the view shows paid grants
+        assert "target = 'paid'" in checks.CHECKS[name], name
+
+
+def test_no_future_row_may_be_in_the_view():
+    sql = checks.CHECKS["future outside"]
+    assert "lists WHERE target = 'future'" in sql and f"FROM {view.VIEW} g" in sql
+    assert "r.target = 'future'" in sql and "g.row_source = 'placeholder_recovery'" in sql
+    for column in ("object_id", "policy_version", "page", "row_ordinal"):          # the view row's key, less the
+        assert f"r.{column} = g.recovered_{column}" in sql                         # target: see "one target"
+    assert "g.filerein = l.filerein AND g.taxyear = l.taxyear" in sql              # one loaded filing at a time
+    assert "GROUP BY object_id, page, row_ordinal" in checks.CHECKS["one target"]
+
+
 def test_the_checks_summary_says_what_failed():
-    found = [checks.Check("reading", 0), checks.Check("double count", 2)]
-    text = checks.summary(found, {"rows": 10, "filings": 2, "view_rows": 10, "view_filings": 2})
-    assert "reading       ok  0" in text and "double count  FAILED  2" in text
+    found = [checks.Check("reading", 0), checks.Check("future outside", 2)]
+    text = checks.summary(found, {"rows": 10, "filings": 2, "future_rows": 4, "future_filings": 1, "view_rows": 10,
+                                  "view_filings": 2})
+    assert "reading         ok  0" in text and "future outside  FAILED  2" in text
+    assert "loaded, paid: 10 rows of 2 filings; in the view: 10 rows of 2 filings" in text
+    assert "loaded, future: 4 rows of 1 filings" in text
     assert [check.passed for check in found] == [True, False]
 
 

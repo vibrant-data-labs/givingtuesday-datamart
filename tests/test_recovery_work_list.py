@@ -35,9 +35,29 @@ def test_a_query_row_becomes_a_work_list_row():
     assert filing == wl.PlaceholderFiling(
         object_id="202223169349100737", filerein=SIEGEL, filer_name="Siegel Family Endowment", taxyear=2021,
         taxperend=date(2021, 12, 31), declared_paid=Decimal("24452401"), declared_books=Decimal("24452401"),
-        placeholder_paid=Decimal("24452401"), placeholder_rows=1, placeholder_texts=["SEE Attachment 15"], band="B",
+        placeholder_paid=Decimal("24452401"), placeholder_rows=1, placeholder_texts=["SEE Attachment 15"],
+        placeholder_future=Decimal(0), placeholder_future_rows=0, band="B",
         filer_marked_individual=False, placeholder_exceeds_declared=False,
         classifier_version=classifier.CLASSIFIER_VERSION, source_version="2026_06_16", built_at=BUILT)
+
+
+def test_a_filing_carries_the_future_amount_on_its_placeholder_rows_of_line_3b():
+    kenan = wl.filing_from_row(_row(paid="31571000", declared="31571000", placeholder_future=Decimal("20012000"),
+                                    placeholder_future_rows=1), BUILT)
+    assert (kenan.placeholder_future, kenan.placeholder_future_rows) == (Decimal("20012000"), 1)
+    none = wl.filing_from_row(_row(placeholder_future=None, placeholder_future_rows=None), BUILT)
+    assert (none.placeholder_future, none.placeholder_future_rows) == (Decimal(0), 0)
+
+
+def test_the_future_amount_decides_neither_the_list_nor_the_band():
+    rows = [_row(paid="900000", declared="900000"),
+            _row("202311019349101326", year="2022", paid="900000", declared="900000",
+                 placeholder_future=Decimal("250000000"), placeholder_future_rows=2)]
+    found = wl.build(rows, {}, BUILT)
+    assert [(f.band, f.placeholder_future) for f in found.filings] == [("D", Decimal(0)), ("D", Decimal("250000000"))]
+    assert "WHERE d.declared_paid > 0 AND p.placeholder_paid > 0 AND p.placeholder_paid >= 0.5 * d.declared_paid" in (
+        wl.QUERY)
+    assert "placeholder_future" not in wl.QUERY[wl.QUERY.index("listed AS"):wl.QUERY.index("future AS")]
 
 
 def test_the_first_two_distinct_placeholder_texts_are_kept_in_the_order_given():
@@ -129,8 +149,39 @@ def test_summary_counts_the_list_the_excluded_and_the_marked():
     assert "of which marked individual" in text and "2026_06_16 (2 filings)" in text
     over = next(line for line in text.splitlines() if "of which over line 25" in line)
     assert over.split()[-4:] == ["0", "0", "$0.00B", "$0.00B"]
+    assert "of which with a future amount" in text
     assert [line.split() for line in text.splitlines() if line.strip().startswith(("2017", "2021"))] == [
         ["2017", "1", "$0.00B", "1"], ["2021", "1", "$0.02B", "0"]]
+
+
+def test_the_future_summary_counts_the_list_and_what_is_not_on_it():
+    rows = [_row(placeholder_future=Decimal("20012000"), placeholder_future_rows=1),
+            _row("201811111111111111", ein="010342663", year="2017", placeholder_future=Decimal("5000000"),
+                 placeholder_future_rows=2),
+            _row("202311019349101326", year="2022")]
+    without = [{"why": "no paid placeholder", "filings": 34, "filers": 20, "dollars": Decimal("270776834")}]
+    lines = [line.split() for line in wl.future_summary(wl.build(rows, {}, BUILT), without).splitlines()]
+    assert lines[1] == ["on", "the", "work", "list", "2", "2", "$0.03B"]
+    assert lines[2] == ["tax", "years", "2020", "on", "1", "1", "$0.02B"]
+    assert lines[3] == ["not", "on", "it:", "no", "paid", "placeholder", "34", "20", "$0.27B"]
+
+
+def test_the_future_amount_is_read_with_the_same_pattern_from_the_same_version_of_the_return():
+    future = wl.FUTURE_PLACEHOLDERS
+    assert "FROM privategrants_future_current g" in future and "g.sigocaffamou" in future
+    assert classifier.pointer_sql("n.name") in future
+    assert classifier.prefilter_sql("g", classifier.FUTURE_NAMES) in future
+    assert f"SELECT {classifier.name_sql('g', classifier.FUTURE_NAMES)} AS name" in future
+    assert future in wl.QUERY and future in wl.FUTURE_WITHOUT_PAID
+    assert "LEFT JOIN future u ON u.filerein = l.filerein AND u.taxyear = l.taxyear AND u.url = f.url" in wl.QUERY
+    assert "coalesce(u.placeholder_future, 0) AS placeholder_future" in wl.QUERY
+
+
+def test_the_new_columns_reach_a_table_made_before_them():
+    added = [statement for statement in wl.DDL if "ADD COLUMN IF NOT EXISTS" in statement]
+    assert any("placeholder_future numeric(18,2) NOT NULL DEFAULT 0" in statement for statement in added)
+    assert any("placeholder_future_rows integer NOT NULL DEFAULT 0" in statement for statement in added)
+    assert all(f"{column} " in wl.DDL[0] for column in wl.COLUMNS)
 
 
 def test_the_query_reads_the_loaded_tables_with_the_half_rule_and_no_year_floor():

@@ -65,6 +65,7 @@ def _work_list(session) -> None:
     started = time.monotonic()
     found = work_list.rebuild(session)
     print(work_list.summary(found))
+    print("\n" + work_list.future_summary(found, work_list.future_without_paid(session)))
     print(f"\n{len(found.filings):,} filings -> {work_list.TABLE} in {time.monotonic() - started:.0f} s")
 
 
@@ -77,7 +78,9 @@ def _load(session, policy: dict, object_id: str | None, dry_run: bool) -> None:
         shown = view.ensure_view(session, policy["version"])
         where = f"{loader.TABLE}; {view.VIEW} " + (
             "shows them" if shown else f"shows policy {view.shown_policy(session)}, not these")
-    print(f"\n{result.loaded:,} filings, {result.rows:,} rows -> {where}, in {time.monotonic() - started:.0f} s")
+    future = result.lists[loader.FUTURE]
+    print(f"\npaid: {result.loaded:,} filings, {result.rows:,} rows; future: {future.loaded:,} filings, "
+          f"{future.rows:,} rows -> {where}, in {time.monotonic() - started:.0f} s")
 
 
 def _check(session, version: str) -> bool:
