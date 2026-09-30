@@ -5,6 +5,7 @@ and what went wrong when nothing did.
     python -m givingtuesday_datamart.filing_images fetch data/exploratory/placeholder_sample_1000.csv
     python -m givingtuesday_datamart.filing_images status
     python -m givingtuesday_datamart.filing_images verify
+    python -m givingtuesday_datamart.filing_images recut --dry-run
 
 ``docs/placeholder_recovery_operations.md`` (Part A of the storage spec it
 was built from, now in git history). The measurements behind
@@ -47,6 +48,11 @@ matches the row, else downloaded from S3 and verified. TEOS is never
 consulted again for a fetched filing, and a re-issued image (a new
 ``sha256`` on the row) makes the stale cached file miss.
 
+**Cutting again.** ``recut`` applies ``irs_source``'s rule to the stored
+``page_widths`` of every fetched row and writes the rows it cuts
+differently: what a change to the rule needs, with no PDF opened and no
+request made. A filing that has a reading keeps its cut.
+
 **Tests.** The store is a small interface — ``PostgresStore`` over a
 SQLAlchemy session, ``MemoryStore`` for tests — and the network edges
 (``irs_source`` and the boto3 client) are plain module attributes and an
@@ -72,7 +78,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, fields, replace
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Iterable, Mapping, NamedTuple, Sequence
+from typing import Collection, Iterable, Mapping, NamedTuple, Sequence
 
 from sqlalchemy import text
 
@@ -614,6 +620,59 @@ def materialise(row: FilingImage, cache_dir: Path = CACHE, *, bucket: str = BUCK
 
 
 # ---------------------------------------------------------------------------
+# Cutting again
+# ---------------------------------------------------------------------------
+
+
+def recut(session, *, read: Collection[str] = (), dry_run: bool = False) -> list[tuple[FilingImage, FilingImage]]:
+    """Cut every fetched row again from its stored ``page_widths`` and write
+    the rows ``attachment_span`` now cuts differently; returns them, each as
+    it was and as it is. No PDF is opened and nothing is asked of the IRS.
+
+    ``read`` is the filings that have a reading (``read_filings``). Their
+    pages were chosen by the cut they have, so they keep it, with a warning
+    for each one the rule would have cut differently."""
+    store = _store(session)
+    changed: list[tuple[FilingImage, FilingImage]] = []
+    for row in store.all():
+        if not row.fetched or not row.page_widths:
+            continue
+        start, attached = attachment_span(row.page_widths)
+        if (start, attached) == (row.attachment_from, row.attachment_pages or 0):
+            continue
+        if row.object_id in read:
+            logger.warning("recut: %s has readings and keeps its cut at page %s (the rule gives %s)",
+                           row.object_id, row.attachment_from, start)
+            continue
+        changed.append((row, replace(row, status="fetched" if start else "no_attachment",
+                                     attachment_from=start, attachment_pages=attached)))
+    if not dry_run:
+        for at in range(0, len(changed), CHUNK):
+            store.upsert([after for _, after in changed[at:at + CHUNK]])
+    return changed
+
+
+def read_filings(session) -> set[str]:
+    """The filings with a row in ``page_readings``, read or failed."""
+    return {oid for (oid,) in session.execute(text("SELECT DISTINCT object_id FROM page_readings"))}
+
+
+def recut_report(changed: Sequence[tuple[FilingImage, FilingImage]]) -> str:
+    """The rows ``recut`` changed, by the width of their first page."""
+    lines = [f"{'first page':<12}{'images':>8}{'pages':>9}{'attached before':>17}{'attached after':>16}"
+             f"{'with an attachment':>20}"]
+    groups: dict[int, list[tuple[FilingImage, FilingImage]]] = {}
+    for pair in changed:
+        groups.setdefault(pair[0].page_widths[0], []).append(pair)
+    for width, pairs in sorted(groups.items(), key=lambda kv: -len(kv[1])) + [("all", list(changed))]:
+        lines.append(f"{width!s:<12}{len(pairs):>8,}{sum(a.pages for _, a in pairs):>9,}"
+                     f"{sum(b.attachment_pages or 0 for b, _ in pairs):>17,}"
+                     f"{sum(a.attachment_pages for _, a in pairs):>16,}"
+                     f"{sum(1 for _, a in pairs if a.attachment_from):>20,}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Reports and verification
 # ---------------------------------------------------------------------------
 
@@ -683,6 +742,8 @@ def main() -> None:
 
     sub.add_parser("status", help="rows by status; unserved images by generated year")
     sub.add_parser("verify", help="hash every object in S3 against its row")
+    again = sub.add_parser("recut", help="cut every fetched row again from its stored page widths")
+    again.add_argument("--dry-run", action="store_true", help="print what would change and write nothing")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
@@ -707,6 +768,10 @@ def main() -> None:
             if bad:
                 sys.exit(f"{len(bad)} objects do not match their row: {bad[:10]}")
             print("every object hashes to its row's sha256")
+        elif args.command == "recut":
+            changed = recut(session, read=read_filings(session), dry_run=args.dry_run)
+            print(recut_report(changed))
+            print(f"{len(changed)} rows cut differently, {'none written (dry run)' if args.dry_run else 'written'}")
 
 
 if __name__ == "__main__":
