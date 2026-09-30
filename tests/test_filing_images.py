@@ -574,6 +574,46 @@ def test_attachment_span_is_the_one_rule_for_where_the_filer_starts():
     assert fi.attachment_span([FILER]) == (1, 1)
 
 
+def test_recut_writes_only_the_rows_the_rule_cuts_differently():
+    older = [2240] * 9 + [2256, 2240, 2432, 2240]
+    store = fi.MemoryStore()
+    store.upsert([
+        _row("1" * 18, pages=15, page_widths=older + [2544, 2544], attachment_from=1, attachment_pages=15),
+        _row("2" * 18, pages=13, page_widths=older, attachment_from=1, attachment_pages=13),
+        _row("3" * 18),                                                        # cut as the rule cuts it
+        _row("4" * 18, status="pdf_unavailable:404", page_widths=None, attachment_from=None),
+    ])
+    store.commits.clear()
+
+    changed = fi.recut(store)
+
+    assert [(was.object_id, was.attachment_from, now.attachment_from) for was, now in changed] == [
+        ("1" * 18, 1, 14), ("2" * 18, 1, None)]
+    assert store.commits == [2]
+    one, two = store.rows["1" * 18], store.rows["2" * 18]
+    assert (one.status, one.attachment_from, one.attachment_pages) == ("fetched", 14, 2)
+    assert (two.status, two.attachment_from, two.attachment_pages) == ("no_attachment", None, 0)
+    assert (one.sha256, one.s3_key, one.page_widths) == ("ab" * 32, f"irs/pdf/{'1' * 18}.pdf", older + [2544, 2544])
+    assert fi.recut(store) == [] and store.commits == [2]
+
+
+def test_recut_leaves_a_filing_with_readings_alone_and_a_dry_run_writes_nothing(caplog):
+    older = [2240] * 9 + [2256, 2240, 2544]
+    store = fi.MemoryStore()
+    store.upsert([_row(oid, pages=12, page_widths=older, attachment_from=1, attachment_pages=12)
+                  for oid in ("1" * 18, "2" * 18)])
+    store.commits.clear()
+
+    with caplog.at_level(logging.WARNING, logger="givingtuesday_datamart"):
+        dry = fi.recut(store, read={"2" * 18}, dry_run=True)
+    assert [was.object_id for was, _ in dry] == ["1" * 18] and store.commits == []
+    assert store.rows["1" * 18].attachment_from == 1
+    assert "2" * 18 in caplog.text and "keeps its cut" in caplog.text
+
+    fi.recut(store, read={"2" * 18})
+    assert (store.rows["1" * 18].attachment_from, store.rows["2" * 18].attachment_from) == (12, 1)
+
+
 def test_tax_year_is_the_year_the_period_begins():
     assert [fi._taxyear(p) for p in ("202012", "202106", "202112", "202108", "", "2021")] == [2020, 2020, 2021, 2020, None, None]
 

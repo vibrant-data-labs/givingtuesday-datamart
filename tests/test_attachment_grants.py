@@ -309,6 +309,19 @@ def test_expenditure_responsibility_page_is_only_used_when_it_reconciles():
     ([2246, 2259, 2246, 3081, 2440, 2246, 2550, 2550], 7),   # Siegel-shaped
     ([2246, 2246, 2246], None),                              # all IRS-rendered: nothing attached
     ([2246, 2521, 2246], 2),                                 # a filer page, then the IRS again: keep both
+    # The renderers before June 2021, each named by its first page's width.
+    ([2240] * 9 + [2256, 2240, 3072, 2432, 2240, 2320, 2272, 2544, 2544], 17),
+    ([2240] * 9 + [2256, 2240, 2304, 2272], None),           # Schedule B closes the IRS's pages
+    ([2256] * 15 + [3072, 2256, 2352, 2368, 2384, 2544], 21),
+    ([2800] * 14 + [3408, 2800, 3392, 2544, 2544], 18),
+    ([2432] * 20 + [3072, 2432, 2544], 23),
+    ([2224] * 15 + [3040, 2224, 2320, 2336, 2544], 20),
+    # A width is the IRS's under its own renderer only.
+    ([2246, 2259, 2246, 3072], 4),                           # a filer's list, 3072 wide
+    ([2256] * 15 + [3392, 3392, 2544], 16),                  # and 3392 under 2256
+    ([2240, 2256, 2240, 2800], 4),
+    ([2576, 2560, 2576], 1),                                 # a paper return scanned whole
+    ([], None),
 ])
 def test_attachment_start_is_the_first_page_the_irs_did_not_render(widths, start):
     assert attachment_start(widths) == start
