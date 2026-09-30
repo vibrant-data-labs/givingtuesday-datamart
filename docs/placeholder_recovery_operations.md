@@ -96,13 +96,15 @@ different reasoning effort reads the page again rather than reusing
 the other setting's answer.
 
 **`page_verdicts`.** What the readers settled on for a page under a
-named policy: `verdict` (`agreed`, `escalated`, `flagged`, `unreadable`),
-`accepted_model` and `accepted_hash` (the reading that is loaded),
-`matched_models` (the readings that agreed with it), `readers_consulted`
-and `decided_at`. A flagged page carries Sonnet's reading as accepted
-under the `load_single` rule; the mark is the verdict. Verdicts under
-`<version>-<rule>` are the same policy with the flagged rule overridden,
-derived without a model call.
+named policy: `verdict` (`agreed`, `escalated`, `flagged`, `not_a_list`,
+`unreadable`), `accepted_model` and `accepted_hash` (the reading that is
+loaded), `matched_models` (the readings that agreed with it),
+`readers_consulted` and `decided_at`. A flagged page carries Sonnet's
+reading as accepted under the `load_single` rule; the mark is the
+verdict. A `not_a_list` page (`POLICY_V3`) names no reading and its
+`matched_models` are the base pair, who agreed there is nothing on it.
+Verdicts under `<version>-<rule>` are the same policy with the flagged
+rule overridden, derived without a model call.
 
 **`privategrants_recovered`.** One grant of a list that adds up to the
 filing's `placeholder_paid` within 0.5%, under one policy.
@@ -173,6 +175,13 @@ policy version, flushing after each stage:
    reader's reading is accepted under `load_single` (left out under
    `leave_out`).
 4. A page fewer than two readers could read is `unreadable`.
+5. Under a `not_a_list` rule (`POLICY_V3`), a page both base readers
+   label `other` and return no pair for is `not_a_list` after step 1: no
+   escalation reader sees it, no reading is accepted, nothing loads from
+   it. To the selector it is an empty `other` page (`loader.selector_input`),
+   so a list's continuation ends at it as at any `other` page. Two empty
+   readings still do not *agree*; without the rule (v1, v2) such a page
+   is a dispute that goes to both escalation readers and ends flagged.
 
 Same-model repeats never count as agreement. Amounts alone never count:
 the pairs must match, because dense pages slide amounts against names
@@ -181,14 +190,16 @@ while the sum barely moves.
 ## Policies
 
 A policy names the readers, their order, the prompt version, each
-reader's request settings and the flagged rule. Results are always tied
-to a policy version so runs stay comparable, and a change of rule is a
-new version, never an edit of an old one.
+reader's request settings, the flagged rule and, from v3, the
+`not_a_list` rule. Results are always tied to a policy version so runs
+stay comparable, and a change of rule is a new version, never an edit of
+an old one.
 
-| policy | readers | prompt | settings | flagged |
-|---|---|---|---|---|
-| `POLICY_V1` | Qwen3-VL + Gemini 3.5 Flash Lite, then Gemini 3.8 Flash, then Claude Sonnet 5 | v4 | 3.8 Flash at its default reasoning effort, pinned; can buy nothing | `load_single` |
-| `POLICY_V2`, the frame's | the same | v4 | 3.8 Flash at `low` reasoning effort; Sonnet with thinking off; Qwen never in JSON mode | `load_single` |
+| policy | readers | prompt | settings | flagged | not a list |
+|---|---|---|---|---|---|
+| `POLICY_V1` | Qwen3-VL + Gemini 3.5 Flash Lite, then Gemini 3.8 Flash, then Claude Sonnet 5 | v4 | 3.8 Flash at its default reasoning effort, pinned; can buy nothing | `load_single` | — |
+| `POLICY_V2`, the frame's and the 2020-on read's | the same | v4 | 3.8 Flash at `low` reasoning effort; Sonnet with thinking off; Qwen never in JSON mode | `load_single` | — |
+| `POLICY_V3`, derived from v2's readings on 2026-09-30, not yet the run's | the same | v4 | the same | `load_single` | `empty_other`: both base readers say `other` and return no row |
 
 A JSON file with the same keys is a policy too (`--policy path.json`);
 `load_policy` refuses one that reuses a registered version with different
@@ -196,6 +207,13 @@ rules. `--flagged leave_out` derives `<version>-leave_out` from the
 stored verdicts. Worker counts per reader (`page_verdicts.WORKERS`):
 Qwen 80, Flash Lite 24, 3.8 Flash 24, Sonnet 24; nothing in 24,131 page
 reads found the gateway's limit.
+
+`page_verdicts base-pair --policy v2` lists every page decided under a
+policy by what the base pair said — both `other` and empty; neither a
+list, otherwise; one a list; both a list — with how many reached the
+last escalation reader, how many ended flagged and what escalating each
+class cost at list prices. It is the measurement v3 came from (the
+engineering log, 2026-09-30) and the check to run on the next read.
 
 ## What is built, and what is not
 
@@ -506,6 +524,7 @@ python -m givingtuesday_datamart.page_readings read data/exploratory/placeholder
 python -m givingtuesday_datamart.page_readings status
 python -m givingtuesday_datamart.page_verdicts agree data/exploratory/placeholder_sample_1000.csv --policy v2
 python -m givingtuesday_datamart.page_verdicts status --policy v2
+python -m givingtuesday_datamart.page_verdicts base-pair --policy v2
 
 # the whole run, the cost gate alone, the stored-only re-derivation, the report
 python -m givingtuesday_datamart.exploratory.placeholder_recovery run --policy v2 --sample data/exploratory/placeholder_sample_1000.csv --cache /data/irs_index [--dry-run]

@@ -273,6 +273,13 @@ rehearsal for the 1,000-filing run it cost $63 and projects the frame
 at about $330; with 3.8 Flash at low reasoning effort (`POLICY_V2`, the
 run's policy) about $270 (*Sample under POLICY_V1* below).
 
+"Or one both returned empty" is the rule's one measured cost: on the
+38,834 pages read by 2026-09-30 a fifth of the escalation spend went to
+pages both base readers called `other` and empty, and 8,536 of 8,541
+ended flagged with nothing on them. `POLICY_V3` decides such a page by
+the base pair alone, as `not_a_list` (*Policy v3* under *Order of
+operations*).
+
 ### 4 · Select — the reconciliation gate
 
 **Input:** the per-page JSON and the target. Until 2026-09-28 also the
@@ -1131,6 +1138,203 @@ still cost less a page, because their pages are short. The two bands'
 figures rest on 699 and 518 pages, so $530 is the low estimate and $757
 the gate's.
 
+### Policy v3: the pages both base readers call empty and `other` (2026-09-30)
+
+The 2020-on work list was read under v2 on 2026-09-30 (28,908 pages,
+$498.94 at list prices). With the frame's 9,926 that is 38,834 pages
+decided under v2, and this is what the base pair said on them, from the
+stored readings (`page_verdicts base-pair --policy v2`; "a list" is a
+`page_kind` of `grants_paid_list`, `grants_future_list` or
+`expenditure_responsibility`; escalation cost is 3.8 Flash's and
+Sonnet's readings of the page at list prices, from their `usage`):
+
+| the base pair said | pages | to Sonnet | ended flagged | escalation $ | share |
+|---|---|---|---|---|---|
+| both `other`, no rows | 8,541 | 8,541 | 8,536 | $108.05 | 20% |
+| neither a list, otherwise (one returns rows) | 2,204 | 1,949 | 1,826 | $28.91 | 5% |
+| one a list | 401 | 280 | 226 | $7.39 | 1% |
+| both a list | 27,687 | 5,666 | 3,646 | $389.54 | 73% |
+| a base reader out of attempts | 1 | 1 | 1 | $0.12 | |
+| all | 38,834 | 16,437 | 14,235 | $534.01 | |
+
+The first class is the rule in `reading_pairs.agree_on` at work: two
+empty readings do not agree, so a page both cheap readers call `other`
+and return nothing for is a dispute, goes to 3.8 Flash and then Sonnet,
+and no two readers agree on nothing, so it ends flagged — 8,536 of 8,541
+times, with Sonnet's empty reading accepted and marked. Sonnet labelled
+8,523 of them `other` too; by its headings they are investment
+schedules (Part II lines 10 and 13), capital gains (Part IV), balance
+sheets and officer lists. On five Sonnet returned rows under a list
+label, 45 rows in all (below). No filing loaded under v2 takes a row
+from a page of the first class; one takes rows from the second (The Lux
+Foundation 2021, page 24: 2 rows, $1.49M of its $1.95M list); pages of
+the third carry 110 loaded rows and $175M (Bezos 2023 alone 106 rows,
+$139M), so that class keeps escalating. Over the 2020-on read too, once
+it loads, the second class carries three filings and the third 48 (the
+loader paragraph below).
+
+**The rule.** `POLICY_V3` is v2 plus `"not_a_list": "empty_other"`: a
+page both base readers label `other` and return no (name, amount) pair
+for is decided by them alone, with a verdict of its own, `not_a_list`,
+that names no reading, so the selector and the loader see nothing from
+it and the count of `agreed` pages stays comparable across versions.
+`agree_on` is untouched (the scorer uses it), and v2's verdicts stand.
+
+**Derived at no cost.** `page_verdicts agree <the 6,350 filings with a v2
+verdict> --policy v3 --stored-only`: 38,834 verdicts written, 0 pages
+bought, v2's rows untouched. Page by page against v2: 15,611 agreed →
+agreed; 8,983 escalated → escalated; 5,699 flagged → flagged; 8,536
+flagged and 5 escalated → `not_a_list`; nothing else differs in any
+column. `check --policy v2` and `check --policy v3` pass.
+
+| verdict | frame, v2 | frame, v3 | 2020-on read, v2 | 2020-on read, v3 | all, v2 | all, v3 |
+|---|---|---|---|---|---|---|
+| agreed | 3,920 (39.5%) | 3,920 (39.5%) | 11,691 (40.4%) | 11,691 (40.4%) | 15,611 (40.2%) | 15,611 (40.2%) |
+| escalated | 3,161 (31.8%) | 3,158 (31.8%) | 5,827 (20.2%) | 5,825 (20.2%) | 8,988 (23.1%) | 8,983 (23.1%) |
+| flagged | 2,845 (28.7%) | 1,820 (18.3%) | 11,390 (39.4%) | 3,879 (13.4%) | 14,235 (36.7%) | 5,699 (14.7%) |
+| not a list | | 1,028 (10.4%) | | 7,513 (26.0%) | | 8,541 (22.0%) |
+
+The class is a tenth of the frame's pages and a quarter of the 2020-on
+read's: the small filings of bands C and D attach their investment
+schedules, and that is where v2's flagged share came from.
+
+**The ground truth.** Of the 138 checked pages, 5 are of the first class
+and 3 of the second, all drawn as flagged pages of bands C and D, and
+each is recorded as *no recipient rows* (`placeholder_ground_truth.csv`,
+`kind=none`). `verdicts --policy v3`: 58 right, 2 wrong (the same two
+future-payment pages as v2), 73 flagged, 5 `not_a_list` with no rows in
+the truth; v2 is 58 / 2 / 78.
+
+**What the same pages would have cost.** List prices from the readings'
+`usage`, whichever run bought them; v3 is v2 less the escalation
+readings of the 8,541 pages:
+
+| reader | v2 pages | v2 $ | v3 pages | v3 $ | reads removed | saved |
+|---|---|---|---|---|---|---|
+| Qwen3-VL | 38,834 | $69.45 | 38,834 | $69.45 | | |
+| Gemini 3.5 Flash Lite | 38,834 | $165.65 | 38,834 | $165.65 | | |
+| Gemini 3.8 Flash | 23,260 | $137.56 | 14,719 | $124.80 | 8,541 | $12.76 |
+| Claude Sonnet 5 | 16,506 | $396.45 | 7,965 | $301.16 | 8,541 | $95.29 |
+| all | | $769.11 | | $661.06 | | $108.05 (14.0%) |
+
+On the frame alone $270.17 → $256.67 (5.0%); on the 2020-on read
+$498.94 → $404.39 (18.9%). The pages removed are the cheap ones — an
+empty page costs Sonnet $0.011 against $0.024 on average — so the
+escalation readers' price per page rises under v3, to $0.0085 for 3.8
+Flash and $0.038 for Sonnet, while the cost gate's `PER_PAGE` keeps the
+frame's $0.0091 and $0.0343.
+
+**The cost gate.** Under v3 the gate's rates (`RATES_BY_RULE`) are the
+same 38,834 pages with the class taken out of the dispute path: 37.8%
+disputed, 3.8 Flash resolves 46.2%, Sonnet 27.8%, 14.7% flagged — the
+widest basis there is, and the one the rule was measured on. v2's
+constants stay the frame's (60.5%, 42.3%, 18.0%, 28.7% flagged); on the
+same 38,834-page basis v2 would be 59.8%, 29.2%, 13.4% and 36.7%
+flagged. The work list's tax years 2015 to 2019 — 2,686 filings fetched
+with an attachment, 22,827 pages, nothing read — project at $598 under
+v2 and **$436 under v3**, 3.8 Flash 13,810 → 8,629 pages and Sonnet
+7,969 → 4,642; tax years 2020 on, read, project at $2 and $0 (the frame's
+rates over-project 3.8 Flash by 268 pages). Both projections are the
+same base-pair cost, $199.
+
+**The loader, filing by filing.** `load --dry-run` under v2 and under v3
+on the same day, over the 9,036 fetched filings with an attachment (the
+2020-on read included, whose lists are not loaded yet): under v2 4,604
+filings would load, 582,102 rows, $16,164.0M. The first v3 pass loaded
+4,603. The Joe W and Dorothy D Brown Foundation 2022
+(`202323199349105412`, band C, $3,065,781, 110 rows) was lost, and none
+of its rows came from a `not_a_list` page: the page mattered by its
+absence. `page_tables` lets a continuation page with no heading inherit
+the heading of the page before it, and a page a reader calls `other`
+ends that carry; with page 38 (Sonnet's label under v2:
+`expenditure_responsibility`, no rows; under v3 `not_a_list`) left out of
+the selector's input, the expenditure-responsibility pages 39–44 after
+it inherited the statement on page 37 and were taken for one statement
+with it, $1.90M in place of two of $1.25M and $645,000, which no subset
+then reconciled. So the loader hands the selector an empty `other` page
+for a `not_a_list` verdict (`loader.NOT_A_LIST_PAGE`, through
+`selector_input`, which the frame run's `report` uses too): what the
+base pair said, and what Sonnet's accepted reading said on 8,523 of the
+8,541 pages under v2. With that, v3 loads the same 4,604 filings, and
+one differs: The Helen Matchett DeMario Foundation 2020, 53 rows and
+$214,200 under v2 (0.47% over the declared $213,200), 52 rows and
+$213,200 under v3, exact — the row v3 leaves out is page 32's carried
+beneficiary total, a double count of a row on page 31. Rows by the
+base-pair class of their page, under v2: the first class 1 row ($1,000,
+DeMario); the second 13 rows, $3.67M, three filings (The Lux Foundation
+2021, David & Teryl Schawk Family Foundation 2021, Violet Hordes
+Foundation 2024, each list needing the one page Flash Lite transcribed
+under an `other` label); the third 1,192 rows, $928M, 48 filings
+(Schusterman 2022, Musk 2024, Bezos 2024 and 2023, Howard G Buffett 2022
+the largest); the fourth 580,755 rows, $15,231M, 4,592 filings; one
+filing, 141 rows, from the page whose Flash Lite reading is at three
+errors. Under v3 every class but the first is the same to the row.
+
+**The wider rule, measured and not built.** Skipping escalation also
+where neither base reader calls the page a list but one returns rows
+(the second class: on 2,199 of its 2,204 pages Qwen returns nothing and
+Flash Lite, labelling the page `other`, transcribes rows) would save
+another 1,949 Sonnet reads and $28.91 (Flash $4.21, Sonnet $24.71) and
+bring the flagged share to 10.0% (frame 16.0%, read 7.9%). It would lose
+the 378 pages of the class an escalation reader resolved under v2 (251
+3.8 Flash, 123 Sonnet), the 7 where Sonnet returned rows under a list
+label (72 rows), and three lists that need the one page Flash Lite
+transcribed under an `other` label: The Lux Foundation 2021 (loaded),
+David & Teryl Schawk Family Foundation 2021 ($2.55M) and Violet Hordes
+Foundation 2024 ($33,400), the last two the 2020-on read's. The three
+ground-truth pages of the class have no rows. The choice is Zein's; v3
+does not take it.
+
+**The five pages of the first class where Sonnet returned list rows**,
+from the images:
+
+- Esther A & Bruce S Gibbs Charitable Trust 2022
+  (`202341299349103719` p20, band D, paid $59,070): a brokerage "2022
+  Donation Report", page 1 of 2, hand-labelled as the 990-PF grants
+  schedule, with 22 scholarship payments of $1,790 each to Missouri and
+  Nebraska universities ($39,380). A real list both cheap readers
+  missed; Sonnet read it right (3.8 Flash read the amounts negative).
+  The filing does not reconcile under v2 either: page 21's accepted
+  reading holds 1 of the other 11 rows, coverage 70%. Under v3 the page
+  never reaches Sonnet.
+- Grace Swift Nye & Alfred Gibbs Nye 2022 (`202313149349102851` p29,
+  band D, paid $99,000): a scholarship trust's bank ledger, hand-labelled
+  "Part XV — Grants Pd": seven $1,500 checks to universities f/b/o named
+  students ($10,500), three voided or stopped, a $3,000 return to the
+  trust's own account, bank fees and a $30,000 deposit. Sonnet's 17 rows
+  include the fees; the filing's four ledger pages do not reconcile
+  under v2 (coverage 191%).
+- Hill Foundation 2021 (`202223349349100412` p105, band C, paid
+  $2,646,870): page 148 of 209 of a Wells Fargo statement, "Cash
+  Disbursements — Paid To/For": a $10,000 reversal pair and two $15,000
+  distributions, printed negative. The 111 statement pages do not
+  reconcile under v2 (coverage 86%).
+- The Helen Matchett DeMario Foundation 2020 (`202123199349103227` p32,
+  band D, paid $213,200): the last page of Schedule E, one beneficiary's
+  carried total ($1,000, Young Israel of Jamaica Estates) and the
+  schedule's totals ($213,200, the declared amount). Under v2 the list
+  reconciles with this row, 53 rows and $214,200, 0.47% over; under v3
+  without it, 52 rows and $213,200, exact: the row is a double count.
+- Eden Hall Foundation 2022 (`202343199349103949` p49, band B, paid
+  $18,571,800): an address carried from the page before and the grand
+  total; Sonnet's one row has no amount. Nothing on it loads under any
+  policy; Eden Hall loads from its other pages.
+
+So the class holds two real lists, both small-filing scholarship
+schedules the cheap pair could not see, and neither is recovered under
+v2 either. What v3 gives up on such pages is Sonnet's reading of them,
+which loaded nothing.
+
+**If v3 became the production policy**, what changes: the flagged share
+of the frame's pages, 28.7% → 18.3%, and of the 2020-on read's, 39.4% →
+13.4%; the cost gate's projection for tax years 2015 to 2019, $598 →
+$436, and the rates it prints; `readers_consulted` on 8,541 pages, 4 →
+2; the `status` count of Sonnet-accepted pages, 16,436 → 7,895; the
+loaded tables (the paragraph above); and every `--policy v2` in the
+runbook. What does not change: `agree_on`, the agreed and escalated
+counts, the ground-truth score, the loaded dollars of any filing but
+DeMario's.
+
 ## Ground truth
 
 [`placeholder_ground_truth.py`](../givingtuesday_datamart/exploratory/placeholder_ground_truth.py):
@@ -1867,3 +2071,10 @@ Still open:
 - What to do with "various" filers: twenty PDFs would tell.
 - Whether GT will run any of this upstream; the lists are in images they
   already link to.
+- Whether `POLICY_V3` becomes the run's policy (2026-09-30): derived
+  from v2's readings at no cost, it flags 14.7% of pages instead of
+  36.7%, loads the same lists, and projects tax years 2015 to 2019 at
+  $436 instead of $598; and whether the wider rule (skip the pages
+  neither base reader calls a list even when one returns rows, $29
+  more, three lists lost) goes with it. Nothing has been loaded under
+  v3.
