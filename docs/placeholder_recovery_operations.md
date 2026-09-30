@@ -522,7 +522,7 @@ few dollars a run and the S3 storage under a dollar a month.
 | cost of the frame | $300 to $430 as designed | $221.64 under v2 |
 | traceability | every loaded row joins to its verdict and two readings | 9,926 verdicts, 0 orphans |
 | a loaded row's lineage | one reading and one verdict a row, and the row's own line in the reading | 225,978 rows of both targets, 0 without either (`check`) |
-| a second load | writes nothing | SECOND_LOAD |
+| a second load | writes nothing | 415 filings unchanged (399 with a paid list, 71 with a future one), 0 written, 0 taken out |
 | no dollar counted twice | a loaded filing holds no more in the view than in `privategrants_current`, within 0.5% | 399 filings, 0 over |
 | no future row in the view | the view holds paid rows only | 71 filings with future rows, 0 with one in the view (`check`) |
 | ground-truth reproduction | 58 / 2 / 23 on the 83 sample pages | 58 / 2 / 23 under v2, the same two wrong pages |
