@@ -596,8 +596,13 @@ own XML to the dollar. This is not the amended-return defect: only one
 of the halved filings has a second version. Nor is it what the paid
 rule does: that rule tests the halved sum against line 25 and never
 looks at the repeated row, and the two agree on 10,154 of the 10,259
-filings it halves; what the repeated row would add on the paid side is
-measured separately, since it moves matcher inputs.
+filings it halves. What the repeated row would do on the paid side was
+measured the same day, in its own pull request (#57), since a change
+there moves matcher inputs: it would halve 113 more filings, $24.4M
+counted twice today, and 2,383 nameless $0 rows; of the 105 the paid
+rule halves without it, 10 are real doubles and 95 are a third defect,
+one grant forward-filled into empty groups, which halving does not
+repair and which wants a rule of its own.
 
 The rule first built, on September 29, borrowed the paid rule's verdict
 on the same filing instead (halve when the paid block was halved). It

@@ -493,9 +493,12 @@ own row in `basic_fields_pf`, which a doubled batch repeats under one
 url and one sha: 315 of the 316 have it, the 316th is a genuine repeat,
 and no filing with the repeated row has unpaired rows. 314 filings are
 halved under the url kept. The paid rule does not use the repeated row;
-it agrees with it on 10,154 of the 10,259 filings it halves, would gain
-about 2,559 small filings from it and has 105 the row does not confirm,
-which is measured in its own session since it moves matcher inputs.
+it agrees with it on 10,154 of the 10,259 filings it halves. Measured
+the same day in PR #57, since it moves matcher inputs: the row would
+add 113 filings and $24.4M on the paid side, plus 2,383 nameless $0
+rows; the 105 the paid rule halves without it are 10 real doubles and
+95 forward-filled copies of one grant, a third defect that halving does
+not repair.
 
 What the build of 2026-09-28 found that the design had not:
 
@@ -2113,8 +2116,10 @@ Still open:
 - Whether a list that adds up only to the paid and the future amount
   together loads. Four filings on the frame; the case is in stage 5.
 - Whether the paid rule should halve on the repeated `basic_fields_pf`
-  row as the future rule now does: about 2,559 filings and $40M it
-  leaves doubled, and 105 it halves that the row does not confirm.
+  row beside its line-25 test, as the future rule now does on the row
+  alone: PR #57 measured 113 filings and $24.4M left doubled, and a
+  third defect, forward-filled copies of one grant, that wants a rule of
+  its own.
 - Whether the view, `privategrants_current_w_recovered`, stays an object of
   its own or becomes what the matcher's first view reads, with no name
   of its own.
