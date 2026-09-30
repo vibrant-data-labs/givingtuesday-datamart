@@ -10,9 +10,16 @@ filer-years when checked on 2026-09-28. A row that withholds the list
 
 The work list's query and the view both build their SQL from here, so the
 rows the view drops are the rows the work list counted.
+
+The same pattern reads the future-payment table, whose columns say
+``sigocaff`` where the paid table says ``sigocpy`` and which has no column
+for a person's name: the functions that build a name take the columns to
+read, ``PAID_NAMES`` unless told otherwise.
 """
 
 from __future__ import annotations
+
+from typing import Sequence
 
 CLASSIFIER_VERSION = "v2"
 
@@ -36,20 +43,26 @@ PREFILTER = ("see|refer|attach|atch|sched|statement|stmt|exhibit|list|detail|sup
 NUMERIC = r"^-?[0-9]+(\.[0-9]+)?$"
 TAX_YEAR = r"^[0-9]{4}$"
 
+# The columns that hold a recipient's name, and the one that holds the amount.
+PAID_NAMES = ("sigocpyrpnam", "sigocpyrbnbn1", "sigocpyrbnbn2")       # privategrants_current
+FUTURE_NAMES = ("sigocaffrbnb1", "sigocaffrbnb2")                     # privategrants_future_current
+PAID_AMOUNT = "sigocpyamoun"
+FUTURE_AMOUNT = "sigocaffamou"
 
-def raw_name_sql(alias: str) -> str:
-    """The name columns of a ``privategrants_current`` row, joined as read."""
-    return f"concat_ws(' ', {alias}.sigocpyrpnam, {alias}.sigocpyrbnbn1, {alias}.sigocpyrbnbn2)"
+
+def raw_name_sql(alias: str, columns: Sequence[str] = PAID_NAMES) -> str:
+    """The name columns of a grant row, joined as read."""
+    return f"concat_ws(' ', {', '.join(f'{alias}.{column}' for column in columns)})"
 
 
-def name_sql(alias: str) -> str:
+def name_sql(alias: str, columns: Sequence[str] = PAID_NAMES) -> str:
     """The recipient name of a row: person and business names, one space between words."""
-    return rf"trim(regexp_replace({raw_name_sql(alias)}, '\s+', ' ', 'g'))"
+    return rf"trim(regexp_replace({raw_name_sql(alias, columns)}, '\s+', ' ', 'g'))"
 
 
-def prefilter_sql(alias: str) -> str:
+def prefilter_sql(alias: str, columns: Sequence[str] = PAID_NAMES) -> str:
     """True for every row that can be a pointer, and cheap."""
-    return f"{raw_name_sql(alias)} ~* '{PREFILTER}'"
+    return f"{raw_name_sql(alias, columns)} ~* '{PREFILTER}'"
 
 
 def pointer_sql(name: str) -> str:
