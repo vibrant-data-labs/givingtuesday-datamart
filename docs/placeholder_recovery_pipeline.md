@@ -14,7 +14,10 @@ built. Stages 1 to 4 and 6 are the three table modules, the selector and
 into the datamart, were built on 2026-09-28 in the package
 `givingtuesday_datamart/placeholder_recovery/` (`work-list`, `run`,
 `load`, `view`, `check`), and their sections say what was built and
-what was measured. The rows GivingTuesday's extract itemised for the
+what was measured. On 2026-09-29 GivingTuesday's future-payment
+datamart became a source, the work list took a future amount from it
+and the loader a second target, `future`; stages 0 and 5 have a dated
+entry each. The rows GivingTuesday's extract itemised for the
 frame, which stage 4 once took beside the pages, left the search the
 same day and went to `placeholder-frame-xml-rows-2026-09-28.zip` in the
 archive folder below. The sample-era data files this
@@ -67,7 +70,8 @@ the declared total in `basic_fields_pf_current` (Part I line 25,
 **Output:** the work list, `pf_placeholder_filings` — one row per
 filing: object id, filer, tax year and period end, grants paid on line
 25, the paid amount on the placeholder rows (the target), how many
-rows and their first two texts, the band, whether the filing's rows are
+rows and their first two texts, since 2026-09-29 the future amount on
+its placeholder rows of line 3b, the band, whether the filing's rows are
 mostly marked `I`, the classifier version, the source version of the
 rows and when it was built. Built on 2026-09-28
 (`placeholder_recovery/work_list.py`, command `work-list`). The frame
@@ -145,6 +149,21 @@ and $48.49B on the placeholder rows; 743 marked; bands 29 / 554 / 3,029
   cost gate prices a filing never fetched at what a frame filing of its
   band cost. For 2020 on it prints $474.72. The frame's cap of $400
   stopped it there; the cap is $800 since 2026-09-29.
+
+As built, 2026-09-29 (session 6): the future amount.
+
+- **A second relation.** `privategrants_future_current`, from
+  GivingTuesday's `990PFPart14Grants3B` (source
+  `irs_990pf_grants_future`, 459,866 rows as published, 441,358 kept).
+  The work list reads a filing's placeholder rows there with the same
+  pattern, on that table's two name columns, and takes them only under
+  the url the paid rows have.
+- **The list does not move.** 24,518 filings, the same object ids and
+  paid amounts as before. 1,104 carry a future amount, $7.10B; 580 of
+  them are for tax years 2020 on, $3.16B.
+- **Future placeholders off the list**, counted and not added: 34
+  filings with no paid placeholder at all, $0.27B, and 27 whose paid
+  placeholder fails the rule or whose filer is excluded, $0.43B.
 
 ### 1 · Resolve — the IRS's own copies
 
@@ -280,7 +299,8 @@ run's policy) about $270 (*Sample under POLICY_V1* below).
 
 **Input:** the per-page JSON and the target. Until 2026-09-28 also the
 rows GivingTuesday's extract itemised, and a future-payment target from
-the same extract; both are gone (stage 5).
+the same extract; both went (stage 5). The future target is back since
+2026-09-29, from the work list.
 **Output:** `pf_recovery_results` — per filing and per target (paid,
 future): outcome, extracted sum, error, evidence (labelled / names),
 whether a stated total matched, coverage, pages in original numbering,
@@ -362,17 +382,15 @@ What loads:
    in a filing whose list does not add up without them, and carry the
    label. On the frame that is 67 rows in 4 filings. Ledger pages no list
    needs, 1,863 rows and $886M on the frame, stay in `page_readings`.
-5. **Future-payment lists** (line 3b): none loads. The design had them
-   loaded with target `future` and left out of the matcher's view. The
-   target comes from the work list, the loaded tables hold no future
-   amount, and the frame's came from the extract, so there is nothing
-   for such a list to add up to. Future-payment pages stay in
-   `page_readings`. Decided on 2026-09-29 (Zein): the future amount
-   comes from GivingTuesday's future-payment datamart,
-   `990PFPart14Grants3B`, published at the same version as the paid one
-   and never loaded here. Once it is a source, the work list carries a
-   future amount and these lists load with target `future`, outside the
-   view. Not built.
+5. **Future-payment lists** (line 3b): loaded with target `future`,
+   outside the view, since 2026-09-29. On 2026-09-28 none loaded: the
+   target comes from the work list, the loaded tables held no future
+   amount, and the frame's came from the extract. Decided on 2026-09-29
+   (Zein): the future amount comes from GivingTuesday's future-payment
+   datamart, `990PFPart14Grants3B`, published at the same version as
+   the paid one and never loaded here. It is a source since that day,
+   the work list carries `placeholder_future`, and a list that adds up
+   to it loads. See *As built, 2026-09-29* below.
 6. **Flagged pages**: their rows carry the verdict. Leaving them out is a
    filter on the view, not a reload.
 7. **Filings marked as grants to individuals**: read, loaded, and
@@ -383,6 +401,10 @@ What loads:
    `placeholder_exceeds_declared`. The list adds up to the amount on the
    rows, which can hold more than the year's grants paid. 112 filings on
    the work list; on the frame 2 loaded filings, 195 rows, $24.7M.
+9. **Lists that add up only to the paid and the future amount
+   together** (2026-09-29): not loaded. The load counts them. Whether
+   they should load is open; the case is in the entry of that date
+   below.
 
 What the tables cannot say: whether a row names a person. The readers
 returned a status for 21% of rows on paid-list pages and "I" for 406
@@ -408,12 +430,78 @@ no model cost:
 `check` runs the last four and three more (the work list holds the amount
 a list reconciled against; no placeholder row of a loaded filing is left
 in the view; the view leaves out as many rows of a filing as the work
-list counted as placeholders) in seven seconds. The work list and the
+list counted as placeholders) in seven seconds. Since 2026-09-29 it
+holds the future rows to the same rules and has two more: no row of a
+reading is loaded under both targets, and no future row is in the view. The work list and the
 view build their test for a placeholder row from the same patterns, in
 `classifier.py`, and the last check holds them to it on the data: 422
 rows left out, 422 counted, no filing where the two differ.
 
-What the build found that the design had not:
+As built and measured on the frame, 2026-09-29 (session 6), all from
+the tables at no model cost and with nothing fetched from the IRS:
+
+| check | expected | found |
+|---|---|---|
+| the future amounts against the frame's | the datamart gives what the extract gave | 171 of the frame's 172 filings with a future placeholder are on the work list, each with the frame's amount to the cent, $2,071.4M; the other is a second version of a return |
+| the paid lists, with the future amount known | Kenan 2020 returns; no list is lost | 402 on the frame, 399 loaded; Kenan 2020's two lists both close on their totals, 136 and 55 rows. No other paid list changed its rows |
+| the future lists | the 71 of the first measurement | the same 71 filings, 3,873 rows, $950.4M in rows and declared; 55 beside a paid list and 16 alone |
+| lists that add up only to the two amounts together | the four named on 2026-09-28 | the four, $37.7M on their rows; counted by the load, not written |
+| Eden Hall 2022 | a future amount, if the filer had entered one on line 3b | none: the datamart has a future placeholder for it in 2016 to 2019 and 2021 and no row for 2022. Its load is unchanged, 164 rows under `placeholder_exceeds_declared` |
+| Johnson & Johnson 2021 | unchanged | no row in the datamart; unchanged, not reconciled |
+| with flagged pages left out | the floor of 327 | 328: T.L.L. Temple 2021, $26.5M, adds up once the future amount is known; $5.11B, 35.1% |
+| lineage and sums, both targets | every row joins to one reading and one verdict; every list within 0.5% | `check`, nine rules, 0 failures on 225,978 rows |
+| no future row in the view | the view holds paid rows | 0 of 71 filings |
+
+What the four lists show, from their page images:
+
+- **T.L.L. Temple 2020** does not add up at all. Its paid pages, 37 to
+  49, read $18.2M against $17.9M, and its future pages, 50 to 52, $6.6M
+  against $5.6M. The two amounts together are reached only by pages 38
+  to 51, a run that leaves out the first paid page and the last future
+  one. A combined target gives the search room to close on a
+  coincidence.
+- **Glenn 2023** has its paid list whole on one page, 31 grants,
+  $5,549,000 to the dollar, under the heading "Grants & Disbursements
+  Paid During the Year - And - Approved for Future Payment". The
+  heading names both, the selector reads "approved for future" in it,
+  and the page counts as a future page. The second page prints one
+  $50,000 row above its "Approved for Future Payment" line and outside
+  its total, so the future list reads $50,000 over.
+- **Northfield Bank 2022** attaches one list, "2022 approved grants",
+  105 items by county, total $715,650, the two amounts together.
+  Nothing on the pages sets the paid grants apart.
+- **Mitchelson 2021** starts its future list at the foot of the paid
+  list's last page: three grants, $7,500, after the paid total.
+
+So a combined target is needed by two of the four, $0.7M of paid grants
+between them, is wrong for one, and is the wrong cure for the fourth. A
+list loaded that way holds grants that were not paid, with nothing on a
+row to say which, so it could not go into the view as it stands. Two
+changes to the selector would do more: a heading that names both lists
+leaves the page's own label to decide, and a list that closes on its
+total in the middle of a page ends there. Neither is made here.
+
+One version per return of the future-payment rows, and the doubled
+blocks, are `current_grants.py`'s, whose docstring has the rule and the
+measurement. In short: the file doubles whole filings as the paid file
+does (316 of 3,099 filings processed in 2025 and 2026 are paired
+throughout, 12 of 23,118 before). The rule of 2026-09-29 halved a block
+when the paid rule had halved the same filing's paid block, 299
+filings, and left 17 whole that the paid rule could not judge, up to
+$7.4M counted twice. On 2026-09-30 the evidence changed to the filing's
+own row in `basic_fields_pf`, which a doubled batch repeats under one
+url and one sha, and which an amended copy stamped with the original
+url repeats under two: 315 of the 316 have it, the 316th is a genuine
+repeat, and no filing with the repeated row has unpaired rows. 315
+filings are halved under the url kept. The paid rule does not use the repeated row;
+it agrees with it on 10,154 of the 10,259 filings it halves. Measured
+the same day in PR #57, since it moves matcher inputs: the row would
+add 113 filings and $24.4M on the paid side, plus 2,383 nameless $0
+rows; the 105 the paid rule halves without it are 10 real doubles and
+95 forward-filled copies of one grant, a third defect that halving does
+not repair.
+
+What the build of 2026-09-28 found that the design had not:
 
 - **Eight rows from a page labelled a future-payment list are loaded**,
   in Eden Hall Foundation 2022. The filer entered two placeholder rows
@@ -2004,7 +2092,8 @@ Decided on 2026-09-29 (Zein):
   from GivingTuesday's future-payment datamart, `990PFPart14Grants3B`,
   loaded as a source like the paid one, not from each filing's XML.
   Until it is loaded the target is the paid amount alone, which costs
-  five of the frame's 406 lists.
+  five of the frame's 406 lists. Loaded the same day; one of the five
+  returns.
 - Rows that name a person load as they are. The regular grants table
   holds them too.
 - The cost cap is $800.
@@ -2013,8 +2102,26 @@ Decided on 2026-09-29 (Zein):
   the work list, on every row and in the view. 112 filings on the work
   list, 2 loaded.
 
+Built on 2026-09-29 (session 6), on the decision above:
+
+- GivingTuesday's future-payment datamart is a source, with one version
+  of each return. Its doubled blocks are halved on the evidence of the
+  paid block of the same filing.
+- The work list carries the future amount. The rule that puts a filing
+  on the list is the paid rule, as before.
+- The loader has a second target, `future`; its rows stay out of the
+  view.
+
 Still open:
 
+- Whether a list that adds up only to the paid and the future amount
+  together loads. Four filings on the frame; the case is in stage 5.
+- The paid rule halving on the repeated `basic_fields_pf` row beside
+  its line-25 test, as the future rule now does on the row alone:
+  decided on 2026-09-30 (Zein, on PR #57's measurement: 113 filings and
+  $24.4M left doubled), still to be made and gated. The third defect
+  PR #57 found, forward-filled copies of one grant, wants a rule of its
+  own; it is rare in the future-payment file.
 - Whether the view, `privategrants_current_w_recovered`, stays an object of
   its own or becomes what the matcher's first view reads, with no name
   of its own.

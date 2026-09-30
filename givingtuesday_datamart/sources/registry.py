@@ -141,6 +141,22 @@ REGISTRY: tuple[SourceSpec, ...] = (
         required_columns=("filerein",),
         indexes=(IndexSpec("ix_privategrants_filerein", ("filerein",)),),
     ),
+    # The other half of Part XIV line 3: grants approved for future payment.
+    # Same release and same shape as 3A, with the columns prefixed SIGOCAFF
+    # where 3A says SIGOCPY, and no person-name column. Placeholder recovery
+    # reads it for the amount a future-payment list must add up to
+    # (`placeholder_recovery.work_list`). GT published the file under two
+    # older names (990PFP15Grants3B, 990PFPart15Grants3B) until 2024; the
+    # regex takes the current name only, as the 3A entry does.
+    _spec(
+        logical_name="irs_990pf_grants_future",
+        staging_table_name="public.privategrants_future",
+        form_type="990-PF",
+        description="Form 990-PF Part XIV Grants/Contributions Approved for Future Payment (3B) — grant line items from private foundations.",
+        filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_990PFPart14Grants3B\.csv$",
+        required_columns=("filerein",),
+        indexes=(IndexSpec("ix_privategrants_future_filerein", ("filerein",)),),
+    ),
     # Officers staging tables are skipped from default refresh (2026-04-27).
     # The raw officers CSV is ~18 GB hot, ~2 GB for the PF side; together they
     # were the binding constraint on the shared RDS. Both `public.officers`

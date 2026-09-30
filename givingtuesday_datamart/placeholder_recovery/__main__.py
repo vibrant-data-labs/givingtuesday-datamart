@@ -54,7 +54,7 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="find and count; write nothing")
 
     for command, text in (("view", f"create {view.VIEW}, or replace it, for a policy's rows"),
-                          ("check", "lineage, the work list, the sums and the double count, on the loaded rows")):
+                          ("check", "lineage, the work list, the sums, the double count and the future rows, on the loaded rows")):
         p = sub.add_parser(command, help=text)
         p.add_argument("--policy", default="v2", help=policy_help)
         p.add_argument("--flagged", choices=FLAGGED_RULES, default=None)
@@ -65,6 +65,7 @@ def _work_list(session) -> None:
     started = time.monotonic()
     found = work_list.rebuild(session)
     print(work_list.summary(found))
+    print("\n" + work_list.future_summary(found, work_list.future_without_paid(session)))
     print(f"\n{len(found.filings):,} filings -> {work_list.TABLE} in {time.monotonic() - started:.0f} s")
 
 
@@ -77,7 +78,9 @@ def _load(session, policy: dict, object_id: str | None, dry_run: bool) -> None:
         shown = view.ensure_view(session, policy["version"])
         where = f"{loader.TABLE}; {view.VIEW} " + (
             "shows them" if shown else f"shows policy {view.shown_policy(session)}, not these")
-    print(f"\n{result.loaded:,} filings, {result.rows:,} rows -> {where}, in {time.monotonic() - started:.0f} s")
+    future = result.lists[loader.FUTURE]
+    print(f"\npaid: {result.loaded:,} filings, {result.rows:,} rows; future: {future.loaded:,} filings, "
+          f"{future.rows:,} rows -> {where}, in {time.monotonic() - started:.0f} s")
 
 
 def _check(session, version: str) -> bool:

@@ -1,6 +1,6 @@
 # Placeholder recovery: operations
 
-Vibrant Data Labs, September 25, 2026; updated September 28. How the placeholder-recovery
+Vibrant Data Labs, September 25, 2026; updated September 28 and 29. How the placeholder-recovery
 pipeline is run and what it writes: the five tables and the view, the
 policies, the one command, how to watch and stop a run, and what a run
 costs. The
@@ -28,7 +28,14 @@ call, and a change of rule re-derives from stored readings for free.
 
 Consumers read one view, `privategrants_current_w_recovered`:
 `privategrants_current` with the recovered grants in place of the
-placeholder rows they replace.
+placeholder rows they replace. It shows grants paid. A future-payment
+list is loaded into the table, marked `future`, and is not in the view.
+
+Two relations of the datamart feed the work list, and neither is
+written here: `privategrants_current`, the paid rows, and since
+September 29 `privategrants_future_current`, the rows approved for
+future payment, from GivingTuesday's `990PFPart14Grants3B` (source
+`irs_990pf_grants_future`). See *The future amount* below.
 
 The first and the last table, the view and the commands that write them
 are the package `givingtuesday_datamart/placeholder_recovery/`, where
@@ -49,14 +56,22 @@ filing: `object_id` (the 18 digits in the filing's url), `filerein`,
 I line 25 column (d), in cash), `declared_books` (the same line, column
 (a), per books), `placeholder_paid` (the amounts on the placeholder
 rows, summed; the target a list must add up to), `placeholder_rows`,
-`placeholder_texts` (the first two), `band` (A at $100M and over, B at
+`placeholder_texts` (the first two), `placeholder_future` (the amounts
+on the filing's placeholder rows of line 3b, in
+`privategrants_future_current`, summed; zero with none; the target a
+future-payment list must add up to) and `placeholder_future_rows`,
+`band` (A at $100M and over, B at
 $10M, C at $1M, D below, on `placeholder_paid`),
 `filer_marked_individual`, `placeholder_exceeds_declared` (the
 placeholder amount passes both columns of line 25 by more than 0.5%),
 `classifier_version`, `source_version` (the `_source_version` of the
 grant rows it was built from) and `built_at`.
 A filing is on the list when its placeholder rows sum to more than zero
-and to at least half of `declared_paid`. The command replaces the rows
+and to at least half of `declared_paid`. The future amount decides
+nothing about the list; it is read from the rows under the url the paid
+rows have, so it never comes from another version of the return. The
+command also prints how many filings have a future placeholder and are
+not on the list. The command replaces the rows
 in one transaction, about a minute and a half for 24,518 filings. The
 filers left out are in `data/placeholder_recovery/exclusions.csv`, one
 row each with EIN, name, evidence and date, tracked as plain text so a
@@ -107,15 +122,19 @@ under the `load_single` rule; the mark is the verdict. Verdicts under
 `<version>-<rule>` are the same policy with the flagged rule overridden,
 derived without a model call.
 
-**`privategrants_recovered`.** One grant of a list that adds up to the
-filing's `placeholder_paid` within 0.5%, under one policy.
+**`privategrants_recovered`.** One grant of a list that adds up within
+0.5%, under one policy: a paid list to the filing's `placeholder_paid`,
+a future-payment list to its `placeholder_future`. The two are searched
+for apart, and a filing can load either or both. A list that adds up
+only to the two amounts together is counted by the load and not
+written.
 
 | group | columns |
 |---|---|
-| key | `object_id`, `policy_version`, `target` (`paid`), `page`, `row_ordinal` |
+| key | `object_id`, `policy_version`, `target` (`paid` or `future`), `page`, `row_ordinal` |
 | content, as read | `recipient_name`, `recipient_address`, `recipient_status`, `purpose`; `amount`, numeric with cents |
 | for the matcher | `match_name` (the name, less a place printed at its end), `match_address` (the address, less the state and zip at its end), `state`, `zip5`, `state_source` (`address`, `name`, or NULL with no state) |
-| labels | `page_kind` (the reader's label for the row's page), `page_verdict` (`agreed`, `escalated`, `flagged`), `filer_marked_individual`, `placeholder_exceeds_declared` |
+| labels | `page_kind` (the reader's label for the row's page), `page_verdict` (`agreed`, `escalated`, `flagged`), `filer_marked_individual`, `placeholder_exceeds_declared` (always false on a future row: line 25 states grants paid) |
 | lineage | `filerein`, `taxyear`, `image_sha256`, `dpi`, `prompt_version`, `accepted_model`, `accepted_hash`, `declared_amount` (the amount the list reconciled against), `reconciliation_error`, `work_list_source_version`, `loaded_at` |
 
 `row_ordinal` is the row's index in the accepted reading's `rows`, from
@@ -150,6 +169,8 @@ end.
   those of the placeholder row it replaces. So a list shows only while
   the filing it was read from is the version `privategrants_current`
   holds.
+- The view shows rows loaded with target `paid`. Rows loaded as
+  `future` are grants approved, not paid, and stay in the table.
 - The view shows the rows of one policy, written into its definition.
   Only the `view` command changes which. A load under another policy
   leaves the view alone and says so.
@@ -157,6 +178,42 @@ end.
   CASCADE`, which takes the view with it. `load` creates it again when
   it is gone, and so does `view`. The matcher does not read the view
   yet.
+
+## The future amount
+
+Grants approved for future payment are a file of their own in
+GivingTuesday's catalog, loaded like any source and then reduced to one
+version of each return. In this order, since each step reads the one
+before:
+
+```bash
+python -m givingtuesday_datamart.sources refresh --source irs_990pf_grants_future
+python -m givingtuesday_datamart.current_grants --only privategrants_future_current
+python -m givingtuesday_datamart.placeholder_recovery work-list
+python -m givingtuesday_datamart.placeholder_recovery load --policy v2
+python -m givingtuesday_datamart.placeholder_recovery check --policy v2
+```
+
+| step | what it writes | measured, 2026-09-29 |
+|---|---|---|
+| `sources refresh` | `public.privategrants_future`, as published, with an index on `filerein` | 459,866 rows, 290 MB, 81 seconds; a default refresh takes it too |
+| `current_grants --only` | `public.privategrants_future_current` | 441,358 rows, 298 MB, about 90 seconds |
+| `work-list` | `placeholder_future` and `placeholder_future_rows` on every filing of the list | 1,104 filings with an amount, $7.10B; 86 seconds |
+| `load` | rows with `target = 'future'` beside the paid ones | 71 filings, 3,873 rows on the frame |
+
+`privategrants_future_current` is built in `current_grants.py` after
+`privategrants_current`, which it reads, and every full rebuild of the
+`_current` relations builds it in that order. `--only` builds it alone
+and touches nothing else: `privategrants_current` is not rebuilt, so
+the view is not dropped. Its rules: the latest url of a filer-year; no
+rows of a filer-year whose paid rows are held under a later url; a
+doubled block halved when every row of it is paired and the filing's
+own row in `basic_fields_pf` is repeated, which is what GivingTuesday's
+doubled batches do to every extract at once, and what an amended copy
+stamped with the original url does too (315 filings). It reads
+`privategrants_current` for the url only. The
+evidence is in the findings doc, *Future-payment lists*, and in the
+module's docstring.
 
 ## How a page is decided
 
@@ -205,8 +262,11 @@ reads found the gateway's limit.
 | piece | state |
 |---|---|
 | the work list | built: `work-list` writes `pf_placeholder_filings`, and `run` reads it in place of a frame file, by tax year and with a limit |
-| the loader and the view | built: `load` writes `privategrants_recovered` and leaves the view; `check` holds the loaded rows to seven rules |
-| the frame's rows, loaded | done: 398 filings, 221,969 rows, $7.03B under `v2` |
+| the loader and the view | built: `load` writes `privategrants_recovered` and leaves the view; `check` holds the loaded rows to nine rules |
+| the future-payment source | built and loaded on 2026-09-29: `irs_990pf_grants_future`, `privategrants_future_current`, the future amount on the work list, the loader's target `future` |
+| the frame's rows, loaded | done under `v2`: paid, 399 filings, 222,105 rows, $7.07B; future, 71 filings, 3,873 rows, $0.95B |
+| the 2020-on work list's rows, loaded | first loaded on 2026-09-30, when this branch's rerun found the production read's verdicts in the tables (6,350 filings): paid 4,607 filings, 582,676 rows, $16.2B; future 173 filings, 6,531 rows, $1.27B; 24 filings add up only to the two amounts together; `check` passes on all of it. The read's own session reports it |
+| a list that adds up only to paid and future together | not loaded, counted by `load`: 4 filings on the frame; whether it should load is open |
 | the extract's rows in the search | gone: the selector reads the pages and nothing else; the file is archived |
 | the matcher reading the view | not built: the name cleaner, the name-only tier and input shape version 3 go in on one rerun |
 | reading the work list | fetched, not read: tax years 2020 on are fetched and cut (2026-09-29), 28,906 pages to read, projected at $757, inside the cap of $800. Tax years 2015 to 2019 are fetched and cut too (the older renderers' widths measured 2026-09-29), 22,827 pages, projected at $598; 2009 to 2014 are not served |
@@ -237,7 +297,8 @@ without a new measurement.
 | work list | built from the loaded tables, every tax year; never from GivingTuesday's one-off extract |
 | exclusions | six patient-assistance programs, by EIN; filings marked as grants to individuals are read and labelled |
 | what loads | lists within 0.5% of the declared total; rows from pages that were read only; rows from pages labelled expenditure responsibility only where a list needs them, labelled |
-| targets | the work list's paid amount, until GivingTuesday's future-payment datamart (`990PFPart14Grants3B`) is loaded as a source; then a future amount too, and future lists load marked `future`, outside the view |
+| targets | the work list's paid amount and, since 2026-09-29, its future amount, from GivingTuesday's future-payment datamart (`990PFPart14Grants3B`); each list is searched for on its own; future lists load marked `future`, outside the view |
+| doubled blocks in the future-payment file | halved when every row is paired and the filing's `basic_fields_pf` row is repeated; nothing else is halved. The paid rule still tests against line 25; Zein chose on 2026-09-30 to add the repeated row beside it (PR #57 measured it), a change still to be made and gated |
 | a placeholder amount over both columns of line 25 | the filing is read and its list loads, every row labelled `placeholder_exceeds_declared`; a consumer filters on it |
 | the view | drops a filing's placeholder row once its list is loaded; shows one policy |
 
@@ -470,9 +531,10 @@ the S3 storage under a dollar a month.
 | base-pair wall time, 10,000 pages | under 6 h | 2 h 16 min for 9,926 pages in parallel |
 | cost of the frame | $300 to $430 as designed | $221.64 under v2 |
 | traceability | every loaded row joins to its verdict and two readings | 9,926 verdicts, 0 orphans |
-| a loaded row's lineage | one reading and one verdict a row, and the row's own line in the reading | 221,969 rows, 0 without either (`check`) |
-| a second load | writes nothing | 398 filings unchanged, 0 written |
-| no dollar counted twice | a loaded filing holds no more in the view than in `privategrants_current`, within 0.5% | 398 filings, 0 over |
+| a loaded row's lineage | one reading and one verdict a row, and the row's own line in the reading | 225,978 rows of both targets, 0 without either (`check`) |
+| a second load | writes nothing | 415 filings unchanged (399 with a paid list, 71 with a future one), 0 written, 0 taken out |
+| no dollar counted twice | a loaded filing holds no more in the view than in `privategrants_current`, within 0.5% | 399 filings, 0 over |
+| no future row in the view | the view holds paid rows only | 71 filings with future rows, 0 with one in the view (`check`) |
 | ground-truth reproduction | 58 / 2 / 23 on the 83 sample pages | 58 / 2 / 23 under v2, the same two wrong pages |
 
 ## Housekeeping
@@ -488,6 +550,15 @@ the S3 storage under a dollar a month.
   up costs minutes: Johnson & Johnson 2021, 836 pages, takes 90 seconds,
   and the frame's load spends 8 of its minutes there. Keeping a running
   count would fix it. The selector was not touched in the loader work.
+- `load` and `work-list` run their table's `ALTER TABLE ... ADD COLUMN
+  IF NOT EXISTS` at every start, and that asks for an exclusive lock.
+  On 2026-09-29 a load waited four minutes behind another session's
+  long read of the view, and a reader arriving meanwhile waits behind
+  the load. Testing for the column first would avoid the lock.
+- `load` walks every fetched filing of the work list, read or not:
+  12,477 on 2026-09-29, while the work list was being fetched, against
+  the frame's 553. With the database busy the frame's load took 20
+  minutes where it had taken 10.
 - `load` reads the whole work list's filings before it starts. At
   24,518 filings that is a second; it will want a filter by tax year
   when the list is read in parts.
@@ -495,6 +566,10 @@ the S3 storage under a dollar a month.
 ## Commands
 
 ```bash
+# the future-payment source, and one version per return of it
+python -m givingtuesday_datamart.sources refresh --source irs_990pf_grants_future
+python -m givingtuesday_datamart.current_grants --only privategrants_future_current
+
 # the work list, the run over it, the load, the view, the checks
 python -m givingtuesday_datamart.placeholder_recovery work-list
 python -m givingtuesday_datamart.placeholder_recovery run --policy v2 --tax-years 2020-2025 --cache /data/irs_index [--limit N] [--keep-list] [--dry-run] [--no-fetch]

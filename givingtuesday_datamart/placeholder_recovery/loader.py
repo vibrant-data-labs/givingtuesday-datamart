@@ -23,8 +23,16 @@ policy, so a load buys nothing and can be repeated.
    Filings whose placeholder amount passes both columns of line 25,
    labelled ``placeholder_exceeds_declared``: their list adds up to the
    amount on the rows and may hold more than the year's grants paid.
-6. The target is the work list's paid amount. The loaded tables hold no
-   future-payment amount, so no future-payment list loads.
+6. Two targets, from the work list: the paid amount, and the future
+   amount where the filing has one (``placeholder_future``, from
+   GivingTuesday's future-payment datamart). Each list is searched for on
+   its own and loads under its own ``target``, ``paid`` or ``future``. The
+   view shows the paid rows only. A future row carries
+   ``placeholder_exceeds_declared`` false: line 25 states grants paid, and
+   says nothing of what is approved.
+7. A list that adds up only to the two amounts together does not load. The
+   selector tries that sum when neither list is found; the load counts
+   such filings and writes nothing for them.
 
 **The rows.** ``row_ordinal`` is the row's index in the accepted reading's
 ``rows``, from 0, so a loaded row joins to its reading on (object_id, page,
@@ -35,9 +43,10 @@ address with the state and zip taken off their end (``address``); the view
 hands those to the matcher.
 
 **Reloading.** A load makes the table hold, for each filing in its scope,
-the rows the rule gives today: a filing whose stored rows are those rows is
-left alone, with its ``loaded_at``; any other has its rows under the policy
-deleted and written in one transaction. So a second load writes nothing.
+the rows the rule gives today, of both targets: a filing whose stored rows
+are those rows is left alone, with its ``loaded_at``; any other has its
+rows under the policy deleted and written in one transaction. So a second
+load writes nothing.
 
 **Tests.** The store is the small interface the other tables use, and the
 work list, filings, readings and verdicts are injectable, so nothing here
@@ -58,7 +67,7 @@ from sqlalchemy import text
 
 from givingtuesday_datamart import filing_images, page_readings
 from givingtuesday_datamart._internal.logger import logger
-from givingtuesday_datamart.attachment_grants import Extraction, GrantRow, extract_tables, page_tables
+from givingtuesday_datamart.attachment_grants import Extraction, GrantRow, Recovery, extract_tables, page_tables
 from givingtuesday_datamart.page_verdicts import Verdict, accepted_readings, check_policy
 from givingtuesday_datamart.placeholder_recovery import work_list
 from givingtuesday_datamart.placeholder_recovery.address import split_address, split_name
@@ -67,6 +76,8 @@ from givingtuesday_datamart.vlm_transcription import DPI
 
 TABLE = "privategrants_recovered"
 PAID = "paid"
+FUTURE = "future"
+TARGETS = (PAID, FUTURE)   # what loads; the selector's third, combined, never does
 CHUNK = 1000               # rows an INSERT statement
 BATCH = 200                # filings whose readings are held at once
 CENT = Decimal("0.01")
@@ -79,7 +90,7 @@ DDL = (
     CREATE TABLE IF NOT EXISTS {TABLE} (
         object_id                text NOT NULL,
         policy_version           text NOT NULL,
-        target                   text NOT NULL,            -- paid
+        target                   text NOT NULL,            -- paid | future
         page                     integer NOT NULL,         -- original PDF page number
         row_ordinal              integer NOT NULL,         -- index in the accepted reading's rows, from 0
         recipient_name           text NOT NULL,            -- content, as read
@@ -183,6 +194,18 @@ def select_paid(readings: Mapping[int, dict], paid: float) -> Extraction:
     return extract_tables(page_tables(readings, (paid,)), paid).paid
 
 
+def select_lists(readings: Mapping[int, dict], paid: float, future: float = 0.0) -> Recovery:
+    """The paid list and the future-payment list among a filing's accepted
+    readings, each searched for on its own. With no future amount it is
+    ``select_paid``. With one, the page reader is told both amounts and
+    their sum, so a list that closes on any of them ends there. When
+    neither list is found the selector tries the sum, and what it finds
+    comes back as the paid part with target ``combined``."""
+    if future <= 0:
+        return Recovery(paid=select_paid(readings, paid))
+    return extract_tables(page_tables(readings, (paid, future, paid + future)), paid, future)
+
+
 def _cells(item: Mapping) -> tuple[str, ...]:
     """A reading's row as the selector's cells: whitespace collapsed."""
     return tuple(" ".join(str(item.get(key) or "").split()) for key in CELLS)
@@ -230,6 +253,7 @@ def grant_from_row(filing: PlaceholderFiling, row: GrantRow, ordinal: int, verdi
     """One selected row as a table row, with its labels and its lineage."""
     name, address, status, purpose, _ = row.cells
     match_name, match_address, state, zip5, source = _located(name, address)
+    paid = found.target == PAID
     return RecoveredGrant(
         object_id=filing.object_id, policy_version=policy["version"], target=found.target, page=verdict.page,
         row_ordinal=ordinal,
@@ -238,25 +262,31 @@ def grant_from_row(filing: PlaceholderFiling, row: GrantRow, ordinal: int, verdi
         match_name=match_name, match_address=match_address or None, state=state, zip5=zip5, state_source=source,
         page_kind=page_kind, page_verdict=verdict.verdict,
         filer_marked_individual=filing.filer_marked_individual,
-        placeholder_exceeds_declared=filing.placeholder_exceeds_declared,
+        placeholder_exceeds_declared=filing.placeholder_exceeds_declared and paid,
         filerein=filing.filerein, taxyear=filing.taxyear, image_sha256=verdict.image_sha256, dpi=DPI,
         prompt_version=policy["prompt_version"], accepted_model=verdict.accepted_model,
-        accepted_hash=verdict.accepted_hash, declared_amount=filing.placeholder_paid,
+        accepted_hash=verdict.accepted_hash,
+        declared_amount=filing.placeholder_paid if paid else filing.placeholder_future,
         reconciliation_error=float(found.error), work_list_source_version=filing.source_version,
         loaded_at=loaded_at)
 
 
-def filing_rows(filing: PlaceholderFiling, accepted: Accepted, policy: Mapping,
-                loaded_at: datetime) -> list[RecoveredGrant]:
-    """The rows a filing loads under the policy: its paid list when the
-    accepted readings hold one that adds up, else nothing. A page with no
-    accepted reading (unreadable, or flagged under ``leave_out``) gives the
-    selector nothing."""
+def filing_lists(filing: PlaceholderFiling, accepted: Accepted) -> Recovery | None:
+    """What the selector finds for a filing among its accepted readings, or
+    None with nothing to search. A page with no accepted reading
+    (unreadable, or flagged under ``leave_out``) gives the selector
+    nothing."""
     readings = {page: response for page, (_, response) in accepted.items() if response is not None}
     if not readings:
-        return []
-    found = select_paid(readings, float(filing.placeholder_paid))
-    if not found.reconciled or found.target != PAID:
+        return None
+    return select_lists(readings, float(filing.placeholder_paid), float(filing.placeholder_future))
+
+
+def list_rows(filing: PlaceholderFiling, found: Extraction, accepted: Accepted, policy: Mapping,
+              loaded_at: datetime) -> list[RecoveredGrant]:
+    """The rows of one list: those of a paid or a future list that adds up,
+    else nothing."""
+    if not found.reconciled or found.target not in TARGETS:
         return []
     by_page: dict[int, list[GrantRow]] = defaultdict(list)
     for row in found.rows:
@@ -268,6 +298,16 @@ def filing_rows(filing: PlaceholderFiling, accepted: Accepted, policy: Mapping,
         for row, ordinal in zip(by_page[page], ordinals(reading, by_page[page])):
             loaded.append(grant_from_row(filing, row, ordinal, verdict, kind, found, policy, loaded_at))
     return loaded
+
+
+def filing_rows(filing: PlaceholderFiling, accepted: Accepted, policy: Mapping,
+                loaded_at: datetime) -> list[RecoveredGrant]:
+    """The rows a filing loads under the policy: its paid list and its
+    future-payment list, each when the accepted readings hold one that adds
+    up."""
+    found = filing_lists(filing, accepted)
+    return [row for part in (found.parts if found else ())
+            for row in list_rows(filing, part, accepted, policy, loaded_at)]
 
 
 def same_rows(stored: Sequence[RecoveredGrant], rows: Sequence[RecoveredGrant]) -> bool:
@@ -404,22 +444,11 @@ def ensure_table(session) -> None:
 
 
 @dataclass
-class LoadResult:
-    """What a load found and did. ``filings`` are the work-list filings in
-    scope; ``read`` those with an accepted reading; ``loaded`` those whose
-    list adds up. ``written``, ``unchanged`` and ``removed`` are filings:
-    rows replaced, rows already as the rule gives them, and rows taken out
-    because the filing no longer loads. The rest describes the rows of the
-    loaded filings, written this time or not."""
+class Lists:
+    """The lists of one target that add up: the filings, their rows and
+    dollars, and the rows by label."""
 
-    policy_version: str
-    dry_run: bool = False
-    filings: int = 0
-    read: int = 0
     loaded: int = 0
-    written: int = 0
-    unchanged: int = 0
-    removed: int = 0
     rows: int = 0
     dollars: Decimal = Decimal(0)
     declared: Decimal = Decimal(0)
@@ -438,6 +467,64 @@ class LoadResult:
                                  ("address", row.address_kind)):
                 self.labels[label][value] += 1
                 self.label_dollars[label][value] += row.amount
+
+
+@dataclass
+class LoadResult:
+    """What a load found and did. ``filings`` are the work-list filings in
+    scope; ``read`` those with an accepted reading, and ``read_future``
+    those of them with a future amount. ``lists`` holds, by target, the
+    lists that add up and their rows, written this time or not; ``loaded``,
+    ``rows``, ``dollars``, ``declared`` and ``labels`` are the paid
+    target's. ``combined`` are the filings whose rows add up to the two
+    amounts together and to neither alone: counted, not loaded.
+    ``written``, ``unchanged`` and ``removed`` are filings: rows replaced,
+    rows already as the rule gives them, and rows taken out because the
+    filing no longer loads."""
+
+    policy_version: str
+    dry_run: bool = False
+    filings: int = 0
+    read: int = 0
+    read_future: int = 0
+    written: int = 0
+    unchanged: int = 0
+    removed: int = 0
+    combined: int = 0
+    combined_declared: Decimal = Decimal(0)
+    lists: dict[str, Lists] = field(default_factory=lambda: {target: Lists() for target in TARGETS})
+
+    @property
+    def loaded(self) -> int:
+        return self.lists[PAID].loaded
+
+    @property
+    def rows(self) -> int:
+        return self.lists[PAID].rows
+
+    @property
+    def dollars(self) -> Decimal:
+        return self.lists[PAID].dollars
+
+    @property
+    def declared(self) -> Decimal:
+        return self.lists[PAID].declared
+
+    @property
+    def labels(self) -> dict[str, Counter]:
+        return self.lists[PAID].labels
+
+    def count(self, filing: PlaceholderFiling, found: Recovery, rows: Sequence[RecoveredGrant]) -> None:
+        """Count a read filing: what the selector found, and the rows of it that load."""
+        self.read += 1
+        self.read_future += filing.placeholder_future > 0
+        if found.paid.reconciled and found.paid.target not in TARGETS:
+            self.combined += 1
+            self.combined_declared += filing.placeholder_paid + filing.placeholder_future
+        for target in TARGETS:
+            of_target = [row for row in rows if row.target == target]
+            if of_target:
+                self.lists[target].count(of_target)
 
 
 def _batches(items: Sequence[str], size: int) -> Iterator[Sequence[str]]:
@@ -475,12 +562,14 @@ def load(session, policy: Mapping, *, object_id: str | None = None, dry_run: boo
     """Load the recovered grants of the work list's filings under ``policy``,
     or of the one filing ``object_id`` names.
 
-    1. The filings are the work list's; the target of each is its
-       ``placeholder_paid``.
+    1. The filings are the work list's; the targets of each are its
+       ``placeholder_paid`` and, where it has one, its
+       ``placeholder_future``.
     2. For each fetched filing with an attachment, the accepted reading of
        every page with a verdict under the policy (``accepted_readings``)
-       goes through the selector. A list that adds up gives the filing's
-       rows; anything else gives none.
+       goes through the selector. A paid or a future list that adds up
+       gives the filing's rows under that target; anything else gives
+       none.
     3. The filing's stored rows under the policy are replaced when they
        differ from those, in one transaction a filing. A full load also
        takes out the rows of filings that left the work list.
@@ -516,17 +605,18 @@ def load(session, policy: Mapping, *, object_id: str | None = None, dry_run: boo
         for (oid, page), found in accepted.items():
             by_filing[oid][page] = found
         for oid in batch:
-            if not by_filing.get(oid):
+            found = filing_lists(filings[oid], by_filing[oid]) if by_filing.get(oid) else None
+            if found is None:
                 continue
-            result.read += 1
-            rows = filing_rows(filings[oid], by_filing[oid], policy, loaded_at)
-            if rows:
-                result.count(rows)
+            rows = [row for part in found.parts
+                    for row in list_rows(filings[oid], part, by_filing[oid], policy, loaded_at)]
+            result.count(filings[oid], found, rows)
             if rows or oid in had_rows:
                 _sync(store, oid, rows, result)
                 seen.add(oid)
-        logger.info("load %s: %d of %d readable filings done, %d loaded, %d rows", version,
-                    min(len(readable), readable.index(batch[-1]) + 1), len(readable), result.loaded, result.rows)
+        logger.info("load %s: %d of %d readable filings done; paid %d loaded, %d rows; future %d loaded, %d rows",
+                    version, min(len(readable), readable.index(batch[-1]) + 1), len(readable), result.loaded,
+                    result.rows, result.lists[FUTURE].loaded, result.lists[FUTURE].rows)
     for oid in sorted(had_rows - seen):          # no list today: off the work list, or nothing accepted to read
         _sync(store, oid, [], result)
     if not dry_run and (result.written or result.removed):
@@ -543,24 +633,38 @@ def _millions(amount: Decimal) -> str:
     return f"${amount / Decimal(10 ** 6):,.1f}M"
 
 
+def _lists(target: str, found: Lists) -> list[str]:
+    lines = ((f"loaded: the {target} list adds up", f"{found.loaded:,}"), ("  rows", f"{found.rows:,}"),
+             ("  dollars, the rows' amounts", _millions(found.dollars)),
+             ("  dollars, the declared amounts", _millions(found.declared)))
+    return [f"  {label:<34}{value:>10}" for label, value in lines]
+
+
 def summary(result: LoadResult) -> str:
-    """Filings loaded, rows, dollars, and rows by label."""
+    """Filings loaded, rows and dollars by target, and rows by label."""
     wrote = "would write" if result.dry_run else "wrote"
+    future = result.lists[FUTURE]
     lines = [
         f"policy {result.policy_version}{', DRY RUN: nothing written' if result.dry_run else ''}",
         f"  filings on the work list in scope {result.filings:>10,}",
         f"  with an accepted reading          {result.read:>10,}",
-        f"  loaded: the paid list adds up     {result.loaded:>10,}",
-        f"  rows                              {result.rows:>10,}",
-        f"  dollars, the rows' amounts        {_millions(result.dollars):>10}",
-        f"  dollars, the declared amounts     {_millions(result.declared):>10}",
+        *_lists(PAID, result.lists[PAID]),
+        f"  read, with a future amount        {result.read_future:>10,}",
+        *_lists(FUTURE, future),
+        f"  adds up only to paid and future together, not loaded: {result.combined:,} filings, "
+        f"{_millions(result.combined_declared)}",
         f"  {wrote}: {result.written:,} filings; unchanged: {result.unchanged:,}; "
         f"rows taken out: {result.removed:,} filings",
     ]
     order = {"address": ADDRESS_KINDS}
-    for label in ("page_kind", "page_verdict", "filer_marked_individual", "placeholder_exceeds_declared", "address"):
-        counts = result.labels.get(label, Counter())
-        lines.append(f"\n  {label:<40}{'rows':>10}{'dollars':>14}")
-        for value in order.get(label, sorted(counts, key=lambda v: -counts[v])):
-            lines.append(f"    {value:<38}{counts[value]:>10,}{_millions(result.label_dollars[label][value]):>14}")
+    for target in TARGETS:
+        found = result.lists[target]
+        if target != PAID and not found.rows:
+            continue
+        for label in ("page_kind", "page_verdict", "filer_marked_individual", "placeholder_exceeds_declared",
+                      "address"):
+            counts = found.labels.get(label, Counter())
+            lines.append(f"\n  {f'{target}: {label}':<40}{'rows':>10}{'dollars':>14}")
+            for value in order.get(label, sorted(counts, key=lambda v: -counts[v])):
+                lines.append(f"    {value:<38}{counts[value]:>10,}{_millions(found.label_dollars[label][value]):>14}")
     return "\n".join(lines)

@@ -37,7 +37,8 @@ from givingtuesday_datamart.placeholder_recovery.work_list import PlaceholderFil
 FRAME_FILE = "work_list.csv"
 TEXT_SEPARATOR = " || "
 FRAME_COLUMNS = ("stratum", "filerein", "filer_name", "taxyear", "taxperend", "object_id", "placeholder_paid",
-                 "placeholder_rows", "placeholder_text", "stratum_pop", "stratum_pop_dollars",
+                 "placeholder_future", "placeholder_rows", "placeholder_future_rows", "placeholder_text",
+                 "stratum_pop", "stratum_pop_dollars",
                  "filer_marked_individual", "placeholder_exceeds_declared", "classifier", "source_version")
 
 
@@ -69,7 +70,8 @@ def frame_rows(chosen: Sequence[PlaceholderFiling], population: Iterable[Placeho
         "stratum": filing.band, "filerein": filing.filerein, "filer_name": filing.filer_name or "",
         "taxyear": filing.taxyear, "taxperend": filing.taxperend.isoformat() if filing.taxperend else "",
         "object_id": filing.object_id, "placeholder_paid": filing.placeholder_paid,
-        "placeholder_rows": filing.placeholder_rows,
+        "placeholder_future": filing.placeholder_future,
+        "placeholder_rows": filing.placeholder_rows, "placeholder_future_rows": filing.placeholder_future_rows,
         "placeholder_text": TEXT_SEPARATOR.join(filing.placeholder_texts),
         "stratum_pop": count[filing.band], "stratum_pop_dollars": dollars[filing.band],
         "filer_marked_individual": filing.filer_marked_individual,

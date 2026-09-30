@@ -12,6 +12,11 @@ recovered rows they would count the dollars twice. The view leaves them
 out, for the filings whose paid list is loaded under the view's policy and
 for those only. Grants the filer named in the form itself stay as they are.
 
+**Paid grants only.** The view shows the rows loaded with target ``paid``.
+A future-payment list is loaded too, with target ``future``, and stays out:
+its grants are approved, not paid, and ``privategrants_current`` holds none
+of that kind. ``check`` holds the view to it.
+
 **A recovered row's columns.** The name, less a place printed at its end,
 is the business name; the address, less the state and zip at its end, is
 address line 1; the state and the zip are in their own columns; status,

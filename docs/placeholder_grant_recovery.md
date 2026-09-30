@@ -7,11 +7,14 @@ September 23 and 24, 2026, for $222 in model calls, after a sample of 100
 filings read four times. On September 28 the rules for loading were
 settled, and the work list moved from GivingTuesday's one-off extract to
 the loaded tables, where it is 24,518 filings across tax years 2009 to
-2025. The work-list command and the loader were built the same day. The
-frame's lists are loaded: 398 filings, 221,969 grants, $7.03B. The
-matcher does not read them yet. On September 29 the rest of the 2020-on
-work list was fetched, 11,830 filings, and none of it is read yet: the
-read is projected at $757 and waits on a decision.
+2025. The work-list command and the loader were built the same day. On
+September 29 GivingTuesday's future-payment datamart became a source, so
+a filing's future amount is known and its future-payment list can load.
+The frame's lists are loaded: 399 filings, 222,105 grants paid, $7.07B,
+and beside them 3,873 grants approved for future payment, of 71 filings,
+$0.95B. The matcher does not read them yet. On September 29 the rest of
+the 2020-on work list was fetched, 11,830 filings, and none of it is
+read yet: the read is projected at $757 and waits on a decision.
 
 This is the findings document. How the method was built and measured,
 step by step, is the engineering log,
@@ -34,15 +37,23 @@ and the [production diagram](https://whimsical.com/FXWZBu4FE9RzpMYqWmupqd).
   foundation declared. A page is loaded only when two different models
   agree on its rows; four are tried in turn.
 - On the 1,000-filing frame, every filing over $10M plus a 6% sample of
-  the rest, it recovered the paid lists of 401 filings: $7.13B of the
-  $14.57B of paid grants on the frame's placeholder rows, 49.0%. That is
-  under the loading rule of September 28: the pages read are the only
-  source, and the paid amount the only target. Under the rule the frame
+  the rest, it recovered the paid lists of 402 filings: $7.17B of the
+  $14.57B of paid grants on the frame's placeholder rows, 49.2%. That is
+  under the loading rule: the pages read are the only source, a paid
+  list adds up to the paid amount, and a future-payment list to the
+  future amount. With the paid amount as the only target, until
+  September 29, it was 401 filings and 49.0%. Under the rule the frame
   was first measured by, which also took rows from GivingTuesday's
   extract and credited future-payment lists, it was 407 filings and
   48.3% of $16.6B. Leaving out every page no two readers agreed on, the
-  floor is 327 filings and 34.9%. Bands A and B, every filing over $10M,
-  are a census and are done: 212 of 460 filings, $6.93B.
+  floor is 328 filings and 35.1%. Bands A and B, every filing over $10M,
+  are a census and are done: 213 of 460 filings, $6.96B.
+- Future-payment lists load too, marked `future` and kept out of the
+  view of paid grants. 172 of the frame's filings carry a future
+  placeholder, $2.08B; 118 of them have an attachment to read, and the
+  future list of 71 adds up: $0.95B, 3,873 grants. The future amount
+  comes from GivingTuesday's future-payment datamart, loaded as a source
+  on September 29; it gives the frame's amounts to the cent.
 - What stops recovery is the data, not the readers. 447 of the 1,000
   filings, 34% of the dollars, have nothing to read: the IRS serves no
   image (169) or the PDF is the IRS's own rendering with nothing
@@ -67,17 +78,19 @@ and the [production diagram](https://whimsical.com/FXWZBu4FE9RzpMYqWmupqd).
   read. Rows from pages labelled expenditure responsibility load only
   where a list needs them, and carry the label. Filings marked as grants
   to individuals are read and labelled, not skipped.
-- The frame is loaded. `privategrants_recovered` holds 221,969 grants of
-  398 filings, each with the page it was read from, the verdict on that
-  page and the reading it came from. The other three of the 401 lists
-  are a second version of a return whose other version is loaded: the
-  extract listed both, and the loaded tables keep one. A view shows the
+- The frame is loaded. `privategrants_recovered` holds 222,105 grants
+  paid, of 399 filings, each with the page it was read from, the verdict
+  on that page and the reading it came from. The other three of the 402
+  lists are a second version of a return whose other version is loaded:
+  the extract listed both, and the loaded tables keep one. A view shows the
   recovered grants in place of the placeholder rows, so no dollar is
   counted twice.
-- Still open: the 3,091 "various" filings ($35.5B) the classifier never
-  sends to the PDF, the read of the work list for tax years 2015 on,
-  and the matcher pass that turns the recovered rows into
-  EINs, which is designed and not yet built.
+- Still open: whether a list that adds up only to the paid and the
+  future amount together should load (four on the frame, and the page
+  images say no for at least two), the 3,091 "various" filings ($35.5B)
+  the classifier never sends to the PDF, the read of the work list for
+  tax years 2015 on, and the matcher pass that turns the recovered rows
+  into EINs, which is designed and not yet built.
 
 ## Terms
 
@@ -95,7 +108,7 @@ and the [production diagram](https://whimsical.com/FXWZBu4FE9RzpMYqWmupqd).
 | readers | the vision-language models; the base pair (Qwen3-VL, Gemini 3.5 Flash Lite) reads every page, the escalation readers (Gemini 3.8 Flash, then Claude Sonnet 5) only the pages the base pair disagrees on |
 | page verdict | agreed (the base pair matched), escalated (an escalation reader matched an earlier reading), or flagged (no two readers agree) |
 | reconciled | a filing whose rows, read from its attachment, add up to its declared total within 0.5% and are labelled as grants; only then is it recovered, and the declared total is what is credited |
-| loaded | a reconciled list written to `privategrants_recovered`, one row a grant; the target is the paid amount on the work list |
+| loaded | a reconciled list written to `privategrants_recovered`, one row a grant, under its target: `paid`, against the paid amount on the work list, or `future`, against the future amount |
 | policy | the named, versioned set of rules a run uses: which readers, in what order, at what settings; `POLICY_V2` is the frame's |
 
 ## The problem
@@ -199,6 +212,21 @@ count rises from 42 filings for tax year 2009 to 2,925 for 2020 and
 falls to 2,012 for 2024. The IRS serves the images of tax years 2015 on
 and none before 2014, measured on September 29 (see "Shipping the
 rest").
+
+Since September 29 a filing on the list also carries a future amount:
+what its placeholder rows hold on line 3b, grants approved for future
+payment. It is read with the same pattern from GivingTuesday's
+future-payment datamart, from the same version of the return as the paid
+rows. 1,104 filings on the list have one, $7.10B; 580 of them are for
+tax years 2020 on, $3.16B. The amount puts no filing on the list and
+takes none off: the rule is the paid rule. 61 filings have a future
+placeholder and are not on the list. 34 of them have no paid placeholder
+at all, $0.27B, and 27 have one that fails the rule or belong to an
+excluded filer, $0.43B. Of the frame's 172 filings with a future
+placeholder, $2,077.8M, 171 are on the list, each with the frame's
+amount to the cent, $2,071.4M. The other, Native American Agriculture
+Fund 2020, is in the frame as a second version of its return; the
+version on the list holds $6.55M where the frame's held $6.33M.
 
 Six filers are left out, by EIN. All are drug-makers' patient-assistance
 programs. They give medicine to patients, so there is no recipient
@@ -346,22 +374,35 @@ Foundation 2020 and Marion and Henry Bloch Family Foundation 2022 still
 add up with one row fewer, and Elbridge Stuart Foundation 2021, $22.3M,
 does not. Eight filings that had not reconciled changed the reason why.
 
-The paid amount is the only target. The loaded tables hold no
-future-payment amount, and the frame's came from the extract. Taking it
-away costs five more lists, 406 to 401, and adds none:
+From September 28 to 29 the paid amount was the only target: the loaded
+tables held no future-payment amount, and the frame's came from the
+extract. Taking it away cost five lists, 406 to 401, and added none.
+Since September 29 the future amount comes from GivingTuesday's
+future-payment datamart, and the selector looks for each list on its
+own, the paid list against the paid amount and the future list against
+the future amount. One of the five returns, 402. The other four add up
+only to the two amounts together, which does not load:
 
-| filing | paid | future | with both amounts | with the paid amount alone |
-|---|---|---|---|---|
-| William R. Kenan Jr. Charitable Trust 2020 | $31.6M | $20.0M | paid and future lists both reconciled | nothing eligible: the future list comes first, and without its total the selector cannot see where it ends, so the paid pages after it continue it |
-| T.L.L. Temple Foundation 2020 | $17.9M | $5.6M | reconciled against the two together | the list is there at 102% of the paid amount |
-| Wilbur and Hilda Glenn Family Foundation 2023 | $5.5M | $7.9M | reconciled against the two together | nothing eligible |
-| Northfield Bank Foundation 2022 | $0.6M | $0.1M | reconciled against the two together | nothing eligible |
-| The Mitchelson Foundation 2021 | $0.1M | $0.07M | reconciled against the two together | nothing eligible |
+| filing | paid | future | with the paid amount alone | each list against its own amount | what the pages show |
+|---|---|---|---|---|---|
+| William R. Kenan Jr. Charitable Trust 2020 | $31.6M | $20.0M | nothing eligible: the future list comes first, and without its total the selector cannot see where it ends, so the paid pages after it continue it | both add up to the dollar: 136 grants paid, 55 approved | two lists, each closed by its total |
+| T.L.L. Temple Foundation 2020 | $17.9M | $5.6M | the list is there at 102% of the paid amount | neither: the paid pages read $18.2M and the future pages $6.6M | the two together add up only as pages 38 to 51 of a list on pages 37 to 52, which is a coincidence |
+| Wilbur and Hilda Glenn Family Foundation 2023 | $5.5M | $7.9M | nothing eligible | neither | the paid page adds up to the dollar, 31 grants, but one heading names both lists, so the selector takes it for a future page; the future page prints a $50,000 row above its own heading and outside its total |
+| Northfield Bank Foundation 2022 | $0.6M | $0.1M | nothing eligible | neither | one list of 105 "approved grants" by county, total $715,650; nothing sets the paid apart from the unpaid |
+| The Mitchelson Foundation 2021 | $0.1M | $0.07M | nothing eligible | neither | the future list starts at the foot of the paid list's last page, three grants, $7,500 |
 
-Four of the five never had a paid list that added up on its own. No
-list that reconciles both ways changed its pages or its error.
-`report --with-future` runs the selection with both amounts, for this
-comparison.
+No list that added up with the paid amount alone changed its pages or
+its error, and none was lost. With flagged pages left out the future
+amount returns another list, T.L.L. Temple Foundation 2021, $26.5M, so
+the floor goes from 327 filings to 328.
+
+Whether a list should load against the two amounts together is open,
+and it is a decision: such a list holds grants that were not paid, and
+nothing on its rows says which. The pages argue against it for T.L.L.
+Temple 2020, whose sum is a coincidence, and for Glenn, whose paid list
+is whole and needs a better reading of its heading. For Northfield Bank
+and Mitchelson, $0.7M of paid grants between them, it is the only way
+in. The load counts such filings and writes nothing for them.
 
 Pages the readers label as an expenditure-responsibility statement are a
 group of their own. They join a filing's list only when the paid pages
@@ -379,25 +420,28 @@ A has a readable attachment against 47% of bands C and D. Dollars are
 paid grants, the amount on the placeholder rows of line 3a; credit is
 the declared amount of each reconciled list, never the transcribed sum.
 The figures are under the loading rule: the pages read are the only
-source, and the paid amount the only target.
+source, and each list adds up to its own amount. The tables are in paid
+grants; the future-payment lists follow them, under *Future-payment
+lists*.
 
 | band | in frame | readable | reconciled | of frame | of readable | paid grants declared | recovered | dollars, of frame | dollars, of readable |
 |---|---|---|---|---|---|---|---|---|---|
 | A | 22 | 17 | 15 | 68% | 88% | $4,134M | $2,507M | 60.6% | 85.8% |
-| B | 438 | 281 | 197 | 45% | 70% | $9,909M | $4,419M | 44.6% | 69.5% |
+| B | 438 | 281 | 198 | 45% | 70% | $9,909M | $4,451M | 44.9% | 70.0% |
 | C | 137 | 64 | 51 | 37% | 80% | $429M | $173M | 40.4% | 77.9% |
 | D | 403 | 191 | 138 | 34% | 72% | $99M | $36M | 36.1% | 72.8% |
-| all | 1,000 | 553 | 401 | 40% | 73% | $14,571M | $7,135M | 49.0% | 74.7% |
+| all | 1,000 | 553 | 402 | 40% | 73% | $14,571M | $7,167M | 49.2% | 75.0% |
 
 | measure | filings | dollars |
 |---|---|---|
-| recovered, paid lists | 401 of 1,000 (40%) | $7.13B of $14.57B (49.0%) |
-| with flagged pages left out, the floor | 327 (33%): A 12, B 144, C 42, D 129 | $5.09B (34.9%) |
+| recovered, paid lists | 402 of 1,000 (40%) | $7.17B of $14.57B (49.2%) |
+| with flagged pages left out, the floor | 328 (33%): A 12, B 145, C 42, D 129 | $5.11B (35.1%) |
 | the 100-filing sample, for comparison | 47 (47%) | 55.7% |
 | the 390 filings added in bands C and D | 130 (33%) | 36.2% |
-| loaded into `privategrants_recovered` | 398 | $7.03B |
+| loaded into `privategrants_recovered`, paid | 399 | $7.07B |
+| loaded into `privategrants_recovered`, future | 71 | $0.95B |
 
-How the frame's figure moved on September 28, step by step:
+How the frame's figure moved on September 28 and 29, step by step:
 
 | rule | filings | credited |
 |---|---|---|
@@ -406,7 +450,8 @@ How the frame's figure moved on September 28, step by step:
 | the same 407, in paid grants | 407 | $7.21B of $14.57B (49.5%) |
 | without the extract's rows | 406 | $7.19B (49.3%) |
 | with the paid amount as the only target | 401 | $7.13B (49.0%) |
-| loaded: one version of each return, the one the loaded tables hold | 398 | $7.03B |
+| with the future amount from GivingTuesday's datamart, each list against its own amount (September 29) | 402 | $7.17B (49.2%) |
+| loaded: one version of each return, the one the loaded tables hold | 399 | $7.07B |
 
 The three lists that reconcile and do not load are Caterpillar
 Foundation 2023 (7,515 rows, $43.5M), The Comcast NBCUniversal
@@ -416,11 +461,11 @@ both read and both reconciled. The loaded tables keep one version of a
 return, and that one is loaded. So nothing is missing from the load: the
 frame had counted three returns twice, $100.8M.
 
-How closely the 401 lists add up to the declared paid total:
+How closely the 402 lists add up to the declared paid total:
 
 | the rows are off by | filings | paid grants |
 |---|---|---|
-| under $1 | 311 (78%) | $3.64B |
+| under $1 | 312 (78%) | $3.67B |
 | under $100 | 5 | $0.01B |
 | under 0.1% | 39 | $2.34B |
 | 0.1% to 0.5% | 46 | $1.15B |
@@ -441,32 +486,34 @@ What is not recovered, in paid grants:
 - **447 filings with nothing to read, $5.02B (34.4%).** 278 whose PDF is
   the IRS rendering and nothing else ($2.71B); 66 whose image the IRS
   returns as 404 ($1.30B); 103 with no image on the IRS site ($1.01B).
-- **152 readable filings that do not reconcile, $2.42B.** 77 where the
+- **151 readable filings that do not reconcile, $2.39B.** 77 where the
   list is present but the rows are off by more than 0.5% ($1.19B); 15
-  where a dense page came back partial ($0.59B); 57 whose attachment
-  holds no table that can be the paid list ($0.61B); 3 absent. The
+  where a dense page came back partial ($0.59B); 56 whose attachment
+  holds no table that can be the paid list ($0.58B); 3 absent. The
   first two are the readers' to improve; the third is the filer's,
-  apart from four lists the paid-only target gave up.
+  apart from the four lists that add up only to the paid and the future
+  amount together.
 
-The recovered rows of the 401 lists: 230,652 grants with name, address,
-purpose and amount, 35,959 of them (16%) from flagged pages and marked
+The recovered rows of the 402 lists: 230,788 grants with name, address,
+purpose and amount, 36,006 of them (16%) from flagged pages and marked
 as such. Every row carries the page verdict and the readings it came
 from, so any rule change re-derives from the tables at no model cost.
 
-What is loaded, 221,969 rows of 398 filings, by the labels on the rows:
+What is loaded as paid, 222,105 rows of 399 filings, by the labels on
+the rows:
 
 | label | value | rows | dollars |
 |---|---|---|---|
-| the page, as the reader labelled it | paid list | 221,894 | $7,029.9M |
+| the page, as the reader labelled it | paid list | 222,030 | $7,061.4M |
 | | expenditure responsibility | 67 | $3.2M |
 | | future-payment list | 8 | $0.9M |
-| the verdict on the page | agreed | 110,443 | $3,979.6M |
-| | escalated | 82,906 | $1,768.0M |
-| | flagged | 28,620 | $1,286.4M |
+| the verdict on the page | agreed | 110,449 | $3,981.0M |
+| | escalated | 82,989 | $1,789.2M |
+| | flagged | 28,667 | $1,295.3M |
 | the filer marked its grants as to individuals | yes | 117 | $0.2M |
-| | no | 221,852 | $7,033.7M |
+| | no | 221,988 | $7,065.3M |
 | the placeholder amount passes both columns of line 25 | yes | 195 | $24.7M |
-| | no | 221,774 | $7,009.3M |
+| | no | 221,910 | $7,040.8M |
 
 The 67 rows from expenditure-responsibility pages are in the four
 filings named above: Bader Philanthropies 2022 (28 rows), Paso del Norte
@@ -481,7 +528,13 @@ entered two placeholder rows on line 3a: "grants paid", $13.36M, and
 the list that adds up to it is both schedules: 27 of its rows, $5.2M,
 are grants approved and not paid. The reader labelled the first of those
 three pages a future-payment list; the two after it carry no heading and
-took the label of a paid list.
+took the label of a paid list. The future-payment datamart, loaded on
+September 29, agrees with that reading of the filing: it holds a future
+placeholder for Eden Hall in tax years 2016 to 2019 and 2021, $3.6M to
+$6.9M a year, and no row at all for 2022, the year the amount went on
+line 3a. So the filing has no future amount, nothing changes in its
+load, and its paid list still holds the $5.2M approved, under the mark
+described below.
 
 Nothing in the rule stops a placeholder amount from passing grants paid
 on Part I line 25. The rule reads column (d) of that line, which is on a
@@ -501,6 +554,110 @@ loads, and every row of it carries `placeholder_exceeds_declared`, so a
 consumer can leave it out. The work list carries the same mark on the
 112 filings, with both columns of line 25 beside the placeholder
 amount.
+
+### Future-payment lists
+
+Measured on September 29, the day GivingTuesday's future-payment
+datamart was loaded. Grants approved for future payment, line 3b, are a
+file of their own in GivingTuesday's catalog, `990PFPart14Grants3B`,
+published with the paid file and never loaded here until now. It is the
+source `irs_990pf_grants_future`, table `privategrants_future`, and
+`privategrants_future_current` keeps one version of each return:
+
+| | filings | rows | dollars |
+|---|---|---|---|
+| as published, release 2026_06_16, tax years 2009 to 2025 | 26,217 | 459,866 | $191.33B |
+| left out: an older version of a return | 392 | 13,808 | $7.98B |
+| left out: the paid rows are held under a later version | 25 | 55 | $0.02B |
+| left out: the second copy of a doubled block | in 315 | 4,645 | $2.03B |
+| kept | 25,800 | 441,358 | $181.30B |
+
+GivingTuesday's doubled blocks are in this file too, and they are in
+the same filings. Of the 3,099 filings the IRS processed in 2025 and
+2026, 316 list every future grant an even number of times; of the
+23,118 processed before, 12 do. In 311 of the 316 the paid rows of the
+same filing are all paired as well, and no filing has paired paid rows
+beside future rows that are not. The paid rule tests a doubled block
+against grants paid, Part I line 25, and no column holds a total
+approved for future payment, so that test cannot be copied.
+
+The evidence used instead, found on September 30: a doubled filing is
+doubled in every extract of its batch, so its own row in
+`basic_fields_pf` is there twice, under one url and one sha. 15,845
+filings are, every one processed in 2025 or 2026 and none before. Of
+the 316 paired filings, 315 have the repeated row, 314 under one sha
+and one (Kiwanis Club of Cape May 2020, $34,000) under two, an amended
+copy stamped with the original url, the shape PR #57 found to be a
+real double on the paid side; the one that has neither has paid rows
+that are not paired, a genuine repeat. No filing with a repeated row
+has future rows that are not paired. So a future block is halved when
+every row of it is paired and the filing's basic-fields row is
+repeated, under one sha or two: 315 filings under the url kept. For
+the four largest (Helmsley, Kern, MacArthur and Sergey Brin, all 2024)
+the rows and dollars kept equal the filing's own XML to the dollar. It
+is not what the paid rule does: that rule tests the halved sum against
+line 25 and never looks at the repeated row, and the two agree on
+10,154 of the 10,259 filings it halves. What the repeated row would do
+on the paid side was measured the same day, in its own pull request
+(#57), since a change there moves matcher inputs: it would halve 113
+more filings, $24.4M counted twice today, and 2,383 nameless $0 rows;
+of the 105 the paid rule halves without it, 10 are real doubles of the
+two-sha shape and 95 are a third defect, one grant forward-filled into
+empty groups, which halving does not repair and which wants a rule of
+its own. That third shape is rare in the future-payment file: about
+13 filings hold one grant two to four times with no repeated
+basic-fields row, a few million dollars at most.
+
+The rule first built, on September 29, borrowed the paid rule's verdict
+on the same filing instead (halve when the paid block was halved). It
+reached 299 of the 316 and could not judge 17 whose paid block gave the
+paid rule nothing to test, $14.8M as published, up to $7.4M counted
+twice; the two of them checked against their XML were doubled (The
+Jerrold and Jacqueline Glass Family Foundation 2024, $12.0M as
+published, and Okumura 2024). The repeated row reaches them. What it
+cannot catch is a doubled filing whose basic-fields row was not doubled
+with it, and none is known.
+
+On the frame, 172 filings carry a future placeholder. The selector
+looks for the future list on its own, among the pages the readers or
+the headings call a future-payment list, against the future amount:
+
+| band | with a future placeholder | on their rows | readable | future list adds up | dollars | of all, filings / dollars | of readable, filings / dollars |
+|---|---|---|---|---|---|---|---|
+| A | 9 | $537.1M | 6 | 3 | $157.3M | 33% / 29.3% | 50% / 58.4% |
+| B | 142 | $1,520.9M | 98 | 63 | $789.4M | 44% / 51.9% | 64% / 72.8% |
+| C | 12 | $18.8M | 7 | 4 | $3.6M | 33% / 19.4% | 57% / 34.1% |
+| D | 9 | $1.0M | 7 | 1 | $0.05M | 11% / 4.9% | 14% / 7.6% |
+| all | 172 | $2,077.8M | 118 | 71 | $950.4M | 41% / 45.7% | 60% / 69.6% |
+
+The 71 are the filings whose future list added up when the frame was
+first measured, with the amounts from the extract, $950.4M then and
+now: the datamart changes where the amount comes from and not what is
+found. 55 load beside the filing's paid list, $803.1M, and 16 alone,
+$147.3M. It was 56 and 15: Elbridge Stuart Foundation 2021 lost its
+paid list with the extract's rows and keeps its future one.
+
+What is loaded as future, 3,873 rows of 71 filings, $950.4M:
+
+| label | value | rows | dollars |
+|---|---|---|---|
+| the page, as the reader labelled it | future-payment list | 3,751 | $915.0M |
+| | paid list | 122 | $35.4M |
+| the verdict on the page | agreed | 2,176 | $639.8M |
+| | escalated | 1,261 | $244.5M |
+| | flagged | 436 | $66.1M |
+| what the row gives the matcher | state and zip | 1,723 | $635.0M |
+| | state, no zip | 855 | $85.7M |
+| | address text with no US state | 245 | $138.7M |
+| | no address | 1,050 | $91.0M |
+
+The 122 rows from pages labelled a paid list are continuation pages of
+a future list: a page with no heading of its own takes the list of the
+page before it. A future row is never marked
+`placeholder_exceeds_declared`: line 25 states grants paid and says
+nothing of what is approved. The rows are in `privategrants_recovered`
+with `target = 'future'` and are not in the view, which shows paid
+grants; `check` holds the view to that.
 
 The sample, read first, gave 47 filings and 55.7%; the frame added 540
 small filings the sample under-represented, and the rate came down.
@@ -595,11 +752,13 @@ the place. It narrows its search by zip, or by an exact name when the
 state is the same, and it scores the address as one string. So a row
 needs a zip or a state. It never needs the street split from the city.
 
-Measured on the frame's 401 reconciled paid lists: 230,652 rows read
-from attachments, $7.13B. Code: `placeholder_recovered_rows.py`, commands
+Measured on September 28 on the frame's 401 reconciled paid lists, the
+paid amount being the only target then: 230,652 rows read from
+attachments, $7.13B. Code: `placeholder_recovered_rows.py`, commands
 `address` and `names`, from the tables at no model cost. The loader
-writes the same five classes for the 398 filings it loads, and prints
-them.
+writes the same five classes for the filings it loads, 398 then, and
+prints them. Kenan 2020, back since September 29, adds 136 rows to
+both sides, 133 of them with a state and a zip.
 
 | what the address gives | rows | of rows | dollars | of dollars | loaded rows | loaded dollars |
 |---|---|---|---|---|---|---|
@@ -859,14 +1018,11 @@ Left out by decision, among what was read:
   `page_readings`.
 - Rows from GivingTuesday's one-off extract: none is loaded, and none is
   used in the search. One list, $22.3M, went with them.
-- Future-payment lists: none loads yet, since the loaded tables hold no
-  future amount to add up to. Decided on September 29: the amount will
-  come from GivingTuesday's future-payment datamart, which we have not
-  loaded, and the lists will load marked `future`. On the frame 56 had
-  reconciled beside
-  their paid list, $0.81B, and 15 alone. Four lists that added up only
-  against paid and future together, and one that needed the future
-  total to find where its paid list began, went with them.
+- Lists that add up only to the paid and the future amount together:
+  four on the frame, $37.7M on their rows. Future-payment lists
+  themselves load since September 29, marked `future`, 71 on the frame,
+  and the list that needed the future total to find where its paid list
+  began is back.
 - A second version of a return: the loaded tables keep one, and the
   load follows them. Three on the frame, 8,683 rows, each the double of
   a list that is loaded.
@@ -941,7 +1097,7 @@ were found:
     the 12% that close between 0.1% and 0.5%.
 25. The first headline credited future-payment lists too. In paid grants
     alone the same 407 lists were 49.5%; under the loading rule the
-    frame recovers 401 lists and 49.0%.
+    frame recovers 402 lists and 49.2%.
 26. Six patient-assistance programs hold 40% of all placeholder dollars.
     A name pattern cannot find them: nine of fifteen filers named like
     them are ordinary foundations.
@@ -980,7 +1136,7 @@ were found:
 | agreement is equal name-and-amount multisets, at least one row | amounts alone hide shifted names; two empty readings agreed once and were wrong | Sept 22 |
 | same-model repeats never count | wrong on 6 of 57 self-agreements | Sept 22 |
 | prompt v4, 200 DPI | v4 inside run-to-run noise for Gemini, a small gain for Qwen; 130 DPI misread digits, 300 cost more for nothing | Sept 22 |
-| flagged pages loaded from Sonnet's reading, marked | 11 of 23 right on the sample; 40 of 57 and 94% of dollars on the small filings; leave-out gives 327 filings and 34.9% of paid grants | Sept 22, measured Sept 24 and 28 |
+| flagged pages loaded from Sonnet's reading, marked | 11 of 23 right on the sample; 40 of 57 and 94% of dollars on the small filings; leave-out gives 328 filings and 35.1% of paid grants | Sept 22, measured Sept 24, 28 and 29 |
 | a base reader out of attempts is absent for the page, which goes through the dispute path | a reader timing out three times on a dense page must not kill a page three other readers can decide | Sept 23 |
 | paid and future lists reconciled separately; the headline counts the filings whose paid list reconciled | 15 frame filings reconcile only their future list | Sept 24 |
 | the frame's C and D split, 137 and 403 at one sampling fraction | rates set by availability, not count | Sept 24 |
@@ -992,11 +1148,14 @@ were found:
 | nothing from GivingTuesday's one-off extract is loaded or used in the search | 406 of the frame's 407 lists reconcile without its rows; one filing, $22.3M, is lost | Sept 28, measured the same day |
 | the target is the paid amount on the work list; no future-payment list loads, until the future amount is in the loaded tables | the loaded tables hold no future amount; 5 of 406 lists are lost and none gained | Sept 28, measured the same day |
 | the future amount comes from GivingTuesday's future-payment datamart, `990PFPart14Grants3B`, loaded like the paid one; future lists then load marked `future`, outside the view | the datamart is published at the same version as the paid one and was never loaded; the filing's own XML is not the source | Sept 29 |
+| one version per return of the future-payment rows; a doubled block is halved when every row is paired and the filing's `basic_fields_pf` row is repeated, under one sha or two | 316 of 3,099 filings processed in 2025 and 2026 are paired throughout, 12 of 23,118 before; 315 of the 316 have the repeated row and the other is a genuine repeat; no filing with the repeated row has unpaired rows; four checked against their XML to the dollar. Built first on the paid rule's verdict, which reached 299 and left 17 (up to $7.4M) whole | Sept 29, rule changed Sept 30 |
+| the work list carries the future amount; it puts no filing on the list | 1,104 filings on the list have one, $7.10B; the frame's 171 agree to the cent; 61 filings with a future placeholder are not on the list, $0.70B | Sept 29 |
+| a future list loads against the future amount, marked `future`, outside the view; a list that adds up only to the two amounts together does not load, pending a decision | 71 future lists on the frame, $0.95B; Kenan 2020's paid list returns; the four others are one coincidence, one paid list taken for a future one, and two lists whose pages do not set paid apart from approved | Sept 29 |
 | six patient-assistance programs are left out, by EIN | $32.7B, 40% of placeholder dollars; the purpose on the placeholder row says donated medicine; a name pattern misfires on nine filers of fifteen | Sept 28 |
 | filings marked as grants to individuals are read, and labelled at the load | the mark removes 743 filings and $0.39B, ordinary grantmakers among them; reading them costs about $20 | Sept 28 |
 | rows from pages labelled expenditure responsibility load only where a list needs them, with the label; ledger pages no list needs never load | 67 rows and $3.2M in 4 filings, loaded; the other 1,888 rows read are a ledger across years, held for some filers and not others | Sept 28 |
 | the 0.5% tolerance stays; lists within 10% of the total do not load | a wider band on a $100M filing lets in $5M of unexplained rows; 58 filings and $855M stay out; a tolerance by filer size is a later question | Sept 28 |
-| the view drops a loaded filing's placeholder rows, and shows one policy's rows | the rows carry the whole amount; on the 398 loaded filings the view holds $7,163.2M where `privategrants_current` holds $7,163.5M | Sept 28 |
+| the view drops a loaded filing's placeholder rows, and shows one policy's rows | the rows carry the whole amount; on the 399 loaded filings the view holds $7,194.8M where `privategrants_current` holds $7,195.0M | Sept 28 |
 
 ## Next steps
 
@@ -1004,9 +1163,17 @@ Done on September 28: the work-list command, `run` over the work list,
 the loader, the view and the checks; the extract's rows out of the
 search; the frame loaded.
 
-1. Load GivingTuesday's future-payment datamart, `990PFPart14Grants3B`,
-   as a source; give the work list a future amount from it; load the
-   future lists marked `future`, outside the view.
+Done on September 29: GivingTuesday's future-payment datamart loaded as
+a source, with one version of each return; the future amount on the
+work list; the future lists loaded marked `future`, outside the view;
+the checks extended to them.
+
+1. Decide whether a list that adds up only to the paid and the future
+   amount together loads, and under what mark. Four filings on the
+   frame. Two smaller changes to the selector would do more for them: a
+   heading that names both lists should leave the page's own label to
+   decide (Glenn 2023), and a list that closes on its total in the
+   middle of a page should end there (Mitchelson 2021).
    Still to confirm: whether the view stays an object of its own.
 2. Put the view into the matcher, with the name cleaner and the
    name-only tier. One matcher rerun takes all of it; the matching
@@ -1076,13 +1243,21 @@ search; the frame loaded.
 - Bands A and B are exact. Bands C and D are a 6% sample: about 8 and 5
   points of error on their rates.
 - Credit is the declared amount, not the transcribed sum. The frame's
-  49.0% is in paid grants, under the loading rule. The first headline,
+  49.2% is in paid grants, under the loading rule. The first headline,
   48.3%, credited future-payment lists and used rows from the extract.
 - The frame counts six returns twice, in two versions each; three of
   them reconcile twice. The load holds one version.
 - The work list's costs and recoveries come from the frame's rates. The
   large filings new to the list were never sampled, and no filing before
   tax year 2020 has been fetched.
+- A future list adds up to the amount on the filing's placeholder rows
+  of line 3b, as GivingTuesday's future-payment datamart holds it. That
+  file doubles whole filings as the paid one does; the repair halves a
+  paired block when the filing's `basic_fields_pf` row is repeated, and
+  a doubled filing whose basic-fields row was not doubled with it would
+  escape it, though none is known. Ten filings on the list take their
+  future amount from a block that was halved, $21.8M; unrepaired, the
+  amount would have been twice the list.
 - A loaded list adds up to the amount on the filing's placeholder rows.
   On 2 loaded filings that amount passes both columns of line 25, by
   $5.4M in all, and one of the two lists holds grants approved for

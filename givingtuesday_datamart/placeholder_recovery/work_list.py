@@ -22,6 +22,15 @@ and carries ``placeholder_exceeds_declared``: a filer can enter its grants
 approved for future payment as a second placeholder row, and the list that
 adds up then holds both schedules.
 
+**The future amount.** Grants approved for future payment, line 3b, are a
+table of their own, ``privategrants_future_current``. A filing on the list
+carries the amount on its placeholder rows there (``placeholder_future``,
+zero when it has none): what a future-payment list must add up to. The rows
+are those of the filing itself, under the url the paid rows have, so an
+amount never comes from another version of the return. The amount puts no
+filing on the list and takes none off; ``future_without_paid`` counts the
+filings that have a future placeholder and are not on the list.
+
 **The build.** One query finds every placeholder filing (``QUERY``, about a
 minute), ``build`` turns its rows into the list, and ``rebuild`` replaces
 the table's rows in one transaction, so a reader sees the old list or the
@@ -73,6 +82,8 @@ DDL = (
         placeholder_paid        numeric(18,2) NOT NULL,   -- the placeholder rows' amounts, summed
         placeholder_rows        integer NOT NULL,
         placeholder_texts       text[] NOT NULL,          -- the first two, largest amount first
+        placeholder_future      numeric(18,2) NOT NULL DEFAULT 0,   -- the placeholder rows of line 3b, summed
+        placeholder_future_rows integer NOT NULL DEFAULT 0,
         band                    text NOT NULL,            -- A | B | C | D, cut on placeholder_paid
         filer_marked_individual boolean NOT NULL,         -- the filing's rows are mostly marked "I"
         placeholder_exceeds_declared boolean NOT NULL DEFAULT false,   -- placeholder_paid passes both columns of line 25
@@ -85,7 +96,24 @@ DDL = (
     # For a table made before 2026-09-29, when the two columns were added.
     f"ALTER TABLE {TABLE} ADD COLUMN IF NOT EXISTS declared_books numeric(18,2)",
     f"ALTER TABLE {TABLE} ADD COLUMN IF NOT EXISTS placeholder_exceeds_declared boolean NOT NULL DEFAULT false",
+    # For a table made before the future amount was added, later on 2026-09-29.
+    f"ALTER TABLE {TABLE} ADD COLUMN IF NOT EXISTS placeholder_future numeric(18,2) NOT NULL DEFAULT 0",
+    f"ALTER TABLE {TABLE} ADD COLUMN IF NOT EXISTS placeholder_future_rows integer NOT NULL DEFAULT 0",
 )
+FUTURE = "privategrants_future_current"
+
+# The placeholder rows of line 3b, one row per filing that has any: the same
+# pattern on the future-payment table's name columns.
+FUTURE_PLACEHOLDERS = f"""
+    SELECT g.filerein, g.taxyear, g.url, coalesce(sum({classifier.amount_sql('g.' + classifier.FUTURE_AMOUNT)}), 0)
+               AS placeholder_future, count(*) AS placeholder_future_rows
+    FROM {FUTURE} g
+    CROSS JOIN LATERAL (SELECT {classifier.name_sql('g', classifier.FUTURE_NAMES)} AS name OFFSET 0) n
+    WHERE g.taxyear ~ '{classifier.TAX_YEAR}'
+      AND {classifier.prefilter_sql('g', classifier.FUTURE_NAMES)}
+      AND {classifier.pointer_sql('n.name')}
+    GROUP BY g.filerein, g.taxyear, g.url
+"""
 
 # One row per placeholder filing, the excluded filers' among them. The
 # pointer rows are found first, in one pass over the grant rows; the columns
@@ -114,10 +142,13 @@ listed AS (
           FROM basic_fields_pf_current
           WHERE taxyear ~ '{classifier.TAX_YEAR}') d USING (filerein, taxyear)
     WHERE d.declared_paid > 0 AND p.placeholder_paid > 0 AND p.placeholder_paid >= 0.5 * d.declared_paid
-)
+),
+future AS ({FUTURE_PLACEHOLDERS})
 SELECT l.filerein, l.taxyear, l.declared_paid, l.declared_books, l.placeholder_paid, l.placeholder_rows,
        l.placeholder_texts,
-       f.url, f.urls, f.filer_name, f.taxperend, f.source_version, f.filer_marked_individual
+       f.url, f.urls, f.filer_name, f.taxperend, f.source_version, f.filer_marked_individual,
+       coalesce(u.placeholder_future, 0) AS placeholder_future,
+       coalesce(u.placeholder_future_rows, 0) AS placeholder_future_rows
 FROM listed l
 CROSS JOIN LATERAL (
     SELECT max(g.url) AS url, count(DISTINCT g.url) AS urls, max(g.filername1) AS filer_name,
@@ -126,7 +157,35 @@ CROSS JOIN LATERAL (
     FROM privategrants_current g
     WHERE g.filerein = l.filerein AND g.taxyear = l.taxyear
 ) f
+LEFT JOIN future u ON u.filerein = l.filerein AND u.taxyear = l.taxyear AND u.url = f.url
 ORDER BY l.taxyear, l.filerein
+"""
+
+# The filings with a future placeholder that the list does not hold, by why:
+# the filing is on the list under another url (another version of the
+# return), its filer-year has paid placeholder rows and fails the rule or is
+# an excluded filer's, or it has no paid placeholder row at all. Reads the
+# table, so it follows a rebuild.
+FUTURE_WITHOUT_PAID = f"""
+WITH future AS ({FUTURE_PLACEHOLDERS}),
+paid AS (
+    SELECT DISTINCT g.filerein, g.taxyear
+    FROM privategrants_current g
+    JOIN (SELECT DISTINCT filerein FROM future) u USING (filerein)
+    CROSS JOIN LATERAL (SELECT {classifier.name_sql('g')} AS name OFFSET 0) n
+    WHERE {classifier.prefilter_sql('g')} AND {classifier.pointer_sql('n.name')}
+)
+SELECT CASE WHEN w.object_id IS NOT NULL THEN 'on the list under another url'
+            WHEN p.filerein IS NOT NULL THEN 'paid placeholder, not on the list'
+            ELSE 'no paid placeholder' END AS why,
+       count(*) AS filings, count(DISTINCT u.filerein) AS filers, sum(u.placeholder_future) AS dollars
+FROM future u
+LEFT JOIN {TABLE} w ON w.filerein = u.filerein AND w.taxyear::text = u.taxyear
+LEFT JOIN paid p ON p.filerein = u.filerein AND p.taxyear = u.taxyear
+WHERE u.placeholder_future > 0
+  AND NOT (w.object_id IS NOT NULL AND position(w.object_id in u.url) > 0)
+GROUP BY 1
+ORDER BY 1
 """
 
 
@@ -145,6 +204,8 @@ class PlaceholderFiling:
     placeholder_paid: Decimal
     placeholder_rows: int
     placeholder_texts: list[str]
+    placeholder_future: Decimal
+    placeholder_future_rows: int
     band: str
     filer_marked_individual: bool
     placeholder_exceeds_declared: bool
@@ -203,6 +264,8 @@ def filing_from_row(row: Mapping, built_at: datetime) -> PlaceholderFiling:
         placeholder_paid=paid,
         placeholder_rows=int(row["placeholder_rows"]),
         placeholder_texts=_texts(row["placeholder_texts"] or ()),
+        placeholder_future=Decimal(row.get("placeholder_future") or 0),
+        placeholder_future_rows=int(row.get("placeholder_future_rows") or 0),
         band=band(paid),
         filer_marked_individual=bool(row["filer_marked_individual"]),
         placeholder_exceeds_declared=exceeds_declared(paid, declared, books),
@@ -364,6 +427,12 @@ def rebuild(session, *, exclusions: Mapping[str, Exclusion] | None = None, rows:
     return found
 
 
+def future_without_paid(session) -> list[Mapping]:
+    """The filings with a future placeholder that are not on the list, by
+    why: the rows of ``FUTURE_WITHOUT_PAID``. They are counted, never added."""
+    return list(session.execute(text(FUTURE_WITHOUT_PAID)).mappings().all())
+
+
 def select(filings: Iterable[PlaceholderFiling], *, tax_years: Collection[int] | None = None,
            limit: int | None = None) -> list[PlaceholderFiling]:
     """The filings of ``tax_years`` (every year when None), largest
@@ -400,6 +469,7 @@ def summary(found: WorkList) -> str:
              _line("the work list", listed),
              _line("  of which marked individual", [row for row in listed if row.filer_marked_individual]),
              _line("  of which over line 25", [row for row in listed if row.placeholder_exceeds_declared]),
+             _line("  of which with a future amount", [row for row in listed if row.placeholder_future > 0]),
              _line(f"  tax years {MEASURED_FROM} on", recent),
              _line(f"  tax years before {MEASURED_FROM}", earlier)]
     versions = Counter(row.source_version for row in listed)
@@ -420,4 +490,19 @@ def summary(found: WorkList) -> str:
         rows = by_year[year]
         lines.append(f"  {year:<10}{len(rows):>8,}{_billions(sum((r.placeholder_paid for r in rows), Decimal(0))):>12}"
                      f"{sum(r.filer_marked_individual for r in rows):>20,}")
+    return "\n".join(lines)
+
+
+def future_summary(found: WorkList, without: Iterable[Mapping] = ()) -> str:
+    """The future-payment placeholders: on the list, which is where a future
+    list can load, and not on it (the rows of ``future_without_paid``)."""
+    lines = [f"  {'future-payment placeholders':<46}{'filings':>8}{'filers':>8}{'on rows':>12}"]
+    for label, rows in (("on the work list", found.filings),
+                        (f"  tax years {MEASURED_FROM} on", [r for r in found.filings if r.taxyear >= MEASURED_FROM])):
+        rows = [row for row in rows if row.placeholder_future > 0]
+        dollars = sum((row.placeholder_future for row in rows), Decimal(0))
+        lines.append(f"  {label:<46}{len(rows):>8,}{len({row.filerein for row in rows}):>8,}{_billions(dollars):>12}")
+    for row in without:
+        label = f"not on it: {row['why']}"
+        lines.append(f"  {label:<46}{row['filings']:>8,}{row['filers']:>8,}{_billions(Decimal(row['dollars'])):>12}")
     return "\n".join(lines)

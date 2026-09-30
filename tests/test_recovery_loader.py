@@ -35,12 +35,13 @@ LIST = [_grant("River Fund Inc", 100, "711 Third Avenue New York NY 10017", "PC"
         _grant("Fondation de France", 50, "40 avenue Hoche Paris 75008")]
 
 
-def _filing(oid=OID, paid="300", filer_marked_individual=False, declared=None):
+def _filing(oid=OID, paid="300", filer_marked_individual=False, declared=None, future="0"):
     declared = Decimal(declared or paid)
     return wl.PlaceholderFiling(
         object_id=oid, filerein="731312965", filer_name="A Foundation", taxyear=2022, taxperend=date(2022, 12, 31),
         declared_paid=declared, declared_books=declared, placeholder_paid=Decimal(paid), placeholder_rows=1,
-        placeholder_texts=["SEE ATTACHED"], band="D", filer_marked_individual=filer_marked_individual,
+        placeholder_texts=["SEE ATTACHED"], placeholder_future=Decimal(future),
+        placeholder_future_rows=int(Decimal(future) > 0), band="D", filer_marked_individual=filer_marked_individual,
         placeholder_exceeds_declared=wl.exceeds_declared(Decimal(paid), declared, declared),
         classifier_version="v2", source_version="2026_06_16", built_at=AT)
 
@@ -192,6 +193,102 @@ def test_a_list_whose_target_passes_line_25_loads_and_every_row_says_so(stores, 
     assert {r.declared_amount for r in rows} == {Decimal("500")}               # the list adds up to the rows
     assert dict(result.labels["placeholder_exceeds_declared"]) == {"true": 5}
     assert "placeholder_exceeds_declared" in ld.summary(result)
+
+
+PAID_LIST = [_grant(f"Paid Grantee {i}", 100) for i in range(3)] + [_grant("Total", 300)]
+FUTURE_LIST = [_grant(f"Pledged Grantee {i}", 50, "1 Main Street Durham NC 27701") for i in range(4)]
+
+
+def _read_both(stores, tmp_path, paid=PAID_LIST, future=FUTURE_LIST, paid_heading="Grants paid during the year"):
+    """A paid list on page 3 and a future-payment list on page 4, agreed."""
+    _read(stores, 3, paid, heading=paid_heading)
+    _read(stores, 4, future, kind="grants_future_list", heading="Grants approved for future payment")
+    _decide(stores, tmp_path, 3, 4)
+
+
+def test_a_future_list_that_adds_up_loads_marked_future_beside_the_paid_one(stores, tmp_path):
+    _read_both(stores, tmp_path)
+    recovered = ld.MemoryStore()
+    result = _load(stores, recovered, _filing(future="200"))
+    rows = recovered.for_filing(OID, "v2")
+    assert [(r.target, r.page, r.row_ordinal, r.amount) for r in rows] == (
+        [("future", 4, n, Decimal("50.00")) for n in range(4)] + [("paid", 3, n, Decimal("100.00")) for n in range(3)])
+    future = rows[0]
+    assert (future.declared_amount, future.reconciliation_error, future.page_kind, future.page_verdict) == (
+        Decimal("200"), 0.0, "grants_future_list", "agreed")
+    assert (future.state, future.zip5, future.match_address) == ("NC", "27701", "1 Main Street Durham")
+    assert {r.declared_amount for r in rows if r.target == "paid"} == {Decimal("300")}
+    assert (result.loaded, result.rows, result.dollars, result.declared) == (1, 3, Decimal("300.00"), Decimal("300"))
+    found = result.lists["future"]
+    assert (found.loaded, found.rows, found.dollars, found.declared) == (1, 4, Decimal("200.00"), Decimal("200"))
+    assert (result.read, result.read_future, result.written, result.combined) == (1, 1, 1, 0)
+    assert dict(found.labels["page_kind"]) == {"grants_future_list": 4}
+    assert dict(result.labels["page_kind"]) == {"grants_paid_list": 3}           # the paid rows' labels, apart
+
+
+def test_a_future_list_loads_where_the_paid_one_does_not_add_up(stores, tmp_path):
+    _read_both(stores, tmp_path)
+    recovered = ld.MemoryStore()
+    result = _load(stores, recovered, _filing(paid="900", future="200"))
+    assert {r.target for r in recovered.for_filing(OID, "v2")} == {"future"} and len(recovered.rows) == 4
+    assert (result.loaded, result.lists["future"].loaded, result.written, result.combined) == (0, 1, 1, 0)
+
+
+def test_a_filing_with_no_future_amount_loads_no_future_list(stores, tmp_path):
+    _read_both(stores, tmp_path)
+    recovered = ld.MemoryStore()
+    result = _load(stores, recovered, _filing())
+    assert {r.target for r in recovered.for_filing(OID, "v2")} == {"paid"} and len(recovered.rows) == 3
+    assert (result.read_future, result.lists["future"].loaded) == (0, 0)
+
+
+def test_a_future_list_never_makes_up_a_paid_target_nor_a_paid_list_a_future_one(stores, tmp_path):
+    _read_both(stores, tmp_path)
+    recovered = ld.MemoryStore()
+    assert _load(stores, recovered, _filing(paid="200", future="300")).written == 0 and recovered.rows == {}
+
+
+def test_lists_that_add_up_only_together_are_counted_and_not_loaded(stores, tmp_path):
+    """Mitchelson 2021: a grant approved is printed at the foot of the paid page."""
+    _read_both(stores, tmp_path, paid=PAID_LIST[:3] + [_grant("Pledged Grantee 4", 50)])
+    recovered = ld.MemoryStore()
+    result = _load(stores, recovered, _filing(paid="300", future="250"))        # 350 and 200 on the pages
+    assert recovered.rows == {} and (result.loaded, result.lists["future"].loaded, result.written) == (0, 0, 0)
+    assert (result.combined, result.combined_declared) == (1, Decimal("550"))
+    assert "adds up only to paid and future together, not loaded: 1 filings, $0.0M" in ld.summary(result)
+
+
+def test_the_future_amount_closes_the_list_before_the_paid_pages(stores, tmp_path):
+    """Kenan 2020: the future list comes first and ends on its total; the
+    paid pages after it have no heading, and are not its continuation."""
+    _read(stores, 3, FUTURE_LIST + [_grant("Total", 200)], kind="grants_future_list",
+          heading="Grants approved for future payment")
+    _read(stores, 4, PAID_LIST[:3], heading="")
+    _decide(stores, tmp_path, 3, 4)
+    recovered = ld.MemoryStore()
+    assert _load(stores, recovered, _filing()).loaded == 0                       # the total is not known to be one
+    result = _load(stores, recovered, _filing(future="200"))
+    assert (result.loaded, result.lists["future"].loaded) == (1, 1)
+    assert [(r.target, r.page) for r in recovered.for_filing(OID, "v2")] == [("future", 3)] * 4 + [("paid", 4)] * 3
+
+
+def test_a_future_row_is_never_marked_as_passing_line_25(stores, tmp_path):
+    _read_both(stores, tmp_path)
+    recovered = ld.MemoryStore()
+    _load(stores, recovered, _filing(paid="300", declared="100", future="200"))
+    assert {(r.target, r.placeholder_exceeds_declared) for r in recovered.for_filing(OID, "v2")} == {
+        ("paid", True), ("future", False)}
+
+
+def test_a_reload_keeps_both_lists_and_takes_out_the_one_that_no_longer_adds_up(stores, tmp_path):
+    _read_both(stores, tmp_path)
+    recovered = ld.MemoryStore()
+    _load(stores, recovered, _filing(future="200"))
+    again = _load(stores, recovered, _filing(future="200"), loaded_at=AT + timedelta(days=1))
+    assert (again.written, again.unchanged) == (0, 1) and recovered.commits == [7]
+    moved = _load(stores, recovered, _filing(future="900"), loaded_at=AT + timedelta(days=2))
+    assert (moved.written, moved.lists["future"].loaded) == (1, 0)
+    assert {r.target for r in recovered.for_filing(OID, "v2")} == {"paid"} and recovered.commits == [7, 3]
 
 
 def test_a_list_that_only_comes_close_does_not_load(stores, tmp_path):

@@ -63,3 +63,12 @@ def test_pointer_sql_tests_the_withheld_pattern_first_and_every_alternative():
 def test_name_sql_joins_the_person_and_business_names():
     assert classifier.name_sql("g") == (
         r"trim(regexp_replace(concat_ws(' ', g.sigocpyrpnam, g.sigocpyrbnbn1, g.sigocpyrbnbn2), '\s+', ' ', 'g'))")
+
+
+def test_the_future_payment_table_is_read_by_its_own_name_columns():
+    """The future-payment table has two business-name columns and none for a person."""
+    assert classifier.name_sql("g", classifier.FUTURE_NAMES) == (
+        r"trim(regexp_replace(concat_ws(' ', g.sigocaffrbnb1, g.sigocaffrbnb2), '\s+', ' ', 'g'))")
+    assert classifier.prefilter_sql("g", classifier.FUTURE_NAMES) == (
+        f"concat_ws(' ', g.sigocaffrbnb1, g.sigocaffrbnb2) ~* '{classifier.PREFILTER}'")
+    assert classifier.prefilter_sql("g") == classifier.prefilter_sql("g", classifier.PAID_NAMES)
