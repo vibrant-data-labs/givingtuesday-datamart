@@ -568,8 +568,8 @@ source `irs_990pf_grants_future`, table `privategrants_future`, and
 | as published, release 2026_06_16, tax years 2009 to 2025 | 26,217 | 459,866 | $191.33B |
 | left out: an older version of a return | 392 | 13,808 | $7.98B |
 | left out: the paid rows are held under a later version | 25 | 55 | $0.02B |
-| left out: the second copy of a doubled block | in 299 | 4,584 | $2.02B |
-| kept | 25,800 | 441,419 | $181.30B |
+| left out: the second copy of a doubled block | in 314 | 4,644 | $2.03B |
+| kept | 25,800 | 441,359 | $181.30B |
 
 GivingTuesday's doubled blocks are in this file too, and they are in
 the same filings. Of the 3,099 filings the IRS processed in 2025 and
@@ -578,23 +578,35 @@ the same filings. Of the 3,099 filings the IRS processed in 2025 and
 same filing are all paired as well, and no filing has paired paid rows
 beside future rows that are not. The paid rule tests a doubled block
 against grants paid, Part I line 25, and no column holds a total
-approved for future payment, so that test cannot be copied. The rule
-borrows it: a future block is halved when every row of it is paired and
-the paid rule halved the paid block of the same filing. That is 299
-filings. For the four largest (Helmsley, Kern, MacArthur and Sergey
-Brin, all 2024) the rows and dollars kept equal the filing's own XML to
-the dollar.
+approved for future payment, so that test cannot be copied.
 
-What the rule cannot catch is a doubled filing whose paid block the
-paid rule could not judge. There are 17 such filings among the 316,
-$14.8M as published, so up to $7.4M is counted twice. 12 declare
-nothing paid on line 25, 4 have no paid rows, and one has a paid row
-that is not paired. The two checked against their XML are doubled (The
+The evidence used instead, found on September 30: a doubled filing is
+doubled in every extract of its batch, so its own row in
+`basic_fields_pf` is there twice, under one url and one sha. 15,845
+filings are, every one processed in 2025 or 2026 and none before. Of
+the 316 paired filings, 315 have the repeated row; the one that does
+not has paid rows that are not paired, a genuine repeat. No filing with
+a repeated row has future rows that are not paired. So a future block
+is halved when every row of it is paired and the filing's basic-fields
+row is repeated: 314 filings under the url kept (the 315th is a
+superseded version). For the four largest (Helmsley, Kern, MacArthur
+and Sergey Brin, all 2024) the rows and dollars kept equal the filing's
+own XML to the dollar. This is not the amended-return defect: only one
+of the halved filings has a second version. Nor is it what the paid
+rule does: that rule tests the halved sum against line 25 and never
+looks at the repeated row, and the two agree on 10,154 of the 10,259
+filings it halves; what the repeated row would add on the paid side is
+measured separately, since it moves matcher inputs.
+
+The rule first built, on September 29, borrowed the paid rule's verdict
+on the same filing instead (halve when the paid block was halved). It
+reached 299 of the 316 and could not judge 17 whose paid block gave the
+paid rule nothing to test, $14.8M as published, up to $7.4M counted
+twice; the two of them checked against their XML were doubled (The
 Jerrold and Jacqueline Glass Family Foundation 2024, $12.0M as
-published, and Okumura 2024). Halving on paired rows alone would catch
-them, at the price of halving the filer that really lists every pledge
-twice; the paid relation does not take that step for paid rows, and the
-future one follows it.
+published, and Okumura 2024). The repeated row reaches them. What it
+cannot catch is a doubled filing whose basic-fields row was not doubled
+with it, and none is known.
 
 On the frame, 172 filings carry a future placeholder. The selector
 looks for the future list on its own, among the pages the readers or
@@ -1100,7 +1112,7 @@ were found:
 | nothing from GivingTuesday's one-off extract is loaded or used in the search | 406 of the frame's 407 lists reconcile without its rows; one filing, $22.3M, is lost | Sept 28, measured the same day |
 | the target is the paid amount on the work list; no future-payment list loads, until the future amount is in the loaded tables | the loaded tables hold no future amount; 5 of 406 lists are lost and none gained | Sept 28, measured the same day |
 | the future amount comes from GivingTuesday's future-payment datamart, `990PFPart14Grants3B`, loaded like the paid one; future lists then load marked `future`, outside the view | the datamart is published at the same version as the paid one and was never loaded; the filing's own XML is not the source | Sept 29 |
-| one version per return of the future-payment rows; a doubled block is halved when every row is paired and the paid rule halved the same filing's paid block | 316 of 3,099 filings processed in 2025 and 2026 are paired throughout, 12 of 23,118 before; 311 of the 316 have paired paid rows too; four checked against their XML to the dollar; 17 filings and up to $7.4M are out of the rule's reach | Sept 29 |
+| one version per return of the future-payment rows; a doubled block is halved when every row is paired and the filing's `basic_fields_pf` row is repeated under one sha | 316 of 3,099 filings processed in 2025 and 2026 are paired throughout, 12 of 23,118 before; 315 of the 316 have the repeated row and the other is a genuine repeat; no filing with the repeated row has unpaired rows; four checked against their XML to the dollar. Built first on the paid rule's verdict, which reached 299 and left 17 (up to $7.4M) whole | Sept 29, rule changed Sept 30 |
 | the work list carries the future amount; it puts no filing on the list | 1,104 filings on the list have one, $7.10B; the frame's 171 agree to the cent; 61 filings with a future placeholder are not on the list, $0.70B | Sept 29 |
 | a future list loads against the future amount, marked `future`, outside the view; a list that adds up only to the two amounts together does not load, pending a decision | 71 future lists on the frame, $0.95B; Kenan 2020's paid list returns; the four others are one coincidence, one paid list taken for a future one, and two lists whose pages do not set paid apart from approved | Sept 29 |
 | six patient-assistance programs are left out, by EIN | $32.7B, 40% of placeholder dollars; the purpose on the placeholder row says donated medicine; a name pattern misfires on nine filers of fifteen | Sept 28 |
@@ -1200,12 +1212,12 @@ the checks extended to them.
   tax year 2020 has been fetched.
 - A future list adds up to the amount on the filing's placeholder rows
   of line 3b, as GivingTuesday's future-payment datamart holds it. That
-  file doubles whole filings as the paid one does; the repair leans on
-  the paid rows of the same filing, and up to $7.4M in 17 filings is
-  out of its reach. None of the 17 is on the work list with a future
-  amount. Ten filings on the list take their future amount from a block
-  that was halved, $21.8M; unrepaired, the amount would have been twice
-  the list.
+  file doubles whole filings as the paid one does; the repair halves a
+  paired block when the filing's `basic_fields_pf` row is repeated, and
+  a doubled filing whose basic-fields row was not doubled with it would
+  escape it, though none is known. Ten filings on the list take their
+  future amount from a block that was halved, $21.8M; unrepaired, the
+  amount would have been twice the list.
 - A loaded list adds up to the amount on the filing's placeholder rows.
   On 2 loaded filings that amount passes both columns of line 25, by
   $5.4M in all, and one of the two lists holds grants approved for

@@ -154,7 +154,7 @@ As built, 2026-09-29 (session 6): the future amount.
 
 - **A second relation.** `privategrants_future_current`, from
   GivingTuesday's `990PFPart14Grants3B` (source
-  `irs_990pf_grants_future`, 459,866 rows as published, 441,419 kept).
+  `irs_990pf_grants_future`, 459,866 rows as published, 441,359 kept).
   The work list reads a filing's placeholder rows there with the same
   pattern, on that table's two name columns, and takes them only under
   the url the paid rows have.
@@ -482,10 +482,17 @@ One version per return of the future-payment rows, and the doubled
 blocks, are `current_grants.py`'s, whose docstring has the rule and the
 measurement. In short: the file doubles whole filings as the paid file
 does (316 of 3,099 filings processed in 2025 and 2026 are paired
-throughout, 12 of 23,118 before), a block is halved when the paid rule
-halved the same filing's paid block (299 filings), and 17 paired
-filings the paid rule could not judge stay whole, up to $7.4M counted
-twice.
+throughout, 12 of 23,118 before). The rule of 2026-09-29 halved a block
+when the paid rule had halved the same filing's paid block, 299
+filings, and left 17 whole that the paid rule could not judge, up to
+$7.4M counted twice. On 2026-09-30 the evidence changed to the filing's
+own row in `basic_fields_pf`, which a doubled batch repeats under one
+url and one sha: 315 of the 316 have it, the 316th is a genuine repeat,
+and no filing with the repeated row has unpaired rows. 314 filings are
+halved under the url kept. The paid rule does not use the repeated row;
+it agrees with it on 10,154 of the 10,259 filings it halves, would gain
+about 2,559 small filings from it and has 105 the row does not confirm,
+which is measured in its own session since it moves matcher inputs.
 
 What the build of 2026-09-28 found that the design had not:
 
@@ -1945,8 +1952,9 @@ Still open:
 
 - Whether a list that adds up only to the paid and the future amount
   together loads. Four filings on the frame; the case is in stage 5.
-- Whether a future block is halved on paired rows alone, where the paid
-  rule could not judge the filing: 17 filings, up to $7.4M.
+- Whether the paid rule should halve on the repeated `basic_fields_pf`
+  row as the future rule now does: about 2,559 filings and $40M it
+  leaves doubled, and 105 it halves that the row does not confirm.
 - Whether the view, `privategrants_current_w_recovered`, stays an object of
   its own or becomes what the matcher's first view reads, with no name
   of its own.

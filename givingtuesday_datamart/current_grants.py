@@ -48,7 +48,8 @@ raw staging:
 
 * ``public.privategrants_future_current`` (990-PF Part XV line 3b, grants
   approved for future payment)
-    Built after ``privategrants_current``, which it reads.
+    Built after ``privategrants_current``, which it reads for the url
+    the paid rows are held under.
     1. latest_url — ``MAX(url)``, as for the paid rows. A filer-year whose
        paid rows are held under a later url is left out whole: the return
        was filed again without these rows (25 filer-years, 55 rows,
@@ -59,26 +60,28 @@ raw staging:
        the 3,099 filings the IRS processed in 2025 and 2026 have every
        line-item tuple an even number of times, against 12 of the 23,118
        processed before; in 311 of the 316 the paid block of the same
-       filing is all even as well, and no filing has a doubled paid block
-       beside a future block that is not. The paid rule's second test
-       cannot be copied: it leans on grants paid, Part I line 25, and no
-       column of ``basic_fields_pf`` holds a total approved for future
-       payment. So the evidence is borrowed from the paid block. Collapse
-       where BOTH hold: (a) every tuple's multiplicity in the filing's
-       future rows is even, and (b) ``privategrants_current`` holds the
-       same filing (same url) with ``pair_collapse``, that is, the paid
-       rule found the filing's paid block doubled against the filer's own
-       declared total. Half of each tuple's copies are kept, as for the
-       paid rows. 299 filings, 9,168 rows and $4.05B before halving.
-       What this cannot catch: a doubled filing whose paid block the paid
-       rule could not judge. Of the 17 other all-even filings of 2025 and
-       2026, 12 have an all-even paid block and declare $0 on line 25, 4
-       have no paid rows at all, and one has a paid row that is not
-       doubled; $14.8M before halving, the largest $12.0M (EIN 820561001,
-       tax year 2024). They are kept whole, so at most $7.4M is counted
-       twice. A filing legitimately all even in its future rows is halved
-       only if its paid block was judged doubled, which the paid rule
-       decides on the declared total.
+       filing is all even as well. The paid rule's second test cannot be
+       copied: it leans on grants paid, Part I line 25, and no column of
+       ``basic_fields_pf`` holds a total approved for future payment. The
+       evidence is the filing's own row in ``basic_fields_pf`` instead: a
+       doubled filing is doubled in every extract of the batch, so its
+       basic-fields row is there twice under one url and one sha (15,845
+       urls, every one processed in 2025 or 2026; measured 2026-09-30).
+       Of the 316, 315 have that repeated row and the one that does not
+       has unpaired paid rows, a genuine repeat; no filing with a repeated
+       row has unpaired future rows. Collapse where BOTH hold: (a) every
+       tuple's multiplicity in the filing's future rows is even, and (b)
+       ``basic_fields_pf`` holds the filing's url more than once under a
+       single ``filesha256``. Half of each tuple's copies are kept, as for
+       the paid rows: 315 filings. What this cannot catch: a doubled
+       filing whose basic-fields row was not doubled with it, of which
+       none is known. A filer that really lists every pledge twice is
+       halved only if its basic-fields row is repeated too, of which none
+       is known either. The rule first built here, on 2026-09-29, borrowed
+       the paid rule's verdict on the same filing (``pair_collapse`` in
+       ``privategrants_current``) and reached 299 of the 316; the 17 it
+       could not judge, up to $7.4M counted twice, the repeated row
+       reaches, and the two of them checked against their XML are doubled.
 
 * ``public.basic_fields_current`` (990 filer financials, issue #34)
 * ``public.basic_fields_pf_current`` (990-PF filer financials)
@@ -429,9 +432,21 @@ WHERE NOT _collapse OR _copy_rank <= _n_copies / 2;
 """
 
 # Reads privategrants_current, so it is built after it: for the url the
-# paid rows of a filer-year are held under, and for what the paid rule
-# decided about the filing (see the module docstring).
+# paid rows of a filer-year are held under. The doubling evidence is the
+# filing's repeated row in basic_fields_pf (see the module docstring),
+# gathered into an indexed temp table first: as a CTE the planner, which
+# takes the joins below for a handful of rows, ran its scan of
+# basic_fields_pf once per row of the future table.
 _PF_FUTURE_CURRENT_DDL = f"""
+CREATE TEMP TABLE _pf_doubled AS
+    -- a filing GT's batch emitted twice: its basic-fields row is there
+    -- twice under one url and one sha
+    SELECT url
+    FROM public.basic_fields_pf
+    GROUP BY url
+    HAVING COUNT(*) > 1 AND COUNT(DISTINCT filesha256) = 1;
+CREATE INDEX ON _pf_doubled (url);
+ANALYZE _pf_doubled;
 DROP TABLE IF EXISTS public.privategrants_future_current CASCADE;
 CREATE TABLE public.privategrants_future_current AS
 WITH kept_url AS (
@@ -446,9 +461,8 @@ WITH kept_url AS (
 ),
 paid AS (
     -- the same filers in the paid relation: the url it holds for each
-    -- filer-year, and whether its rule found the paid block doubled
-    SELECT g.filerein, g.taxyear, MAX(g.url) AS url,
-           BOOL_OR(g.dedup_rule LIKE '%pair_collapse%') AS collapsed
+    -- filer-year
+    SELECT g.filerein, g.taxyear, MAX(g.url) AS url
     FROM public.privategrants_current g
     WHERE g.filerein IN (SELECT filerein FROM kept_url)
     GROUP BY 1, 2
@@ -463,7 +477,7 @@ hashed AS (
            g.ctid AS _ctid,
            k.n_urls_for_year,
            {_content_hash(_PF_FUTURE_CONTENT_COLS)} AS _h,
-           COALESCE(p.collapsed AND p.url = g.url, FALSE) AS _paid_collapsed
+           (d.url IS NOT NULL) AS _doubled
     FROM public.privategrants_future g
     JOIN kept_url k
       ON k.filerein = g.filerein
@@ -471,6 +485,7 @@ hashed AS (
      AND k.url IS NOT DISTINCT FROM g.url
     LEFT JOIN paid p
       ON p.filerein = g.filerein AND p.taxyear IS NOT DISTINCT FROM g.taxyear
+    LEFT JOIN _pf_doubled d ON d.url = g.url
     -- the paid rows are held under a later url: the return was filed
     -- again without these rows, and they are left out
     WHERE p.url IS NULL OR p.url <= g.url
@@ -486,13 +501,13 @@ copies AS (
     FROM hashed h
 ),
 ranked AS (
-    -- every tuple's multiplicity is even AND the paid rule collapsed the
-    -- same filing's paid block. Windows, not a join to the filer-years
-    -- that pass: the planner takes the joins above for a handful of rows
-    -- and would nest a loop over every row here.
+    -- every tuple's multiplicity is even AND the filing's basic-fields
+    -- row is repeated. Windows, not a join to the filer-years that pass:
+    -- the planner takes the joins above for a handful of rows and would
+    -- nest a loop over every row here.
     SELECT c.*,
            (BOOL_AND(c._n_copies % 2 = 0) OVER fy
-            AND BOOL_OR(c._paid_collapsed) OVER fy) AS _collapse
+            AND BOOL_OR(c._doubled) OVER fy) AS _collapse
     FROM copies c
     WINDOW fy AS (PARTITION BY c.filerein, c.taxyear)
 )
@@ -508,6 +523,7 @@ LEFT JOIN pf_filings pf
   ON pf.filerein = ranked.filerein
  AND pf.taxyear IS NOT DISTINCT FROM ranked.taxyear
 WHERE NOT _collapse OR _copy_rank <= _n_copies / 2;
+DROP TABLE _pf_doubled;
 """
 
 _INDEX_DDL = {

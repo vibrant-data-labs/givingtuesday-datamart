@@ -58,18 +58,23 @@ def test_the_relation_is_built_after_the_paid_one_which_it_reads():
     assert [table for table, _ in cg._TABLES][-1] == FUTURE and FUTURE in cg._INDEX_DDL
     assert FUTURE not in cg._MATCHING_VIEW_TABLES          # rebuilding it alone drops no view
     ddl = cg._PF_FUTURE_CURRENT_DDL
-    assert ddl.strip().startswith(f"DROP TABLE IF EXISTS public.{FUTURE} CASCADE;")
+    assert f"DROP TABLE IF EXISTS public.{FUTURE} CASCADE;" in ddl.split("CREATE TABLE public.")[0]
+    assert all("--" not in statement or ";" not in statement.split("--", 1)[1].split("\n")[0]
+               for statement in ddl.split(";"))                  # a ';' in a comment would split a statement
     assert "FROM public.privategrants_future g" in ddl and "FROM public.privategrants_current g" in ddl
     assert "DROP TABLE IF EXISTS public.privategrants_current" not in ddl
 
 
-def test_a_block_is_halved_only_when_all_even_and_the_paid_rule_found_the_filing_doubled():
+def test_a_block_is_halved_only_when_all_even_and_the_filings_basic_fields_row_is_repeated():
     ddl = cg._PF_FUTURE_CURRENT_DDL
-    assert "BOOL_OR(g.dedup_rule LIKE '%pair_collapse%') AS collapsed" in ddl
-    assert "COALESCE(p.collapsed AND p.url = g.url, FALSE) AS _paid_collapsed" in ddl      # the same filing
-    assert "BOOL_AND(c._n_copies % 2 = 0) OVER fy" in ddl and "BOOL_OR(c._paid_collapsed) OVER fy" in ddl
+    doubled = ddl[ddl.index("CREATE TEMP TABLE _pf_doubled"):ddl.index("CREATE INDEX ON _pf_doubled")]
+    assert "FROM public.basic_fields_pf" in doubled and "GROUP BY url" in doubled
+    assert "HAVING COUNT(*) > 1 AND COUNT(DISTINCT filesha256) = 1" in doubled         # one sha: not an amendment
+    assert "LEFT JOIN _pf_doubled d ON d.url = g.url" in ddl and "(d.url IS NOT NULL) AS _doubled" in ddl
+    assert ddl.rstrip().endswith("DROP TABLE _pf_doubled;")
+    assert "BOOL_AND(c._n_copies % 2 = 0) OVER fy" in ddl and "BOOL_OR(c._doubled) OVER fy" in ddl
     assert "WHERE NOT _collapse OR _copy_rank <= _n_copies / 2" in ddl                     # half of each tuple
-    assert "arecgpdcprps" not in ddl                       # line 25 states grants paid, not grants approved
+    assert "arecgpdcprps" not in ddl and "dedup_rule" not in ddl[:ddl.index("AS dedup_rule")]
 
 
 def test_rows_of_a_version_the_paid_relation_has_moved_past_are_left_out():
