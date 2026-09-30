@@ -201,6 +201,7 @@ keep-half-of-each-tuple mechanics:
 |---|---|---|---|
 | today: all even AND line 25 | 10,259 filer-years | the 2,496 doubles with a 0, absent, mis-read or non-itemized line 25(d); halves the 95 forward-filled filings to N/2 copies | none |
 | A: all even AND doubled basic row | 12,650 | the 10 amended-copy doubles under one url (two shas, single-row-per-sha); any future batch that doubles grants without doubling the basic row (none seen: 0 counter-examples in 12,650) | -2,924 rows (2,496 filer-years newly halved, $24.4M) and +304 rows (105 filer-years un-halved, $30.0M restored, wrongly for the 95 forward fills); net 16,651,426 -> 16,648,806 |
+| A': all even AND the url repeated in `basic_fields_pf`, one sha or two (the future table's form) | 12,660 | the 95 forward fills restored to N copies, as A | as A, minus the 10 amended copies, which stay halved |
 | B: all even AND (line 25 OR doubled basic row) | 12,755 | the 95 forward fills stay halved to N/2 (wrong either way; a separate rule); a double whose basic row is single and whose line 25 is 0 (none seen) | -2,924 rows only (2,388 nameless $0 rows, 536 rows carrying $24.4M); 16,651,426 -> 16,648,502 |
 
 B is the recommendation. What it does not do, and what should follow it:
@@ -231,18 +232,20 @@ B is the recommendation. What it does not do, and what should follow it:
 
 `privategrants_future_current` (PR #55) faced the same doubling with no
 line 25 to test against, and since September 30 halves a future block
-when every row is paired AND the filing's basic row is repeated: the
-A-shaped rule, on its own. Under B the paid and future rules agree on
-every batch double (12,650 filer-years here, 314 there) and differ only
-where the paid rule's line-25 test fires without a repeated basic row,
-the 10 amended copies and the 95 forward fills, which have no known
-future-side counterpart. The future rule no longer borrows the paid
-verdict, so B does not cascade into it and the two rebuild independently.
-Two things for that side to look at: the 12 pre-2025 filings whose future
-rows are all paired (PR #55's own count) are the place an amended copy or
-a forward fill of `GrantOrContriApprvForFutGrp` would sit, and the
-forward-fill signature (one tuple, N copies) can be checked there without
-a declared total by counting the XML's empty future groups.
+when every tuple is even AND the filing's url appears more than once in
+`basic_fields_pf`, one sha or two: the A shape, on its own, in a form
+that also catches the amended copy under one url. Measured there after
+this doc: 315 filings halved under the kept url (314 batch doubles plus
+Kiwanis Club of Cape May 2020, the one pre-2025 paired filing, an
+amended copy with two shas), 4,645 rows removed, $2.03B, 441,358 rows
+kept. The 11 other pre-2025 paired filings have one basic row and are
+genuine repeats. Under B the paid and future rules agree on every batch
+double and on the amended copies, and differ only on the 95 forward
+fills, which the future side carries rarely: one-tuple-times-N blocks
+without a repeated basic row are about 13 filings and a few million
+dollars, noted there as unrepaired and not XML-checked. The future rule
+no longer borrows the paid verdict, so B does not cascade into it and the
+two rebuild independently.
 
 ## 6. Files
 
