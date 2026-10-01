@@ -8,11 +8,10 @@ and before match_records():
 
 Exit code 0 = all checks pass; 1 = at least one FAIL.
 
-For each CSV row it verifies, using the matcher's own functions (clean_zip /
-create_full_name / create_clean_address, the same recordlinkage blocking and
-Compare, filter_match_rules with the imported CHUNK/FINAL threshold sets,
-and the same best-per-recipient-tuple winner resolution) over the matcher's
-own SQL against the real views:
+For each CSV row it verifies, using the matcher's own functions (``prepare``
+and ``match_slice``: the run's cleaning, blocking, scores, the CHUNK/FINAL
+threshold sets, the best-per-recipient-tuple winner resolution and the
+name-only tier) over the matcher's own SQL against the real views:
 
   (a) the row survives the DISTINCT ON universe dedup — if it collapses
       into an organic filing with the same key tuple, the correction does
@@ -31,7 +30,8 @@ tuple's winner is per-pair and deterministic. Blocking pairs a universe row
 u with a grant tuple g iff clean_zip(u) == clean_zip(g) OR full_name(u) ==
 full_name(g) (both exact keys), and every filter tier requires name_score
 >= FAMILY_NAME_JW_MIN — so a correction can only ever win grant tuples
-whose full_name is within that Jaro-Winkler floor of one of its own names
+whose compared name is within that Jaro-Winkler floor of one of its own
+names, or whose cleaned name is one of its own, which scores 1
 (its "name family"). Per correction family (CSV rows sharing
 recipient_ein), the slice takes:
 
@@ -45,11 +45,17 @@ For each g in G the full competitive set is therefore present, and the
 winner computed here is the winner the full run computes. Global-run
 effects the slice doesn't replicate — chunking, the categorical dtype
 spanning the full universe, and input order on exact combined-score ties —
-don't change per-pair scores.
+don't change per-pair scores. The name-only tier asks that a name belong
+to one filer of the universe; every universe row under a family name is in
+the slice, so the slice answers as the universe does.
 
 Side effects: the same ones match_records() performs at start of run —
 loads the CSV into public.corrections_org_identities and refreshes the
-matching views — so the preflight reads the same state a run would.
+matching views — so the preflight reads the same state a run would. With
+``--prefix`` it creates its table and views under that prefix and leaves
+the run's own as they are:
+
+    python -m givingtuesday_datamart.corrections_preflight --prefix scratch_matcher_
 """
 
 from __future__ import annotations
@@ -60,21 +66,21 @@ import sys
 
 import jellyfish
 import pandas as pd
-import recordlinkage
 from sqlalchemy import text
 
-from givingtuesday_datamart._internal.address_cleaning import create_clean_address
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart.grant_matching import (
-    CHUNK_FILTER_RULES,
     FINAL_FILTER_RULES,
+    Relations,
     _load_corrections,
     _read_corrections_csv,
-    clean_zip,
-    create_full_name,
     create_or_replace_views,
-    filter_match_rules,
+    grants_sql,
+    match_slice,
+    prepare,
+    score_slice,
+    universe_sql,
 )
 from givingtuesday_datamart.ingestion import datamart_config
 from givingtuesday_datamart.matching_regression_checks import AMT, Gate
@@ -104,58 +110,15 @@ _KEY7 = [
 ]
 _KEY8 = ["filerein_key"] + _KEY7
 
-# Verbatim copies of the two reads in _do_match_records (sans LIMIT) —
-# keep in lockstep with that function.
-_UNIVERSE_SQL = """
-    SELECT filerein_key, name1_key, name2_key, address1_key,
-           address2_key, addresscity_key, addressstate_key,
-           addresszip_key, source
-    FROM (
-        SELECT DISTINCT ON (filerein_key, name1_key, name2_key,
-                            address1_key, address2_key,
-                            addresscity_key, addressstate_key,
-                            addresszip_key)
-            *
-        FROM (
-            SELECT *, 'basic_fields' AS source, 1 AS source_rank
-            FROM public.basic_fields_unique_names_view
-            UNION ALL
-            SELECT *, 'basic_fields_pf' AS source, 2 AS source_rank
-            FROM public.basic_fields_pf_unique_names_view
-            UNION ALL
-            SELECT *, 'correction' AS source, 3 AS source_rank
-            FROM public.corrections_unique_names_view
-        ) arms
-        ORDER BY filerein_key, name1_key, name2_key, address1_key,
-                 address2_key, addresscity_key, addressstate_key,
-                 addresszip_key, source_rank
-    ) filers
-    ORDER BY filerein_key, name1_key, name2_key, address1_key,
-             address2_key, addresscity_key, addressstate_key,
-             addresszip_key
-"""
-
-_GRANTS_SQL = """
-    SELECT * FROM public.privategrants_unique_names_view
-    ORDER BY name1_key, name2_key, address1_key, address2_key,
-             addresscity_key, addressstate_key, addresszip_key
-"""
+# The read of the filer universe, under production's names.
+_UNIVERSE_SQL = universe_sql()
 
 
 def _clean_like_run(df: pd.DataFrame) -> pd.DataFrame:
-    """The cleaning _do_match_records applies before blocking.
-
-    create_full_name is applied via zip() rather than df.apply for speed —
-    same function, same per-row output. compare_addr is deferred to
-    _match_slice (it's row-local, so slice-time values are identical).
-    """
-    df.fillna("", inplace=True)
-    df["clean_zip"] = df["addresszip_key"].apply(clean_zip)
-    df["full_name"] = [
-        create_full_name({"name1_key": n1, "name2_key": n2})
-        for n1, n2 in zip(df["name1_key"], df["name2_key"])
-    ]
-    return df
+    """The cleaning _do_match_records applies before blocking, less
+    compare_addr, which is left to the slice (it's row-local, so slice-time
+    values are identical)."""
+    return prepare(df, addresses=False)
 
 
 def _keyed_corrections(csv_df: pd.DataFrame) -> pd.DataFrame:
@@ -184,62 +147,11 @@ def _keyed_corrections(csv_df: pd.DataFrame) -> pd.DataFrame:
 
 def _score_slice(universe_slice: pd.DataFrame, grants_slice: pd.DataFrame) -> pd.DataFrame:
     """match_records' blocking → Compare on a slice: one row per candidate
-    pair with the four scores, unfiltered. Pair indices land in the
-    basic_fields_df_index / private_foundations_df_index columns.
-
-    compare_addr and the categorical zip dtype are computed per-slice
-    (row-local / speed-only respectively — per-pair scores are identical
-    to the full run's; see module docstring).
-    """
-    u = universe_slice.copy()
-    g = grants_slice.copy()
-    for df in (u, g):
-        df["compare_addr"] = df.apply(create_clean_address, axis=1)
-    union_cats = pd.concat([u["clean_zip"], g["clean_zip"]]).unique()
-    cat_type = pd.CategoricalDtype(categories=union_cats, ordered=False)
-    u["clean_zip"] = u["clean_zip"].astype(cat_type)
-    g["clean_zip"] = g["clean_zip"].astype(cat_type)
-
-    indexer = recordlinkage.Index()
-    indexer.block(left_on=["clean_zip"], right_on=["clean_zip"])
-    indexer.block(left_on=["full_name"], right_on=["full_name"])
-    candidate_links = indexer.index(u, g)
-    logger.info(f"slice candidate pairs: {len(candidate_links):,}")
-
-    compare = recordlinkage.Compare()
-    compare.exact("clean_zip", "clean_zip", label="zip_score")
-    compare.string("full_name", "full_name", method="jarowinkler", label="name_score")
-    compare.string("compare_addr", "compare_addr", method="levenshtein", label="addr_score")
-    compare.exact("addressstate_key", "addressstate_key", label="state_score")
-    features = compare.compute(candidate_links, u, g)
-
-    features.index = features.index.set_names(
-        ["basic_fields_df_index", "private_foundations_df_index"]
-    )
-    return features.reset_index()
+    pair with the four scores, unfiltered."""
+    return score_slice(universe_slice, grants_slice, chunk_rules=False)
 
 
-def _match_slice(universe_slice: pd.DataFrame, grants_slice: pd.DataFrame) -> pd.DataFrame:
-    """match_records' blocking → Compare → two-stage filter → winner
-    resolution, on a slice. Returns one row per matched grant tuple with
-    the winning universe row's index in basic_fields_df_index.
-    """
-    features = _score_slice(universe_slice, grants_slice)
-    features = filter_match_rules(features_df=features, **CHUNK_FILTER_RULES)
-    matches = filter_match_rules(features_df=features, **FINAL_FILTER_RULES).copy()
-    matches = matches.drop_duplicates()
-    if matches.empty:
-        return matches
-
-    matches = matches.assign(
-        _combined_score=matches["name_score"] * 2 + matches["addr_score"]
-    )
-    matches = matches.sort_values("_combined_score", ascending=False, kind="mergesort")
-    matches = matches.drop_duplicates(subset=["private_foundations_df_index"], keep="first")
-    return matches.drop(columns="_combined_score")
-
-
-def _rows_dollars_won(conn, tuples: pd.DataFrame) -> tuple[int, float]:
+def _rows_dollars_won(conn, tuples: pd.DataFrame, relations: Relations = Relations()) -> tuple[int, float]:
     """Grant rows / dollars behind a set of won recipient tuples, via the
     same 7-key join the pipeline's SELECT INTO uses to build
     privategrants_w_recipients."""
@@ -256,7 +168,7 @@ def _rows_dollars_won(conn, tuples: pd.DataFrame) -> tuple[int, float]:
         text(f"""
             SELECT COUNT(*) AS n_rows,
                    SUM({AMT.format(col='sigocpyamoun')}) AS dollars
-            FROM public.privategrants_w_column_keys_view pg
+            FROM public.{relations.of('privategrants_w_column_keys_view')} pg
             JOIN (VALUES {", ".join(values)}) t({", ".join(_KEY7)}) ON {on}
         """),
         conn,
@@ -274,7 +186,7 @@ def _verbatim_mask(df: pd.DataFrame, line) -> pd.Series:
     return mask
 
 
-def run_preflight() -> int:
+def run_preflight(relations: Relations = Relations()) -> int:
     gate = Gate()
     csv_df = _read_corrections_csv()  # raises loudly on structural problems
     keyed = _keyed_corrections(csv_df)
@@ -288,15 +200,15 @@ def run_preflight() -> int:
         conn = session.connection()
         # Same start-of-run side effects as match_records: CSV load into
         # corrections_org_identities + view refresh.
-        _load_corrections(conn)
-        create_or_replace_views(conn)
+        _load_corrections(conn, relations)
+        create_or_replace_views(conn, relations)
         logger.info(
             "Reading filer universe: basic_fields_unique_names_view "
             "∪ basic_fields_pf_unique_names_view ∪ corrections_unique_names_view"
         )
-        universe = pd.read_sql_query(text(_UNIVERSE_SQL), conn)
+        universe = pd.read_sql_query(text(universe_sql(relations)), conn)
         logger.info("Reading public.privategrants_unique_names_view")
-        grants = pd.read_sql_query(text(_GRANTS_SQL), conn)
+        grants = pd.read_sql_query(text(grants_sql(relations)), conn)
 
     logger.info(f"universe rows: {len(universe):,}; grant tuples: {len(grants):,}")
     logger.info("Cleaning (clean_zip + full_name) ...")
@@ -322,46 +234,52 @@ def run_preflight() -> int:
             )
 
     # --- (b) slice-match each correction family ------------------------
-    uniq_grant_names = pd.Series(grants["full_name"].unique())
-    logger.info(f"unique grant full_names: {len(uniq_grant_names):,}")
+    uniq_grant_names = pd.Series(grants["compare_name"].unique())
+    logger.info(f"unique grant names: {len(uniq_grant_names):,}")
     report_rows = []
-    with get_session(config=config) as session:
-        conn = session.connection()
-        for ein, fam in keyed.groupby("filerein_key", sort=True):
-            fam_names = set(fam["full_name"])
-            fam_zips = set(fam["clean_zip"])
-            family_names: set[str] = set()
-            for cname in sorted(fam_names):
-                sims = uniq_grant_names.map(
-                    lambda n: jellyfish.jaro_winkler_similarity(cname, n)
-                )
-                family_names.update(uniq_grant_names[sims >= FAMILY_NAME_JW_MIN])
-            g_slice = grants[grants["full_name"].isin(family_names)]
-            u_slice = universe[
-                universe["clean_zip"].isin(set(g_slice["clean_zip"]) | fam_zips)
-                | universe["full_name"].isin(family_names | fam_names)
-            ]
-            logger.info(
-                f"family {ein}: {len(fam)} correction rows, "
-                f"{len(g_slice):,} name-family grant tuples, "
-                f"{len(u_slice):,} universe rows in slice"
+    # The scoring of one family can take the better part of an hour, and a
+    # connection left idle that long can be gone by the time the family's
+    # rows are counted; so the connection is opened after the scoring and
+    # closed with the family.
+    for ein, fam in keyed.groupby("filerein_key", sort=True):
+        fam_names = set(fam["full_name"])
+        fam_zips = set(fam["clean_zip"])
+        family_names: set[str] = set()
+        for cname in sorted(set(fam["compare_name"])):
+            sims = uniq_grant_names.map(
+                lambda n: jellyfish.jaro_winkler_similarity(cname, n)
             )
-            winners = _match_slice(u_slice, g_slice)
-            wu = winners.merge(
-                universe[_KEY8 + ["source"]].add_suffix("_univ"),
-                left_on="basic_fields_df_index",
-                right_index=True,
-            ).merge(
-                grants[_KEY7 + ["clean_zip"]],
-                left_on="private_foundations_df_index",
-                right_index=True,
-            )
-            n_corr_won = int((wu["source_univ"] == "correction").sum())
-            logger.info(
-                f"family {ein}: {len(wu):,} family tuples matched; "
-                f"corrections won {n_corr_won}"
-            )
+            family_names.update(uniq_grant_names[sims >= FAMILY_NAME_JW_MIN])
+        g_slice = grants[
+            grants["compare_name"].isin(family_names) | grants["full_name"].isin(fam_names)
+        ]
+        u_slice = universe[
+            universe["clean_zip"].isin(set(g_slice["clean_zip"]) | fam_zips)
+            | universe["full_name"].isin(set(g_slice["full_name"]) | fam_names)
+        ]
+        logger.info(
+            f"family {ein}: {len(fam)} correction rows, "
+            f"{len(g_slice):,} name-family grant tuples, "
+            f"{len(u_slice):,} universe rows in slice"
+        )
+        winners = match_slice(u_slice, g_slice)
+        wu = winners.merge(
+            universe[_KEY8 + ["source"]].add_suffix("_univ"),
+            left_on="basic_fields_df_index",
+            right_index=True,
+        ).merge(
+            grants[_KEY7 + ["clean_zip"]],
+            left_on="private_foundations_df_index",
+            right_index=True,
+        )
+        n_corr_won = int((wu["source_univ"] == "correction").sum())
+        logger.info(
+            f"family {ein}: {len(wu):,} family tuples matched; "
+            f"corrections won {n_corr_won}"
+        )
 
+        with get_session(config=config) as session:
+            conn = session.connection()
             for line in fam.itertuples():
                 label = line.label
 
@@ -396,7 +314,7 @@ def run_preflight() -> int:
                 for col in _KEY8:
                     won_mask &= wu[f"{col}_univ"] == getattr(line, col)
                 won = wu[won_mask]
-                n_rows, dollars = _rows_dollars_won(conn, won)
+                n_rows, dollars = _rows_dollars_won(conn, won, relations)
                 gate.check(
                     f"{label}: wins >=1 grant tuple",
                     len(won) >= 1,
@@ -433,8 +351,12 @@ def main() -> None:
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
     )
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.parse_args()
-    sys.exit(run_preflight())
+    parser.add_argument("--prefix", default="",
+                        help="create the corrections table and the views under this prefix")
+    parser.add_argument("--grants", default=Relations().grants,
+                        help="the relation the grants are read from")
+    args = parser.parse_args()
+    sys.exit(run_preflight(Relations(prefix=args.prefix, grants=args.grants)))
 
 
 if __name__ == "__main__":

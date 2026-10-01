@@ -735,6 +735,7 @@ if __name__ == "__main__":
     # step: each table build is a 10-30 min transaction, and a failure in
     # a later step must not roll an earlier table back.
     from givingtuesday_datamart.grant_matching import create_or_replace_views
+    from givingtuesday_datamart.placeholder_recovery.view import shown_policy
 
     _parser = argparse.ArgumentParser(prog="python -m givingtuesday_datamart.current_grants")
     _parser.add_argument("--only", action="append", choices=[t for t, _ in _TABLES], default=None,
@@ -742,13 +743,19 @@ if __name__ == "__main__":
     _only = _parser.parse_args().only
     _wanted = [(t, d) for t, d in _TABLES if _only is None or t in _only]
 
+    # The policy the view of current and recovered grants shows, read
+    # before the rebuild: the DROP ... CASCADE of privategrants_current
+    # takes the view, and the policy is written nowhere else. The view is
+    # created again for that policy, never for a default.
+    with get_session(config=datamart_config()) as session:
+        _policy = shown_policy(session)
     for _table, _ddl in _wanted:
         with get_session(config=datamart_config()) as session:
             _build_one(session.connection(), _table, _ddl)
     with get_session(config=datamart_config()) as session:
         conn = session.connection()
         if any(t in _MATCHING_VIEW_TABLES for t, _ in _wanted):
-            create_or_replace_views(conn)
+            create_or_replace_views(conn, recovered_policy=_policy)
         rules = conn.execute(text("""
             SELECT 'sched_i' AS side, dedup_rule, COUNT(*) AS rows
             FROM public.grants_to_domestic_organizations_current GROUP BY 1, 2
