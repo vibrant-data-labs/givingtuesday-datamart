@@ -1,26 +1,14 @@
-"""``placeholder_recovered_rows``: the name cleaner, the exact-name outcome
-and what a row gives the matcher. No database: the universe is three
-tuples. The state and zip are ``placeholder_recovery.address``'s, tested in
-``test_recovery_address``."""
+"""``placeholder_recovered_rows``: the exact-name outcome and what a row
+gives the matcher. No database: the universe is three tuples. The state and
+zip are ``placeholder_recovery.address``'s, tested in
+``test_recovery_address``; the name cleaner is the matcher's, tested in
+``test_grant_matching``."""
 
 from __future__ import annotations
 
 import pytest
 
 from givingtuesday_datamart.exploratory import placeholder_recovered_rows as rr
-
-
-@pytest.mark.parametrize("name, expected", [
-    ("The River Fund, Inc.", "river fund"),
-    ("RIVER FUND INC", "river fund"),
-    ("Boys & Girls Clubs of Springfield, Inc.", "boys and girls clubs of springfield"),
-    ("St. Mary's Hospital Corp., LLC", "st marys hospital"),
-    ("Nature Conservancy, The", "nature conservancy"),
-    ("The", "the"),                                                       # never empty
-    ("Incorporated Village Fund", "incorporated village fund"),           # only a trailing ending goes
-])
-def test_clean_name_is_one_level_and_no_more(name, expected):
-    assert rr.clean_name(name) == expected
 
 
 NAMES = [("111", "river fund inc", "NY"), ("222", "open door ministries", "NC"),

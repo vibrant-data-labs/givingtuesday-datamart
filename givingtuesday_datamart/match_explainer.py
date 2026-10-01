@@ -41,7 +41,12 @@ Scope: pairs against the target EIN only. A pair that matches here can
 still lose the final best-match-per-recipient resolution to a
 better-scoring row of a *different* EIN (name_score weighted 2x) — the
 ``current_match_ein`` column shows which EIN won in the last completed
-matching run.
+matching run. Two rules are not a pair's doing and are not explained here:
+the name-only tier (it asks whether the name belongs to one filer of the
+whole universe), and the one-filer-in-the-state rule, which leaves a tuple
+with no street address (no digit in its address lines) unmatched when only
+the exact-name tier accepts it and several filers of its state carry the
+name.
 """
 
 from __future__ import annotations
@@ -53,10 +58,9 @@ from sqlalchemy import text
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart.grant_matching import (
     FINAL_FILTER_RULES,
-    clean_zip,
-    create_clean_address,
-    create_full_name,
     filter_match_rules,
+    pair_scores,
+    prepare,
 )
 from givingtuesday_datamart.ingestion import datamart_config
 
@@ -113,11 +117,7 @@ _CURRENT_MATCH_SQL = """
 
 
 def _prep(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.fillna("").reset_index(drop=True)
-    df["clean_zip"] = df["addresszip_key"].apply(clean_zip)
-    df["full_name"] = df.apply(create_full_name, axis=1)
-    df["compare_addr"] = df.apply(create_clean_address, axis=1)
-    return df
+    return prepare(df.reset_index(drop=True))
 
 
 def _tier_report(row: pd.Series) -> str:
@@ -163,12 +163,7 @@ def _score_pairs(
     indexer = recordlinkage.Index()
     indexer.full()
     links = indexer.index(universe, grants)
-    compare = recordlinkage.Compare()
-    compare.exact("clean_zip", "clean_zip", label="zip_score")
-    compare.string("full_name", "full_name", method="jarowinkler", label="name_score")
-    compare.string("compare_addr", "compare_addr", method="levenshtein", label="addr_score")
-    compare.exact("addressstate_key", "addressstate_key", label="state_score")
-    features = compare.compute(links, universe, grants)
+    features = pair_scores(links, universe, grants)
     features.index = features.index.set_names(["universe_idx", "grant_idx"])
     features = features.reset_index()
 
