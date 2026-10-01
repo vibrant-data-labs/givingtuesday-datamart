@@ -583,7 +583,7 @@ chain meets it:
   state. Every recovered grant has a NULL city (the readers return none
   of its own), so none would have joined. The three keys are now '' where
   NULL, like the name and address keys; on the subset that brought
-  {never_rows} rows and ${never_dollars}M of the sampled foundations'
+  1,670 rows and $127.4M of the sampled foundations'
   grants into the output.
 - **The name cleaner, `clean_name`, in `grant_matching`, extends
   `normalize_org_name` and does not replace it.** Two rows with the same
@@ -631,27 +631,34 @@ chain meets it:
 Proved on a subset (`matching_subset`, 2026-09-29, the report and the
 examples in `data/exploratory/placeholder_matching_subset_*.csv`): the
 tuples of the recovered grants, of the gate's name classes and sentinel
-families, and of one in 25 of the labeled set's foundations ({sub_tuples}
-tuples, {sub_rows} rows), each matched against the whole universe
+families, and of one in 25 of the labeled set's foundations (268,440
+tuples, 2,322,600 rows), each matched against the whole universe
 before and after. Before agrees with the last full run on every one of
 its tuples, which is the harness's own check.
 
 | | rows | dollars |
 |---|---|---|
-| recovered grants, matched | {rec_matched_rows_pct}% of {rec_rows} | {rec_matched_dollars_pct}% of ${rec_dollars}B |
-| by zip and name | {zip_rows} | ${zip_dollars}B |
-| by exact name and state | {state_rows} | ${state_dollars}B |
-| by the name alone | {name_rows} | ${name_dollars}B |
-| the sampled foundations' grants, matched before | {same_pct}% of {reg_rows} | |
-| gained on a name equal once cleaned | {gained_rows} | ${gained_dollars}M |
-| gained as a row that never joined | {never_rows} | ${never_dollars}M |
-| gained on the name alone | {nameonly_rows} | ${nameonly_dollars}M |
-| lost | {lost_rows} | ${lost_dollars}M |
-| moved to another filer | {moved_rows} | ${moved_dollars}M |
-| labeled pairs of the sampled foundations covered | {cov_before}% before, {cov_after}% after, of {cov_pairs} | |
+| recovered grants, matched | 73.5% of 222,105 | 66.5% of $7.07B |
+| by zip and name | 41,829 | $3.51B |
+| by exact name and state | 7,648 | $0.61B |
+| by the name alone | 113,802 | $0.58B |
+| the sampled foundations' grants, matched to the same filer before and after | 59.5% of 347,933 | |
+| gained on a name equal once cleaned | 14,109 | $679.8M |
+| gained as a row that never joined | 1,670 | $127.4M |
+| gained on the name alone | 1,009 | $25.0M |
+| lost | 0 | $0M |
+| moved to another filer | 767 | $93.9M |
+| labeled pairs of the sampled foundations covered | 62.7% before, 67.1% after, of 15,226 | |
 
-The run's cost: the recovered grants add {pairs_added}M pairs to the
-{pairs_total}M of the last run, about {minutes} minutes at its rate.
+The run's cost grows with what is loaded. The frame's recovered grants
+(78,081 distinct recipients) add 49.6M pairs to the 982M of the last
+run, 5%, about 25 minutes at its rate. With the production read loaded
+on 2026-09-30 (582,676 grants paid of 4,607 filings, $16.2B, 262,512
+distinct recipients) it is 162.8M pairs, 17%, about 80 minutes. Of
+those, 117.8M pair a recipient that has no zip with the 931 filers that
+have none, and a recipient with no address cannot match by address:
+leaving such recipients out of the zip block would save most of the
+added time, and 32M pairs of the regular grants. Not done here.
 
 ### 6 · Report and gates
 

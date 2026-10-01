@@ -390,9 +390,11 @@ What to expect:
   (`.../corr_<hash>/rec_v2_<digest>/shape_v3`) and in the build's
   `source_runs`, so a load between two starts of the run makes the
   second start compute from scratch: do not load while it runs.
-- The recovered grants add 49.6M pairs to the 982M
-  of the last run, 5.0%, about 25 minutes at that run's
-  rate; the rest of the change costs seconds. The preflight is another
+- The recovered grants add pairs to the 982M of the last run: 49.6M for
+  the frame's lists (5%, about 25 minutes at that run's rate), and
+  162.8M for what is loaded since the production read of September 30
+  (582,676 grants paid of 4,607 filings; 17%, about 80 minutes). The
+  rest of the change costs seconds. The preflight is another
   matter: with 17 filers in the registry its name families are large
   (the ASPCA's is 108,000 tuples and 38 million pairs under the old
   code, 40 million under the new), and it runs for hours on a laptop.
