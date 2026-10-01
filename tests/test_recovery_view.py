@@ -66,14 +66,16 @@ def test_the_view_shows_one_policys_paid_rows():
 
 
 def test_a_view_under_another_name_reads_another_table_of_recovered_grants():
-    sql = view.view_sql("v2", name="scratch_matcher_grants", recovered="scratch_matcher_recovered")
+    sql = view.view_sql("v2", view="scratch_matcher_grants", recovered="scratch_matcher_recovered")
     assert "CREATE OR REPLACE VIEW public.scratch_matcher_grants AS" in sql
     assert sql.count("FROM public.scratch_matcher_recovered") == 2 and loader.TABLE not in sql
     assert view.VIEW not in sql and sql.count(f"public.{view.CURRENT} g") == 2
-    assert view.view_sql("v2") == view.view_sql("v2", name=view.VIEW, recovered=loader.TABLE)
+    assert view.view_sql("v2") == view.view_sql("v2", view=view.VIEW, recovered=loader.TABLE)
     for name in ("public.grants", "Grants", "x; DROP TABLE y"):
         with pytest.raises(ValueError):
-            view.view_sql("v2", name=name)
+            view.view_sql("v2", view=name)
+        with pytest.raises(ValueError):
+            view.view_sql("v2", recovered=name)
 
 
 def test_the_view_and_the_work_list_test_a_placeholder_row_the_same_way():

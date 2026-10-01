@@ -232,6 +232,19 @@ def run_checks(fast: bool, relations: Relations = Relations()) -> int:
             gate.check("filings with matched recovered positive $ > loaded positive $ (must be 0)",
                        inv.dollar_violations == 0, f"{inv.dollar_violations}")
 
+            # The person-row control above cannot see a recovered grant: the
+            # view puts every recovered name in the business-name column. A
+            # list the filer marked as grants to individuals holds people's
+            # names, and a person's name that equals a filer's whole cleaned
+            # name matches. A count to look at, not a rule: such a list
+            # also names the schools and hospitals the money went through.
+            people = conn.execute(text(f"""
+                SELECT COUNT(*), COUNT(*) FILTER (WHERE match_tier = 'name_only')
+                FROM {matched} WHERE {recovered} AND filer_marked_individual
+            """)).one()
+            gate.check("matched recovered rows of lists marked as grants to individuals (look at them)",
+                       people[0] == 0, f"{people[0]}, {people[1]} of them on the name alone", warn_only=True)
+
         # --- Labeled-pair coverage (recall floor; skippable) -------------
         if fast:
             gate.check("labeled-pair coverage", False, "skipped (--fast)", warn_only=True)

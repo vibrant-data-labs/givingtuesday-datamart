@@ -34,18 +34,6 @@ def test_the_tuples_are_those_of_the_matchers_view():
     assert "FROM public.scratch_matcher_privategrants_w_column_keys_view" in sql
 
 
-def scored(name: float, address: float, words=pd.NA) -> dict:
-    return {"name_score": name, "addr_score": address, "match_name_words": words}
-
-
-def test_a_match_is_credited_to_the_first_tier_that_accepts_it():
-    matches = pd.DataFrame([scored(1.0, 0.6), scored(0.9, 0.9), scored(0.75, 0.95), scored(1.0, 0.2),
-                            scored(float("nan"), float("nan"), 3)])
-    matches["match_name_words"] = matches["match_name_words"].astype("Int64")
-    assert ms.tier(matches).tolist() == ["zip and name", "zip and name", "zip and name", "state and name",
-                                         "name only"]
-
-
 def test_what_an_address_gives():
     df = pd.DataFrame({"addressstate_key": ["ny", "ny", "", ""], "addresszip_key": ["12207", "", "", "12207"]})
     assert ms.address_kind(df).tolist() == ["state and zip", "state, no zip", "no state", "no state"]
@@ -73,9 +61,13 @@ SUBSET = pd.DataFrame([
     ("h", "ca", "94103", 1, 10.0, 0, 0.0, 1, 10.0, "777", "778", "zip and name"),
     ("i", "", "", 2, 5.0, 0, 0.0, 2, 5.0, None, "888", "name only"),
     ("j", "", "02139", 2, 15.0, 0, 0.0, 2, 15.0, None, "999", "zip and name"),
+    ("k", "ca", "", 3, 9.0, 0, 0.0, 3, 9.0, "555", None, None),          # two filers of the state share the name
+    ("l", "ca", "", 4, 8.0, 4, 8.0, 0, 0.0, None, None, None),          # the same, a recovered grant
 ], columns=["name1_key", "addressstate_key", "addresszip_key", "n_rows", "dollars", "recovered_rows",
             "recovered_dollars", "funder_rows", "funder_dollars", "before_ein", "after_ein", "tier"])
-SUBSET["addresscity_key"] = ["albany", "", "", "", "sf", "sf", "sf", "sf", "", "cambridge"]
+SUBSET["after_ein_no_rule"] = SUBSET["after_ein"].where(~SUBSET["name1_key"].isin(["k", "l"]), "556")
+SUBSET["after_ein_rule_all"] = SUBSET["after_ein"].where(SUBSET["name1_key"] != "e")   # a wider rule would take e too
+SUBSET["addresscity_key"] = ["albany", "", "", "", "sf", "sf", "sf", "sf", "", "cambridge", "sf", "sf"]
 SUBSET["address_kind"] = ms.address_kind(SUBSET)
 SUBSET["production_ein"] = SUBSET["before_ein"]
 for _column in ("name2_key", "address1_key", "before_name", "after_name", "after_state"):
@@ -87,7 +79,7 @@ def test_the_recovered_grants_are_counted_by_address_and_tier_in_rows_and_dollar
     assert table["state and zip"]["zip and name, rows"] == 3 and table["state, no zip"]["state and name, rows"] == 2
     assert (table["no state"]["rows"], table["no state"]["name only, rows"], table["no state"]["matched rows"]) == (
         15, 5, "33.3%")
-    assert (table["all"]["rows"], table["all"]["dollars"], table["all"]["matched dollars"]) == (20, 200, "50.0%")
+    assert (table["all"]["rows"], table["all"]["dollars"], table["all"]["matched dollars"]) == (24, 208, "48.1%")
 
 
 def test_the_regular_grants_are_counted_by_what_became_of_their_match():
@@ -95,9 +87,18 @@ def test_the_regular_grants_are_counted_by_what_became_of_their_match():
     found = {line["change"]: (line["tuples"], line["rows"], line["dollars"]) for line in table}
     assert found == {"matched, the same filer": (1, 4, 40), "gained": (1, 2, 25), "lost": (1, 1, 10),
                      "matched, another filer": (1, 1, 10), "gained, on the name alone": (1, 2, 5),
-                     "gained, a row that never joined": (1, 2, 15)}
-    assert sorted(changed["name1_key"]) == ["f", "g", "h", "i", "j"]
-    assert ms.examples(changed, n=1)["name1_key"].tolist() == ["f", "j", "i", "g", "h"]
+                     "gained, a row that never joined": (1, 2, 15), ms.SHARED_IN_STATE: (1, 3, 9)}
+    assert sorted(changed["name1_key"]) == ["f", "g", "h", "i", "j", "k"]
+    assert ms.examples(changed, n=1)["name1_key"].tolist() == ["f", "j", "i", "g", "k", "h"]
+
+
+def test_the_rule_is_counted_as_built_and_as_it_would_be_held_to_every_tuple():
+    found = {(line["grants"], line["the rule holds a tuple with"]): (line["tuples"], line["rows"], line["dollars"])
+             for line in ms.one_filer_in_state(SUBSET)}
+    assert found == {("recovered", "no street address (as built)"): (1, 4, 8),
+                     ("recovered", "a street address too (not built)"): (0, 0, 0),
+                     ("the sampled funders'", "no street address (as built)"): (1, 3, 9),
+                     ("the sampled funders'", "a street address too (not built)"): (1, 4, 40)}
 
 
 def test_before_is_held_against_the_last_full_run():

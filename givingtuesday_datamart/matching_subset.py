@@ -40,9 +40,13 @@ Each tuple is matched against the whole universe, so the match it gets is
 the match the full run gives it (the argument is in
 ``corrections_preflight``). It is matched twice. **Before** is the matcher
 up to input shape 2: only the same normalized name is the same name, two
-rows without a state agree on it, no name-only tier, no recovered grants,
+rows without a state agree on it, no name-only tier, a name several filers
+of a state share goes to the one the address picks, no recovered grants,
 and no row with a NULL city, state or zip, since such a row never joined.
-**After** is the matcher as it stands.
+**After** is the matcher as it stands. The scores of after are resolved
+twice more, with the one-filer-in-the-state rule off and with it held to
+every tuple, so the report says what the rule moves and what a wider one
+would.
 
 **What it writes**, all under the prefix: ``recovered``, the copy, and
 ``grants``, the view over it; the seven views and the corrections table of
@@ -82,10 +86,10 @@ from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart.corrections_preflight import FAMILY_NAME_JW_MIN
 from givingtuesday_datamart.grant_matching import (
-    FINAL_FILTER_RULES,
+    ADDRESS_TIER,
     INDEX_COLS,
     NAME_ONLY,
-    RECOVERED_POLICY,
+    STATE_TIER,
     Relations,
     _KEYS,
     _load_corrections,
@@ -107,7 +111,7 @@ from givingtuesday_datamart.matching_regression_checks import (
     RECIPIENT_SENTINEL_FLOORS,
 )
 from givingtuesday_datamart.placeholder_recovery import loader as recovered_loader
-from givingtuesday_datamart.placeholder_recovery.view import FROM_RECOVERY, view_sql
+from givingtuesday_datamart.placeholder_recovery.view import FROM_RECOVERY, shown_policy, view_sql
 
 PREFIX = "scratch_matcher_"
 RECOVERED = "recovered"
@@ -119,9 +123,12 @@ TUPLES = Path.home() / ".cache" / "matching_subset" / "tuples.parquet"
 REPORT = Path("data/exploratory/placeholder_matching_subset_report.csv")
 EXAMPLES = Path("data/exploratory/placeholder_matching_subset_examples.csv")
 
-# The tiers, in the order a match is credited to them.
-ADDRESS, STATE = "zip and name", "state and name"
-TIERS = (ADDRESS, STATE, NAME_ONLY.replace("_", " "))
+# The tiers as the report names them, in the order a match is credited to
+# them. "Zip and name" is the address tiers: nearly all their pairs come
+# from the zip block.
+TIER_NAMES = {ADDRESS_TIER: "zip and name", STATE_TIER: "state and name", NAME_ONLY: "name only"}
+TIERS = tuple(TIER_NAMES.values())
+SHARED_IN_STATE = "lost, several filers of the state share the name"
 ADDRESS_KINDS = ("state and zip", "state, no zip", "no state")
 
 
@@ -206,19 +213,6 @@ def score(universe: pd.DataFrame, grants: pd.DataFrame, workers: int) -> pd.Data
     return pd.concat(scored, ignore_index=True)
 
 
-def tier(matches: pd.DataFrame) -> pd.Series:
-    """The tier a match is credited to: the address tiers where any of them
-    accepts the pair, else the exact name with the state, else the name
-    alone."""
-    rules = FINAL_FILTER_RULES
-    name, address = matches["name_score"], matches["addr_score"]
-    by_address = (((name >= rules["near_perfect_name_name_min"]) & (address >= rules["near_perfect_name_addr_min"]))
-                  | ((name >= rules["near_perfect_addr_name_min"]) & (address >= rules["near_perfect_addr_addr_min"]))
-                  | ((name >= rules["good_enough_name_name_min"]) & (address >= rules["good_enough_name_addr_min"])))
-    found = pd.Series(STATE, index=matches.index).where(~by_address, ADDRESS)
-    return found.where(matches["match_name_words"].isna(), TIERS[2])
-
-
 def address_kind(df: pd.DataFrame) -> pd.Series:
     has_zip = df["addresszip_key"].str.strip() != ""
     has_state = df["addressstate_key"].str.strip() != ""
@@ -231,12 +225,18 @@ def address_kind(df: pd.DataFrame) -> pd.Series:
 # ---------------------------------------------------------------------------
 
 
-def build(prefix: str = PREFIX, policy: str = RECOVERED_POLICY, one_in: int = ONE_IN, workers: int = 1,
+def build(prefix: str = PREFIX, policy: str | None = None, one_in: int = ONE_IN, workers: int = 1,
           out: Path = TUPLES) -> None:
+    """``policy`` is the policy whose recovered grants are copied; with
+    none named, the one production's view shows."""
     names = relations(prefix)
     sentinels = list(RECIPIENT_SENTINEL_FLOORS) + [FIDELITY]
     copy = f"{prefix}{RECOVERED}"
     with get_session(config=datamart_config()) as session:
+        policy = policy or shown_policy(session)
+        if policy is None:
+            raise LookupError("production's view of current and recovered grants is absent: name the --policy")
+        logger.info(f"Copying the recovered grants of policy {policy}")
         connection = session.connection()
         connection.execute(text(f"DROP TABLE IF EXISTS public.{copy} CASCADE"))
         connection.execute(text(f"""
@@ -245,7 +245,7 @@ def build(prefix: str = PREFIX, policy: str = RECOVERED_POLICY, one_in: int = ON
             WHERE policy_version = :policy AND target = '{recovered_loader.PAID}'
         """), {"policy": policy})
         connection.execute(text(f"ANALYZE public.{copy}"))
-        connection.execute(text(view_sql(policy, name=names.grants, recovered=copy)))
+        connection.execute(text(view_sql(policy, view=names.grants, recovered=copy)))
         session.commit()
         connection = session.connection()
         _load_corrections(connection, names)
@@ -278,16 +278,23 @@ def build(prefix: str = PREFIX, policy: str = RECOVERED_POLICY, one_in: int = ON
     # Before: no recovered grant, and no row with a NULL city, state or zip.
     regular = subset[subset["n_rows"] > subset["recovered_rows"]]
     logger.info(f"Matching before: {len(regular):,} tuples")
-    before = resolve_matches(score(as_before(universe), as_before(regular), workers))
+    universe_before, regular_before = as_before(universe), as_before(regular)
+    before = resolve_matches(score(universe_before, regular_before, workers), universe_before, regular_before,
+                             one_filer_in_state="none")
     joined = (subset[["addresscity_key", "addressstate_key", "addresszip_key"]] != "").all(axis=1)
     before = before[before[INDEX_COLS[1]].map(joined)]
     logger.info(f"Matching after: {len(subset):,} tuples")
-    after = all_matches(score(universe, subset, workers), universe, subset)
+    scored = score(universe, subset, workers)
+    after = all_matches(scored, universe, subset)
     # The join table, while the matches and the tuples share an index:
     # the merge below gives the tuples a new one.
     join_table = matched_tuples(universe, subset, after)
 
     ein = universe["filerein_key"]
+    # The same scores under the rule's two other settings, for the report.
+    for column, setting in (("after_ein_no_rule", "none"), ("after_ein_rule_all", "all")):
+        other = all_matches(scored, universe, subset, one_filer_in_state=setting)
+        subset[column] = other.set_index(INDEX_COLS[1])[INDEX_COLS[0]].map(ein)
     subset["before_ein"] = before.set_index(INDEX_COLS[1])[INDEX_COLS[0]].map(ein)
     subset["before_name"] = before.set_index(INDEX_COLS[1])[INDEX_COLS[0]].map(universe["compare_name"])
     found = after.set_index(INDEX_COLS[1])
@@ -295,7 +302,7 @@ def build(prefix: str = PREFIX, policy: str = RECOVERED_POLICY, one_in: int = ON
     subset["after_name"] = found[INDEX_COLS[0]].map(universe["compare_name"])
     subset["same_name"] = subset["full_name"] == found[INDEX_COLS[0]].map(universe["full_name"]).reindex(subset.index)
     subset["after_state"] = found[INDEX_COLS[0]].map(universe["addressstate_key"])
-    subset["tier"] = tier(found)
+    subset["tier"] = found["match_tier"].map(TIER_NAMES)
     subset["match_name_words"] = found["match_name_words"]
     subset = subset.merge(production.fillna("").drop_duplicates(_KEYS), on=_KEYS, how="left")
     subset["address_kind"] = address_kind(subset)
@@ -378,6 +385,7 @@ def regular_changes(subset: pd.DataFrame) -> tuple[list[dict], pd.DataFrame]:
     rows.loc[(before != "") & (after == before), "change"] = "matched, the same filer"
     rows.loc[(before != "") & (after != "") & (after != before), "change"] = "matched, another filer"
     rows.loc[(before != "") & (after == ""), "change"] = "lost"
+    rows.loc[(before != "") & (after == "") & rows["after_ein_no_rule"].notna(), "change"] = SHARED_IN_STATE
     rows.loc[(before == "") & (after != ""), "change"] = "gained"
     rows.loc[(before == "") & (after != "") & never_joined, "change"] = "gained, a row that never joined"
     rows.loc[(before == "") & (after != "") & (rows["tier"] == TIERS[2]), "change"] = "gained, on the name alone"
@@ -397,6 +405,22 @@ def examples(changed: pd.DataFrame, n: int = 20) -> pd.DataFrame:
                "after_name", "after_state", "tier"]
     return (changed.sort_values("funder_dollars", ascending=False).groupby("change").head(n)
             .sort_values(["change", "funder_dollars"], ascending=[True, False])[columns])
+
+
+def one_filer_in_state(subset: pd.DataFrame) -> list[dict]:
+    """What the one-filer-in-the-state rule leaves unmatched, as built (a
+    tuple with no street address) and held to every tuple, for the
+    recovered grants and for the sampled funders' regular ones."""
+    as_built = subset["after_ein_no_rule"].notna() & subset["after_ein"].isna()
+    wider = subset["after_ein"].notna() & subset["after_ein_rule_all"].isna()
+    table = []
+    for grants, rows, dollars in (("recovered", "recovered_rows", "recovered_dollars"),
+                                  ("the sampled funders'", "funder_rows", "funder_dollars")):
+        for rule, hit in (("no street address (as built)", as_built), ("a street address too (not built)", wider)):
+            found = subset[hit & (subset[rows] > 0)]
+            table.append({"grants": grants, "the rule holds a tuple with": rule, "tuples": len(found),
+                          "rows": int(found[rows].sum()), "dollars": round(found[dollars].sum())})
+    return table
 
 
 def against_production(subset: pd.DataFrame) -> dict:
@@ -427,10 +451,13 @@ def report(tuples: Path = TUPLES, out: Path = REPORT, examples_out: Path = EXAMP
     by_tier = recovered_by_tier(subset)
     changes, changed = regular_changes(subset)
     agreement = against_production(subset)
+    in_state = one_filer_in_state(subset)
     _table(by_tier, "the recovered grants, by address and tier")
     _table(changes, "the sampled funders' grants, before and after")
+    _table(in_state, "left unmatched: several filers of the state share the name")
     _table([agreement], "before, against the last full run")
     pd.concat([pd.DataFrame(by_tier).assign(table="recovered"), pd.DataFrame(changes).assign(table="regular"),
+               pd.DataFrame(in_state).assign(table="one filer in the state"),
                pd.DataFrame([agreement]).assign(table="production")]).to_csv(out, index=False)
     examples(changed).to_csv(examples_out, index=False)
     print(f"\nwrote {out} and {examples_out}")
@@ -440,7 +467,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("build", help="match the subset before and after, and write the output under the prefix")
-    p.add_argument("--policy", default=RECOVERED_POLICY)
+    p.add_argument("--policy", default=None, help="default: the policy production's view shows")
     p.add_argument("--one-in", type=int, default=ONE_IN, help="the share of the labeled set's foundations sampled")
     p.add_argument("--workers", type=int, default=1, help="processes that score")
     sub.add_parser("report", help="the tables, from the tuples `build` wrote")

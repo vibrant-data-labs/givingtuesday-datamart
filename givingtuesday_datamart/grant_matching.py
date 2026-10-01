@@ -53,13 +53,11 @@ from givingtuesday_datamart.placeholder_recovery import view as recovered_view
 # 990-only universe makes every PF-recipient grant structurally unmatchable —
 # ~$32B of 2020+ grant dollars carry a "PF:" recipient status alone.
 
-# The policy whose recovered grants the matcher takes in. The view that
-# holds them shows one policy, written into its definition, and the rows are
-# a matching input like the staging tables: the policy and a digest of the
-# rows are in the checkpoint prefix.
-RECOVERED_POLICY = "v2"
-
-_IDENTIFIER = re.compile(r"[a-z_][a-z0-9_]*")
+# The recovered grants the matcher takes in are those of one policy, the one
+# the view of current and recovered grants shows: it is written into the
+# view's definition, and nowhere else. A run never guesses it. The rows are
+# a matching input like the staging tables, so the policy and a digest of
+# the rows are in the checkpoint prefix.
 # What a matching run creates: seven views, the corrections table, the join
 # table and the two output tables.
 _CREATED = (
@@ -99,8 +97,7 @@ class Relations:
 
     def __post_init__(self):
         for name in (self.prefix or "_", self.grants, self.schedule_i):
-            if not _IDENTIFIER.fullmatch(name):
-                raise ValueError(f"{name!r} cannot be written into SQL: lower case letters, digits and '_' only")
+            recovered_view.check_identifier(name)
 
     def of(self, name: str) -> str:
         """The run's name for one of the relations it creates."""
@@ -502,8 +499,11 @@ def _load_corrections(connection, relations: Relations = Relations()) -> int:
 # privategrants_current, placeholder_recovery, or the Schedule I relation),
 # and for a recovered grant whether its page was flagged (`page_verdict`),
 # whether the filer marked the list as grants to individuals, and whether
-# the list holds more than the grants paid on line 25. `match_name_words`
-# is the number of words in the name of a name-only match.
+# the list holds more than the grants paid on line 25. `match_source` is
+# the arm of the universe the matched filer's row came from, and
+# `match_tier` what the match rests on: the address and the name, the exact
+# name and the state, or the name alone, where `match_name_words` is the
+# number of words in the name.
 #
 # A recovered grant also carries its key in privategrants_recovered (the
 # filing's object id, the page, the line of the reading), which leads to the
@@ -540,6 +540,7 @@ FROM (
         sigocpyrfsta AS grant_status,
         sigocpyrrela AS grant_relationship,
         match_source,
+        match_tier,
         match_name_words,
         row_source,
         page_verdict,
@@ -577,6 +578,7 @@ FROM (
         -- Schedule I rows carry the filer-reported recipient EIN directly;
         -- no matching happened, so no match_source.
         NULL AS match_source,
+        NULL AS match_tier,
         NULL::bigint AS match_name_words,
         '{schedule_i}' AS row_source,
         NULL AS page_verdict,
@@ -608,7 +610,7 @@ _UNIONED_GRANTS_INDEXES = [
 ]
 
 
-def recovered_digest(connection, policy_version: str = RECOVERED_POLICY) -> dict:
+def recovered_digest(connection, policy_version: str) -> dict:
     """The recovered grants the view shows under the policy: how many, and
     eight characters that change whenever a filing's rows are written. A
     load rewrites a filing's rows only when they differ, with a new
@@ -623,39 +625,53 @@ def recovered_digest(connection, policy_version: str = RECOVERED_POLICY) -> dict
     return {"policy_version": policy_version, "rows": int(rows), "digest": digest[:8]}
 
 
-def _check_recovered_policy(connection, policy_version: str) -> bool:
-    """Is the view of current and recovered grants there? Raises when it
-    is and shows another policy than the run's: which policy the grants
-    come from is a decision (``placeholder_recovery view --policy``), not
-    something a matching run changes on its way."""
-    shown = recovered_view.shown_policy(connection)
-    if shown is not None and shown != policy_version:
-        raise RuntimeError(
-            f"{recovered_view.VIEW} shows policy {shown} and the run expects {policy_version}. "
-            f"Run `python -m givingtuesday_datamart.placeholder_recovery view --policy {policy_version}`, "
-            f"or pass the policy the view shows."
+def recovered_policy_of(shown: str | None, asked: str | None) -> str:
+    """The policy whose recovered grants a run takes: the one the view
+    shows, or the one asked for when there is no view.
+
+    Which policy the grants come from is a decision (``placeholder_recovery
+    view --policy``), and the view's definition is the one place it is
+    written. So a run changes nothing and guesses nothing: it raises when
+    the view shows another policy than the one asked for, and when there is
+    no view and no policy was named.
+    """
+    if shown is None and asked is None:
+        raise LookupError(
+            f"{recovered_view.VIEW} is absent, so the policy its grants come from is not known. "
+            "Name it (--recovered-policy <version>), or create the view first: "
+            "`python -m givingtuesday_datamart.placeholder_recovery view --policy <version>`."
         )
-    return shown is not None
+    if shown is not None and asked is not None and shown != asked:
+        raise RuntimeError(
+            f"{recovered_view.VIEW} shows policy {shown} and the run was asked for {asked}. "
+            f"Run `python -m givingtuesday_datamart.placeholder_recovery view --policy {asked}`, "
+            f"or ask for the policy the view shows."
+        )
+    return shown if shown is not None else asked
 
 
-def _ensure_recovered_view(connection, policy_version: str) -> None:
-    """The view of current and recovered grants, created when it is gone.
+def _ensure_recovered_view(connection, policy_version: str | None) -> str:
+    """The view of current and recovered grants, created when it is gone;
+    returns the policy it shows.
 
     ``build_current_relations`` rebuilds ``privategrants_current`` with
-    DROP ... CASCADE, which takes the view with it, so at the start of a
-    run there is none and it is created here, before the views that read
-    it. A view that is there is left as it is.
+    DROP ... CASCADE, which takes the view with it, so after a rebuild
+    there is none and it is created here, before the views that read it,
+    for the policy the caller read from the view before the rebuild. A
+    view that is there is left as it is.
     """
-    if _check_recovered_policy(connection, policy_version):
-        return
-    logger.info(f"Creating {recovered_view.VIEW} for policy {policy_version}")
-    connection.execute(text(recovered_view.view_sql(policy_version)))
+    shown = recovered_view.shown_policy(connection)
+    policy = recovered_policy_of(shown, policy_version)
+    if shown is None:
+        logger.info(f"Creating {recovered_view.VIEW} for policy {policy}")
+        connection.execute(text(recovered_view.view_sql(policy)))
+    return policy
 
 
 def create_or_replace_views(
     connection,
     relations: Relations = Relations(),
-    recovered_policy: str = RECOVERED_POLICY,
+    recovered_policy: str | None = None,
 ):
     """Idempotently (re)create the 7 views the matching pipeline reads from.
 
@@ -666,7 +682,9 @@ def create_or_replace_views(
     database before the loader ever runs. So is the view of current and
     recovered grants, when the run reads its grants from it: by a
     production run only, since a run under a prefix creates nothing of
-    production's.
+    production's. ``recovered_policy`` is the policy to create it for when
+    it is gone: what the caller read from the view before the rebuild that
+    dropped it. With no view and no policy this raises.
     """
     logger.info(f"Creating/replacing grant matching views in public.{relations.prefix}*")
     connection.execute(text(_CORRECTIONS_TABLE_DDL.format(table=relations.of(_CORRECTIONS_TABLE))))
@@ -723,7 +741,9 @@ _MATCHING_INPUT_LOGICAL_NAMES = (
 #   recovered grants in place of the placeholder rows); rows block on the
 #   name under clean_name, and the same cleaned name scores 1; the city,
 #   state and zip keys of a grant are '' where they were NULL; two rows
-#   without a state do not agree on it; the name-only tier.
+#   without a state do not agree on it; the name-only tier; a row with no
+#   address is not in the zip block; the exact-name tier asks for one
+#   filer in the state of a row with no street address.
 MATCHING_INPUT_SHAPE_VERSION = 3
 
 
@@ -751,6 +771,22 @@ def _insert_started_build(build_id: str, started_at: datetime, source_runs: dict
                 "started_at": started_at,
                 "source_runs": json.dumps(source_runs),
             },
+        )
+
+
+def _stamp_recovered(build_id: str, recovered: dict) -> None:
+    """Add the recovered grants a run took (the policy, the rows, their
+    digest) to its build's ``source_runs``."""
+    with get_session(config=datamart_config()) as session:
+        session.execute(
+            text(
+                f"""
+                UPDATE {CANONICAL_BUILDS_TABLE}
+                SET source_runs = source_runs || CAST(:recovered AS JSONB)
+                WHERE build_id = :build_id
+                """
+            ),
+            {"build_id": build_id, "recovered": json.dumps({recovered_loader.TABLE: recovered})},
         )
 
 
@@ -807,8 +843,8 @@ def _finalize_build_success(
 
 def _resolve_checkpoint_prefix(
     connection,
+    recovered: dict,
     base_prefix: str = "grant_matching_checkpoints",
-    recovered_policy: str = RECOVERED_POLICY,
 ) -> str:
     """Build an S3 prefix that's keyed on the source versions of all three
     upstream staging tables plus the content hash of the corrections CSV
@@ -819,6 +855,10 @@ def _resolve_checkpoint_prefix(
     recovered grants sort into the deterministic ORDER BY and shift integer
     row positions, which chunk checkpoints key on; resuming old chunks
     against a shifted dataframe would silently produce wrong matches.)
+
+    ``recovered`` is ``recovered_digest``'s answer, read once by the run
+    and stamped on its build, so the prefix and the build name the same
+    rows.
 
     Resolves the latest successful (status='success') ingest_run per
     logical_name from datamart_meta.ingest_runs. Raises if any source has
@@ -850,7 +890,7 @@ def _resolve_checkpoint_prefix(
         f"bf_{versions['irs_990_basic_fields']}/"
         f"bfpf_{versions['irs_990pf_basic_fields']}/"
         f"corr_{_corrections_content_hash()}/"
-        f"rec_{recovered_policy}_{recovered_digest(connection, recovered_policy)['digest']}/"
+        f"rec_{recovered['policy_version']}_{recovered['digest']}/"
         f"shape_v{MATCHING_INPUT_SHAPE_VERSION}"
     )
 
@@ -1208,8 +1248,12 @@ def grants_sql(relations: Relations = Relations(), limit_clause: str = "") -> st
 # The (universe row, grant tuple) positions of a pair, as columns.
 INDEX_COLS = ['basic_fields_df_index', 'private_foundations_df_index']
 SCORE_COLS = ['zip_score', 'name_score', 'addr_score', 'state_score']
-# match_source of a match made by the name-only tier. Every other match
-# carries the arm of the universe its winning row came from.
+# match_tier: what a match rests on. The address tiers of filter_match_rules
+# (a name and an address that agree), the exact name with the same state,
+# or the name alone. match_source says which arm of the universe the
+# matched filer's row came from, whatever the tier.
+ADDRESS_TIER = "address_and_name"
+STATE_TIER = "state_and_name"
 NAME_ONLY = "name_only"
 
 
@@ -1222,15 +1266,27 @@ def candidate_pairs(universe_df: pd.DataFrame, grants_df: pd.DataFrame) -> pd.Mu
          (+0.07%), but it reaches ~$25B of PF-recipient dollars that zip
          blocking alone can never pair. These pairs match via the
          exact-name + same-state tier in filter_match_rules.
+
+    A row with no address at all is left out of the zip block. Its
+    ``compare_addr`` (street, city and state as one string) is empty, so it
+    scores 0 on the address against anything and has no state: no address
+    tier and no state tier can accept a pair it is in. A missing zip pads
+    to 00000, and that block paired every such grant tuple with the 931
+    filers that have no zip: 117.8M pairs for the recovered grants loaded
+    on 2026-09-30, and 32M for the regular ones. The name block still
+    pairs it with the filers of its own name, and the name-only tier does
+    not go through pairs.
     """
     # Make sure the zip codes are Pandas Categorical types for faster matching
     union_cats = pd.concat([universe_df['clean_zip'], grants_df['clean_zip']]).unique()
     cat_type = pd.CategoricalDtype(categories=union_cats, ordered=False)
-    universe_df['clean_zip'] = universe_df['clean_zip'].astype(cat_type)
-    grants_df['clean_zip'] = grants_df['clean_zip'].astype(cat_type)
+    for df in (universe_df, grants_df):
+        df['clean_zip'] = df['clean_zip'].astype(cat_type)
+        # Missing where there is no address: a block leaves a missing key out.
+        df['block_zip'] = df['clean_zip'].where(df['compare_addr'] != "")
 
     indexer = recordlinkage.Index()
-    indexer.block(left_on=['clean_zip'], right_on=['clean_zip'])
+    indexer.block(left_on=['block_zip'], right_on=['block_zip'])
     indexer.block(left_on=['full_name'], right_on=['full_name'])
     return indexer.index(universe_df, grants_df)
 
@@ -1246,9 +1302,11 @@ def pair_scores(pairs: pd.MultiIndex, universe_df: pd.DataFrame, grants_df: pd.D
     compare.exact('compare_state', 'compare_state', label='state_score')
     compare.exact('full_name', 'full_name', label='same_name')
     features = compare.compute(pairs, universe_df, grants_df)
-    # The same cleaned name is the same name. Any other pair keeps the
-    # score of its normalized names.
-    features['name_score'] = features['name_score'].where(features['same_name'] != 1, 1.0)
+    # The same cleaned name is the same name, unless it is no name at all
+    # (a name with no letter or digit cleans to ''). Any other pair keeps
+    # the score of its normalized names.
+    named = grants_df['full_name'].reindex(features.index.get_level_values(1)).to_numpy() != ""
+    features['name_score'] = features['name_score'].where(~((features['same_name'] == 1) & named), 1.0)
     return features[SCORE_COLS]
 
 
@@ -1265,14 +1323,44 @@ def score_pairs(pairs: pd.MultiIndex, universe_df: pd.DataFrame, grants_df: pd.D
     return features.reset_index()
 
 
-def resolve_matches(features: pd.DataFrame) -> pd.DataFrame:
-    """The final rules, then one universe row per grant tuple.
+def _by_address(features: pd.DataFrame) -> pd.Series:
+    """Does a pair pass one of the address tiers of the final rules?"""
+    rules = FINAL_FILTER_RULES
+    name, address = features['name_score'], features['addr_score']
+    return (
+        ((name >= rules['near_perfect_name_name_min']) & (address >= rules['near_perfect_name_addr_min']))
+        | ((name >= rules['near_perfect_addr_name_min']) & (address >= rules['near_perfect_addr_addr_min']))
+        | ((name >= rules['good_enough_name_name_min']) & (address >= rules['good_enough_name_addr_min']))
+    )
+
+
+# Which grant tuples the one-filer-in-the-state rule holds: those with no
+# street address ("street"), every tuple ("all"), or none ("none", the
+# matcher up to input shape 2, for a before-and-after measurement).
+ONE_FILER_IN_STATE = "street"
+
+
+def resolve_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df: pd.DataFrame,
+                    one_filer_in_state: str = ONE_FILER_IN_STATE) -> pd.DataFrame:
+    """The final rules, then one universe row per grant tuple, with the
+    tier the match rests on (``match_tier``).
 
     Each private_foundations record (grant recipient) should map to exactly
     one basic_fields org. When fuzzy matching finds multiple candidates,
     keep the one with the highest combined score; name_score is weighted 2x
     since the name is the primary identifier and address collisions (shared
     buildings, PO boxes) are common.
+
+    **One filer in the state.** A winner that only the exact-name tier
+    accepts has the name and the state for it and nothing else. When
+    several filers of that state carry the name, the combined score picks
+    among them on the address, and a grant tuple with no street address
+    has an address string that is its city and state at most: the filer
+    with the shortest address wins. So such a tuple matches on the name
+    and the state only when one filer of the state has the name, as the
+    name-only tier asks of the whole universe; otherwise it is left
+    unmatched. A tuple with a street address keeps the pick of the address
+    (``ONE_FILER_IN_STATE``).
     """
     # filter_match_rules returns a boolean-mask slice (a view). Take an
     # explicit copy so subsequent assignments don't trigger
@@ -1280,6 +1368,16 @@ def resolve_matches(features: pd.DataFrame) -> pd.DataFrame:
     matches = filter_match_rules(features_df=features, **FINAL_FILTER_RULES).copy()
     logger.info(f"Found {len(matches)} matches.")
     matches = matches.drop_duplicates()
+    matches['match_tier'] = pd.Series(STATE_TIER, index=matches.index).where(~_by_address(matches), ADDRESS_TIER)
+    # The filers of the tuple's state that carry its name: the pairs the
+    # exact-name tier accepts.
+    by_state = matches[
+        (matches['name_score'] >= FINAL_FILTER_RULES['exact_name_name_min']) & (matches['state_score'] == 1)
+    ]
+    filers_in_state = (
+        by_state.assign(_ein=by_state[INDEX_COLS[0]].map(universe_df['filerein_key']))
+        .groupby(INDEX_COLS[1])['_ein'].nunique()
+    )
 
     pre_resolve_count = len(matches)
     matches = matches.assign(_combined_score=matches['name_score'] * 2 + matches['addr_score'])
@@ -1294,6 +1392,18 @@ def resolve_matches(features: pd.DataFrame) -> pd.DataFrame:
         f"Resolved multi-matches: {pre_resolve_count} -> {len(matches)} "
         f"pairs after keeping the best basic_fields match per private_foundations record."
     )
+
+    if one_filer_in_state != "none":
+        shared = (matches['match_tier'] == STATE_TIER) & (
+            matches[INDEX_COLS[1]].map(filers_in_state).fillna(1) > 1)
+        if one_filer_in_state == "street":
+            street = grants_df['address1_key'].str.strip() + grants_df['address2_key'].str.strip()
+            shared &= matches[INDEX_COLS[1]].map(street == "").astype(bool)
+        logger.info(
+            f"One filer in the state: {int(shared.sum())} grant tuples left unmatched, "
+            f"their name shared by several filers of their state."
+        )
+        matches = matches[~shared]
     return matches
 
 
@@ -1327,14 +1437,16 @@ def name_only_matches(universe_df: pd.DataFrame, grants_df: pd.DataFrame, matche
         INDEX_COLS[0]: row_of.reindex(found['full_name']).to_numpy(),
         INDEX_COLS[1]: found.index.to_numpy(),
         'match_name_words': found['full_name'].str.split().str.len().to_numpy(),
-    }).astype('int64')
+    }).astype('int64').assign(match_tier=NAME_ONLY)
 
 
-def all_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df: pd.DataFrame) -> pd.DataFrame:
+def all_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df: pd.DataFrame,
+                one_filer_in_state: str = ONE_FILER_IN_STATE) -> pd.DataFrame:
     """Every match of a run, one row per grant tuple matched: the winners
     of the scored pairs, then the name-only tier on what they left.
-    ``match_name_words`` is missing but on a name-only match."""
-    matches = resolve_matches(features)
+    ``match_tier`` says which; ``match_name_words`` is missing but on a
+    name-only match."""
+    matches = resolve_matches(features, universe_df, grants_df, one_filer_in_state)
     name_only = name_only_matches(universe_df, grants_df, matches[INDEX_COLS[1]])
     logger.info(f"Name-only tier: {len(name_only)} grant tuples matched on a name that belongs to one filer.")
     matches = pd.concat([matches.assign(match_name_words=pd.NA), name_only], ignore_index=True)
@@ -1372,16 +1484,18 @@ def match_slice(universe_slice: pd.DataFrame, grants_slice: pd.DataFrame) -> pd.
 
 def matched_tuples(universe_df: pd.DataFrame, grants_df: pd.DataFrame, matches: pd.DataFrame) -> pd.DataFrame:
     """The join table: the seven keys of each matched grant tuple, the EIN
-    it matched, ``match_source`` and ``match_name_words``."""
+    it matched, ``match_source``, ``match_tier`` and ``match_name_words``."""
     # `source` comes from the basic_fields (filer-universe) side of the merge:
-    # which arm of the universe union supplied the winning identity row.
-    found = matches[INDEX_COLS + ['match_name_words']].merge(
+    # which arm of the universe union supplied the winning identity row. It
+    # is the arm whatever the tier: a name-only match on a name only a
+    # correction row carries says `correction`, the sign that row earns its
+    # place (docs/corrections-plan.md).
+    found = matches[INDEX_COLS + ['match_tier', 'match_name_words']].merge(
         universe_df[['filerein_key', 'source']], left_on=INDEX_COLS[0], right_index=True,
     ).merge(
         grants_df[_KEYS], left_on=INDEX_COLS[1], right_index=True,
     )
-    found['source'] = found['source'].where(found['match_name_words'].isna(), NAME_ONLY)
-    found = found[['filerein_key'] + _KEYS + ['source', 'match_name_words']].drop_duplicates()
+    found = found[['filerein_key'] + _KEYS + ['source', 'match_tier', 'match_name_words']].drop_duplicates()
     return found.rename(columns={
         'filerein_key': 'recipeint_ein_key',
         'source': 'match_source',
@@ -1420,6 +1534,7 @@ def write_matches(connection, full_data_df: pd.DataFrame, relations: Relations =
             pg.*,
             pfgm.recipeint_ein_key,
             pfgm.match_source,
+            pfgm.match_tier,
             pfgm.match_name_words
         INTO public.{private_grants_w_recipient_table_name}
         FROM public.{keys_view} pg
@@ -1474,7 +1589,7 @@ def match_records(
     resume_from_checkpoints: bool = True,
     resume_workers: int = 32,
     limit: int | None = None,
-    recovered_policy: str = RECOVERED_POLICY,
+    recovered_policy: str | None = None,
 ):
     """Run the recordlinkage grant-matching pipeline against gt_datamart.
 
@@ -1490,9 +1605,11 @@ def match_records(
     grants forces a clean recompute.
     Pass an explicit string to override (e.g. for testing).
 
-    ``recovered_policy`` is the policy whose recovered grants take the
-    place of the placeholder rows (``placeholder_recovery``). The run stops
-    before it rebuilds anything when the view shows another policy.
+    The recovered grants that take the place of the placeholder rows
+    (``placeholder_recovery``) are those of the policy the view shows.
+    ``recovered_policy`` names it when there is no view to read it from;
+    the run stops before it rebuilds anything when there is no view and no
+    policy, or when the view shows another policy than the one named.
 
     ``limit`` (test-only): caps both view reads to the first N rows. Used
     to validate the chunk write/read round-trip end-to-end without paying
@@ -1522,9 +1639,8 @@ def match_records(
         "content_hash": _corrections_content_hash(),
         "rows": len(_read_corrections_csv()),
     }
-    # So are the recovered grants.
-    with get_session(config=datamart_config()) as session:
-        source_runs[recovered_loader.TABLE] = recovered_digest(session.connection(), recovered_policy)
+    # So are the recovered grants; the run reads them once, after the
+    # rebuild, and stamps them on this row (``_stamp_recovered``).
     _insert_started_build(build_id, started_at, source_runs)
     logger.info(f"Starting grant matching build {build_id}")
 
@@ -1537,6 +1653,7 @@ def match_records(
             resume_workers=resume_workers,
             limit=limit,
             recovered_policy=recovered_policy,
+            build_id=build_id,
         )
     except BaseException as err:
         _finalize_build_failed(build_id, err)
@@ -1560,7 +1677,8 @@ def _do_match_records(
     resume_from_checkpoints: bool,
     resume_workers: int = 32,
     limit: int | None = None,
-    recovered_policy: str = RECOVERED_POLICY,
+    recovered_policy: str | None = None,
+    build_id: str | None = None,
 ):
     """Inner pipeline body. Returns ``(full_data_df, pg_rows, ug_rows)``.
 
@@ -1575,7 +1693,7 @@ def _do_match_records(
         connection = session.connection()
         # Before anything is rebuilt: the rebuild below drops the view, and
         # with it what says which policy it showed.
-        _check_recovered_policy(connection, recovered_policy)
+        recovered_policy = recovered_policy_of(recovered_view.shown_policy(connection), recovered_policy)
         _load_corrections(connection)
         # Rebuild the filing-version-deduped inputs (issues #33/#34)
         # BEFORE the views: the DROP ... CASCADE inside takes the view of
@@ -1584,8 +1702,13 @@ def _do_match_records(
         # order.
         build_current_relations(connection)
         create_or_replace_views(connection, recovered_policy=recovered_policy)
+        # The recovered grants the run takes, read once: the build's
+        # source_runs and the checkpoint prefix name the same rows.
+        recovered = recovered_digest(connection, recovered_policy)
+        if build_id is not None:
+            _stamp_recovered(build_id, recovered)
         if s3_prefix is None:
-            s3_prefix = _resolve_checkpoint_prefix(connection, recovered_policy=recovered_policy)
+            s3_prefix = _resolve_checkpoint_prefix(connection, recovered)
             logger.info(f"Resolved checkpoint prefix from lineage: {s3_prefix}")
         else:
             logger.info(f"Using caller-supplied checkpoint prefix: {s3_prefix}")
@@ -1774,11 +1897,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--recovered-policy",
-        default=RECOVERED_POLICY,
+        default=None,
         help=(
             "The policy whose recovered grants take the place of the "
-            f"placeholder rows (default: {RECOVERED_POLICY}). The run stops "
-            "when privategrants_current_w_recovered shows another."
+            "placeholder rows. Default: the policy "
+            "privategrants_current_w_recovered shows. Needed only when the "
+            "view is absent; the run stops when the view shows another."
         ),
     )
     args = parser.parse_args()

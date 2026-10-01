@@ -108,17 +108,25 @@ def _recovered_column(column: str) -> str:
     return f"f.{column}"
 
 
-def view_sql(policy_version: str, name: str = VIEW, recovered: str = loader.TABLE) -> str:
+def check_identifier(identifier: str) -> str:
+    """``identifier`` when it can be written into SQL as a relation's name:
+    lower case letters, digits and '_'. Raises ``ValueError`` otherwise.
+    The matcher holds the names of the relations a run writes to it too."""
+    if not _IDENTIFIER.fullmatch(identifier):
+        raise ValueError(f"{identifier!r} cannot be written into SQL: lower case letters, digits and '_' only")
+    return identifier
+
+
+def view_sql(policy_version: str, view: str = VIEW, recovered: str = loader.TABLE) -> str:
     """The view's definition for the rows loaded under ``policy_version``.
-    ``name`` and ``recovered`` are the view's name and the table of
+    ``view`` and ``recovered`` are the view's name and the table of
     recovered grants it reads; a subset of the matcher's work gives its own
     (``matching_subset``), so that it reads a copy of the rows and holds
     nothing on the table a load writes."""
     if not _VERSION.fullmatch(policy_version):
         raise ValueError(f"{policy_version!r} cannot be written into the view: letters, digits, '_', '.', '-' only")
-    for identifier in (name, recovered):
-        if not _IDENTIFIER.fullmatch(identifier):
-            raise ValueError(f"{identifier!r} cannot be written into the view: lower case letters, digits, '_' only")
+    check_identifier(view)
+    check_identifier(recovered)
     pointer = classifier.pointer_sql(classifier.name_sql("g"))
     current = ", ".join(f"g.{column}" for column in CURRENT_COLUMNS)
     current_added = ", ".join(f"'{FROM_CURRENT}'::text AS row_source" if name == "row_source"
@@ -126,7 +134,7 @@ def view_sql(policy_version: str, name: str = VIEW, recovered: str = loader.TABL
     recovered_columns = ", ".join(_recovered_column(column) for column in CURRENT_COLUMNS)
     recovered_added = ", ".join(f"{value}::{kind} AS {name}" for name, kind, value in ADDED)
     return f"""
-CREATE OR REPLACE VIEW public.{name} AS
+CREATE OR REPLACE VIEW public.{view} AS
 WITH loaded AS (
     -- the filings whose paid list is loaded under the policy
     SELECT DISTINCT object_id, filerein, taxyear::text AS taxyear

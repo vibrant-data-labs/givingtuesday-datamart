@@ -41,8 +41,11 @@ Scope: pairs against the target EIN only. A pair that matches here can
 still lose the final best-match-per-recipient resolution to a
 better-scoring row of a *different* EIN (name_score weighted 2x) — the
 ``current_match_ein`` column shows which EIN won in the last completed
-matching run. The name-only tier is not a pair's doing (it asks whether the
-name belongs to one filer of the whole universe) and is not explained here.
+matching run. Two rules are not a pair's doing and are not explained here:
+the name-only tier (it asks whether the name belongs to one filer of the
+whole universe), and the one-filer-in-the-state rule, which leaves a tuple
+with no street address unmatched when only the exact-name tier accepts it
+and several filers of its state carry the name.
 """
 
 from __future__ import annotations
