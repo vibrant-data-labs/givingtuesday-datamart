@@ -91,7 +91,7 @@ def test_agreed_when_both_base_readers_return_the_same_pairs(stores, tmp_path):
     client = _Client([])
     result = _agree(stores, _pages(3, 4), client, tmp_path)
     assert client.json_modes == [] and result.no_verdict == {} and result.written == 2
-    assert result.mix() == {"agreed": 2, "escalated": 0, "flagged": 0, "unreadable": 0, "no_verdict": 0}
+    assert result.mix() == {"agreed": 2, "escalated": 0, "flagged": 0, "not_a_list": 0, "unreadable": 0, "no_verdict": 0}
     for page in (3, 4):
         verdict = _verdict(result, page)
         assert verdict == pv.Verdict(OID, page, filings.rows[OID].sha256, "v2", "agreed", QWEN, pr.request_hash(QWEN),
@@ -180,6 +180,60 @@ def test_two_empty_readings_are_a_dispute_not_an_agreement(stores, tmp_path):
     result = _agree(stores, _pages(3, 4), tmp_path=tmp_path)
     assert (_verdict(result, 3).verdict, _verdict(result, 3).accepted_model, _verdict(result, 3).matched_models) == ("flagged", SONNET, [])
     assert (_verdict(result, 4).verdict, _verdict(result, 4).matched_models) == ("escalated", [FLASH, SONNET])
+
+
+def _other(stores, oid, page, model, rows=()):
+    """A stored reading that labels the page ``other``, with ``rows`` (none by default)."""
+    row = _store_reading(stores, oid, page, model, list(rows))
+    row.response["page_kind"] = "other"
+    return row
+
+
+def test_a_page_both_base_readers_call_other_and_empty_is_not_a_list_under_v3_and_a_dispute_under_v2(stores, tmp_path):
+    _other(stores, OID, 3, QWEN); _other(stores, OID, 3, GEMINI)
+    _other(stores, OID, 3, FLASH); _store_reading(stores, OID, 3, SONNET, _rows(2))      # what v2 buys for such a page
+    _other(stores, OID, 4, QWEN); _other(stores, OID, 4, GEMINI, _rows(1))                # other, but one returns a row
+    _store_reading(stores, OID, 5, QWEN, []); _other(stores, OID, 5, GEMINI)               # empty, but one calls it a list
+    _store_reading(stores, OID, 6, QWEN, _rows(2)); _store_reading(stores, OID, 6, GEMINI, _rows(2))
+    for page in (4, 5):
+        _store_reading(stores, OID, page, FLASH, _rows(1)); _store_reading(stores, OID, page, SONNET, _rows(1))
+    client = _Client([])
+    result = _agree(stores, _pages(3, 4, 5, 6), client, tmp_path, policy=pv.POLICY_V3)
+    assert client.json_modes == [] and result.written == 4
+    assert result.mix() == {"agreed": 1, "escalated": 2, "flagged": 0, "not_a_list": 1, "unreadable": 0, "no_verdict": 0}
+    verdict = _verdict(result, 3)
+    assert verdict == pv.Verdict(OID, 3, stores[0].rows[OID].sha256, "v3", "not_a_list", None, None, [QWEN, GEMINI], 2,
+                                 verdict.decided_at)
+    assert (_verdict(result, 4).verdict, _verdict(result, 4).matched_models, _verdict(result, 4).readers_consulted) == (
+        "escalated", [GEMINI, FLASH], 3)
+    assert (_verdict(result, 5).verdict, _verdict(result, 5).matched_models, _verdict(result, 5).readers_consulted) == (
+        "escalated", [FLASH, SONNET], 4)
+    assert result.bought[SONNET]["pages"] == 0 and result.bought[FLASH]["pages"] == 0
+    under_v2 = _agree(stores, _pages(3), client, tmp_path)                             # the same page under v2
+    flagged = _verdict(under_v2, 3)
+    assert (flagged.verdict, flagged.accepted_model, flagged.readers_consulted, flagged.policy_version) == (
+        "flagged", SONNET, 4, "v2")
+    assert stores[2].rows[verdict.key] is verdict and sorted(key[3] for key in stores[2].rows) == ["v2"] + ["v3"] * 4
+
+
+def test_not_a_list_is_the_base_pairs_word_and_needs_no_escalation_reading(stores, tmp_path):
+    _other(stores, OID, 3, QWEN); _other(stores, OID, 3, GEMINI)                # nothing stored for 3.8 Flash or Sonnet
+    client = _Client([])
+    result = _agree(stores, _pages(3), client, tmp_path, policy=pv.POLICY_V3, buy=False)
+    assert client.json_modes == [] and _verdict(result, 3).verdict == "not_a_list" and result.written == 1
+    assert sorted(result.bought) == [QWEN, GEMINI]                              # no escalation reader consulted
+    with pytest.raises(LookupError, match="buys nothing"):                      # v2 would send it to 3.8 Flash
+        _agree(stores, _pages(3), client, tmp_path, policy=pv.POLICY_V2, buy=False)
+    assert client.json_modes == []
+
+
+def test_not_a_list_needs_both_base_readers_to_say_so(stores, tmp_path):
+    _store_reading(stores, OID, 3, QWEN, None, errors=3); _other(stores, OID, 3, GEMINI)      # Qwen out of attempts
+    _other(stores, OID, 3, FLASH); _other(stores, OID, 3, SONNET)
+    result = _agree(stores, _pages(3), tmp_path=tmp_path, policy=pv.POLICY_V3)
+    verdict = _verdict(result, 3)                                                 # the dispute path, as under v2
+    assert (verdict.verdict, verdict.accepted_model, verdict.matched_models, verdict.readers_consulted) == (
+        "flagged", SONNET, [], 4)
 
 
 def test_a_base_reader_out_of_attempts_is_absent_and_the_page_goes_through_the_dispute_path(stores, tmp_path):
@@ -299,7 +353,7 @@ def test_a_single_reader_policy_agrees_with_itself_on_every_page_it_can_read(sto
     _store_reading(stores, OID, 5, QWEN, None, prompt_version="v3", settings=json_first, errors=3)
     client = _Client([])
     result = _agree(stores, _pages(3, 4, 5), client, tmp_path, policy=v3, buy=False)
-    assert client.json_modes == [] and result.mix() == {"agreed": 2, "escalated": 0, "flagged": 0, "unreadable": 1, "no_verdict": 0}
+    assert client.json_modes == [] and result.mix() == {"agreed": 2, "escalated": 0, "flagged": 0, "not_a_list": 0, "unreadable": 1, "no_verdict": 0}
     for page in (3, 4):
         verdict = _verdict(result, page)
         assert (verdict.accepted_model, verdict.accepted_hash, verdict.matched_models, verdict.readers_consulted) == (
@@ -358,8 +412,21 @@ def test_a_policy_is_checked_before_anything_runs():
         pv.check_policy({**pv.POLICY_V1, "settings": {"openai/gpt-5.6-luna": {"json_mode": True, "extras": {}}}})
     with pytest.raises(ValueError, match="no version"):
         pv.check_policy({**pv.POLICY_V1, "version": ""})
+    with pytest.raises(ValueError, match="not_a_list rule"):
+        pv.check_policy({**pv.POLICY_V2, "not_a_list": "empty"})
+    with pytest.raises(ValueError, match="two base readers"):
+        pv.check_policy({**SINGLE, "not_a_list": "empty_other"})
     pv.check_policy(pv.POLICY_V1)
+    pv.check_policy(pv.POLICY_V3)
     pv.check_policy(SINGLE)
+
+
+def test_v3_is_v2_plus_the_not_a_list_rule():
+    assert pv.load_policy("v3") == pv.POLICY_V3 and pv.POLICY_V3["not_a_list"] == "empty_other"
+    assert {k: v for k, v in pv.POLICY_V3.items() if k not in ("version", "not_a_list")} == \
+        {k: v for k, v in pv.POLICY_V2.items() if k != "version"}
+    assert "not_a_list" not in pv.POLICY_V2 and "not_a_list" not in pv.POLICY_V1
+    assert pv.with_flagged(pv.POLICY_V3, "leave_out")["version"] == "v3-leave_out"
 
 
 def test_load_policy_takes_a_registered_version_or_a_json_file(tmp_path):
@@ -403,7 +470,7 @@ def _accepted(stores, pages, policy=pv.POLICY_V2):
 
 def test_accepted_readings_joins_each_verdict_to_the_reading_it_names(stores, tmp_path):
     result = _decided(stores, tmp_path)
-    assert result.mix() == {"agreed": 1, "escalated": 1, "flagged": 1, "unreadable": 1, "no_verdict": 0}
+    assert result.mix() == {"agreed": 1, "escalated": 1, "flagged": 1, "not_a_list": 0, "unreadable": 1, "no_verdict": 0}
     found = _accepted(stores, _pages(3, 4, 5, 6, 7))
     assert sorted(found) == _pages(3, 4, 5, 6)                       # p7 has no verdict: absent
     assert found[(OID, 3)] == (_verdict(result, 3), _response(_rows(2), "qwen"))
@@ -434,7 +501,7 @@ def test_summary_prints_the_mix_and_the_cost(stores, tmp_path):
     result = _decided(stores, tmp_path)
     result.bought[FLASH] = {"pages": 2, "in": 4000, "out": 2000, "dollars": vlm.cost(FLASH, 4000, 2000)}
     lines = pv.summary(result).splitlines()
-    assert lines[0] == "4 pages: agreed 1, escalated 1, flagged 1, unreadable 1, no_verdict 0; 4 verdict rows written"
+    assert lines[0] == "4 pages: agreed 1, escalated 1, flagged 1, not_a_list 0, unreadable 1, no_verdict 0; 4 verdict rows written"
     assert lines[-1].startswith("  bought in all") and lines[-1].endswith("2 pages     0.01 $")
     assert any(line.startswith(f"  {FLASH}") and "2 pages bought" in line for line in lines)
 
@@ -468,6 +535,22 @@ def test_the_scorer_counts_right_wrong_flagged_and_unreadable_verdicts_against_t
     leave_out = _decided(stores, tmp_path, policy=LEAVE_OUT)
     tally = gt.verdicts(LEAVE_OUT, session=verdicts, filing_store=filings, reading_store=readings, truth=truth)
     assert tally["flagged"] == 1 and tally["flagged, accepted reading right"] == 0 and leave_out.written == 4
+
+
+def test_the_scorer_counts_a_not_a_list_page_and_lists_it_when_the_truth_has_rows(stores, tmp_path, capsys):
+    from givingtuesday_datamart.exploratory import placeholder_ground_truth as gt
+
+    for page in (3, 4):
+        _other(stores, OID, page, QWEN); _other(stores, OID, page, GEMINI)
+    _agree(stores, _pages(3, 4), tmp_path=tmp_path, policy=pv.POLICY_V3)
+    truth = {(OID, 3): [{"object_id": OID, "page": 3, "n": 0, "name": "", "amount": "", "note": "kind=none no recipient rows"}],
+             (OID, 4): _truth_rows(4, _rows(1))}                     # a list the base pair both missed
+    filings, readings, verdicts = stores
+    tally = gt.verdicts(pv.POLICY_V3, session=verdicts, filing_store=filings, reading_store=readings, truth=truth)
+    assert tally == {"not a list": 2, "not a list, wrongly": 1}
+    out = capsys.readouterr().out
+    assert "not a list: 2 pages, 1 of them with rows in the truth" in out
+    assert f"not a list, wrongly: {OID} p004 (not_a_list, {QWEN} = {GEMINI})" in out and f"not_a_list  {'-':<32}    2" in out
 
 
 # ---------------------------------------------------------------------------
@@ -552,3 +635,69 @@ def test_status_report_lists_verdicts_by_version_and_accepted_readings_by_model(
     assert f"v1                {SONNET:<32}       0          6       23" in report
     assert all(params == {"v": "v1"} and "WHERE policy_version = :v" in sql for sql, params in session.calls)
     pv.status_report(_Reporting())
+
+
+# ---------------------------------------------------------------------------
+# what the base pair said
+# ---------------------------------------------------------------------------
+
+
+def _page(verdict, consulted, qwen=("other", ()), gemini=("other", ()), cost=0.0):
+    """A page as ``base_pair_report`` collects it: each base reader's label and pairs."""
+    from collections import Counter
+    return {"verdict": verdict, "consulted": consulted, "kinds": {QWEN: qwen[0], GEMINI: gemini[0]},
+            "pairs": {QWEN: Counter(qwen[1]), GEMINI: Counter(gemini[1])}, "cost": cost}
+
+
+def test_the_base_pair_report_classes_each_page_by_what_the_pair_said_and_prices_its_escalation():
+    from collections import Counter
+    pair = [("recipientnumber", 100.0)]
+    pages = {
+        (OID, 3): _page("flagged", 4, cost=0.05),                                                   # the v3 rule
+        (OID, 4): _page("flagged", 4, gemini=("other", pair), cost=0.04),                            # other, but a row
+        (OID, 5): _page("escalated", 3, qwen=("grants_paid_list", pair), cost=0.01),
+        (OID, 6): _page("agreed", 2, qwen=("grants_paid_list", pair), gemini=("grants_paid_list", pair)),
+        (OID, 7): _page("escalated", 4, qwen=("grants_future_list", pair), gemini=("expenditure_responsibility", ()), cost=0.10),
+        (OID, 8): {"verdict": "flagged", "consulted": 4, "kinds": {GEMINI: "other"}, "pairs": {GEMINI: Counter()}, "cost": 0.05},
+    }
+    assert [pv.base_pair_class(p["kinds"], p["pairs"], pv.POLICY_V2["base"]) for p in pages.values()] == [
+        "both other, no rows", "neither a list, otherwise", "one a list", "both a list", "both a list", "a base reader absent"]
+    lines = pv.base_pair_table(pages, pv.POLICY_V2).splitlines()
+    assert lines[0] == f"6 pages decided under v2, by what the base pair said ({QWEN} + {GEMINI}); escalation at list prices"
+    assert lines[1].split() == ["the", "base", "pair", "said", "pages", "to", "claude-sonnet-5", "flagged", "$", "share"]
+    assert [line.split()[-5:] for line in lines[2:]] == [
+        ["1", "1", "1", "0.05", "20%"], ["1", "1", "1", "0.04", "16%"], ["1", "0", "0", "0.01", "4%"],
+        ["2", "1", "0", "0.10", "40%"], ["1", "1", "1", "0.05", "20%"], ["all", "6", "4", "3", "0.25"]]
+    assert [line.strip().split("  ")[0] for line in lines[2:]] == list(pv.CLASSES) + ["all"]
+
+
+def test_the_base_pair_report_reads_the_policys_own_readings_and_prices_the_escalation_readers():
+    def reading(page, model, kind="other", rows=(), usage=None, verdict="flagged", consulted=4):
+        return {"object_id": OID, "page": page, "verdict": verdict, "readers_consulted": consulted, "model": model,
+                "kind": kind, "rows": list(rows) if model in pv.POLICY_V2["base"] else None, "usage": usage}
+
+    class _Streaming(_Session):
+        def execute(self, clause, params=None):
+            self.calls.append((clause.text, params))
+            return self
+
+        def mappings(self):
+            return iter(self._rows)
+
+    session = _Streaming(rows=[
+        reading(3, QWEN), reading(3, GEMINI), reading(3, FLASH, usage={"in": 1000, "out": 500}),
+        reading(3, SONNET, usage={"in": 2000, "out": 1000}),
+        reading(4, QWEN, "grants_paid_list", _rows(1), verdict="agreed", consulted=2),
+        reading(4, GEMINI, "grants_paid_list", _rows(1), verdict="agreed", consulted=2),
+    ])
+    report = pv.base_pair_report(session, pv.POLICY_V2)
+    (sql, params), = session.calls
+    assert "WHERE v.policy_version = :version" in sql and "p.response->>'page_kind' AS kind" in sql
+    assert params["version"] == "v2" and params["prompt_version"] == "v4" and params["dpi"] == vlm.DPI
+    assert params["models"] == [QWEN, GEMINI, FLASH, SONNET] and params["base"] == [QWEN, GEMINI]
+    assert params["hashes"] == [pv.reader_hash(pv.POLICY_V2, model) for model in params["models"]]
+    lines = report.splitlines()
+    escalation = vlm.cost(FLASH, 1000, 500) + vlm.cost(SONNET, 2000, 1000)
+    assert lines[2].split()[-5:] == ["1", "1", "1", f"{escalation:.2f}", "100%"] and lines[2].startswith("  both other, no rows")
+    assert lines[3].split()[-5:] == ["1", "0", "0", "0.00", "0%"] and lines[3].startswith("  both a list")
+    assert lines[4].split() == ["all", "2", "1", "1", f"{escalation:.2f}"]

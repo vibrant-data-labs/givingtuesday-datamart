@@ -194,6 +194,32 @@ def select_paid(readings: Mapping[int, dict], paid: float) -> Extraction:
     return extract_tables(page_tables(readings, (paid,)), paid).paid
 
 
+# What the selector sees for a page decided ``not_a_list``: an empty page
+# labelled ``other``, which is what the base pair said. It gives no row
+# and, like any page a reader calls ``other``, ends a list's continuation
+# across it (``page_tables``). Left out of the input instead, the pages
+# after it would inherit the heading of the statement before it and be
+# taken for one statement with it: The Joe W and Dorothy D Brown
+# Foundation 2022 reconciled under v2 and not under v3 until this, its
+# expenditure-responsibility continuation pages having been joined to the
+# statement two pages before them (the pipeline doc, 2026-09-30).
+NOT_A_LIST_PAGE = {"page_kind": "other", "heading": "", "rows": [], "totals": []}
+
+
+def selector_input(accepted: Accepted) -> dict[int, dict]:
+    """The readings a filing's pages give the selector: each accepted
+    reading, and ``NOT_A_LIST_PAGE`` for a page decided ``not_a_list``. A
+    page with no accepted reading otherwise (unreadable, or flagged under
+    ``leave_out``) gives nothing."""
+    readings: dict[int, dict] = {}
+    for page, (verdict, response) in accepted.items():
+        if response is not None:
+            readings[page] = response
+        elif verdict.verdict == "not_a_list":
+            readings[page] = dict(NOT_A_LIST_PAGE)
+    return readings
+
+
 def select_lists(readings: Mapping[int, dict], paid: float, future: float = 0.0) -> Recovery:
     """The paid list and the future-payment list among a filing's accepted
     readings, each searched for on its own. With no future amount it is
@@ -273,10 +299,11 @@ def grant_from_row(filing: PlaceholderFiling, row: GrantRow, ordinal: int, verdi
 
 def filing_lists(filing: PlaceholderFiling, accepted: Accepted) -> Recovery | None:
     """What the selector finds for a filing among its accepted readings, or
-    None with nothing to search. A page with no accepted reading
-    (unreadable, or flagged under ``leave_out``) gives the selector
-    nothing."""
-    readings = {page: response for page, (_, response) in accepted.items() if response is not None}
+    None with nothing to search. The selector's input is ``selector_input``:
+    a ``not_a_list`` page is an empty ``other`` page to it, and a page with
+    no accepted reading otherwise (unreadable, or flagged under
+    ``leave_out``) is not there."""
+    readings = selector_input(accepted)
     if not readings:
         return None
     return select_lists(readings, float(filing.placeholder_paid), float(filing.placeholder_future))
@@ -454,11 +481,13 @@ class Lists:
     declared: Decimal = Decimal(0)
     labels: dict[str, Counter] = field(default_factory=lambda: defaultdict(Counter))
     label_dollars: dict[str, Counter] = field(default_factory=lambda: defaultdict(Counter))
+    by_filing: dict[str, tuple[int, Decimal]] = field(default_factory=dict)     # object id -> (rows, dollars)
 
     def count(self, rows: Sequence[RecoveredGrant]) -> None:
         self.loaded += 1
         self.rows += len(rows)
         self.declared += rows[0].declared_amount
+        self.by_filing[rows[0].object_id] = (len(rows), sum((row.amount for row in rows), Decimal(0)))
         for row in rows:
             self.dollars += row.amount
             for label, value in (("page_kind", row.page_kind), ("page_verdict", row.page_verdict),
@@ -475,9 +504,10 @@ class LoadResult:
     scope; ``read`` those with an accepted reading, and ``read_future``
     those of them with a future amount. ``lists`` holds, by target, the
     lists that add up and their rows, written this time or not; ``loaded``,
-    ``rows``, ``dollars``, ``declared`` and ``labels`` are the paid
-    target's. ``combined`` are the filings whose rows add up to the two
-    amounts together and to neither alone: counted, not loaded.
+    ``rows``, ``dollars``, ``declared``, ``labels`` and ``by_filing`` (each
+    loaded filing's rows and dollars) are the paid target's. ``combined``
+    are the filings whose rows add up to the two amounts together and to
+    neither alone: counted, not loaded.
     ``written``, ``unchanged`` and ``removed`` are filings: rows replaced,
     rows already as the rule gives them, and rows taken out because the
     filing no longer loads."""
@@ -513,6 +543,10 @@ class LoadResult:
     @property
     def labels(self) -> dict[str, Counter]:
         return self.lists[PAID].labels
+
+    @property
+    def by_filing(self) -> dict[str, tuple[int, Decimal]]:
+        return self.lists[PAID].by_filing
 
     def count(self, filing: PlaceholderFiling, found: Recovery, rows: Sequence[RecoveredGrant]) -> None:
         """Count a read filing: what the selector found, and the rows of it that load."""

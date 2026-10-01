@@ -642,6 +642,11 @@ def verdicts(policy: dict, *, session, filing_store=None, reading_store=None,
         elif verdict.verdict == "flagged":
             tally["flagged"] += 1
             tally["flagged, accepted reading right"] += int(response is not None and reading_pairs.pairs(response) == want)
+        elif verdict.verdict == "not_a_list":
+            tally["not a list"] += 1                          # the base pair's word: right when the truth has no rows
+            if want:
+                tally["not a list, wrongly"] += 1
+                wrong.append((key, verdict))
         else:
             tally["unreadable"] += 1
     readers = " + ".join(policy["base"]) + (" -> " + " -> ".join(policy["escalation"]) if policy["escalation"] else "")
@@ -651,11 +656,14 @@ def verdicts(policy: dict, *, session, filing_store=None, reading_store=None,
     print("|---|---|---|---|---|---|---|")
     print(f"| {policy['version']} | {tally['right']} | {tally['wrong']} | {tally['flagged']} | {tally['unreadable']} | "
           f"{tally['no verdict']} | {tally['flagged, accepted reading right']} of {tally['flagged']} |")
+    if tally["not a list"]:
+        print(f"not a list: {tally['not a list']} pages, {tally['not a list, wrongly']} of them with rows in the truth")
     print("\nverdicts by kind and accepted reading:")
     for (kind, model), n in sorted(decided.items()):
         print(f"  {kind:<11} {model:<32} {n:>4}")
     for (oid, page), verdict in wrong:
-        print(f"  accepted wrongly: {oid} p{page:03d} ({verdict.verdict}, {' = '.join(verdict.matched_models)})")
+        what = "not a list, wrongly" if verdict.verdict == "not_a_list" else "accepted wrongly"
+        print(f"  {what}: {oid} p{page:03d} ({verdict.verdict}, {' = '.join(verdict.matched_models)})")
     return tally
 
 

@@ -315,6 +315,17 @@ printed totals. Under `POLICY_V2`, the frame's policy:
 | second escalation | Claude Sonnet 5, thinking off | reads what is still open; a reading equal to any earlier one keeps the page | resolves 18% of what reaches it | $0.046 |
 | flagged | none agree | loaded from Sonnet's reading with a mark on every row | 28.7% of pages, 13% of loaded rows | |
 
+A third of the flagged pages are pages both cheap readers called
+`other` and empty — investment schedules, capital gains, balance sheets
+— which the rule "two empty readings do not agree" sends to both
+escalation readers for nothing: 8,541 of the 38,834 pages read by
+September 30, a fifth of the escalation spend, none loading a row.
+`POLICY_V3`, derived from the same readings at no cost, decides such a
+page by the base pair alone: beside v2's 28.7% flagged on the frame it
+flags 18.3%, and on the 2020-on read 13.4% against 39.4%; the same lists
+load. It is measured, not yet adopted (the engineering log, *Policy
+v3*).
+
 Three findings changed how the readers are asked:
 
 - Qwen returned no rows for 401 dense pages, twice each, when asked for
@@ -1137,6 +1148,7 @@ were found:
 | same-model repeats never count | wrong on 6 of 57 self-agreements | Sept 22 |
 | prompt v4, 200 DPI | v4 inside run-to-run noise for Gemini, a small gain for Qwen; 130 DPI misread digits, 300 cost more for nothing | Sept 22 |
 | flagged pages loaded from Sonnet's reading, marked | 11 of 23 right on the sample; 40 of 57 and 94% of dollars on the small filings; leave-out gives 328 filings and 35.1% of paid grants | Sept 22, measured Sept 24, 28 and 29 |
+| a page both base readers call `other` and empty is decided by them alone (`POLICY_V3`; measured, not yet adopted) | 8,536 of 8,541 such pages ended flagged under v2 with nothing on them, $108 of escalation; the 5 such ground-truth pages have no rows; the same lists load; flagged 36.7% → 14.7% | Sept 30 |
 | a base reader out of attempts is absent for the page, which goes through the dispute path | a reader timing out three times on a dense page must not kill a page three other readers can decide | Sept 23 |
 | paid and future lists reconciled separately; the headline counts the filings whose paid list reconciled | 15 frame filings reconcile only their future list | Sept 24 |
 | the frame's C and D split, 137 and 403 at one sampling fraction | rates set by availability, not count | Sept 24 |

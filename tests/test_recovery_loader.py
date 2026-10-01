@@ -170,6 +170,47 @@ def test_rows_from_a_flagged_page_load_and_carry_the_verdict(stores, tmp_path):
     assert recovered.loaded("v2-leave_out") == set() and recovered.loaded("v2") == {OID}
 
 
+def test_a_page_both_base_readers_call_other_and_empty_loads_nothing_beside_the_list_that_does(stores, tmp_path):
+    _read(stores, 3, LIST)
+    _read(stores, 4, [], kind="other")                          # both base readers: other, no rows; nothing else stored
+    _decide(stores, tmp_path, 3, 4, policy=pv.POLICY_V3)        # decided from the base pair alone, at no cost
+    assert stores[2].rows[(OID, 4, stores[0].rows[OID].sha256, "v3")].verdict == "not_a_list"
+    recovered = ld.MemoryStore()
+    result = _load(stores, recovered, _filing(), policy=pv.POLICY_V3)
+    rows = recovered.for_filing(OID, "v3")
+    assert [(r.page, r.page_verdict, r.policy_version) for r in rows] == [(3, "agreed", "v3")] * 3
+    assert (result.loaded, result.rows, result.by_filing) == (1, 3, {OID: (3, Decimal("300.00"))})
+    assert result.labels["page_verdict"] == {"agreed": 3}
+
+
+def test_a_not_a_list_page_ends_a_lists_continuation_as_any_other_page_does(stores, tmp_path):
+    """The Brown Foundation 2022 shape: a statement, a page that is not a
+    list, then continuation pages with no heading of their own. They must
+    not inherit the statement's heading across the page and be taken for
+    one statement with it, which is what happened when a not_a_list page
+    was simply absent from the selector's input."""
+    _seed(stores[0], tmp_path, OID, pages=8)
+    _read(stores, 3, [_grant(f"Alpha Grantee {i}", 250) for i in range(5)], heading="Grants Paid: Program A")   # 1,250
+    _read(stores, 4, [], kind="other", models=(QWEN, GEMINI, FLASH, SONNET))                             # not a list
+    _read(stores, 5, [_grant("River Fund Inc", 161.25), _grant("Mayo Clinic", 161.25)], heading="")       # continues...
+    _read(stores, 6, [_grant("Fondation de France", 161.25), _grant("Oxfam America", 161.25)], heading="")  # ...what? 645
+    _read(stores, 7, [_grant(f"Beta Grantee {i}", 33) for i in range(3)], heading="Grants Paid: Program B")    # 99
+    _read(stores, 8, [_grant(f"Gamma Grantee {i}", 3000) for i in range(3)], heading="Grants Paid: Program C")  # 9,000
+    for policy in (pv.POLICY_V3, pv.POLICY_V2):                       # v2: Sonnet's empty other reading, flagged
+        _decide(stores, tmp_path, 3, 4, 5, 6, 7, 8, policy=policy)
+        recovered = ld.MemoryStore()
+        result = _load(stores, recovered, _filing(paid="9645"), policy=policy)   # pages 5, 6 and 8, no run of pages
+        rows = recovered.for_filing(OID, policy["version"])
+        assert result.loaded == 1 and [(r.page, r.row_ordinal) for r in rows] == [(5, 0), (5, 1), (6, 0), (6, 1), (8, 0), (8, 1), (8, 2)]
+        assert result.by_filing == {OID: (7, Decimal("9645.00"))}
+    verdicts = {page: stores[2].rows[(OID, page, stores[0].rows[OID].sha256, "v3")] for page in (3, 4, 5)}
+    assert (verdicts[4].verdict, verdicts[4].accepted_model) == ("not_a_list", None)
+    accepted = {page: (verdicts[page], None if page == 4 else {"page_kind": "grants_paid_list", "rows": [1]}) for page in verdicts}
+    assert ld.selector_input(accepted) == {3: {"page_kind": "grants_paid_list", "rows": [1]}, 4: ld.NOT_A_LIST_PAGE,
+                                           5: {"page_kind": "grants_paid_list", "rows": [1]}}
+    assert ld.selector_input({4: (verdicts[4], None), 5: (replace(verdicts[5], verdict="unreadable"), None)}) == {4: ld.NOT_A_LIST_PAGE}
+
+
 def test_a_filing_marked_individual_loads_labelled_and_a_row_keeps_its_own_status(stores, tmp_path):
     _read(stores, 3, [_grant("Jane Student", 100, status="I"), _grant("State University", 100, status="PC"),
                       _grant("John Student", 100)])
