@@ -650,6 +650,11 @@ its tuples, which is the harness's own check.
 | moved to another filer | 767 | $93.9M |
 | labeled pairs of the sampled foundations covered | 62.7% before, 67.1% after, of 15,226 | |
 
+The corrections preflight passes before and after, with the same two
+warnings: 1,749 tuples, 15,376 rows and $1.927B won by the registry's 27
+rows under the old code, 1,771 tuples, 16,529 rows and $1.950B under the
+new.
+
 The run's cost grows with what is loaded. The frame's recovered grants
 (78,081 distinct recipients) add 49.6M pairs to the 982M of the last
 run, 5%, about 25 minutes at its rate. With the production read loaded
