@@ -289,12 +289,15 @@ every column compared, `dedup_rule` included, per filer-year:
 | future again, reading the PAID scratch copy | `privategrants_future_current` | 25,800 | 0 | 441,358 = 441,358 | the same: the paid change does not reach it |
 | paid, shared definition and the two new rules | `privategrants_current` | 1,007,142 | 2,703 | 16,651,426 -> 16,648,094 | $833,063,559,153 -> $832,962,530,575 |
 
-The first and the third proof were run twice: on September 30 with the
-line-25 test still in the paid rule, and on October 1 without it (the
-text that ships). The two runs give the same tables, to the row and the
-dollar, here and below. The second proof is of September 30 alone: it
-shows that the paid copy holds every filer-year under the url production
-holds it under, which the October 1 copy, equal in every count, does too.
+The paid proof was run three times: on September 30 with the line-25 test
+still in the paid rule, on October 1 without it, and on October 1 again
+with line 25 read from the kept url's own basic row (the text that ships;
+6.3 has why). The three runs give the same tables, to the row and the
+dollar, here and below. The first future proof was run on September 30
+and on October 1, of the text that ships. The second is of September 30
+alone: it shows that the paid copy holds every filer-year under the url
+production holds it under, which the later copies, equal in every count,
+do too.
 
 Every one of the 2,703 paid filer-years that differ is one the two new
 rules take (6.2, 6.3). The other 1,004,439 are identical row for row.
@@ -329,7 +332,8 @@ row by accident is now called what it is.
 
 The paid scratch build took 22 minutes with the shared DDL (windows over
 one sort, where the old DDL wrote its hashed rows to disk and read them
-twice); the future one 78 seconds.
+twice), and 32 the third time, with other sessions on the database and
+line 25 looked up by url; the future one 78 seconds.
 
 One change beyond the sharing, on the future side, found by the second
 proof above. Reading the paid scratch copy, the future build did not
@@ -381,10 +385,22 @@ under every rule (the tables of 6.1 are of that build), and 32 filings
 were checked against their XML in it. What is given up is a guard with
 nothing to guard today: a batch that doubles the grants and NOT the basic
 row would now pass unhalved, where the test caught it when the filing
-itemizes more than 2/3 of line 25. The watch for it is this doc's own
-script after every drop: `halved_without_doubled_row_shape` re-derives the
-old test, and a "multi tuple" line there is a doubled block the rule
-misses. Section 2 is that query on this batch: no such line.
+itemizes more than 2/3 of line 25. The watch for it is in the build, where
+it cannot be skipped (review of October 1): after every build of
+`privategrants_current`, `current_grants.unhalved_doubles` counts the
+filer-years held whole in which every tuple is even, there is more than
+one tuple, and half the block is closer to line 25(d) than the whole. It
+changes no row; the count is logged, and a non-zero count is a WARNING
+that names the first of them. On the scratch copy it is 0, in 81 seconds.
+Run on the production table as it stands, it finds three: 546053504 /
+2024, 631263667 / 2024 and 870442164 / 2025, blocks in the extract twice
+(66, 26 and 30 rows) that the old rule holds whole because it read line
+25 from another version of the return. The kept url's own line 25 is
+exactly half of each block's sum, and the new rule halves all three under
+their repeated row. So the watch finds what it is for. This doc's own
+script shows the same by hand, as a "multi tuple" line of
+`halved_without_doubled_row_shape`: section 2 is that query on this batch,
+and it has no such line.
 
 ### 6.3 Forward fill
 
@@ -410,9 +426,21 @@ line 25 in column (d) or column (a), keeps ONE row and carries
   (a) too). 64 match column (a) only: 62 leave column (d) at 0, and 2 are
   the pair above. 11 of the 64 were checked against the XML, and all 11
   are one real group plus empty ones.
-- *Which row of `basic_fields_pf`.* The filer-year's row the old line-25
-  test read (newest ingested), not the kept url's own: on these
-  blocks the two agree in every case, so there is one lookup.
+- *Which row of `basic_fields_pf`.* The kept url's own, since the review
+  of October 1. As first built the rule read the filer-year's row the old
+  line-25 test read, `ORDER BY _ingested_at DESC, filesha256`, which is
+  the lowest sha (the table holds one `_ingested_at`): an arbitrary
+  version of the return. 1,775 filer-years hold versions that state line
+  25 differently. On this batch the two readings decide every block the
+  same way: forward fill fires on the same 200 filer-years under either.
+  Where they state different totals for a one-tuple block (18
+  filer-years), 17 are one grant twice under a repeated row, halved to one
+  row before forward fill is asked, and the other matches under both. But
+  the old reading could make a wrong collapse: an original that paid one
+  grant X, amended to two grants of X, would lose a row of the amended
+  list if the original's sha sorted first. Every kept url has a basic row
+  (1,007,142 of 1,007,142), so no fallback to another version is built: a
+  url without one states no line 25, and none is borrowed.
 - *Order against `pair_collapse`.* The forward-fill test comes AFTER the
   repeated row: a filing in the extract twice
   holds half the copies, so one tuple twice under a repeated row is a
@@ -605,19 +633,26 @@ Nothing here was run. The steps, and who runs them:
 1. **Rebuild `privategrants_current`.** The matcher does it at the start
    of its next run. Alone, which Zein runs or approves:
    `python -m givingtuesday_datamart.current_grants --only privategrants_current`
-   (about 22 minutes). Its `DROP ... CASCADE` takes the matching views,
-   which the command creates again, and `privategrants_current_w_recovered`,
-   which `placeholder_recovery view --policy v2` or the next `load`
-   creates again. Expect 16,648,094 rows and the rule counts of 6.1.
+   (25 to 35 minutes, the watch's minute and a half included). Its
+   `DROP ... CASCADE` takes the matching views
+   and `privategrants_current_w_recovered`; since PR #56 the command reads
+   the policy the view shows before the rebuild and creates them all again
+   for that policy. Expect 16,648,094 rows, the rule counts of 6.1, and
+   the watch's line: `0 filer-years look doubled without a repeated basic
+   row` (6.2). A WARNING there is to be looked at before the matcher runs.
 2. **Then the future relation**, which reads the paid one:
    `python -m givingtuesday_datamart.current_grants --only privategrants_future_current`
    (under two minutes). Expect it unchanged: 441,358 rows.
-3. **Then `work-list`, `load`, `check`** of `placeholder_recovery`. Expect
-   22 filings with a smaller `placeholder_paid` and without
-   `placeholder_exceeds_declared`, and five more filings loading (6.5).
+3. **Then `work-list`, `load`, `check`** of `placeholder_recovery`, the
+   last two under the policy the view shows (v2 on October 1; v3 after
+   the reload Zein plans). Expect 22 filings with a smaller
+   `placeholder_paid` and without `placeholder_exceeds_declared`, whatever
+   the policy, and five more filings loading (6.5: measured on the stored
+   readings under v2's verdicts and under v3's, the same five).
 4. **`privategrants_w_recipients` and `unioned_grants`**, which products
    read, change only when the matcher reruns. That rerun is Zein's, about
-   eight hours, and PR #56 needs the same one: one rerun carries both.
+   eight hours, and PR #56 (merged October 1) needs the same one: one
+   rerun carries both.
 5. **The regression gate** (`matching_regression_checks`) after it.
 
 What the gate will see, from this change alone. Every tuple keeps at least
@@ -640,11 +675,12 @@ subtract from what the rerun shows.
 
 ### 6.8 Scratch objects
 
-Made for this proof and dropped at its end: `public.scratch_pgc_rules`
-(the paid copy, 10 GB), `public.scratch_pgfc_rules` (the future copy),
-`public.scratch_pgc_fy`, `public.scratch_pgc_bf`, `public.scratch_pgc_fut`
-and `public.scratch_pgc_changed` (the filer-year summaries the tables
-above were counted from). `pf_current_scratch build` makes the first two
+Made for this proof and dropped at its end, each time it was run:
+`public.scratch_pgc_rules` (the paid copy, 10 GB),
+`public.scratch_pgfc_rules` (the future copy), `public.scratch_pgc_fy`,
+`public.scratch_pgc_bf`, `public.scratch_pgc_fut` and
+`public.scratch_pgc_changed` (the filer-year summaries the tables above
+were counted from). `pf_current_scratch build` makes the first two
 again.
 
 ## 7. Files

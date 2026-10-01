@@ -71,7 +71,18 @@ raw staging:
        2016, $1,069,215 21 times for EIN 396040395 / tax year 2018. The
        rule: where the block has the forward-fill shape and one copy's
        amount, above zero, EQUALS line 25, in column (d) or in column (a)
-       (per books, ``arecprexpnss``), the filer-year keeps ONE row. A
+       (per books, ``arecprexpnss``), the filer-year keeps ONE row. Line
+       25 is the kept url's own, from that url's row in
+       ``basic_fields_pf``, and never another version of the return's:
+       1,775 filer-years hold versions that state it differently, and an
+       original that paid one grant, amended to two equal ones, would
+       lose a row of the amended list if the original's line 25 were
+       read. (Until 2026-10-01 it was read from one row a filer-year,
+       ``ORDER BY _ingested_at DESC, filesha256``, which is the lowest sha:
+       a refresh replaces the table in one run, so it holds one
+       ``_ingested_at``. On batch ``2026_06_16`` the two readings decide
+       every block the same way, and every kept url has a basic row. A url
+       without one states no line 25, and none is borrowed.) A
        legitimate repeat declares every copy on line 25 (EIN 954536657 /
        tax year 2020, two $2,000,000 grants, line 25 $4,000,000) and is
        kept whole. The match is exact, and the two kinds do not overlap:
@@ -121,11 +132,15 @@ raw staging:
     under every rule. What went with it is a guard that had nothing to
     guard on this batch: a batch that doubles the grants and not the basic
     row now passes unhalved, where the test caught it if the filing
-    itemizes more than 2/3 of line 25. The watch for that is the
-    measurement script (``exploratory.pf_doubling_basic_rows``), which
-    re-derives the old test: a "multi tuple" line in its
-    ``halved_without_doubled_row_shape`` is a doubled block this rule
-    misses. There is none today.
+    itemizes more than 2/3 of line 25. The watch for that runs at the end
+    of every build of ``privategrants_current`` (``unhalved_doubles``): the
+    filer-years held whole in which every tuple is even, there is more
+    than one tuple, and half the block is closer to line 25(d) than the
+    whole. It changes no row. The build logs the count, and a WARNING
+    naming the first of them when it is not zero. It is zero on this
+    batch. (The measurement script ``exploratory.pf_doubling_basic_rows``
+    shows the same as a "multi tuple" line of its
+    ``halved_without_doubled_row_shape``, by hand.)
 
     What the rule cannot catch: a doubled filing whose basic-fields row
     was not doubled with it (none known, see above). A filer that really
@@ -167,12 +182,11 @@ raw staging:
 
     NOTE: the Schedule I and PF grant rules above deliberately keep
     reading RAW ``basic_fields``/``basic_fields_pf`` for their amendment
-    evidence, the repeated row and line 25 (the newest-ingested row of the
-    filer-year). Repointing them at these relations would change which
-    version supplies line 25, hence which filer-years forward_fill fires
-    on, hence matching inputs — a gate-moving change that does not belong
-    in a consumer-side fix. (These relations keep one row per filer-year,
-    so they could not show a repeated row at all.)
+    evidence, the repeated row and line 25 (the row of the kept url).
+    These relations keep one row per filer-year, chosen by ``MAX(url)``
+    of the basic rows and not of the grant rows, so they could not show a
+    repeated row at all, and their line 25 is the kept url's only where
+    the two choices agree.
 
 Every surviving row carries provenance: ``n_urls_for_year`` (grants),
 ``n_filings_for_year`` (distinct shas in basic_fields[_pf]), and
@@ -396,6 +410,19 @@ PAIR_COLLAPSE = "pair_collapse"
 FORWARD_FILL = "forward_fill"
 
 
+def _line25_by_url(basic: str) -> str:
+    """Line 25 of each filing in ``basic``, by url. The rows of one url
+    never disagree on it (0 of 15,874 urls held twice, 2026-10-01), so the
+    lowest sha only makes the pick repeatable."""
+    return f"""    SELECT DISTINCT ON (url) url,
+           CASE WHEN arecgpdcprps ~ {_NUMERIC_RE}
+                THEN arecgpdcprps::numeric END AS line25_d,
+           CASE WHEN arecprexpnss ~ {_NUMERIC_RE}
+                THEN arecprexpnss::numeric END AS line25_a
+    FROM {basic}
+    ORDER BY url, filesha256"""
+
+
 def _pf_current_ddl(*, table: str, source: str, content_cols: list[str], all_cols: list[str],
                     line25_amount: str | None = None, paid: str | None = None,
                     basic: str = "public.basic_fields_pf") -> str:
@@ -427,17 +454,12 @@ def _pf_current_ddl(*, table: str, source: str, content_cols: list[str], all_col
     line25 = line25_amount is not None
     line25_table = f"""
 CREATE TEMP TABLE _pf_line25 AS
-    -- grants paid as the return declares it, Part I line 25: column (d),
-    -- in cash, and column (a), per books. One row per filer-year (0 below
-    -- where the return declares none)
-    SELECT DISTINCT ON (filerein, taxyear) filerein, taxyear,
-           CASE WHEN arecgpdcprps ~ {_NUMERIC_RE}
-                THEN arecgpdcprps::numeric END AS line25_d,
-           CASE WHEN arecprexpnss ~ {_NUMERIC_RE}
-                THEN arecprexpnss::numeric END AS line25_a
-    FROM {basic}
-    ORDER BY filerein, taxyear, _ingested_at DESC, filesha256;
-CREATE INDEX ON _pf_line25 (filerein, taxyear);
+    -- grants paid as the filing declares it, Part I line 25: column (d),
+    -- in cash, and column (a), per books. One row per url, so the kept
+    -- url's own: another version of the return can state another total.
+    -- (0 below where the filing declares none, or has no basic row)
+{_line25_by_url(basic)};
+CREATE INDEX ON _pf_line25 (url);
 ANALYZE _pf_line25;""" if line25 else ""
     line25_cols = f""",
            CASE WHEN g.{line25_amount} ~ {_NUMERIC_RE}
@@ -445,8 +467,7 @@ ANALYZE _pf_line25;""" if line25 else ""
            COALESCE(l.line25_d, 0) AS _line25_d,
            COALESCE(l.line25_a, 0) AS _line25_a""" if line25 else ""
     line25_join = """
-    LEFT JOIN _pf_line25 l
-      ON l.filerein = g.filerein AND l.taxyear IS NOT DISTINCT FROM g.taxyear""" if line25 else ""
+    LEFT JOIN _pf_line25 l ON l.url = g.url""" if line25 else ""
     paid_table = f"""
 CREATE TEMP TABLE _pf_paid AS
     -- the same filers in the paid relation: the url it holds for each
@@ -586,6 +607,66 @@ _PF_FUTURE_CURRENT_DDL = _pf_current_ddl(
     content_cols=_PF_FUTURE_CONTENT_COLS, all_cols=_PF_FUTURE_ALL_COLS, paid="public.privategrants_current",
 )
 
+# The watch that stands where the line-25 test of pair_collapse stood (module
+# docstring): the filer-years a paid relation holds WHOLE that the old test
+# would have halved. Every tuple an even number of times, more than one
+# tuple, and half the block closer to line 25(d) than the whole, with no
+# repeated row to say the filing is in the extract twice (a block with one
+# is halved, so it is not among the whole ones). A batch that doubles the
+# grants and not the basic row shows here and nowhere else. Read from the
+# built relation: the filer-years with an even number of rows first, in one
+# pass, then the tuples of the few that pass the line-25 comparison.
+_PF_UNHALVED_SQL = """
+CREATE TEMP TABLE _pf_unhalved AS
+    SELECT f.filerein, f.taxyear
+    FROM (
+        SELECT g.filerein, g.taxyear, MAX(g.url) AS url,
+               SUM(CASE WHEN g.sigocpyamoun ~ {numeric}
+                        THEN g.sigocpyamoun::numeric ELSE 0 END) AS full_sum
+        FROM {table} g
+        WHERE g.dedup_rule IN ('passthrough', 'latest_url')
+        GROUP BY 1, 2
+        HAVING COUNT(*) % 2 = 0 AND COUNT(*) >= 4
+    ) f
+    JOIN (
+{line25}
+    ) l ON l.url = f.url
+    WHERE l.line25_d > 0
+      AND ABS(f.full_sum / 2 - l.line25_d) < ABS(f.full_sum - l.line25_d);
+CREATE INDEX ON _pf_unhalved (filerein, taxyear);
+ANALYZE _pf_unhalved;
+SELECT t.filerein, t.taxyear
+FROM (
+    SELECT g.filerein, g.taxyear, {tuple} AS _h, COUNT(*) AS n_copies
+    FROM _pf_unhalved u
+    JOIN {table} g
+      ON g.filerein = u.filerein AND g.taxyear IS NOT DISTINCT FROM u.taxyear
+    GROUP BY 1, 2, 3
+) t
+GROUP BY 1, 2
+HAVING BOOL_AND(t.n_copies % 2 = 0) AND COUNT(*) > 1
+ORDER BY 1, 2;
+DROP TABLE _pf_unhalved
+"""
+
+
+def unhalved_doubles(connection, table: str = "public.privategrants_current",
+                     basic: str = "public.basic_fields_pf") -> list[tuple[str, str]]:
+    """The filer-years of a paid relation that look doubled and are held
+    whole (``_PF_UNHALVED_SQL``), as ``(filerein, taxyear)``. Empty on batch
+    ``2026_06_16``. It changes no row: it is run after every build of
+    ``privategrants_current`` and its count is logged, a warning when it is
+    not zero."""
+    statements = _PF_UNHALVED_SQL.format(table=table, numeric=_NUMERIC_RE, line25=_line25_by_url(basic),
+                                         tuple=_content_hash(_PF_CONTENT_COLS)).split(";")
+    found: list[tuple[str, str]] = []
+    for statement in statements:
+        result = connection.execute(text(statement))
+        if result.returns_rows:
+            found = [(row[0], row[1]) for row in result.fetchall()]
+    return found
+
+
 _INDEX_DDL = {
     "basic_fields_current": [
         "CREATE INDEX ix_bf_current_filerein ON public.basic_fields_current (filerein)",
@@ -657,7 +738,23 @@ def _build_one(connection, table: str, ddl: str) -> int:
         text(f"SELECT COUNT(*) FROM public.{table}")
     ).scalar_one()
     logger.info("public.%s: %s rows", table, f"{count:,}")
+    if table == "privategrants_current":
+        _log_unhalved_doubles(unhalved_doubles(connection))
     return count
+
+
+def _log_unhalved_doubles(found: list[tuple[str, str]]) -> None:
+    """The watch's line in the build's log: a count, and a warning with the
+    first filer-years when there is anything to look at."""
+    if not found:
+        logger.info("public.privategrants_current: 0 filer-years look doubled without a repeated basic row")
+        return
+    logger.warning(
+        "public.privategrants_current: %d filer-years look doubled and are NOT halved: every tuple even, "
+        "more than one tuple, half the block closer to line 25 than the whole, and no repeated row in "
+        "basic_fields_pf. pair_collapse has no line-25 test since 2026-10-01 (current_grants docstring). "
+        "Check them against their XML. First: %s",
+        len(found), ", ".join(f"{ein}/{year}" for ein, year in found[:10]))
 
 
 def build_basic_fields_current(

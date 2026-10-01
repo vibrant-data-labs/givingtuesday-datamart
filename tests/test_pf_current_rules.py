@@ -5,12 +5,16 @@ paid and its future form.
 Each case is one filer-year under its own EIN, so one build a side answers
 them all. The tables are the session's own (``pg_temp``): nothing under
 ``public`` is read or written. The cases need Postgres (``ctid``, ``DISTINCT
-ON``, the regex operator) and are skipped where the datamart cannot be
-reached. The tests of the rendered text, at the end, need no database.
+ON``, the regex operator), carry the ``db`` marker and are skipped where the
+datamart cannot be reached within a few seconds: ``pytest -m "not db"`` runs
+the rest, the tests of the rendered text at the end among them, without a
+database.
 """
 
 from __future__ import annotations
 
+import logging
+import os
 from dataclasses import dataclass, field
 
 import pytest
@@ -40,6 +44,7 @@ class Case:
     line25_a: int | None = None               # column (a), per books: (d) unless given
     basic_shas: tuple = ("s1",)               # one basic row per sha named: ("s1", "s1") is a repeated row
     older_url_rows: tuple = field(default=())  # rows under an earlier url of the filer-year
+    older_line25: int | None = None           # line 25 of that earlier version, in a basic row whose sha sorts first
 
 
 CASES = (
@@ -78,6 +83,16 @@ CASES = (
     Case("a single grant", (A,), (1, "passthrough"), (1, "passthrough"), line25_d=1000),
     Case("two versions of the return", (A, B), (2, "latest_url"), (2, "latest_url"), line25_d=1250,
          older_url_rows=(A, B, B)),
+    # line 25 is the kept version's own. The original declared one grant, the amended return two equal ones:
+    # read from the original (its sha sorts first) the amended list would lose a row
+    Case("an amended list of two equal grants", (A, A), (2, "latest_url"), (2, "latest_url"), line25_d=2000,
+         older_url_rows=(A,), older_line25=1000),
+    # and the other way: the kept version is the forward fill, whatever the earlier one declared
+    Case("a forward fill whose earlier version declares another total", (A, A), (1, "latest_url+forward_fill"),
+         (2, "latest_url"), line25_d=1000, older_url_rows=(B,), older_line25=250),
+    # a kept url with no basic row states no line 25, and another version's is not borrowed
+    Case("a repeat whose kept version has no basic row", (A, A), (2, "latest_url"), (2, "latest_url"),
+         basic_shas=(), older_url_rows=(A,), older_line25=1000),
 )
 TAX_YEAR = "2024"
 # A filer-year whose paid rows are held under a later url than its future rows
@@ -101,7 +116,7 @@ def _grant_rows(side: str) -> list[dict]:
             for recipient, dollars in grants:
                 row = dict.fromkeys(every, None)
                 row.update(filerein=ein, taxyear=TAX_YEAR, url=_url(ein, version), filername1=case.name,
-                           filesha256=case.basic_shas[0], **{name: recipient, amount: str(dollars)})
+                           filesha256=f"s{version - 1}", **{name: recipient, amount: str(dollars)})
                 rows.append(row)
     if side == FUTURE:
         row = dict.fromkeys(every, None)
@@ -111,11 +126,18 @@ def _grant_rows(side: str) -> list[dict]:
 
 
 def _basic_rows() -> list[dict]:
-    return [dict(filerein=_ein(index), taxyear=TAX_YEAR, url=_url(_ein(index)), filesha256=sha,
-                 arecgpdcprps=str(case.line25_d),
-                 arecprexpnss=str(case.line25_d if case.line25_a is None else case.line25_a),
-                 _ingested_at="2026-06-16")
-            for index, case in enumerate(CASES) for sha in case.basic_shas]
+    """``basic_fields_pf``: the kept url's rows, and the earlier version's where the case has one. One
+    ``_ingested_at`` throughout, as in the table: a refresh replaces it in one run."""
+    rows = []
+    for index, case in enumerate(CASES):
+        ein = _ein(index)
+        versions = [(_url(ein), sha, case.line25_d, case.line25_a) for sha in case.basic_shas]
+        if case.older_line25 is not None:
+            versions.append((_url(ein, 1), "s0", case.older_line25, None))
+        rows += [dict(filerein=ein, taxyear=TAX_YEAR, url=url, filesha256=sha, arecgpdcprps=str(in_cash),
+                      arecprexpnss=str(in_cash if per_books is None else per_books), _ingested_at="2026-06-16")
+                 for url, sha, in_cash, per_books in versions]
+    return rows
 
 
 def _load(session, table: str, columns: list[str], rows: list[dict]) -> None:
@@ -139,17 +161,26 @@ def _build(session, side: str) -> dict[str, list]:
     return kept
 
 
+CONNECT_SECONDS = "5"           # libpq's connect timeout: an unreachable database is a skip, not a wait
+STATEMENT_TIMEOUT = "30s"       # no statement here takes one second; behind a busy database it fails, not hangs
+
+
 @pytest.fixture(scope="module")
 def built():
-    """Both relations over the fixtures, in one session that leaves nothing behind."""
+    """Both relations over the fixtures, and the watch over the paid one, in
+    one session that leaves nothing behind."""
+    before = os.environ.get("PGCONNECT_TIMEOUT")
+    os.environ["PGCONNECT_TIMEOUT"] = CONNECT_SECONDS             # read by libpq when the helper's engine connects
     try:
         from givingtuesday_datamart._internal.db import get_session
         from givingtuesday_datamart.ingestion import datamart_config
         manager = get_session(config=datamart_config())
         session = manager.__enter__()
-        session.execute(text("SELECT 1"))
+        session.execute(text(f"SET statement_timeout = '{STATEMENT_TIMEOUT}'"))
     except Exception as error:                                   # no config, no network: nothing to run against
         pytest.skip(f"the datamart's Postgres is not reachable: {type(error).__name__}")
+    finally:
+        os.environ.pop("PGCONNECT_TIMEOUT") if before is None else os.environ.update(PGCONNECT_TIMEOUT=before)
     try:
         _load(session, "t_basic", ["filerein", "taxyear", "url", "filesha256", "arecgpdcprps", "arecprexpnss",
                                    "_ingested_at"], _basic_rows())
@@ -157,12 +188,15 @@ def built():
         _load(session, "t_paid_held", ["filerein", "taxyear", "url"],
               [dict(filerein=_ein(i), taxyear=TAX_YEAR, url=_url(_ein(i))) for i in range(len(CASES))]
               + [dict(filerein=LEFT_BEHIND, taxyear=TAX_YEAR, url=_url(LEFT_BEHIND, 2))])
-        yield {side: _build(session, side) for side in (PAID, FUTURE)}
+        found = {side: _build(session, side) for side in (PAID, FUTURE)}
+        found["watch"] = cg.unhalved_doubles(session, table="pg_temp.t_paid_out", basic="pg_temp.t_basic")
+        yield found
     finally:
         session.rollback()
         manager.__exit__(None, None, None)
 
 
+@pytest.mark.db
 @pytest.mark.parametrize("side", (PAID, FUTURE))
 @pytest.mark.parametrize("index", range(len(CASES)), ids=[case.name for case in CASES])
 def test_a_filer_year_keeps_the_rows_the_rule_gives_it(built, side, index):
@@ -173,6 +207,7 @@ def test_a_filer_year_keeps_the_rows_the_rule_gives_it(built, side, index):
     assert {row["url"] for row in kept} == {_url(_ein(index))}                  # the latest url, and no other
 
 
+@pytest.mark.db
 @pytest.mark.parametrize("side", (PAID, FUTURE))
 def test_halving_keeps_half_of_each_tuple_and_a_forward_fill_one_row(built, side):
     name, amount = COLUMNS[side][2:]
@@ -186,6 +221,7 @@ def test_halving_keeps_half_of_each_tuple_and_a_forward_fill_one_row(built, side
     assert [row[amount] for row in filled] == (["1000"] if side == PAID else ["1000"] * 3)
 
 
+@pytest.mark.db
 @pytest.mark.parametrize("side", (PAID, FUTURE))
 def test_every_row_carries_its_provenance_after_the_files_columns(built, side):
     every = COLUMNS[side][1]
@@ -198,9 +234,18 @@ def test_every_row_carries_its_provenance_after_the_files_columns(built, side):
     assert by_case["a doubled block"]["n_filings_for_year"] == 1    # a repeated row is one filing, twice
 
 
+@pytest.mark.db
 def test_the_future_relation_leaves_out_a_filer_year_the_paid_one_holds_under_a_later_url(built):
     assert LEFT_BEHIND not in built[FUTURE]
     assert len(built[FUTURE]) == len(CASES)                         # and every other filer-year is there
+
+
+@pytest.mark.db
+def test_the_watch_finds_the_one_block_the_old_line_25_test_would_have_halved(built):
+    # every tuple even, more than one tuple, no repeated row, half the block on line 25: held whole, and reported
+    names = {_ein(index): case.name for index, case in enumerate(CASES)}
+    assert [(names[ein], year) for ein, year in built["watch"]] == [("an even block whose basic row is single", TAX_YEAR)]
+    # a legitimate repeat is one tuple, and a block already halved or filled is not whole: neither is reported
 
 
 # ---------------------------------------------------------------------------
@@ -271,12 +316,71 @@ def test_line_25_decides_forward_fill_and_nothing_else():
     assert cg.PAIR_COLLAPSE == "pair_collapse" and cg.FORWARD_FILL == "forward_fill"
 
 
-def test_line_25_is_read_from_the_row_the_old_line_25_test_read():
-    # raw basic_fields_pf, the newest-ingested row of the filer-year
+def test_line_25_is_the_kept_urls_own():
+    # raw basic_fields_pf, the row of the url the rows are kept under: never another version of the return's.
+    # (Until 2026-10-01 it was one row a filer-year, the lowest sha: the table has one _ingested_at.)
     ddl = cg._PF_CURRENT_DDL
     line25 = ddl[ddl.index("CREATE TEMP TABLE _pf_line25"):ddl.index("CREATE INDEX ON _pf_line25")]
     assert "FROM public.basic_fields_pf\n" in line25 and "basic_fields_pf_current" not in ddl
-    assert "ORDER BY filerein, taxyear, _ingested_at DESC, filesha256;" in line25
+    assert "SELECT DISTINCT ON (url) url," in line25 and "ORDER BY url, filesha256;" in line25
+    assert "_ingested_at" not in line25 and "CREATE INDEX ON _pf_line25 (url);" in ddl
+    assert "LEFT JOIN _pf_line25 l ON l.url = g.url" in ddl               # g.url is the kept url
+    assert cg._line25_by_url("public.basic_fields_pf") in line25
+
+
+class _Result:
+    def __init__(self, rows=None):
+        self.rows, self.returns_rows = rows or [], rows is not None
+
+    def scalar_one(self):
+        return 16_648_094
+
+    def fetchall(self):
+        return self.rows
+
+
+class _Connection:
+    """What ``_build_one`` needs of a connection: it records the statements,
+    and answers the watch's SELECT with ``unhalved``."""
+
+    def __init__(self, unhalved):
+        self.unhalved, self.statements = unhalved, []
+
+    def execute(self, statement):
+        sql = str(statement)
+        self.statements.append(sql)
+        return _Result(self.unhalved if sql.lstrip().startswith("SELECT t.filerein") else None)
+
+
+@pytest.mark.parametrize("unhalved, level", [([], logging.INFO), ([("900000001", "2026"), ("900000002", "2026")],
+                                                                  logging.WARNING)])
+def test_every_paid_build_runs_the_watch_and_logs_its_count(caplog, unhalved, level):
+    connection = _Connection(unhalved)
+    with caplog.at_level(logging.INFO):
+        assert cg._build_one(connection, "privategrants_current", "SELECT 1") == 16_648_094
+    watch = [sql for sql in connection.statements if "_pf_unhalved" in sql]
+    assert len(watch) == 5 and watch[0].lstrip().startswith("CREATE TEMP TABLE _pf_unhalved")
+    assert "FROM public.privategrants_current g" in watch[0] and "FROM public.basic_fields_pf" in watch[0]
+    assert connection.statements.index(watch[0]) > max(
+        i for i, sql in enumerate(connection.statements) if "ix_pg_current" in sql)           # after the indexes
+    said = [r for r in caplog.records if "look doubled" in r.getMessage()]
+    assert [r.levelno for r in said] == [level]
+    assert f"{len(unhalved)} filer-years" in said[0].getMessage()
+    assert all(f"{ein}/{year}" in said[0].getMessage() for ein, year in unhalved)
+
+
+def test_the_watch_is_the_old_test_on_the_blocks_held_whole_and_changes_no_row():
+    sql = cg._PF_UNHALVED_SQL
+    assert "dedup_rule IN ('passthrough', 'latest_url')" in sql                  # whole blocks only
+    assert "HAVING COUNT(*) % 2 = 0 AND COUNT(*) >= 4" in sql                    # even, and room for two tuples
+    assert "ABS(f.full_sum / 2 - l.line25_d) < ABS(f.full_sum - l.line25_d)" in sql and "l.line25_d > 0" in sql
+    assert "HAVING BOOL_AND(t.n_copies % 2 = 0) AND COUNT(*) > 1" in sql         # every tuple even, more than one
+    assert not [word for word in ("INSERT", "UPDATE", "DELETE", "ALTER") if word in sql]
+    assert sql.count("CREATE") == 2 and "CREATE TEMP TABLE _pf_unhalved" in sql and "DROP TABLE _pf_unhalved" in sql
+    # the builds of the other relations do not run it
+    connection = _Connection([])
+    cg._build_one(connection, "privategrants_future_current", "SELECT 1")
+    assert not [s for s in connection.statements if "_pf_unhalved" in s]
 
 
 @pytest.mark.parametrize("ddl", (cg._PF_CURRENT_DDL, cg._PF_FUTURE_CURRENT_DDL))
