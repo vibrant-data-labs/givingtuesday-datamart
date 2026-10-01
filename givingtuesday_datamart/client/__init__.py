@@ -6,6 +6,7 @@ from givingtuesday_datamart.client.models import (
     CanonicalIdentity,
     Grant,
     GrantSummary,
+    FunderIdentity,
     IdentityHit,
     IdentityQuery,
     Nonprofit,
@@ -22,4 +23,5 @@ __all__ = [
     "BasicFieldsRow",
     "Grant",
     "GrantSummary",
+    "FunderIdentity",
 ]

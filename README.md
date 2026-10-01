@@ -622,3 +622,36 @@ pyproject.toml          # pip-installable; [ingest] extra for the heavy path
 document — the phased roadmap, the trade-offs behind each layer, and
 verification criteria. Useful when extending the pipeline beyond what's
 covered here.
+
+### Client 0.2.0: organization names and structured granters
+
+Identity results now include `businessname1`, `businessname2`, and `dba_name`
+alongside the existing name fields. DBA is the space-joined nonblank DBA lines;
+it is null for PF identities and whenever no DBA is available. Search matching
+is unchanged. `get_funder_identities(eins)` resolves current identities in bulk,
+preferring the PF canonical row when both canonical tables contain the EIN.
+Unknown EINs remain in the result with null names; malformed EINs raise an error.
+
+`get_grant_summaries()` now returns `granters` instead of `granter_eins` and
+`granter_names`. It resolves all funders in one additional bulk query. Serialize
+with `dataclasses.asdict()` to obtain nested plain records:
+
+```python
+{
+    "ein": "012345678",
+    "taxyear": 2024,
+    "total_grant_amount": 250000.0,
+    "grant_count": 3,
+    "granters": [
+        {"ein": "987654321", "businessname1": "Example Foundation",
+         "businessname2": None, "dba_name": None}
+    ],
+}
+```
+
+The total belongs to the recipient/year summary, not to each listed granter.
+Individual grant rows additionally expose `granter_businessname1`,
+`granter_businessname2`, and `granter_dba_name`; their existing name fallbacks
+remain intact. Update vdl-tools and ed_tracker together before regenerating
+GivingTuesday caches. No canonical rebuild is needed. Full data refresh and
+publication are separate from installing this client update.
