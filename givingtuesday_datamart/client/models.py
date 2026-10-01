@@ -20,6 +20,10 @@ class NonprofitHit:
     ``unique_text`` is the full deduped text for the EIN (already collapsed
     at canonical-build time). Included on the hit so consumers can build
     EIN→text maps without a second round-trip.
+
+    ``dba_1`` / ``dba_2`` are the IRS doing-business-as lines from
+    ``nonprofit_canonical``. They default to ``None`` so callers that build
+    a hit without them keep working.
     """
 
     ein: str
@@ -29,6 +33,8 @@ class NonprofitHit:
     state: str | None
     rank: float
     unique_text: str | None
+    dba_1: str | None = None
+    dba_2: str | None = None
 
 
 @dataclass(frozen=True)

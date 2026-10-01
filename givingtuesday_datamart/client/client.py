@@ -403,6 +403,8 @@ class GtDatamartClient:
                 fts.ein,
                 nc.name,
                 nc.name_secondary,
+                nc.dba_1,
+                nc.dba_2,
                 nc.city,
                 nc.state,
                 fts.rank,
@@ -439,6 +441,8 @@ class GtDatamartClient:
                 state=r["state"],
                 rank=float(r["rank"]),
                 unique_text=r["unique_text"],
+                dba_1=r["dba_1"],
+                dba_2=r["dba_2"],
             )
             for r in rows
         ]
@@ -477,6 +481,8 @@ class GtDatamartClient:
                 n.ein,
                 nc.name,
                 nc.name_secondary,
+                nc.dba_1,
+                nc.dba_2,
                 nc.city,
                 nc.state,
                 0.0::float AS rank,
@@ -504,6 +510,8 @@ class GtDatamartClient:
                 state=r["state"],
                 rank=float(r["rank"]),
                 unique_text=r["unique_text"],
+                dba_1=r["dba_1"],
+                dba_2=r["dba_2"],
             )
             for r in rows
         ]
