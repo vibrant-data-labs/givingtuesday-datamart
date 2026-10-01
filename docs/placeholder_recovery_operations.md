@@ -255,7 +255,64 @@ doubled batches do to every extract at once, and what an amended copy
 stamped with the original url does too (315 filings). It reads
 `privategrants_current` for the url only. The
 evidence is in the findings doc, *Future-payment lists*, and in the
-module's docstring.
+module's docstring. Since September 30 the paid and the future relation
+are built from one definition (`current_grants._pf_current_ddl`), and the
+docstring states the rule once and then the two things the two differ
+by.
+
+## Rebuilding `privategrants_current` after a rule change
+
+The rule of `privategrants_current` changed on September 30 (the doubling
+repairs: `docs/pf_doubling_basic_row_test.md`, section 6). A filer-year is
+now halved when every line item is there an even number of times and the
+filing's row in `basic_fields_pf` is repeated, whatever line 25 says: the
+future relation's test, and since October 1 the only one. A forward-filled
+block (one grant in the table N times, line 25 equal to one copy) keeps
+one row and carries `forward_fill`; line 25 is the kept url's own, never
+another version of the return's. The change was proved on scratch copies.
+The production table holds the old rule's rows until it is rebuilt, and
+nothing below has been run.
+
+In this order, since each step reads the one before. `POLICY` is the
+policy the view shows (`v2` on October 1; `v3` once the reload under it
+has been run and `view --policy v3` has pointed the view at its rows):
+
+```bash
+# 1. the paid relation: Zein runs or approves it. 25 to 35 minutes.
+python -m givingtuesday_datamart.current_grants --only privategrants_current
+# 2. the future relation, which reads the paid one. About 2 minutes.
+python -m givingtuesday_datamart.current_grants --only privategrants_future_current
+# 3. the work list, the load, the checks
+python -m givingtuesday_datamart.placeholder_recovery work-list
+python -m givingtuesday_datamart.placeholder_recovery load --policy POLICY
+python -m givingtuesday_datamart.placeholder_recovery check --policy POLICY
+```
+
+| step | what to expect |
+|---|---|
+| 1 | 16,651,426 rows become 16,648,094; `pair_collapse` on 12,668 filer-years (10,259 today), `forward_fill` on 200. Step 1 is also what the matcher does at the start of a run, so a matcher rerun makes it unnecessary |
+| 1, the watch | the build's last log line counts the filer-years that look doubled and are held whole (every line item an even number of times, more than one line item, half the block closer to line 25 than the whole, no repeated row). Expect `0 filer-years look doubled without a repeated basic row`. Anything else is a WARNING that names the first of them: a batch that doubled the grants and not the basic row, which the rule no longer halves. Check them against their XML before the matcher runs |
+| 1, the views | the `DROP ... CASCADE` takes the matching views and `privategrants_current_w_recovered`. The command reads the policy the view shows BEFORE the rebuild and creates all of them again for that policy (since PR #56). With no view to read a policy from, it rebuilds the table and stops before the matching views, saying to run `placeholder_recovery view --policy`; the matching views are then created by the next matcher run, which starts with them |
+| 2 | unchanged, 441,358 rows: the future relation reads the paid one for its urls only, and no filer-year's url moves |
+| 3, `work-list` | 22 filings whose placeholder amount was in the table N times come down to one copy ($42,980,947 to $8,015,203) and lose `placeholder_exceeds_declared`. The work list does not depend on the policy |
+| 3, `load` | measured on the rows read under v2, and the same under v3's verdicts: five of the 22 load, 145 rows and $5,857,441 (EIN 205905161, tax years 2020 to 2024). Their lists add up to the corrected amount and never could to five times it |
+
+What does NOT follow from these steps: `privategrants_w_recipients` and
+`unioned_grants`, which the products read, are written by the matcher and
+change only when it reruns. That rerun is Zein's, about eight hours, and
+PR #56 (the recovered grants into the matcher, merged October 1) needs
+the same one, so one rerun carries both. The regression gate runs after it
+(`docs/matching-regression-runbook.md`). From this change alone it should
+show 277 fewer matched rows (7,578,795 to 7,578,518) and one self-match
+fewer (3,641 to 3,640), and nothing else: the placeholder, corporate,
+foreign and person counts, the three sentinels, the labeled-pair coverage
+and the two hard rules stay where they are. The doubling doc, section
+6.7, has the reasoning for each line.
+
+Still wrong after the rebuild, and listed in the doubling doc: 14
+work-list filings whose placeholder amount is repeated in rows that
+differ in one field (6.6), and two future-payment filings that are
+forward-filled (6.4).
 
 ## How a page is decided
 
@@ -709,6 +766,14 @@ the S3 storage under a dollar a month.
 # the future-payment source, and one version per return of it
 python -m givingtuesday_datamart.sources refresh --source irs_990pf_grants_future
 python -m givingtuesday_datamart.current_grants --only privategrants_future_current
+
+# the paid relation alone, after a change to its rule (drops the views: see "Rebuilding privategrants_current")
+python -m givingtuesday_datamart.current_grants --only privategrants_current
+# a rule change proved on scratch copies, the production tables untouched
+python -m givingtuesday_datamart.exploratory.pf_current_scratch build paid|future [--suffix S] [--paid-scratch]
+python -m givingtuesday_datamart.exploratory.pf_current_scratch compare paid|future [--suffix S]
+python -m givingtuesday_datamart.exploratory.pf_current_scratch placeholders [--suffix S] [--policy v2]
+python -m givingtuesday_datamart.exploratory.pf_current_scratch drop [--suffix S]
 
 # the work list, the run over it, the load, the view, the checks
 python -m givingtuesday_datamart.placeholder_recovery work-list

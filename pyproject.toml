@@ -59,3 +59,8 @@ exclude = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["givingtuesday_datamart"]
+
+[tool.pytest.ini_options]
+markers = [
+    "db: runs SQL in the datamart's Postgres, in the session's own temp tables (deselect with -m \"not db\")",
+]

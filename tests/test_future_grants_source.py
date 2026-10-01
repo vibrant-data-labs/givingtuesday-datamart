@@ -45,7 +45,7 @@ def test_the_relation_keeps_every_column_of_the_file_in_its_order():
     assert cg._PF_FUTURE_ALL_COLS == HEADER + LINEAGE
     assert set(cg._PF_FUTURE_CONTENT_COLS) == set(HEADER) - {"filerein", "filesha256", "taxyear", "url"}
     ddl = cg._PF_FUTURE_CURRENT_DDL
-    assert "SELECT " + ", ".join(f"ranked.{column}" for column in HEADER + LINEAGE) in ddl
+    assert "SELECT " + ", ".join(f"ruled.{column}" for column in HEADER + LINEAGE) in ddl
     assert cg._content_hash(cg._PF_FUTURE_CONTENT_COLS) in ddl
     # what the work list reads is there under the names the classifier has for it
     assert set(classifier.FUTURE_NAMES) | {classifier.FUTURE_AMOUNT} <= set(HEADER)
@@ -67,17 +67,27 @@ def test_the_relation_is_built_after_the_paid_one_which_it_reads():
 
 def test_a_block_is_halved_only_when_all_even_and_the_filings_basic_fields_row_is_repeated():
     ddl = cg._PF_FUTURE_CURRENT_DDL
-    doubled = ddl[ddl.index("CREATE TEMP TABLE _pf_doubled"):ddl.index("CREATE INDEX ON _pf_doubled")]
-    assert "FROM public.basic_fields_pf" in doubled and "GROUP BY url" in doubled
-    assert "HAVING COUNT(*) > 1;" in doubled                # one sha (a batch's double) or two (an amended copy)
-    assert "LEFT JOIN _pf_doubled d ON d.url = g.url" in ddl and "(d.url IS NOT NULL) AS _doubled" in ddl
-    assert ddl.rstrip().endswith("DROP TABLE _pf_doubled;")
-    assert "BOOL_AND(c._n_copies % 2 = 0) OVER fy" in ddl and "BOOL_OR(c._doubled) OVER fy" in ddl
-    assert "WHERE NOT _collapse OR _copy_rank <= _n_copies / 2" in ddl                     # half of each tuple
-    assert "arecgpdcprps" not in ddl and "dedup_rule" not in ddl[:ddl.index("AS dedup_rule")]
+    repeated = ddl[ddl.index("CREATE TEMP TABLE _pf_repeated"):ddl.index("CREATE INDEX ON _pf_repeated")]
+    assert "FROM public.basic_fields_pf" in repeated and "GROUP BY url" in repeated
+    assert "HAVING COUNT(*) > 1;" in repeated               # one sha (a batch's double) or two (an amended copy)
+    assert "LEFT JOIN _pf_repeated r ON r.url = g.url" in ddl and "(r.url IS NOT NULL) AS _repeated" in ddl
+    assert ddl.rstrip().endswith("DROP TABLE _pf_repeated;\nDROP TABLE _pf_paid;")
+    assert "BOOL_AND(c._n_copies % 2 = 0) OVER fy AS _all_even" in ddl
+    assert "(b._all_even AND b._repeated) AS _pair" in ddl
+    assert "WHEN _pair THEN _copy_rank <= _n_copies / 2" in ddl                            # half of each tuple
+    assert "dedup_rule" not in ddl[:ddl.index("AS dedup_rule")]
+
+
+def test_the_future_relation_has_no_line_25_test_and_no_forward_fill_repair():
+    # no column holds a total approved for future payment, and both lean on one (the module docstring)
+    ddl = cg._PF_FUTURE_CURRENT_DDL
+    assert "arecgpdcprps" not in ddl and "arecprexpnss" not in ddl and "_pf_line25" not in ddl
+    assert "FALSE AS _fill" in ddl and "_full_sum" not in ddl
 
 
 def test_rows_of_a_version_the_paid_relation_has_moved_past_are_left_out():
     ddl = cg._PF_FUTURE_CURRENT_DDL
     assert "ORDER BY filerein, taxyear, url DESC" in ddl                                   # the latest url
-    assert "WHERE p.url IS NULL OR p.url <= g.url" in ddl
+    held = ddl[ddl.index("CREATE TEMP TABLE _pf_paid"):ddl.index("CREATE INDEX ON _pf_paid")]
+    assert "MAX(g.url) AS url" in held and "FROM public.privategrants_current g" in held
+    assert "LEFT JOIN _pf_paid p" in ddl and "WHERE p.url IS NULL OR p.url <= g.url" in ddl
