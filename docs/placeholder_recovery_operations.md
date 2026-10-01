@@ -224,10 +224,11 @@ by.
 
 The rule of `privategrants_current` changed on September 30 (the doubling
 repairs: `docs/pf_doubling_basic_row_test.md`, section 6). A filer-year is
-now also halved when the filing's row in `basic_fields_pf` is repeated,
-whatever line 25 says, and a forward-filled block (one grant in the table
-N times, line 25 equal to one copy) keeps one row and carries
-`forward_fill`. The change was proved on scratch copies. The production
+now halved when every line item is there an even number of times and the
+filing's row in `basic_fields_pf` is repeated, whatever line 25 says: the
+future relation's test, and since October 1 the only one. A forward-filled
+block (one grant in the table N times, line 25 equal to one copy) keeps
+one row and carries `forward_fill`. The change was proved on scratch copies. The production
 table holds the old rule's rows until it is rebuilt, and nothing below
 has been run.
 

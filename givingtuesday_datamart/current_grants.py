@@ -24,7 +24,7 @@ raw staging:
 * ``public.privategrants_future_current`` (990-PF Part XV line 3b, grants
   approved for future payment)
     One rule for both, built from one definition (``_pf_current_ddl``).
-    The two relations differ by the three things listed after the rule and
+    The two relations differ by the two things listed after the rule and
     by nothing else. The future relation is built after the paid one, which
     it reads.
 
@@ -45,7 +45,8 @@ raw staging:
        block: 12,668 paid blocks and 315 future ones lie under a repeated
        row, and not one of them holds a tuple an odd number of times.
     4. pair_collapse — a block is halved where every tuple's multiplicity
-       is EVEN and the filing's row is repeated. Even, not "exactly 2": a
+       is EVEN and the filing's row is repeated, and nowhere else: the
+       same test on both sides. Even, not "exactly 2": a
        doubled block that already held a legitimately repeated line item
        shows multiplicity 4 (EIN 472107200 / tax year 2024: multiplicities
        2-4, full sum exactly 2x line 25). Halving keeps HALF of each
@@ -55,33 +56,14 @@ raw staging:
        times by the filing itself (N/2 where step 4 found the filing
        doubled). The shape alone decides nothing: it is a legitimate
        repeat, N grants to one recipient, as often as it is a defect. A
-       total is needed to tell them apart, which is difference (b).
+       total is needed to tell them apart, which is difference (a).
     6. ``dedup_rule`` — ``latest_url``, ``pair_collapse`` and
        ``forward_fill``, ``+``-joined when more than one took rows from
        the filer-year, else ``passthrough``.
 
     The differences, and why each is there:
 
-    a. The line-25 test: paid only. On the paid side ``pair_collapse``
-       also fires where every tuple is even and halving moves the itemized
-       sum toward grants paid, Part I line 25 column (d)
-       (``arecgpdcprps``): ``|half - line 25| < |full - line 25|``, line
-       25 above zero. No column of ``basic_fields_pf`` holds a total
-       approved for future payment, so the future side has the repeated
-       row alone. The paid rule is the two tests joined by OR (decided
-       2026-09-30, option B of ``docs/pf_doubling_basic_row_test.md``):
-       until then it was the line-25 test alone, which could not see a
-       doubled filing whose line 25(d) is 0, absent, read from another
-       row of the filer-year or inclusive of amounts not itemized (2,504
-       filer-years, 2,958 rows, $24.4M counted twice). On batch
-       ``2026_06_16`` the line-25 test halves nothing the repeated row
-       does not: the 95 filer-years it halved without a repeated row are
-       forward fills, which (b) now takes first. It stays as the guard
-       for a batch that doubles the grants and not the basic row.
-       Detection boundary of that guard: a double is caught only when the
-       filing itemizes more than 2/3 of line 25, and a legitimate all-even
-       filer is halved only if it itemizes about twice its own line 25.
-    b. forward_fill: paid only. GivingTuesday's extract fills a group's
+    a. forward_fill: paid only. GivingTuesday's extract fills a group's
        missing fields from another group of the same filing. A return
        that enters ONE real grant group and N-1 empty ones (``<Amt>0</Amt>``
        and nothing else) comes out as N copies of the real group, amount
@@ -98,14 +80,13 @@ raw staging:
        line 25 to the dollar, and the 2 left state neither. The 22 of the
        198 checked against the filing's XML are all one real group plus
        empties. Column (a) is needed beside (d): 62 of the 198 leave
-       column (d) at 0. Order: the rule is decided before the line-25
-       test of (a), which a forward fill passes as well (N copies against
-       one) and which would leave N/2 copies. Under a repeated row both
-       apply: three groups, one real, in a doubled filing are six rows,
-       halved by step 4 and filled to one (``pair_collapse+forward_fill``,
-       2 filer-years). A doubled single-grant filing (one tuple twice
-       under a repeated row) is step 4's alone and stays
-       ``pair_collapse``.
+       column (d) at 0. Order: after step 4, on what the filing itself
+       holds. Under a repeated row both apply: three groups, one real, in
+       a doubled filing are six rows, halved by step 4 and filled to one
+       (``pair_collapse+forward_fill``, 2 filer-years). A doubled
+       single-grant filing (one tuple twice under a repeated row) is step
+       4's alone and stays ``pair_collapse``. Line 25 is read for this
+       rule and for nothing else.
 
        The future side has no forward-fill repair, because the rule leans
        on line 25 and nothing states a future total. Its 13 one-tuple
@@ -117,17 +98,39 @@ raw staging:
        of the 13, and "one real group and empty ones" is the XML itself,
        which no extract carries. They are listed by object id in
        ``docs/pf_doubling_basic_row_test.md``.
-    c. A later url on the paid side: future only. The future relation
+    b. A later url on the paid side: future only. The future relation
        leaves out, whole, a filer-year whose paid rows are held under a
        later url: the return was filed again without these rows (25
        filer-years, 55 rows, $18.4M, measured 2026-09-29), and keeping
        them would mix two versions of one return. The paid relation has
        nothing to be behind.
 
+    The line-25 test, taken out on 2026-10-01. Until 2026-09-30
+    ``pair_collapse`` on the paid side was a test against grants paid,
+    Part I line 25 column (d): every tuple even AND ``|half - line 25| <
+    |full - line 25|``. It could not see a doubled filing whose line 25(d)
+    is 0, absent, read from another row of the filer-year or inclusive of
+    amounts not itemized (2,504 filer-years, 2,958 rows, $24.4M counted
+    twice), and it halved forward fills to N/2 copies. With the repeated
+    row beside it (option B of ``docs/pf_doubling_basic_row_test.md``) and
+    forward fill decided first, it halved nothing on batch ``2026_06_16``
+    that the repeated row does not: all 95 filer-years it had halved
+    without a repeated row are forward fills. Zein took it out. The scratch
+    copy built without it differs from production in the same 2,703
+    filer-years as the one built with it, by the same rows and dollars
+    under every rule. What went with it is a guard that had nothing to
+    guard on this batch: a batch that doubles the grants and not the basic
+    row now passes unhalved, where the test caught it if the filing
+    itemizes more than 2/3 of line 25. The watch for that is the
+    measurement script (``exploratory.pf_doubling_basic_rows``), which
+    re-derives the old test: a "multi tuple" line in its
+    ``halved_without_doubled_row_shape`` is a doubled block this rule
+    misses. There is none today.
+
     What the rule cannot catch: a doubled filing whose basic-fields row
-    was not doubled with it and whose line 25 is 0 (none known). A filer
-    that really lists every grant twice under a repeated row (none
-    known). A forward fill whose copies differ in a field: the fill is per
+    was not doubled with it (none known, see above). A filer that really
+    lists every grant twice under a repeated row (none known). A forward
+    fill whose copies differ in a field: the fill is per
     field, so a group that holds only the rest of a long status or purpose
     text comes out as a second row with the first one's name and amount,
     and the block is then two or three tuples, not one. Measured
@@ -166,10 +169,10 @@ raw staging:
     reading RAW ``basic_fields``/``basic_fields_pf`` for their amendment
     evidence, the repeated row and line 25 (the newest-ingested row of the
     filer-year). Repointing them at these relations would change which
-    version supplies ``arecgpdcprps``, hence which filer-years
-    pair_collapse fires on, hence matching inputs — a gate-moving change
-    that does not belong in a consumer-side fix. (These relations keep one
-    row per filer-year, so they could not show a repeated row at all.)
+    version supplies line 25, hence which filer-years forward_fill fires
+    on, hence matching inputs — a gate-moving change that does not belong
+    in a consumer-side fix. (These relations keep one row per filer-year,
+    so they could not show a repeated row at all.)
 
 Every surviving row carries provenance: ``n_urls_for_year`` (grants),
 ``n_filings_for_year`` (distinct shas in basic_fields[_pf]), and
@@ -405,8 +408,8 @@ def _pf_current_ddl(*, table: str, source: str, content_cols: list[str], all_col
     relations are the two optional arguments and nothing else:
 
     * ``line25_amount``: the amount column that Part I line 25 totals. Given
-      for the paid rows only, it adds the line-25 test to ``pair_collapse``
-      and the ``forward_fill`` rule, which both lean on that total.
+      for the paid rows only, it adds the ``forward_fill`` rule, which leans
+      on that total.
     * ``paid``: the paid relation. Given for the future-payment rows only,
       it leaves out a filer-year whose paid rows are held under a later url.
 
@@ -461,21 +464,14 @@ ANALYZE _pf_paid;""" if paid else ""
     -- the paid rows are held under a later url: the return was filed
     -- again without these rows, and they are left out
     WHERE p.url IS NULL OR p.url <= g.url""" if paid else ""
-    full_sum = ",\n           SUM(c._amt) OVER fy AS _full_sum" if line25 else ""
     drop_line25 = "\nDROP TABLE _pf_line25;" if line25 else ""
     drop_paid = "\nDROP TABLE _pf_paid;" if paid else ""
     # forward fill: the block is one tuple, the filing itself holds it more
     # than once (a doubled filing holds half the copies), and line 25, in
     # either column, equals ONE copy. A legitimate repeat declares every
     # copy on line 25.
-    fill = """(d._one_tuple AND d._n_copies / CASE WHEN d._doubled THEN 2 ELSE 1 END >= 2
-                AND d._amt > 0 AND (d._amt = d._line25_d OR d._amt = d._line25_a))""" if line25 else "FALSE"
-    # the line-25 test: halving moves the itemized sum toward column (d). A
-    # forward fill passes it too (N copies against one), so that rule goes
-    # first.
-    line25_test = """
-            OR (f._all_even AND NOT f._fill AND f._line25_d > 0
-                AND ABS(f._full_sum / 2 - f._line25_d) < ABS(f._full_sum - f._line25_d))""" if line25 else ""
+    fill = """(p._one_tuple AND p._n_copies / CASE WHEN p._pair THEN 2 ELSE 1 END >= 2
+            AND p._amt > 0 AND (p._amt = p._line25_d OR p._amt = p._line25_a))""" if line25 else "FALSE"
     return f"""
 CREATE TEMP TABLE _pf_repeated AS
     -- the repeated-row signal: a filing whose rows are in every extract
@@ -542,23 +538,19 @@ blocks AS (
     -- tax year 2024, multiplicities 2-4, full sum exactly 2x line 25.
     SELECT c.*,
            BOOL_AND(c._n_copies % 2 = 0) OVER fy AS _all_even,
-           (c._n_copies = COUNT(*) OVER fy) AS _one_tuple{full_sum}
+           (c._n_copies = COUNT(*) OVER fy) AS _one_tuple
     FROM copies c
     WINDOW fy AS (PARTITION BY c.filerein, c.taxyear)
 ),
 ruled AS (
-    -- _doubled: every tuple is even and the filing's basic-fields row is
-    -- repeated, so the filing is in the extract twice.
-    -- _fill: the forward-fill rule. _pair: the block is halved.
-    SELECT f.*,
-           (f._doubled{line25_test}) AS _pair
+    -- _pair: every tuple is even and the filing's basic-fields row is
+    -- repeated, so the filing is in the extract twice and the block is
+    -- halved. _fill: the forward-fill rule, on what the filing itself holds.
+    SELECT p.*,
+           {fill} AS _fill
     FROM (
-        SELECT d.*,
-               {fill} AS _fill
-        FROM (
-            SELECT b.*, (b._all_even AND b._repeated) AS _doubled FROM blocks b
-        ) d
-    ) f
+        SELECT b.*, (b._all_even AND b._repeated) AS _pair FROM blocks b
+    ) p
 )
 SELECT {", ".join(f"ruled.{c}" for c in all_cols)},
        n_urls_for_year,

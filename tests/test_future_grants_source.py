@@ -73,7 +73,7 @@ def test_a_block_is_halved_only_when_all_even_and_the_filings_basic_fields_row_i
     assert "LEFT JOIN _pf_repeated r ON r.url = g.url" in ddl and "(r.url IS NOT NULL) AS _repeated" in ddl
     assert ddl.rstrip().endswith("DROP TABLE _pf_repeated;\nDROP TABLE _pf_paid;")
     assert "BOOL_AND(c._n_copies % 2 = 0) OVER fy AS _all_even" in ddl
-    assert "(b._all_even AND b._repeated) AS _doubled" in ddl and "(f._doubled) AS _pair" in ddl
+    assert "(b._all_even AND b._repeated) AS _pair" in ddl
     assert "WHEN _pair THEN _copy_rank <= _n_copies / 2" in ddl                            # half of each tuple
     assert "dedup_rule" not in ddl[:ddl.index("AS dedup_rule")]
 

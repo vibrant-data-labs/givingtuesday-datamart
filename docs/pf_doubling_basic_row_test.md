@@ -8,10 +8,13 @@ doc is a proposal; changing `pair_collapse` moves matcher inputs and needs
 Zein's decision and the regression gate (`docs/matching-regression-runbook.md`).
 
 **Built on 2026-09-30** (sections 1 to 5 are the measurement as it stood
-before): option B and a forward-fill rule are in `current_grants.py`, the
-paid and the future relation are built from one definition, and the whole
-is proved on scratch copies. Section 6 has what was built, what it changes
-and what happens next. The production tables are not rebuilt yet.
+before): the repeated row as the halving test and a forward-fill rule are
+in `current_grants.py`, the paid and the future relation are built from
+one definition, and the whole is proved on scratch copies. It was built as
+option B; on 2026-10-01 Zein took the line-25 test out, which on this
+batch changes no row (6.2), so `pair_collapse` is now the same test on
+both sides. Section 6 has what was built, what it changes and what happens
+next. The production tables are not rebuilt yet.
 
 ## Summary
 
@@ -262,15 +265,19 @@ one function, `current_grants._pf_current_ddl`. The kept url, the tuple and
 its multiplicity, the repeated-row signal, the all-even test, keeping half
 of each tuple, the forward-fill shape and the `dedup_rule` values are each
 written once. The function takes the table names, so a scratch copy or a
-test's temp table is the same DDL under another name. Three differences are
-left, each an argument or a consequence of one (the module docstring has
-the reasons):
+test's temp table is the same DDL under another name. Two differences are
+left, each an argument of that function (the module docstring has the
+reasons):
 
 | difference | side | why |
 |---|---|---|
-| the line-25 test of `pair_collapse` | paid | no column holds a total approved for future payment |
-| `forward_fill` | paid | the rule leans on line 25 (6.4 has what was tried on the future side) |
+| `forward_fill` | paid | the rule leans on line 25, and no column holds a total approved for future payment (6.4 has what was tried on the future side) |
 | a filer-year whose paid rows are held under a later url is left out | future | the paid relation has nothing to be behind |
+
+`pair_collapse` is one test on both sides: every tuple even and the
+filing's url in `basic_fields_pf` more than once. A third difference, a
+line-25 test beside it on the paid side, was built on September 30 and
+taken out on October 1 (6.2).
 
 The refactor itself changed nothing. Proved on scratch copies
 (`python -m givingtuesday_datamart.exploratory.pf_current_scratch build|compare`),
@@ -281,6 +288,13 @@ every column compared, `dedup_rule` included, per filer-year:
 | future, from the shared definition | `privategrants_future_current` | 25,800 | 0 | 441,358 = 441,358 | $181,296,385,866 on both |
 | future again, reading the PAID scratch copy | `privategrants_future_current` | 25,800 | 0 | 441,358 = 441,358 | the same: the paid change does not reach it |
 | paid, shared definition and the two new rules | `privategrants_current` | 1,007,142 | 2,703 | 16,651,426 -> 16,648,094 | $833,063,559,153 -> $832,962,530,575 |
+
+The first and the third proof were run twice: on September 30 with the
+line-25 test still in the paid rule, and on October 1 without it (the
+text that ships). The two runs give the same tables, to the row and the
+dollar, here and below. The second proof is of September 30 alone: it
+shows that the paid copy holds every filer-year under the url production
+holds it under, which the October 1 copy, equal in every count, does too.
 
 Every one of the 2,703 paid filer-years that differ is one the two new
 rules take (6.2, 6.3). The other 1,004,439 are identical row for row.
@@ -330,11 +344,12 @@ an indexed temp table, looked up per row. Both future proofs above are of
 that DDL. Without it, step 2 of 6.7 could have hung on the rebuilt paid
 table.
 
-### 6.2 Option B
+### 6.2 The repeated row as the halving test
 
-Halve when every tuple is even AND (the line-25 test passes OR the
-filing's url is in `basic_fields_pf` more than once). The second test is
-the future relation's own, one sha or two.
+Halve when every tuple is even AND the filing's url is in
+`basic_fields_pf` more than once, one sha or two: the future relation's
+own test. As built on September 30 this was option B, the line-25 test OR
+the repeated row; the end of this section has why the line-25 test went.
 
 | | expected (section 5) | built | difference |
 |---|---:|---:|---|
@@ -356,13 +371,20 @@ is also a forward fill and ends at one row (6.3); halving alone would have
 left it three, which is where 2,958 comes from against the 2,955 the table
 above shows for the two halving-only lines.
 
-After the two rules, **the line-25 test alone halves nothing on this
-batch**: 0 filer-years carry `pair_collapse` without a repeated row. All
-95 it halved without one were forward fills. It stays in the rule as the
-guard Zein chose, for a batch that doubles the grants and not the basic
-row. Taking it out would make the paid and the future `pair_collapse` the
-same rule and leave line 25 to `forward_fill` alone; that is a decision,
-not a finding.
+**The line-25 test, taken out on 2026-10-01.** With the repeated row
+beside it and forward fill decided first, the line-25 test alone halved
+nothing on this batch: 0 filer-years carried `pair_collapse` without a
+repeated row, and all 95 it had halved without one were forward fills.
+Zein took it out. The paid scratch copy built without it differs from
+production in the same 2,703 filer-years, by the same rows and dollars
+under every rule (the tables of 6.1 are of that build), and 32 filings
+were checked against their XML in it. What is given up is a guard with
+nothing to guard today: a batch that doubles the grants and NOT the basic
+row would now pass unhalved, where the test caught it when the filing
+itemizes more than 2/3 of line 25. The watch for it is this doc's own
+script after every drop: `halved_without_doubled_row_shape` re-derives the
+old test, and a "multi tuple" line there is a doubled block the rule
+misses. Section 2 is that query on this batch: no such line.
 
 ### 6.3 Forward fill
 
@@ -388,12 +410,11 @@ line 25 in column (d) or column (a), keeps ONE row and carries
   (a) too). 64 match column (a) only: 62 leave column (d) at 0, and 2 are
   the pair above. 11 of the 64 were checked against the XML, and all 11
   are one real group plus empty ones.
-- *Which row of `basic_fields_pf`.* The filer-year's row the line-25 test
-  has always read (newest ingested), not the kept url's own: on these
+- *Which row of `basic_fields_pf`.* The filer-year's row the old line-25
+  test read (newest ingested), not the kept url's own: on these
   blocks the two agree in every case, so there is one lookup.
-- *Order against `pair_collapse`.* The forward-fill test comes before the
-  line-25 test, which a forward fill also passes and which would leave N/2
-  copies. It comes AFTER the repeated row: a filing in the extract twice
+- *Order against `pair_collapse`.* The forward-fill test comes AFTER the
+  repeated row: a filing in the extract twice
   holds half the copies, so one tuple twice under a repeated row is a
   doubled single-grant filing (1,851 of them halved today, line 25 equal
   to one copy) and stays `pair_collapse`, and one tuple six times under a

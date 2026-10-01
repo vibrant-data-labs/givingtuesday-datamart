@@ -108,6 +108,8 @@ FROM t_fy f JOIN t_bfd b ON b.url = f.url
 WHERE f.all_even AND NOT f.collapse_now ORDER BY f.full_sum DESC LIMIT 15;
 
 -- name: halved_without_doubled_row_shape
+-- Since 2026-10-01 current_grants halves on the repeated row alone, so this
+-- is also the watch for a doubled block it misses: a 'multi tuple' line.
 -- two shas under one url: an amended copy stamped with the original's url
 -- (the report's category C); single tuple with declared = one copy: the
 -- filing's XML has one real paid group and N-1 empty ones, each emitted as

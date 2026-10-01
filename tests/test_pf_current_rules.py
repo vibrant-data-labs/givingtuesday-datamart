@@ -47,11 +47,12 @@ CASES = (
          line25_d=1250, basic_shas=("s1", "s1")),
     Case("a doubled block with a legitimate repeat", (A, A, B, A, A, B), (3, "pair_collapse"), (3, "pair_collapse"),
          line25_d=2250, basic_shas=("s1", "s1")),
-    # line 25 is 0 while the filing itemizes (Okumura): the repeated row alone decides
-    Case("a doubled block the line-25 test cannot see", (A, B, A, B), (2, "pair_collapse"), (2, "pair_collapse"),
+    # line 25 is 0 while the filing itemizes (Okumura): the repeated row decides, whatever line 25 says
+    Case("a doubled block whose line 25 is 0", (A, B, A, B), (2, "pair_collapse"), (2, "pair_collapse"),
          line25_d=0, basic_shas=("s1", "s1")),
-    # the paid rule's own test, with no repeated row. The future rule has no total to test against
-    Case("a doubled block whose basic row is single", (A, B, A, B), (2, "pair_collapse"), (4, "passthrough"),
+    # no repeated row, no halving, even where line 25 is half the block: the line-25 test was taken out on
+    # 2026-10-01, and with it the one difference between the paid and the future pair_collapse. None is known
+    Case("an even block whose basic row is single", (A, B, A, B), (4, "passthrough"), (4, "passthrough"),
          line25_d=1250),
     Case("an amended copy under the original url", (A, B, A, B), (2, "pair_collapse"), (2, "pair_collapse"),
          line25_d=1250, basic_shas=("s1", "s2")),
@@ -215,15 +216,15 @@ SHARED = (
     "PARTITION BY h.filerein, h.taxyear, h._h ORDER BY h._ctid",                         # the tuple and its copies
     "BOOL_AND(c._n_copies % 2 = 0) OVER fy AS _all_even",                                # the all-even test
     "(c._n_copies = COUNT(*) OVER fy) AS _one_tuple",                                    # the forward-fill shape
-    "(b._all_even AND b._repeated) AS _doubled",
+    "(b._all_even AND b._repeated) AS _pair",                                            # pair_collapse, whole
     "CASE WHEN n_urls_for_year > 1 THEN 'latest_url' END",                               # the dedup_rule values
     "CASE WHEN _pair THEN 'pair_collapse' END",
     "CASE WHEN _fill THEN 'forward_fill' END",
     "WHERE CASE WHEN _fill THEN _copy_rank = 1",                                         # what is kept
     "WHEN _pair THEN _copy_rank <= _n_copies / 2",
 )
-# The differences: line 25 on the paid side, the paid relation's url on the future side.
-PAID_ONLY = ("_pf_line25", "arecgpdcprps", "arecprexpnss", "_full_sum", "_line25_d", "_line25_a")
+# The differences: line 25 on the paid side (forward fill), the paid relation's url on the future side.
+PAID_ONLY = ("_pf_line25", "arecgpdcprps", "arecprexpnss", "_amt", "_line25_d", "_line25_a")
 FUTURE_ONLY = ("CREATE TEMP TABLE _pf_paid AS", "LEFT JOIN _pf_paid p", "WHERE p.url IS NULL OR p.url <= g.url")
 
 
@@ -253,25 +254,25 @@ def test_each_difference_only_adds_to_the_shared_rule():
     assert not [f for f in PAID_ONLY + FUTURE_ONLY if any(f in line for line in shared)]
     # the paid relation's url: lines added, none rewritten
     assert _rewritten(shared, with_paid) == [] and len(with_paid) > len(shared)
-    # line 25: lines added, and the two lines that decide the rules rewritten
-    assert _rewritten(shared, with_line25) == ["(f._doubled) AS _pair", "FALSE AS _fill"]
+    # line 25: lines added, and the one line that decides forward fill rewritten
+    assert _rewritten(shared, with_line25) == ["FALSE AS _fill"]
     assert len(with_line25) > len(shared)
 
 
-def test_the_paid_rule_halves_on_line_25_or_the_repeated_row_and_fills_before_it_halves():
+def test_line_25_decides_forward_fill_and_nothing_else():
     ddl = cg._PF_CURRENT_DDL
-    # option B: the repeated row, or the line-25 test on a block that is not a forward fill
-    assert "(f._doubled\n            OR (f._all_even AND NOT f._fill AND f._line25_d > 0" in ddl
-    assert "ABS(f._full_sum / 2 - f._line25_d) < ABS(f._full_sum - f._line25_d))) AS _pair" in ddl
+    # pair_collapse is the repeated row alone, on both sides: no test of the block's sum against line 25
+    assert "ABS(" not in ddl and "_full_sum" not in ddl
+    rule = ddl[ddl.index("ruled AS ("):ddl.index("SELECT ruled.filerein")]
+    assert rule.count("_line25") == 2 and "AS _pair" in rule
     # forward fill: one tuple, more than once in the filing itself, one copy on line 25 in either column
-    assert "(d._one_tuple AND d._n_copies / CASE WHEN d._doubled THEN 2 ELSE 1 END >= 2" in ddl
-    assert "AND d._amt > 0 AND (d._amt = d._line25_d OR d._amt = d._line25_a)) AS _fill" in ddl
-    assert ddl.index("AS _fill") > ddl.index("AS _pair")          # _fill is the inner query: decided first
+    assert "(p._one_tuple AND p._n_copies / CASE WHEN p._pair THEN 2 ELSE 1 END >= 2" in ddl
+    assert "AND p._amt > 0 AND (p._amt = p._line25_d OR p._amt = p._line25_a)) AS _fill" in ddl
     assert cg.PAIR_COLLAPSE == "pair_collapse" and cg.FORWARD_FILL == "forward_fill"
 
 
-def test_line_25_is_read_as_it_was_before_the_rule_was_shared():
-    # raw basic_fields_pf, the newest-ingested row of the filer-year: the lookup pair_collapse has always used
+def test_line_25_is_read_from_the_row_the_old_line_25_test_read():
+    # raw basic_fields_pf, the newest-ingested row of the filer-year
     ddl = cg._PF_CURRENT_DDL
     line25 = ddl[ddl.index("CREATE TEMP TABLE _pf_line25"):ddl.index("CREATE INDEX ON _pf_line25")]
     assert "FROM public.basic_fields_pf\n" in line25 and "basic_fields_pf_current" not in ddl

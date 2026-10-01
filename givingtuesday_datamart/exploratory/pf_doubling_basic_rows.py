@@ -9,9 +9,13 @@ twice in ``privategrants``. When this was measured, on 2026-09-30,
 ``privategrants_current``'s ``pair_collapse`` halved a filer-year when every
 tuple's multiplicity is even AND halving moves the itemized sum toward Part
 I line 25(d), and never looked at the basic row. The rule the measurement
-led to is in ``current_grants`` since the same day; once the production
-table is rebuilt under it, ``rule_vs_live`` below, which re-derives the OLD
-rule, stops agreeing with the table, as it should.
+led to is in ``current_grants`` since the same day, and since 2026-10-01
+without the line-25 test: once the production table is rebuilt under it,
+``rule_vs_live`` below, which re-derives the OLD rule, stops agreeing with
+the table, as it should. The script stays the watch for what the new rule
+gave up: a "multi tuple" line in ``halved_without_doubled_row_shape`` is a
+block the old test halved and the repeated row does not see (none on
+2026_06_16).
 The first form runs ``data/exploratory/pf_doubling_basic_rows.sql``
 in one read-only session (temp tables only) and prints the cross between
 the two signals, the shapes of the disagreements, and the row counts
