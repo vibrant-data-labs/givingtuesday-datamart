@@ -44,8 +44,9 @@ better-scoring row of a *different* EIN (name_score weighted 2x) — the
 matching run. Two rules are not a pair's doing and are not explained here:
 the name-only tier (it asks whether the name belongs to one filer of the
 whole universe), and the one-filer-in-the-state rule, which leaves a tuple
-with no street address unmatched when only the exact-name tier accepts it
-and several filers of its state carry the name.
+with no street address (no digit in its address lines) unmatched when only
+the exact-name tier accepts it and several filers of its state carry the
+name.
 """
 
 from __future__ import annotations

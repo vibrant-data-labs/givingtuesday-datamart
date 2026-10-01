@@ -1338,6 +1338,11 @@ def _by_address(features: pd.DataFrame) -> pd.Series:
 # street address ("street"), every tuple ("all"), or none ("none", the
 # matcher up to input shape 2, for a before-and-after measurement).
 ONE_FILER_IN_STATE = "street"
+# A street address has a number in it, of a building or of a box. An
+# address line without a digit is a city, a department or a person: a
+# recovered grant has no city column, so its city, when the list prints
+# one, is in its address line.
+_STREET = r"\d"
 
 
 def resolve_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df: pd.DataFrame,
@@ -1359,8 +1364,11 @@ def resolve_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df
     with the shortest address wins. So such a tuple matches on the name
     and the state only when one filer of the state has the name, as the
     name-only tier asks of the whole universe; otherwise it is left
-    unmatched. A tuple with a street address keeps the pick of the address
-    (``ONE_FILER_IN_STATE``).
+    unmatched. A tuple with a street address (an address line with a digit
+    in it) keeps the pick of the address (``ONE_FILER_IN_STATE``): held to
+    every tuple, the rule took 359 rows and $52M of the sampled
+    foundations' itemised grants on 2026-10-01, most of them to a
+    university or a hospital at its own street address.
     """
     # filter_match_rules returns a boolean-mask slice (a view). Take an
     # explicit copy so subsequent assignments don't trigger
@@ -1397,8 +1405,8 @@ def resolve_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df
         shared = (matches['match_tier'] == STATE_TIER) & (
             matches[INDEX_COLS[1]].map(filers_in_state).fillna(1) > 1)
         if one_filer_in_state == "street":
-            street = grants_df['address1_key'].str.strip() + grants_df['address2_key'].str.strip()
-            shared &= matches[INDEX_COLS[1]].map(street == "").astype(bool)
+            lines = grants_df['address1_key'] + " " + grants_df['address2_key']
+            shared &= matches[INDEX_COLS[1]].map(~lines.str.contains(_STREET)).astype(bool)
         logger.info(
             f"One filer in the state: {int(shared.sum())} grant tuples left unmatched, "
             f"their name shared by several filers of their state."

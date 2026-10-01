@@ -128,7 +128,10 @@ def test_a_name_several_filers_of_the_state_share_does_not_match_a_row_with_no_s
     state have the name, and the row's address is its state: the address
     would pick the filer with the shorter one."""
     assert matched([("memorial cancer center", "", "", "ny", "")], TWO_IN_ONE_STATE) == {}
-    assert matched([("memorial cancer center", "", "new york", "ny", "")], TWO_IN_ONE_STATE) == {}
+    assert matched([("memorial cancer center", "", "albany", "ny", "")], TWO_IN_ONE_STATE) == {}
+    # a recovered grant carries its city in its address line: a line with no number is no street address
+    assert matched([("memorial cancer center", "albany", "", "ny", "")], TWO_IN_ONE_STATE) == {}
+    assert matched([("memorial cancer center", "office of development, albany", "", "ny", "")], TWO_IN_ONE_STATE) == {}
 
 
 def test_a_street_address_picks_among_the_filers_of_the_state_that_share_a_name():

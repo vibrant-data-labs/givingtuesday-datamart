@@ -33,7 +33,8 @@ keys of a recipient):
                     that can match the filer
 ``funder``          every tuple of a sample of the private foundations of
                     the labeled set, one in ``--one-in``, and of the gate's
-                    funder sentinel
+                    funder sentinel; their rows and dollars count the grants
+                    they itemised, not their recovered ones
 ==================  ========================================================
 
 Each tuple is matched against the whole universe, so the match it gets is
@@ -164,8 +165,9 @@ def tuples_sql(names: Relations) -> str:
                coalesce(sum({amount}), 0)::float8 AS dollars,
                count(*) FILTER (WHERE {recovered}) AS recovered_rows,
                coalesce(sum({amount}) FILTER (WHERE {recovered}), 0)::float8 AS recovered_dollars,
-               count(*) FILTER (WHERE f.filerein IS NOT NULL) AS funder_rows,
-               coalesce(sum({amount}) FILTER (WHERE f.filerein IS NOT NULL), 0)::float8 AS funder_dollars,
+               count(*) FILTER (WHERE f.filerein IS NOT NULL AND NOT {recovered}) AS funder_rows,
+               coalesce(sum({amount}) FILTER (WHERE f.filerein IS NOT NULL AND NOT {recovered}), 0)::float8
+                   AS funder_dollars,
                bool_or(l.filerein IS NOT NULL) AS in_loaded,
                bool_or(concat_ws(' ', sigocpyrpnam, sigocpyrbnbn1, sigocpyrbnbn2) ~* '{PLACEHOLDER_REGEX}'
                        OR sigocpyrbnbn1 ILIKE 'pfizer%' OR sigocpyrbnbn1 ILIKE '%world health organi%') AS in_gate
