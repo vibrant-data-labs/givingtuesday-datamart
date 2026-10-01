@@ -20,72 +20,122 @@ raw staging:
        row, so legitimate repeated grants (e.g. 20 separate identical
        checks to one org) are never under-counted.
 
-* ``public.privategrants_current`` (990-PF Part XV)
-    1. latest_url — ``MAX(url)`` only: ``basic_fields_pf`` carries no
-       amended-return flag.
-    2. pair_collapse — the PF doubling is NOT amendment-linked (scan
-       2026-07-30: 5/6,277 doubled filer-years have a second sha; the
-       rest are a GT batch defect concentrated in taxyear 2024). Collapse
-       only where BOTH hold: (a) every line-item tuple's multiplicity in
-       the filer-year is EVEN — a doubled block always is, including when
-       the underlying filing legitimately repeats a line item (two
-       legitimate copies double to four; confirmed on EIN 472107200 /
-       tax year 2024: multiplicities 2-4, full sum exactly 2x the
-       declared total) — and (b) halving moves the itemized
-       sum toward the filer's own declared grants paid (Part I line 25
-       col (d), ``arecgpdcprps``): ``|half - declared| < |full -
-       declared|``. Collapsing keeps HALF of each tuple's copies (4 -> 2,
-       2 -> 1), so legitimate repeats inside a doubled block survive.
-       Spurious doubles reconcile at half (to the dollar in the verified
-       cases); legitimate repeaters reconcile at full, and mixed odd
-       multiplicities (e.g. one grant listed 20 times alongside
-       singletons) fail the even test outright. Detection boundary:
-       doubles are only caught when the
-       filing itemizes >2/3 of declared — the failure mode is
-       conservative (residual doubles survive among sparse itemizers; a
-       legitimate filer can't be halved unless it itemizes ~2x its own
-       declared total).
-
+* ``public.privategrants_current`` (990-PF Part XV line 3a, grants paid)
 * ``public.privategrants_future_current`` (990-PF Part XV line 3b, grants
   approved for future payment)
-    Built after ``privategrants_current``, which it reads for the url
-    the paid rows are held under.
-    1. latest_url — ``MAX(url)``, as for the paid rows. A filer-year whose
-       paid rows are held under a later url is left out whole: the return
-       was filed again without these rows (25 filer-years, 55 rows,
-       $18.4M, measured 2026-09-29), and keeping them would mix two
-       versions of one return.
-    2. pair_collapse — the doubling is in this file too, and it is the
-       filing that is doubled, not the block: measured 2026-09-29, 316 of
-       the 3,099 filings the IRS processed in 2025 and 2026 have every
-       line-item tuple an even number of times, against 12 of the 23,118
-       processed before; in 311 of the 316 the paid block of the same
-       filing is all even as well. The paid rule's second test cannot be
-       copied: it leans on grants paid, Part I line 25, and no column of
-       ``basic_fields_pf`` holds a total approved for future payment. The
-       evidence is the filing's own row in ``basic_fields_pf`` instead: a
-       doubled filing is doubled in every extract of the batch, so its
-       basic-fields row is there twice under one url (15,845 urls under
-       one sha, every one processed in 2025 or 2026; measured 2026-09-30),
-       and an amended copy stamped with the original url doubles the
-       rows the same way, with a second sha under the url (one such
-       filing here, PR #57 checked the shape on the paid side). Of the
-       316, 315 have the repeated row under one sha and one under two;
-       the one that has neither has unpaired paid rows, a genuine repeat;
-       no filing with a repeated row has unpaired future rows. Collapse
-       where BOTH hold: (a) every tuple's multiplicity in the filing's
-       future rows is even, and (b) ``basic_fields_pf`` holds the filing's
-       url more than once. Half of each tuple's copies are kept, as for
-       the paid rows: 315 filings under the url kept. What this cannot
-       catch: a doubled filing whose basic-fields row was not doubled with
-       it, of which none is known. A filer that really lists every pledge
-       twice is halved only if its basic-fields row is repeated too, of
-       which none is known either. The rule first built here, on
-       2026-09-29, borrowed the paid rule's verdict on the same filing
-       (``pair_collapse`` in ``privategrants_current``) and reached 299 of
-       the 316; the 17 it could not judge, up to $7.4M counted twice, the
-       repeated row reaches, and the two of them checked against their
-       XML are doubled.
+    One rule for both, built from one definition (``_pf_current_ddl``).
+    The two relations differ by the three things listed after the rule and
+    by nothing else. The future relation is built after the paid one, which
+    it reads.
+
+    1. latest_url — one url per filer-year, ``MAX(url)``:
+       ``basic_fields_pf`` carries no amended-return flag.
+    2. The tuple — two rows are the same line item when they agree on
+       every content column (``_PF_CONTENT_COLS``,
+       ``_PF_FUTURE_CONTENT_COLS``). A tuple's multiplicity is its count
+       in the filer-year, under the kept url.
+    3. The repeated row — a filing is in the extracts twice when
+       ``basic_fields_pf`` holds its url more than once. GivingTuesday's
+       2025 and 2026 batches emit some filings twice in every extract of
+       the batch: the basic-fields row twice under one url and one sha
+       (15,845 urls, every one processed in 2025 or 2026, measured
+       2026-09-30), and every line item twice. An amended copy stamped
+       with the original's url doubles the rows the same way, with a
+       second sha under the url. The doubling is of the filing, not of the
+       block: 12,668 paid blocks and 315 future ones lie under a repeated
+       row, and not one of them holds a tuple an odd number of times.
+    4. pair_collapse — a block is halved where every tuple's multiplicity
+       is EVEN and the filing's row is repeated. Even, not "exactly 2": a
+       doubled block that already held a legitimately repeated line item
+       shows multiplicity 4 (EIN 472107200 / tax year 2024: multiplicities
+       2-4, full sum exactly 2x line 25). Halving keeps HALF of each
+       tuple's copies (4 -> 2, 2 -> 1), so the legitimate repeat survives.
+       A block with an odd tuple is never halved.
+    5. The forward-fill shape — a block that is ONE tuple held N >= 2
+       times by the filing itself (N/2 where step 4 found the filing
+       doubled). The shape alone decides nothing: it is a legitimate
+       repeat, N grants to one recipient, as often as it is a defect. A
+       total is needed to tell them apart, which is difference (b).
+    6. ``dedup_rule`` — ``latest_url``, ``pair_collapse`` and
+       ``forward_fill``, ``+``-joined when more than one took rows from
+       the filer-year, else ``passthrough``.
+
+    The differences, and why each is there:
+
+    a. The line-25 test: paid only. On the paid side ``pair_collapse``
+       also fires where every tuple is even and halving moves the itemized
+       sum toward grants paid, Part I line 25 column (d)
+       (``arecgpdcprps``): ``|half - line 25| < |full - line 25|``, line
+       25 above zero. No column of ``basic_fields_pf`` holds a total
+       approved for future payment, so the future side has the repeated
+       row alone. The paid rule is the two tests joined by OR (decided
+       2026-09-30, option B of ``docs/pf_doubling_basic_row_test.md``):
+       until then it was the line-25 test alone, which could not see a
+       doubled filing whose line 25(d) is 0, absent, read from another
+       row of the filer-year or inclusive of amounts not itemized (2,504
+       filer-years, 2,958 rows, $24.4M counted twice). On batch
+       ``2026_06_16`` the line-25 test halves nothing the repeated row
+       does not: the 95 filer-years it halved without a repeated row are
+       forward fills, which (b) now takes first. It stays as the guard
+       for a batch that doubles the grants and not the basic row.
+       Detection boundary of that guard: a double is caught only when the
+       filing itemizes more than 2/3 of line 25, and a legitimate all-even
+       filer is halved only if it itemizes about twice its own line 25.
+    b. forward_fill: paid only. GivingTuesday's extract fills a group's
+       missing fields from another group of the same filing. A return
+       that enters ONE real grant group and N-1 empty ones (``<Amt>0</Amt>``
+       and nothing else) comes out as N copies of the real group, amount
+       included: "See Attached list" 14 times for EIN 481210113 / tax year
+       2016, $1,069,215 21 times for EIN 396040395 / tax year 2018. The
+       rule: where the block has the forward-fill shape and one copy's
+       amount, above zero, EQUALS line 25, in column (d) or in column (a)
+       (per books, ``arecprexpnss``), the filer-year keeps ONE row. A
+       legitimate repeat declares every copy on line 25 (EIN 954536657 /
+       tax year 2020, two $2,000,000 grants, line 25 $4,000,000) and is
+       kept whole. The match is exact, and the two kinds do not overlap:
+       of 322 one-tuple blocks with dollars and no repeated row, 198 have
+       one copy equal to a column to the dollar, 122 have EVERY copy on
+       line 25 to the dollar, and the 2 left state neither. The 22 of the
+       198 checked against the filing's XML are all one real group plus
+       empties. Column (a) is needed beside (d): 62 of the 198 leave
+       column (d) at 0. Order: the rule is decided before the line-25
+       test of (a), which a forward fill passes as well (N copies against
+       one) and which would leave N/2 copies. Under a repeated row both
+       apply: three groups, one real, in a doubled filing are six rows,
+       halved by step 4 and filled to one (``pair_collapse+forward_fill``,
+       2 filer-years). A doubled single-grant filing (one tuple twice
+       under a repeated row) is step 4's alone and stays
+       ``pair_collapse``.
+
+       The future side has no forward-fill repair, because the rule leans
+       on line 25 and nothing states a future total. Its 13 one-tuple
+       blocks without a repeated row were all checked against their XML
+       on 2026-09-30: 10 are genuine repeats, 2 are forward fills
+       ($201,000 counted too often) and 1 is two amount-only groups read
+       as one amount twice. Neither signal that needs no total separates
+       them: the paid block of the same filing is forward-filled in none
+       of the 13, and "one real group and empty ones" is the XML itself,
+       which no extract carries. They are listed by object id in
+       ``docs/pf_doubling_basic_row_test.md``.
+    c. A later url on the paid side: future only. The future relation
+       leaves out, whole, a filer-year whose paid rows are held under a
+       later url: the return was filed again without these rows (25
+       filer-years, 55 rows, $18.4M, measured 2026-09-29), and keeping
+       them would mix two versions of one return. The paid relation has
+       nothing to be behind.
+
+    What the rule cannot catch: a doubled filing whose basic-fields row
+    was not doubled with it and whose line 25 is 0 (none known). A filer
+    that really lists every grant twice under a repeated row (none
+    known). A forward fill whose copies differ in a field: the fill is per
+    field, so a group that holds only the rest of a long status or purpose
+    text comes out as a second row with the first one's name and amount,
+    and the block is then two or three tuples, not one. Measured
+    2026-09-30 and left for a rule of its own: 45 filer-years without a
+    repeated row whose paid rows all carry one amount and one name while
+    line 25 equals one copy, $126.2M counted too often, $64.35M of it one
+    grant (EIN 133703640 / tax year 2021); 7 of 7 checked against the XML.
+    A forward fill of $0 rows (3 filer-years, 7 rows, no dollars).
 
 * ``public.basic_fields_current`` (990 filer financials, issue #34)
 * ``public.basic_fields_pf_current`` (990-PF filer financials)
@@ -114,18 +164,20 @@ raw staging:
 
     NOTE: the Schedule I and PF grant rules above deliberately keep
     reading RAW ``basic_fields``/``basic_fields_pf`` for their amendment
-    evidence and declared-total lookups. Repointing them at these
-    relations would change which version supplies ``arecgpdcprps``, hence
-    which filer-years pair_collapse fires on, hence matching inputs — a
-    gate-moving change that does not belong in a consumer-side fix.
+    evidence, the repeated row and line 25 (the newest-ingested row of the
+    filer-year). Repointing them at these relations would change which
+    version supplies ``arecgpdcprps``, hence which filer-years
+    pair_collapse fires on, hence matching inputs — a gate-moving change
+    that does not belong in a consumer-side fix. (These relations keep one
+    row per filer-year, so they could not show a repeated row at all.)
 
 Every surviving row carries provenance: ``n_urls_for_year`` (grants),
 ``n_filings_for_year`` (distinct shas in basic_fields[_pf]), and
 ``dedup_rule`` — ``passthrough`` | ``latest_url`` | ``amend_distinct`` |
-``pair_collapse`` (``+``-joined when both applied) on the grants side,
-``passthrough`` | ``latest_filing`` | ``duplicate_row`` on the basic
-fields side — so every kept or dropped row is explainable from the
-relation alone.
+``pair_collapse`` | ``forward_fill`` (``+``-joined when more than one
+applied) on the grants side, ``passthrough`` | ``latest_filing`` |
+``duplicate_row`` on the basic fields side — so every kept or dropped row
+is explainable from the relation alone.
 
 Builds are DROP + CREATE TABLE AS (idempotent) with (filerein) and
 (filerein, taxyear) indexes + ANALYZE. The DROP cascades to the matching
@@ -335,79 +387,143 @@ FROM ranked
 WHERE n_filings_for_year < 2 OR _copy_rank = 1;
 """
 
-_PF_CURRENT_DDL = f"""
-DROP TABLE IF EXISTS public.privategrants_current CASCADE;
-CREATE TABLE public.privategrants_current AS
+# dedup_rule values of the two 990-PF line-item relations (the docstring
+# has the rules). Joined with '+' when more than one applies.
+PAIR_COLLAPSE = "pair_collapse"
+FORWARD_FILL = "forward_fill"
+
+
+def _pf_current_ddl(*, table: str, source: str, content_cols: list[str], all_cols: list[str],
+                    line25_amount: str | None = None, paid: str | None = None,
+                    basic: str = "public.basic_fields_pf") -> str:
+    """The DDL of a 990-PF line-item ``_current`` relation: the one
+    definition of the paid and the future-payment rule (module docstring).
+
+    ``table`` is the relation built and ``source`` the staging table it
+    corrects, both schema-qualified: a scratch copy or a test's temp table
+    is the same DDL under another name. The differences between the two
+    relations are the two optional arguments and nothing else:
+
+    * ``line25_amount``: the amount column that Part I line 25 totals. Given
+      for the paid rows only, it adds the line-25 test to ``pair_collapse``
+      and the ``forward_fill`` rule, which both lean on that total.
+    * ``paid``: the paid relation. Given for the future-payment rows only,
+      it leaves out a filer-year whose paid rows are held under a later url.
+
+    ``basic`` is ``basic_fields_pf``, read raw (see the NOTE in the module
+    docstring). What the rule reads beside the rows (the repeated urls,
+    line 25, the paid relation's urls) is gathered into indexed temp
+    tables first. As CTEs they are at the planner's mercy: it cannot
+    estimate the ``IS NOT DISTINCT FROM`` join to the kept url, takes it
+    for one row, and nests a loop over whatever is joined next. That ran a
+    scan of ``basic_fields_pf`` once per row on 2026-09-29, and the paid
+    relation's urls once per row on 2026-09-30 (a build that takes two
+    minutes was stopped after eleven). An index lookup per row is cheap
+    whatever the estimate.
+    """
+    line25 = line25_amount is not None
+    line25_table = f"""
+CREATE TEMP TABLE _pf_line25 AS
+    -- grants paid as the return declares it, Part I line 25: column (d),
+    -- in cash, and column (a), per books. One row per filer-year (0 below
+    -- where the return declares none)
+    SELECT DISTINCT ON (filerein, taxyear) filerein, taxyear,
+           CASE WHEN arecgpdcprps ~ {_NUMERIC_RE}
+                THEN arecgpdcprps::numeric END AS line25_d,
+           CASE WHEN arecprexpnss ~ {_NUMERIC_RE}
+                THEN arecprexpnss::numeric END AS line25_a
+    FROM {basic}
+    ORDER BY filerein, taxyear, _ingested_at DESC, filesha256;
+CREATE INDEX ON _pf_line25 (filerein, taxyear);
+ANALYZE _pf_line25;""" if line25 else ""
+    line25_cols = f""",
+           CASE WHEN g.{line25_amount} ~ {_NUMERIC_RE}
+                THEN g.{line25_amount}::numeric ELSE 0 END AS _amt,
+           COALESCE(l.line25_d, 0) AS _line25_d,
+           COALESCE(l.line25_a, 0) AS _line25_a""" if line25 else ""
+    line25_join = """
+    LEFT JOIN _pf_line25 l
+      ON l.filerein = g.filerein AND l.taxyear IS NOT DISTINCT FROM g.taxyear""" if line25 else ""
+    paid_table = f"""
+CREATE TEMP TABLE _pf_paid AS
+    -- the same filers in the paid relation: the url it holds for each
+    -- filer-year
+    SELECT g.filerein, g.taxyear, MAX(g.url) AS url
+    FROM {paid} g
+    WHERE g.filerein IN (SELECT filerein FROM {source})
+    GROUP BY 1, 2;
+CREATE INDEX ON _pf_paid (filerein, taxyear);
+ANALYZE _pf_paid;""" if paid else ""
+    paid_join = """
+    LEFT JOIN _pf_paid p
+      ON p.filerein = g.filerein AND p.taxyear IS NOT DISTINCT FROM g.taxyear""" if paid else ""
+    paid_where = """
+    -- the paid rows are held under a later url: the return was filed
+    -- again without these rows, and they are left out
+    WHERE p.url IS NULL OR p.url <= g.url""" if paid else ""
+    full_sum = ",\n           SUM(c._amt) OVER fy AS _full_sum" if line25 else ""
+    drop_line25 = "\nDROP TABLE _pf_line25;" if line25 else ""
+    drop_paid = "\nDROP TABLE _pf_paid;" if paid else ""
+    # forward fill: the block is one tuple, the filing itself holds it more
+    # than once (a doubled filing holds half the copies), and line 25, in
+    # either column, equals ONE copy. A legitimate repeat declares every
+    # copy on line 25.
+    fill = """(d._one_tuple AND d._n_copies / CASE WHEN d._doubled THEN 2 ELSE 1 END >= 2
+                AND d._amt > 0 AND (d._amt = d._line25_d OR d._amt = d._line25_a))""" if line25 else "FALSE"
+    # the line-25 test: halving moves the itemized sum toward column (d). A
+    # forward fill passes it too (N copies against one), so that rule goes
+    # first.
+    line25_test = """
+            OR (f._all_even AND NOT f._fill AND f._line25_d > 0
+                AND ABS(f._full_sum / 2 - f._line25_d) < ABS(f._full_sum - f._line25_d))""" if line25 else ""
+    return f"""
+CREATE TEMP TABLE _pf_repeated AS
+    -- the repeated-row signal: a filing whose rows are in every extract
+    -- twice has its basic-fields row twice under one url. One GT's batch
+    -- emitted twice (one sha), or an amended copy stamped with the
+    -- original url (two shas)
+    SELECT url
+    FROM {basic}
+    GROUP BY url
+    HAVING COUNT(*) > 1;
+CREATE INDEX ON _pf_repeated (url);
+ANALYZE _pf_repeated;{line25_table}{paid_table}
+DROP TABLE IF EXISTS {table} CASCADE;
+CREATE TABLE {table} AS
 WITH kept_url AS (
     -- one url per filer-year: MAX(url) (basic_fields_pf has no amend flag)
     SELECT DISTINCT ON (filerein, taxyear)
            filerein, taxyear, url,
            COUNT(*) OVER (PARTITION BY filerein, taxyear) AS n_urls_for_year
     FROM (
-        SELECT DISTINCT filerein, taxyear, url FROM public.privategrants
+        SELECT DISTINCT filerein, taxyear, url FROM {source}
     ) u
     ORDER BY filerein, taxyear, url DESC
 ),
 pf_filings AS (
     SELECT filerein, taxyear, COUNT(DISTINCT filesha256) AS n_filings_for_year
-    FROM public.basic_fields_pf
+    FROM {basic}
     GROUP BY 1, 2
 ),
-declared AS (
-    SELECT DISTINCT ON (filerein, taxyear) filerein, taxyear,
-           CASE WHEN arecgpdcprps ~ {_NUMERIC_RE}
-                THEN arecgpdcprps::numeric END AS declared_amt
-    FROM public.basic_fields_pf
-    ORDER BY filerein, taxyear, _ingested_at DESC, filesha256
-),
 hashed AS (
+    -- the rows under the kept url, each with its line-item tuple (_h).
     -- g.ctid is carried as _ctid: system columns don't pass through CTEs,
     -- and the copy-rank below needs a deterministic physical order.
     SELECT g.*,
            g.ctid AS _ctid,
            k.n_urls_for_year,
-           {_content_hash(_PF_CONTENT_COLS)} AS _h,
-           CASE WHEN g.sigocpyamoun ~ {_NUMERIC_RE}
-                THEN g.sigocpyamoun::numeric ELSE 0 END AS _amt
-    FROM public.privategrants g
+           {_content_hash(content_cols)} AS _h,
+           (r.url IS NOT NULL) AS _repeated{line25_cols}
+    FROM {source} g
     JOIN kept_url k
       ON k.filerein = g.filerein
      AND k.taxyear IS NOT DISTINCT FROM g.taxyear
-     AND k.url IS NOT DISTINCT FROM g.url
+     AND k.url IS NOT DISTINCT FROM g.url{paid_join}
+    LEFT JOIN _pf_repeated r ON r.url = g.url{line25_join}{paid_where}
 ),
-tuple_counts AS (
-    SELECT filerein, taxyear, _h, COUNT(*) AS n_copies, SUM(_amt) AS h_sum
-    FROM hashed
-    GROUP BY 1, 2, 3
-),
-fy AS (
-    -- all_even, not "all exactly 2": a doubled block that already
-    -- contained a legitimately repeated line item shows multiplicity 4
-    -- (2 legitimate copies x2), not 2. Confirmed case: EIN 472107200 /
-    -- tax year 2024 — multiplicities 2-4, full sum exactly 2x the
-    -- declared total. Halving each tuple's copies (below) preserves the
-    -- legitimate repeats while removing the doubling.
-    SELECT filerein, taxyear,
-           BOOL_AND(n_copies % 2 = 0) AS all_even,
-           SUM(h_sum) AS full_sum
-    FROM tuple_counts
-    GROUP BY 1, 2
-),
-collapse_fy AS (
-    -- every tuple's multiplicity is even AND halving reconciles better
-    -- with declared (a legitimately all-even filer-year reconciles at
-    -- full, so it is kept intact)
-    SELECT f.filerein, f.taxyear
-    FROM fy f
-    JOIN declared d
-      ON d.filerein = f.filerein AND d.taxyear IS NOT DISTINCT FROM f.taxyear
-    WHERE f.all_even
-      AND d.declared_amt IS NOT NULL AND d.declared_amt > 0
-      AND ABS(f.full_sum / 2 - d.declared_amt) < ABS(f.full_sum - d.declared_amt)
-),
-ranked AS (
+copies AS (
+    -- a tuple's multiplicity in the filer-year, and each copy's rank
     SELECT h.*,
-           (c.filerein IS NOT NULL) AS _collapse,
            ROW_NUMBER() OVER (
                PARTITION BY h.filerein, h.taxyear, h._h ORDER BY h._ctid
            ) AS _copy_rank,
@@ -415,121 +531,68 @@ ranked AS (
                PARTITION BY h.filerein, h.taxyear, h._h
            ) AS _n_copies
     FROM hashed h
-    LEFT JOIN collapse_fy c
-      ON c.filerein = h.filerein AND c.taxyear IS NOT DISTINCT FROM h.taxyear
+),
+blocks AS (
+    -- the filer-year's block as a whole. Windows, not a join to the
+    -- filer-years that pass: the planner takes the joins above for a
+    -- handful of rows and would nest a loop over every row here.
+    -- all_even, not "all exactly 2": a doubled block that already
+    -- contained a legitimately repeated line item shows multiplicity 4
+    -- (2 legitimate copies x2), not 2. Confirmed case: EIN 472107200 /
+    -- tax year 2024, multiplicities 2-4, full sum exactly 2x line 25.
+    SELECT c.*,
+           BOOL_AND(c._n_copies % 2 = 0) OVER fy AS _all_even,
+           (c._n_copies = COUNT(*) OVER fy) AS _one_tuple{full_sum}
+    FROM copies c
+    WINDOW fy AS (PARTITION BY c.filerein, c.taxyear)
+),
+ruled AS (
+    -- _doubled: every tuple is even and the filing's basic-fields row is
+    -- repeated, so the filing is in the extract twice.
+    -- _fill: the forward-fill rule. _pair: the block is halved.
+    SELECT f.*,
+           (f._doubled{line25_test}) AS _pair
+    FROM (
+        SELECT d.*,
+               {fill} AS _fill
+        FROM (
+            SELECT b.*, (b._all_even AND b._repeated) AS _doubled FROM blocks b
+        ) d
+    ) f
 )
-SELECT {", ".join(f"ranked.{c}" for c in _PF_ALL_COLS)},
+SELECT {", ".join(f"ruled.{c}" for c in all_cols)},
        n_urls_for_year,
        COALESCE(pf.n_filings_for_year, 0) AS n_filings_for_year,
        -- See the Schedule I block: inline passthrough, no post-CTAS UPDATE.
        COALESCE(NULLIF(CONCAT_WS('+',
            CASE WHEN n_urls_for_year > 1 THEN 'latest_url' END,
-           CASE WHEN _collapse THEN 'pair_collapse' END
+           CASE WHEN _pair THEN '{PAIR_COLLAPSE}' END,
+           CASE WHEN _fill THEN '{FORWARD_FILL}' END
        ), ''), 'passthrough') AS dedup_rule
-FROM ranked
+FROM ruled
 LEFT JOIN pf_filings pf
-  ON pf.filerein = ranked.filerein
- AND pf.taxyear IS NOT DISTINCT FROM ranked.taxyear
--- keep HALF of each tuple's copies (not one): multiplicity 4 -> 2 keeps
--- a legitimately repeated grant that was swept up in the block doubling
-WHERE NOT _collapse OR _copy_rank <= _n_copies / 2;
+  ON pf.filerein = ruled.filerein
+ AND pf.taxyear IS NOT DISTINCT FROM ruled.taxyear
+-- forward fill keeps ONE row. pair_collapse keeps HALF of each tuple's
+-- copies (not one): multiplicity 4 -> 2 keeps a legitimately repeated
+-- grant that was swept up in the doubling
+WHERE CASE WHEN _fill THEN _copy_rank = 1
+           WHEN _pair THEN _copy_rank <= _n_copies / 2
+           ELSE TRUE END;
+DROP TABLE _pf_repeated;{drop_line25}{drop_paid}
 """
 
-# Reads privategrants_current, so it is built after it: for the url the
-# paid rows of a filer-year are held under. The doubling evidence is the
-# filing's repeated row in basic_fields_pf (see the module docstring),
-# gathered into an indexed temp table first: as a CTE the planner, which
-# takes the joins below for a handful of rows, ran its scan of
-# basic_fields_pf once per row of the future table.
-_PF_FUTURE_CURRENT_DDL = f"""
-CREATE TEMP TABLE _pf_doubled AS
-    -- a filing whose rows are in every extract twice: one GT's batch
-    -- emitted twice (its basic-fields row twice under one url and one
-    -- sha), or an amended copy stamped with the original url (two shas)
-    SELECT url
-    FROM public.basic_fields_pf
-    GROUP BY url
-    HAVING COUNT(*) > 1;
-CREATE INDEX ON _pf_doubled (url);
-ANALYZE _pf_doubled;
-DROP TABLE IF EXISTS public.privategrants_future_current CASCADE;
-CREATE TABLE public.privategrants_future_current AS
-WITH kept_url AS (
-    -- one url per filer-year: MAX(url), as for the paid rows
-    SELECT DISTINCT ON (filerein, taxyear)
-           filerein, taxyear, url,
-           COUNT(*) OVER (PARTITION BY filerein, taxyear) AS n_urls_for_year
-    FROM (
-        SELECT DISTINCT filerein, taxyear, url FROM public.privategrants_future
-    ) u
-    ORDER BY filerein, taxyear, url DESC
-),
-paid AS (
-    -- the same filers in the paid relation: the url it holds for each
-    -- filer-year
-    SELECT g.filerein, g.taxyear, MAX(g.url) AS url
-    FROM public.privategrants_current g
-    WHERE g.filerein IN (SELECT filerein FROM kept_url)
-    GROUP BY 1, 2
-),
-pf_filings AS (
-    SELECT filerein, taxyear, COUNT(DISTINCT filesha256) AS n_filings_for_year
-    FROM public.basic_fields_pf
-    GROUP BY 1, 2
-),
-hashed AS (
-    SELECT g.*,
-           g.ctid AS _ctid,
-           k.n_urls_for_year,
-           {_content_hash(_PF_FUTURE_CONTENT_COLS)} AS _h,
-           (d.url IS NOT NULL) AS _doubled
-    FROM public.privategrants_future g
-    JOIN kept_url k
-      ON k.filerein = g.filerein
-     AND k.taxyear IS NOT DISTINCT FROM g.taxyear
-     AND k.url IS NOT DISTINCT FROM g.url
-    LEFT JOIN paid p
-      ON p.filerein = g.filerein AND p.taxyear IS NOT DISTINCT FROM g.taxyear
-    LEFT JOIN _pf_doubled d ON d.url = g.url
-    -- the paid rows are held under a later url: the return was filed
-    -- again without these rows, and they are left out
-    WHERE p.url IS NULL OR p.url <= g.url
-),
-copies AS (
-    SELECT h.*,
-           ROW_NUMBER() OVER (
-               PARTITION BY h.filerein, h.taxyear, h._h ORDER BY h._ctid
-           ) AS _copy_rank,
-           COUNT(*) OVER (
-               PARTITION BY h.filerein, h.taxyear, h._h
-           ) AS _n_copies
-    FROM hashed h
-),
-ranked AS (
-    -- every tuple's multiplicity is even AND the filing's basic-fields
-    -- row is repeated. Windows, not a join to the filer-years that pass:
-    -- the planner takes the joins above for a handful of rows and would
-    -- nest a loop over every row here.
-    SELECT c.*,
-           (BOOL_AND(c._n_copies % 2 = 0) OVER fy
-            AND BOOL_OR(c._doubled) OVER fy) AS _collapse
-    FROM copies c
-    WINDOW fy AS (PARTITION BY c.filerein, c.taxyear)
+
+_PF_CURRENT_DDL = _pf_current_ddl(
+    table="public.privategrants_current", source="public.privategrants",
+    content_cols=_PF_CONTENT_COLS, all_cols=_PF_ALL_COLS, line25_amount="sigocpyamoun",
 )
-SELECT {", ".join(f"ranked.{c}" for c in _PF_FUTURE_ALL_COLS)},
-       n_urls_for_year,
-       COALESCE(pf.n_filings_for_year, 0) AS n_filings_for_year,
-       COALESCE(NULLIF(CONCAT_WS('+',
-           CASE WHEN n_urls_for_year > 1 THEN 'latest_url' END,
-           CASE WHEN _collapse THEN 'pair_collapse' END
-       ), ''), 'passthrough') AS dedup_rule
-FROM ranked
-LEFT JOIN pf_filings pf
-  ON pf.filerein = ranked.filerein
- AND pf.taxyear IS NOT DISTINCT FROM ranked.taxyear
-WHERE NOT _collapse OR _copy_rank <= _n_copies / 2;
-DROP TABLE _pf_doubled;
-"""
+# Reads privategrants_current, so it is built after it: for the url the
+# paid rows of a filer-year are held under.
+_PF_FUTURE_CURRENT_DDL = _pf_current_ddl(
+    table="public.privategrants_future_current", source="public.privategrants_future",
+    content_cols=_PF_FUTURE_CONTENT_COLS, all_cols=_PF_FUTURE_ALL_COLS, paid="public.privategrants_current",
+)
 
 _INDEX_DDL = {
     "basic_fields_current": [

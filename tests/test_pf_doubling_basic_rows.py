@@ -18,7 +18,32 @@ def test_paid_groups_counts_real_and_empty():
       </IRS990PF></Return>"""
     real, empty, total, fields = m.paid_groups(xml)
     assert (real, empty, total) == (1, 2, 489885)
-    assert fields == {"ein": "481210113", "period": "2017-05-31", "total_3a": "489885", "line25d": "489885"}
+    assert fields == {"ein": "481210113", "period": "2017-05-31", "total_3a": "489885", "total_3b": None,
+                      "line25d": "489885", "line25a": None}
+
+
+def test_future_groups_are_counted_apart_from_the_paid_ones():
+    # Sodhani Foundation 2021 in small: the empty groups come first, and each is a copy of the real one in the table
+    xml = b"""<Return xmlns="http://www.irs.gov/efile">
+      <ReturnHeader><Filer><EIN>475268267</EIN></Filer><TaxPeriodEndDt>2021-12-31</TaxPeriodEndDt></ReturnHeader>
+      <IRS990PF>
+        <ContriPaidRevAndExpnssAmt>297988</ContriPaidRevAndExpnssAmt>
+        <GrantOrContributionPdDurYrGrp>
+          <RecipientBusinessName><BusinessNameLine1Txt>A SCHOOL</BusinessNameLine1Txt></RecipientBusinessName>
+          <Amt>222488</Amt>
+        </GrantOrContributionPdDurYrGrp>
+        <GrantOrContriApprvForFutGrp><Amt>0</Amt></GrantOrContriApprvForFutGrp>
+        <GrantOrContriApprvForFutGrp><Amt>0</Amt></GrantOrContriApprvForFutGrp>
+        <GrantOrContriApprvForFutGrp>
+          <RecipientBusinessName><BusinessNameLine1Txt>SEWA INTERNATIONAL</BusinessNameLine1Txt></RecipientBusinessName>
+          <Amt>75500</Amt>
+        </GrantOrContriApprvForFutGrp>
+        <TotalGrantOrContriApprvFutAmt>75500</TotalGrantOrContriApprvFutAmt>
+      </IRS990PF></Return>"""
+    real, empty, total, fields = m.future_groups(xml)
+    assert (real, empty, total) == (1, 2, 75500)
+    assert fields["total_3b"] == "75500" and fields["line25a"] == "297988" and fields["line25d"] is None
+    assert m.paid_groups(xml)[:3] == (1, 0, 222488)
 
 
 def test_statements_carry_names_and_drop_comments():

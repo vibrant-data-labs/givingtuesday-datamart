@@ -10,7 +10,8 @@
 While reconciling grant totals against filers' own declared totals, we
 found that both grants extracts contain large volumes of duplicated line
 items — the same grant appearing two (sometimes four) times. Three
-distinct mechanisms are involved, and they are additive:
+distinct mechanisms are involved, and they are additive (a fourth, found
+in September 2026 and not a duplication of filings, is section D):
 
 1. **Every filing version is included.** When a filer amends a return,
    the extracts carry the grant line items of *both* the original and
@@ -117,6 +118,70 @@ rows) are present, and **both carry the original filing's `url` and
 the extract alone — the version labels are wrong at the source. This is
 the case we verified against the raw IRS XMLs.
 
+### D. Empty grant groups emitted as copies of a real one (990-PF, both grant extracts)
+
+*Added September 30, 2026. Batch `2026_06_16`, the 3A (paid) and 3B
+(approved for future payment) extracts.*
+
+Some returns enter one real grant group in Part XV and then a run of
+empty groups: `<Amt>0</Amt>` and nothing else. In the extract every one of
+those groups comes out as a full row carrying the real group's values,
+amount included, so the grant is in the table once per group. This is not
+categories A to C: the filing is in the extract once, under one url and
+one sha, and nothing was amended.
+
+Three filings to open (the XML is the copy in your own data lake,
+`EfileData/XmlFiles/<object id>_public.xml`):
+
+| Filer EIN / tax year | Object id | In the XML (`GrantOrContributionPdDurYrGrp`) | `TotalGrantOrContriPdDurYrAmt` and line 25(d) | In the 3A extract |
+|---|---|---|---|---|
+| 39-6040395 / 2018 | `201911339349100431` | 1 group, Greater Milwaukee Foundation, $1,069,215; then 20 groups of `<Amt>0</Amt>` | $1,069,215 | 21 identical rows of $1,069,215: **$22,453,515** |
+| 48-1210113 / 2016 | `201712869349100601` | 1 group, "See Attached list", $489,885; then 13 empty groups | $489,885 | 14 identical rows: **$6,858,390** |
+| 20-5905161 / 2023 | `202423199349102497` | 1 group, "SEE ATTACHED SCHEDULE", $1,210,000; then 4 empty groups | $1,210,000 | 5 identical rows: **$6,050,000** |
+
+How far it reaches, measured on the paid extract by the one signature
+that is safe to test from the tables alone: a filer-year whose rows are
+one line item repeated N times while the return's own line 25 (column (d),
+or column (a) where (d) is 0) equals ONE copy. **200 filer-years, 745
+rows where 200 belong, about $98M of grant dollars that were never
+paid.** We checked 24 of them against the XML and all 24 are one real
+group plus empty ones. The same signature separates them cleanly from
+filers that really made N identical grants: those declare all N on line
+25 (122 filer-years, to the dollar).
+
+Three things about the mechanism that may help find it:
+
+- **The fill is per field, not per row, and a continuation line sets it
+  off.** Where a group carries one field of its own, the row takes that
+  field and copies the rest. The largest case we found is 13-3703640 /
+  2021 (`202203449349100000`): group 1 is a grant to the Metropolitan
+  Museum of Art, $64,350,000, status "501(C)(3)"; group 2 holds only
+  "PUBLIC CHAR", the rest of the status text. The extract has the grant
+  twice, once with each status: **$128,700,000 where $64,350,000 was
+  paid.** 43-0666753 / 2016 (`201723209349100112`) is one grant of
+  $6,794,381 whose purpose runs over three groups, and comes out as three
+  rows. 48-1210113 / 2022 (`202343119349101864`) has one real group ("See
+  Attached list", $552,382), one group holding only a status, and 12 empty
+  ones: 13 rows of $552,382. Such filings do not show as one repeated line
+  item, so the count above leaves them out. Counted on their own (every
+  row with an amount carries the same amount and the same recipient,
+  while line 25 equals that amount once): 45 more filer-years and about
+  $126M more, 7 of 7 checked.
+- **It does not depend on the order of the groups.** In the 3B extract
+  the empty groups come first: 47-5268267 / 2021
+  (`202233189349105123`) has two empty groups and then one real one
+  (SEWA International, $75,500), and the extract has the real one three
+  times ($226,500). 46-6175348 / 2023 (`202423179349102672`) is the same
+  with one empty group.
+- **A real amount can be overwritten.** 34-6500595 / 2020
+  (`202112959349100711`), 3B: two groups that carry only an amount,
+  $541,462 and $278,781 (the return's total is $820,243). The extract has
+  $278,781 twice: $557,562, which is $262,681 too little. So the defect
+  can lose dollars as well as add them.
+
+A group-by-group emit, with a field left empty when the group does not
+carry it, would remove all three.
+
 ## What would fix it upstream
 
 In order of value to consumers:
@@ -133,6 +198,9 @@ In order of value to consumers:
    extract.
 3. **Fix version labeling (category C)** so each block carries the
    `url`/`filesha256` of the filing it actually came from.
+4. **Emit each grant group with its own fields only (category D).** A
+   group that holds `<Amt>0</Amt>` alone should come out as a $0 row, or
+   not at all, and never as a copy of another group.
 
 We can provide: complete affected filer-year lists for every category
 (CSV), the SQL detectors we use, and before/after totals for
