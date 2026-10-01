@@ -569,11 +569,12 @@ chain meets it:
   The cost is one more object that `DROP ... CASCADE` takes with
   `privategrants_current`; the matcher now creates it again at its start,
   after the rebuild and before its own views, as `load` and `view` do.
-  The matcher names the policy it takes (`RECOVERED_POLICY`, `v2`), stops
-  before rebuilding anything when the view shows another, and writes the
-  policy and a digest of the rows into the checkpoint prefix. To reverse:
-  `Relations.grants` back to `privategrants_current`, and the nine label
-  columns out of `unioned_grants`.
+  The matcher takes the policy the view shows, read before the rebuild
+  that drops it, stops before rebuilding anything when asked for
+  another, and writes the policy and a digest of the rows into the
+  checkpoint prefix. To reverse: `Relations.grants` back to
+  `privategrants_current`, and the label columns out of
+  `unioned_grants`.
 - **The grant keys are never NULL.** Found on the way: the matches come
   back from pandas with '' for a missing value and the output join
   compares keys with `=`, while the keys view left the city, state and
@@ -604,7 +605,7 @@ chain meets it:
   missing where there is none.
 - **The name-only tier**, decided on 2026-09-28: a tuple with no state
   and no zip, which no other tier matched, whose cleaned name belongs to
-  exactly one filer of the universe; `match_source = 'name_only'`,
+  exactly one filer of the universe; `match_tier = 'name_only'`,
   `match_name_words` beside it. Uniqueness is asked of the whole
   universe. A tuple with a state is not for this tier.
 - **Output names are parameters** (`Relations`: a prefix on everything
@@ -615,8 +616,8 @@ chain meets it:
   the cast to a whole number failed on the first of the 10,359 recovered
   rows with cents. The cents stay in `privategrants_recovered`; the
   rounding nets to $131 over $354.7M.
-- **Labels and the key.** `unioned_grants` carries `match_name_words`,
-  `row_source`, `page_verdict`, `filer_marked_individual`,
+- **Labels and the key.** `unioned_grants` carries `match_tier`,
+  `match_name_words`, `row_source`, `page_verdict`, `filer_marked_individual`,
   `placeholder_exceeds_declared` and the recovered row's key
   (`recovered_object_id`, `recovered_page`, `recovered_row_ordinal`).
   The key is lineage, and it keeps the rows apart: `unioned_grants` is a
@@ -628,8 +629,8 @@ chain meets it:
   `privategrants_recovered` per filing, in rows and positive dollars, as
   it holds the regular rows to `privategrants`.
 
-Proved on a subset (`matching_subset`, 2026-09-29, the report and the
-examples in `data/exploratory/placeholder_matching_subset_*.csv`): the
+Proved on a subset (`matching_subset`, 2026-09-29, on the frame's lists;
+the review below ran it again on everything loaded since): the
 tuples of the recovered grants, of the gate's name classes and sentinel
 families, and of one in 25 of the labeled set's foundations (268,440
 tuples, 2,322,600 rows), each matched against the whole universe
@@ -644,8 +645,8 @@ its tuples, which is the harness's own check.
 | by the name alone | 113,802 | $0.58B |
 | the sampled foundations' grants, matched to the same filer before and after | 59.5% of 347,933 | |
 | gained on a name equal once cleaned | 14,109 | $679.8M |
-| gained as a row that never joined | 1,670 | $127.4M |
-| gained on the name alone | 1,009 | $25.0M |
+| gained as a row that never joined (counted wrongly: see the review) | 1,670 | $127.4M |
+| gained on the name alone (counted wrongly: see the review) | 1,009 | $25.0M |
 | lost | 0 | $0M |
 | moved to another filer | 767 | $93.9M |
 | labeled pairs of the sampled foundations covered | 62.7% before, 67.1% after, of 15,226 | |
@@ -655,15 +656,105 @@ warnings: 1,749 tuples, 15,376 rows and $1.927B won by the registry's 27
 rows under the old code, 1,771 tuples, 16,529 rows and $1.950B under the
 new.
 
-The run's cost grows with what is loaded. The frame's recovered grants
-(78,081 distinct recipients) add 49.6M pairs to the 982M of the last
-run, 5%, about 25 minutes at its rate. With the production read loaded
-on 2026-09-30 (582,676 grants paid of 4,607 filings, $16.2B, 262,512
-distinct recipients) it is 162.8M pairs, 17%, about 80 minutes. Of
-those, 117.8M pair a recipient that has no zip with the 931 filers that
-have none, and a recipient with no address cannot match by address:
-leaving such recipients out of the zip block would save most of the
-added time, and 32M pairs of the regular grants. Not done here.
+The run's cost, as first measured: the frame's recovered grants (78,081
+distinct recipients) added 49.6M pairs to the 982M of the last run, and
+the production read loaded on 2026-09-30 (582,676 grants paid of 4,607
+filings, $16.2B, 262,512 distinct recipients) 162.8M, of which 117.8M
+paired a recipient that has no zip with the 931 filers that have none.
+The review took that block out; the cost is restated below.
+
+**Review, 2026-10-01** (Zein's review of the pull request, ten notes;
+all acted on). What changed:
+
+- **The policy is never guessed.** The view was recreated for a
+  constant, `v2`, whenever it was absent, so a standalone rebuild of
+  `privategrants_current` after a switch to `v3` would have put the view
+  back on `v2` with no word. The policy is written in the view's
+  definition and nowhere else: the matcher and the standalone
+  `current_grants` now read it from the view before the rebuild that
+  drops it and create the view again for it. With no view and no policy
+  named, both stop. The constant is gone, and the code holds for either
+  policy.
+- **The tier has a column of its own.** `match_source` keeps the arm of
+  the universe for every match; `match_tier` says what the match rests
+  on (`address_and_name`, `state_and_name`, `name_only`), in the join
+  table, `privategrants_w_recipients` and `unioned_grants`. The
+  corrections preflight never read `match_source` (it counts a win by
+  the universe row's source), so its counts do not move; in the output a
+  name-only match on a name only a correction row carries now says
+  `correction`. The gate reads neither column for its rules.
+- **A row with no address at all is out of the zip block.** Its
+  `compare_addr` (street, city and state as one string) is empty: it
+  scores 0 on the address and has no state, so no address tier and no
+  state tier can accept a pair it is in. All 931 filers with no zip are
+  such rows, so the block of the missing zip is gone whole. Proved on
+  the subset: of the 267,964 tuples this run shares with the frame's,
+  every one keeps its match, before and after, and before still agrees
+  with the last full run on every one of its 187,641 tuples. The
+  matches of recovered grants with an address abroad stay (795 rows,
+  $65.6M on the frame; 2,488 rows, $125.7M on what is loaded now): they
+  come through the name block. Pairs: the recovered grants add 45.0M,
+  not 162.8M, and the regular grants lose 32.2M (982.0M to 949.8M), so
+  the run is at about 995M pairs, 1% over the last one.
+- **One filer in the state.** A tuple that only the exact-name tier
+  accepts, and that has no street address, matches only when one filer
+  of its state carries the name; the address picked among several
+  before, and with no street the filer with the shortest address won.
+  No street address means no digit in the address lines: a recovered
+  grant has no city column, and its city, when the list prints one, is
+  in its address line ("Memorial Sloan Kettering Cancer Center, New
+  York"). It leaves 288 recovered rows unmatched, $54.4M (Higgins
+  Family Foundation, Memorial Sloan Kettering, Trustees of Dartmouth
+  College, Scholarship America), and 29 rows, $3.2M, of the sampled
+  foundations' itemised grants, 19 of them matched before (Board of
+  Regents of the University of Wisconsin System at "University of
+  Wisconsin-Madison", Shriners Hospitals for Children at "attn trust
+  investment"). Held to tuples with a street address too, it would take
+  119 more recovered rows ($7.5M) and 359 itemised rows, $52.1M, most
+  of them to a university or a hospital at its own street address: not
+  done.
+- **The gate counts matched recovered rows of lists marked as grants to
+  individuals**, as a warning with the number: 2,430 on this subset, 548
+  of them on the name alone.
+- **The corrections preflight was not run again** after these changes
+  (seven hours on the laptop). Its two rules cannot move by them: a
+  correction's verbatim tuple carries the correction's own address, so
+  it is won by an address tier, which neither the zip block of
+  address-less rows nor the one-filer rule touches. The rerun's
+  procedure runs it first in any case.
+- **Smaller:** `corrections_scout` scores on the compared name and takes
+  the cleaned name for the same name (its suffix-only exclusion, a no-op
+  since the cleaner, is gone, and it has its first tests); the recovered
+  digest is read once, inside the run, and stamped on the build; two
+  names that clean to nothing are not the same name; `view_sql`'s
+  parameter is `view`; one identifier check.
+
+A correction to the table above: the subset tool counted the sampled
+foundations' own recovered grants among their regular rows, which
+inflated the two gains marked there. Counted on itemised rows only, and
+on everything loaded on 2026-10-01 (582,676 grants paid of 4,607
+filings, $16.20B; 452,502 tuples, 2,681,494 rows in the subset):
+
+| | rows | dollars |
+|---|---|---|
+| recovered grants, matched | 59.7% of 582,676 | 66.2% of $16.20B |
+| by zip and name | 125,667 | $7.83B |
+| by exact name and state | 30,199 | $1.46B |
+| by the name alone | 191,925 | $1.43B |
+| the sampled foundations' itemised grants, matched to the same filer before and after | 60.2% of 344,011 | |
+| gained on a name equal once cleaned | 14,099 | $679.8M |
+| gained as a row that never joined | 8 | $1.8M |
+| gained on the name alone | 27 | $3.6M |
+| lost: several filers of the state share the name, and the row has no street address | 19 | $3.2M |
+| moved to another filer | 767 | $93.9M |
+| labeled pairs of the sampled foundations covered | 62.7% before, 65.8% after on their itemised grants, 68.3% with their recovered ones, of 15,226 | |
+
+The frame's lists matched at 73.5% of rows; everything loaded matches at
+59.7%, with the dollars where they were. The lists read since the frame
+are the small filings, and more of their rows name people. The gate on
+this output passes every hard rule and sentinel (placeholder rows
+matched 285, MJFF 3,470, Johns Hopkins 1,835); its two coverage floors
+fail on a subset by construction.
 
 ### 6 · Report and gates
 
@@ -2415,8 +2506,18 @@ Decided on 2026-09-29, in the matcher session (the reasons are in stage
   same name; other names score as before.
 - The matcher's output names are parameters, so a change is proved on a
   subset beside production.
-- `unioned_grants` rounds a recovered amount and carries five labels and
+- `unioned_grants` rounds a recovered amount and carries the labels and
   the recovered row's key.
+
+Decided on 2026-10-01, in the review of that session's pull request
+(Zein):
+
+- The policy of the recovered grants is the one the view shows; nothing
+  recreates the view for a default.
+- `match_source` is the arm of the universe; the tier is `match_tier`.
+- A row with no address at all is not in the zip block.
+- A row with no street address matches on the exact name and the state
+  only when one filer of the state has the name.
 
 Still open:
 

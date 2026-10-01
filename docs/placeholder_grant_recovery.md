@@ -13,8 +13,9 @@ a filing's future amount is known and its future-payment list can load.
 The frame's lists are loaded: 399 filings, 222,105 grants paid, $7.07B,
 and beside them 3,873 grants approved for future payment, of 71 filings,
 $0.95B. On September 29 the matcher was made to read the grants paid,
-with the name cleaner and the name-only tier, and proved on a subset:
-73.5% of the recovered grants, 66.5% of their dollars, find a filer; the
+with the name cleaner and the name-only tier, and proved on a subset;
+on October 1, after review, on everything loaded: 59.7% of the
+recovered grants, 66.2% of their dollars, find a filer. The
 rerun that puts that in the tables products read is still to come. The
 same day the rest of the 2020-on work list was fetched, 11,830 filings, and none of it is
 read yet: the read is projected at $757 and waits on a decision.
@@ -90,11 +91,12 @@ and the [production diagram](https://whimsical.com/FXWZBu4FE9RzpMYqWmupqd).
   counted twice.
 - The matcher reads the recovered grants (September 29). Rows with a zip
   or a state go through it as any grant does; rows with neither match on
-  a cleaned name that belongs to exactly one filer, and say so. On the
-  frame's rows, 73.5% of the grants and 66.5% of the dollars find a
-  filer; 113,802 rows, $0.58B, on the name alone. The cleaner goes in for
-  every grant: on a sample of foundations it adds 14,109 matched rows,
-  $679.8M, and loses none.
+  a cleaned name that belongs to exactly one filer, and say so. Of the
+  582,676 grants loaded by October 1, 59.7% and
+  66.2% of the dollars find a filer; 191,925 rows,
+  $1.43B, on the name alone. The cleaner goes in for every
+  grant: on a sample of foundations it adds 14,099 matched rows,
+  $679.8M.
 - Still open: the matcher rerun; whether a list that adds up only to the
   paid and the future amount together should load (four on the frame,
   and the page images say no for at least two); the 3,091 "various"
@@ -864,38 +866,51 @@ subset of the grants, against the whole universe of filers, twice, as it
 was and as it is (`matching_subset`; the tables are in
 `placeholder_matching_subset_report.csv`, the examples in
 `placeholder_matching_subset_examples.csv`). The subset holds every
-recovered grant, and the grants of one foundation in 25 of the labeled
-set; the match a grant gets there is the match the full run gives it.
+recovered grant, and the itemised grants of one foundation in 25 of the
+labeled set; the match a grant gets there is the match the full run
+gives it. First run on the frame's lists on September 29, and again on
+October 1, after the review of the pull request, on everything loaded:
+582,676 grants paid of 4,607 filings, $16.20B.
 
 | the recovered grants | rows | of rows | dollars | of dollars |
 |---|---|---|---|---|
-| matched by zip and name | 41,829 | | $3.51B | |
-| matched by exact name and state | 7,648 | | $0.61B | |
-| matched by the name alone | 113,802 | | $0.58B | |
-| matched, all | | 73.5% | | 66.5% |
-| all | 222,105 | | $7.07B | |
+| matched by zip and name | 125,667 | | $7.83B | |
+| matched by exact name and state | 30,199 | | $1.46B | |
+| matched by the name alone | 191,925 | | $1.43B | |
+| matched, all | | 59.7% | | 66.2% |
+| all | 582,676 | | $16.20B | |
 
-Name-only matches of one word are 3,219 rows and $27.5M;
-`match_name_words` lets a consumer leave them out.
+On the frame's lists alone the rows matched at 73.5% and the dollars at
+66.5%. The lists read since are the small filings, whose rows more often
+name a person or a body that files no return.
+
+Each match says what it rests on (`match_tier`) and which kind of filer
+it found (`match_source`). Name-only matches of one word are
+5,616 rows and $55.6M; `match_name_words` lets a
+consumer leave them out. A row with a state and no street address
+matches on its name only when one filer of the state has that name:
+288 rows, $54.4M, stay unmatched for it
+(Memorial Sloan Kettering Cancer Center has two filers in New York).
 
 The cleaner says when two names are the same: "The River Fund, Inc." and
 "RIVER FUND INC" are one name, and score as one. It does not change the
 score of two names that are not: a first build scored the cleaned names
 and moved every fuzzy score, so that "mit" matched "mit womens
 independent group" on a shared address, $52M; the log has the numbers.
-On the sampled foundations' 347,933 grants, $54.3B:
+On the sampled foundations' 344,011 itemised grants, $54.0B:
 
 | what became of the match | rows | dollars |
 |---|---|---|
-| the same filer as before | 59.5% | |
-| gained on a name equal once cleaned | 14,109 | $679.8M |
-| gained as a row the old join dropped (a NULL city, state or zip) | 1,670 | $127.4M |
-| gained on the name alone | 1,009 | $25.0M |
-| lost | 0 | $0M |
+| the same filer as before | 60.2% | |
+| gained on a name equal once cleaned | 14,099 | $679.8M |
+| gained as a row the old join dropped (a NULL city, state or zip) | 8 | $1.8M |
+| gained on the name alone | 27 | $3.6M |
+| lost: several filers of the state share the name, no street address | 19 | $3.2M |
 | moved to another filer | 767 | $93.9M |
 
 Of the labeled set's pairs for those foundations, 62.7% were
-covered before and 67.1% are after.
+covered before; 65.8% are after on their itemised grants, and
+68.3% with their recovered ones.
 
 ## Shipping the rest
 
@@ -1209,6 +1224,10 @@ were found:
 | the cleaner extends the matcher's normaliser: the same cleaned name is the same name, other names score as before | scoring the cleaned names moved every fuzzy score: 2,247 rows gained, 822 lost and 959 moved on the sample, "mit" to "mit womens independent group" among them | Sept 29 |
 | the view stays an object of its own; the matcher reads it and creates it again after the rebuild that drops it | three readers want one definition; folded, the loader would rebuild the matcher's views | Sept 29 |
 | `unioned_grants` rounds a recovered amount and carries the labels and the row's key | the cast failed on 10,359 rows with cents; the `UNION` would have dropped 77,078 repeated rows, $117M | Sept 29 |
+| the policy of the recovered grants is the one the view shows; nothing recreates the view for a default | a rebuild after a switch to v3 would have put the view back on v2 with no word | Oct 1 |
+| `match_source` keeps the arm of the universe; the tier is `match_tier` | a name-only match on a correction's name said `name_only`, and the correction looked unused | Oct 1 |
+| a row with no address at all is out of the zip block | all 931 filers with no zip have no address either; 117.8M of the 162.8M added pairs and 32.2M regular ones could match nothing; no match moves on 267,964 tuples | Oct 1 |
+| a row with no street address matches on the exact name and the state only when one filer of the state has the name | 288 recovered rows, $54.4M, had several; held to rows with a street address too it would take 359 itemised rows, $52.1M, of the sample | Oct 1 |
 | the work list is built from the loaded tables at the start of each run, over every tax year they hold | the extract held 9,515 placeholder filings for 2020 to 2024, the loaded tables 12,115; 992 of the frame's 1,000 are found by object id | Sept 28 |
 | nothing from GivingTuesday's one-off extract is loaded or used in the search | 406 of the frame's 407 lists reconcile without its rows; one filing, $22.3M, is lost | Sept 28, measured the same day |
 | the target is the paid amount on the work list; no future-payment list loads, until the future amount is in the loaded tables | the loaded tables hold no future amount; 5 of 406 lists are lost and none gained | Sept 28, measured the same day |
@@ -1341,5 +1360,9 @@ the checks extended to them.
   numbers are the rerun's; the sampled foundations are one in 25.
 - A name-only match is exact on a cleaned name and unique in the
   universe; where a state could be checked it agreed 96.6% of the time.
-  Nothing checks the 113,802 rows matched that way beyond that.
+  Nothing checks the 191,925 rows matched that way beyond that.
+- A list marked as grants to individuals holds people's names, and a
+  person's name that equals a filer's whole name matches: 2,430
+  matched rows come from such lists, 548 of them on the
+  name alone. The gate prints the count; nothing removes them.
 - The "various" class is outside the population and untested.
