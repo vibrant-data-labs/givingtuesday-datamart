@@ -1518,6 +1518,15 @@ the largest); the fourth 580,755 rows, $15,231M, 4,592 filings; one
 filing, 141 rows, from the page whose Flash Lite reading is at three
 errors. Under v3 every class but the first is the same to the row.
 
+Run again after the future target was merged (2026-10-01, `filing_lists`
+over the 6,347 read filings on the work list, both targets): v2 and v3
+find the same 4,780 lists — 4,607 paid (582,676 rows, $16,205.0M) and
+173 future (6,531 rows, $1,268.7M) — and the same 24 filings that add up
+only to the two amounts together. v2's figures are what the table holds
+today (`check --policy v2`: 582,676 paid rows of 4,607 filings, 6,531
+future rows of 173, every rule passing). The one difference is still
+DeMario's paid list, 53 rows against 52.
+
 **The wider rule, measured and not built.** Skipping escalation also
 where neither base reader calls the page a list but one returns rows
 (the second class: on 2,199 of its 2,204 pages Qwen returns nothing and
