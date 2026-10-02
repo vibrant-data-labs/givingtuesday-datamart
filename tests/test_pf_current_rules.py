@@ -23,13 +23,17 @@ from sqlalchemy import text
 from givingtuesday_datamart import current_grants as cg
 
 PAID, FUTURE = "paid", "future"
-# side -> (content columns, every column, the recipient-name column, the amount column)
+# side -> (content columns, every column, the recipient-name column, the amount column, the purpose column)
 COLUMNS = {
-    PAID: (cg._PF_CONTENT_COLS, cg._PF_ALL_COLS, "sigocpyrbnbn1", "sigocpyamoun"),
-    FUTURE: (cg._PF_FUTURE_CONTENT_COLS, cg._PF_FUTURE_ALL_COLS, "sigocaffrbnb1", "sigocaffamou"),
+    PAID: (cg._PF_CONTENT_COLS, cg._PF_ALL_COLS, "sigocpyrbnbn1", "sigocpyamoun", "sigocpypogoc"),
+    FUTURE: (cg._PF_FUTURE_CONTENT_COLS, cg._PF_FUTURE_ALL_COLS, "sigocaffrbnb1", "sigocaffamou", "sigocaffpogo"),
 }
 A, B = ("ALPHA FUND", 1000), ("BETA TRUST", 250)
 EMPTY = ("", 0)                               # the nameless $0 row of a filing with no grants
+# The per-field fill: the real group, and the row a group that holds only the rest of a text comes out as.
+# One name, one amount, another purpose: two tuples
+A1, A2 = ("ALPHA FUND", 1000, "GENERAL SUPPORT OF THE"), ("ALPHA FUND", 1000, "MISSION")
+NAMED_ZERO = ("GAMMA SOCIETY", 0)             # a group of its own that names a recipient and pays nothing
 
 
 @dataclass(frozen=True)
@@ -37,7 +41,7 @@ class Case:
     """One filer-year: its rows in the extract, its ``basic_fields_pf`` rows
     and line 25, and what each relation must keep of it."""
     name: str
-    rows: tuple                               # (recipient, amount), in the extract's order
+    rows: tuple                               # (recipient, amount[, purpose]), in the extract's order
     paid: tuple                               # (rows kept, dedup_rule) in the paid relation
     future: tuple                             # the same in the future one
     line25_d: int = 0                         # Part I line 25 column (d), in cash
@@ -93,6 +97,32 @@ CASES = (
     # a kept url with no basic row states no line 25, and another version's is not borrowed
     Case("a repeat whose kept version has no basic row", (A, A), (2, "latest_url"), (2, "latest_url"),
          basic_shas=(), older_url_rows=(A,), older_line25=1000),
+    # field fill: paid only, as forward fill is. The copies of one grant differ in a field, or rows without an
+    # amount stand beside them, so the block is not one tuple. Line 25 states the grant once
+    Case("a field fill", (A1, A2), (1, "field_fill"), (2, "passthrough"), line25_d=1000),
+    Case("a field fill, a text over three groups", (A1, A2, A2), (1, "field_fill"), (3, "passthrough"),
+         line25_d=1000),
+    Case("a field fill line 25 states per books only", (A1, A2), (1, "field_fill"), (2, "passthrough"),
+         line25_d=0, line25_a=1000),
+    # the rows without an amount are groups of their own and stay: one copy of the grant beside them
+    Case("a field fill beside a $0 row", (A1, A2, EMPTY, A2), (2, "field_fill"), (4, "passthrough"), line25_d=1000),
+    Case("identical copies beside a named $0 row", (NAMED_ZERO, A, A, A), (2, "field_fill"), (4, "passthrough"),
+         line25_d=1000),
+    # after the halving, on what the filing itself holds
+    Case("a field fill in a doubled filing", (A1, A2, EMPTY, A1, A2, EMPTY), (2, "pair_collapse+field_fill"),
+         (3, "pair_collapse"), line25_d=1000, basic_shas=("s1", "s1")),
+    # one grant and a $0 group, in the extract twice: the filing holds the amount once, and halving is all there is
+    Case("a doubled single grant beside a $0 row", (NAMED_ZERO, A, NAMED_ZERO, A), (2, "pair_collapse"),
+         (2, "pair_collapse"), line25_d=1000, basic_shas=("s1", "s1")),
+    Case("a field fill whose earlier version declares another total", (A1, A2), (1, "latest_url+field_fill"),
+         (2, "latest_url"), line25_d=1000, older_url_rows=(B,), older_line25=250),
+    # what the field fill must leave alone
+    Case("a legitimate repeat whose copies differ", (A1, A2), (2, "passthrough"), (2, "passthrough"), line25_d=2000),
+    Case("one amount under two names", (A, ("BETA TRUST", 1000)), (2, "passthrough"), (2, "passthrough"),
+         line25_d=1000),
+    Case("one name under two amounts", (A1, ("ALPHA FUND", 250, "MISSION")), (2, "passthrough"), (2, "passthrough"),
+         line25_d=1000),
+    Case("one grant beside a $0 row", (A, NAMED_ZERO), (2, "passthrough"), (2, "passthrough"), line25_d=1000),
 )
 TAX_YEAR = "2024"
 # A filer-year whose paid rows are held under a later url than its future rows
@@ -108,15 +138,16 @@ def _url(ein: str, version: int = 2) -> str:
 
 
 def _grant_rows(side: str) -> list[dict]:
-    _content, every, name, amount = COLUMNS[side]
+    _content, every, name, amount, purpose = COLUMNS[side]
     rows = []
     for index, case in enumerate(CASES):
         ein = _ein(index)
         for version, grants in ((1, case.older_url_rows), (2, case.rows)):
-            for recipient, dollars in grants:
+            for recipient, dollars, *text_of in grants:
                 row = dict.fromkeys(every, None)
                 row.update(filerein=ein, taxyear=TAX_YEAR, url=_url(ein, version), filername1=case.name,
-                           filesha256=f"s{version - 1}", **{name: recipient, amount: str(dollars)})
+                           filesha256=f"s{version - 1}", **{name: recipient, amount: str(dollars)},
+                           **{purpose: text_of[0] for _ in text_of})
                 rows.append(row)
     if side == FUTURE:
         row = dict.fromkeys(every, None)
@@ -148,9 +179,10 @@ def _load(session, table: str, columns: list[str], rows: list[dict]) -> None:
 
 def _build(session, side: str) -> dict[str, list]:
     """The relation ``side``'s DDL builds from the fixtures: its rows by EIN."""
-    content, every, _name, amount = COLUMNS[side]
+    content, every, _name, amount, _purpose = COLUMNS[side]
     _load(session, f"t_{side}_src", every, _grant_rows(side))
-    differences = {"line25_amount": amount} if side == PAID else {"paid": "pg_temp.t_paid_held"}
+    differences = ({"line25_amount": amount, "recipient_cols": cg._PF_NAME_COLS} if side == PAID
+                   else {"paid": "pg_temp.t_paid_held"})
     ddl = cg._pf_current_ddl(table=f"pg_temp.t_{side}_out", source=f"pg_temp.t_{side}_src", content_cols=content,
                              all_cols=every, basic="pg_temp.t_basic", **differences)
     for statement in [s for s in ddl.split(";") if s.strip()]:
@@ -210,7 +242,7 @@ def test_a_filer_year_keeps_the_rows_the_rule_gives_it(built, side, index):
 @pytest.mark.db
 @pytest.mark.parametrize("side", (PAID, FUTURE))
 def test_halving_keeps_half_of_each_tuple_and_a_forward_fill_one_row(built, side):
-    name, amount = COLUMNS[side][2:]
+    name, amount = COLUMNS[side][2:4]
     by_case = {case.name: built[side][_ein(index)] for index, case in enumerate(CASES)}
     recipients = lambda case: sorted(row[name] for row in by_case[case])           # noqa: E731
     assert recipients("a doubled block") == ["ALPHA FUND", "BETA TRUST"]
@@ -219,6 +251,23 @@ def test_halving_keeps_half_of_each_tuple_and_a_forward_fill_one_row(built, side
     assert [row[amount] for row in by_case["a doubled empty row"]] == ["0"]
     filled = by_case["a forward fill, N odd"]
     assert [row[amount] for row in filled] == (["1000"] if side == PAID else ["1000"] * 3)
+
+
+@pytest.mark.db
+def test_a_field_fill_keeps_the_first_copy_of_the_grant_and_the_rows_without_an_amount(built):
+    name, amount, purpose = COLUMNS[PAID][2:]
+    by_case = {case.name: built[PAID][_ein(index)] for index, case in enumerate(CASES)}
+    kept = lambda case: sorted((row[name], row[amount], row[purpose]) for row in by_case[case])  # noqa: E731
+    first = tuple(str(value) for value in A1)                   # the real group's own row, purpose and all
+    assert kept("a field fill") == kept("a field fill, a text over three groups") == [first]
+    assert kept("a field fill beside a $0 row") == [("", "0", None), first]
+    one_and_the_named_zero = [("ALPHA FUND", "1000", None), ("GAMMA SOCIETY", "0", None)]
+    assert kept("identical copies beside a named $0 row") == one_and_the_named_zero
+    # under a repeated row the $0 rows are halved with the rest, and the grant is still held once
+    assert kept("a field fill in a doubled filing") == [("", "0", None), first]
+    assert kept("a doubled single grant beside a $0 row") == one_and_the_named_zero
+    # the future relation has no fill rule: its rows are as the extract has them
+    assert len(built[FUTURE][_ein([case.name for case in CASES].index("a field fill beside a $0 row"))]) == 4
 
 
 @pytest.mark.db
@@ -265,11 +314,13 @@ SHARED = (
     "CASE WHEN n_urls_for_year > 1 THEN 'latest_url' END",                               # the dedup_rule values
     "CASE WHEN _pair THEN 'pair_collapse' END",
     "CASE WHEN _fill THEN 'forward_fill' END",
+    "CASE WHEN _field_fill THEN 'field_fill' END",
     "WHERE CASE WHEN _fill THEN _copy_rank = 1",                                         # what is kept
     "WHEN _pair THEN _copy_rank <= _n_copies / 2",
 )
-# The differences: line 25 on the paid side (forward fill), the paid relation's url on the future side.
-PAID_ONLY = ("_pf_line25", "arecgpdcprps", "arecprexpnss", "_amt", "_line25_d", "_line25_a")
+# The differences: line 25 on the paid side (the two fill rules), the paid relation's url on the future side.
+PAID_ONLY = ("_pf_line25", "arecgpdcprps", "arecprexpnss", "_amt", "_line25_d", "_line25_a",
+             "_n_amt", "_first_amt", "_grant_amt", "_one_grant")
 FUTURE_ONLY = ("CREATE TEMP TABLE _pf_paid AS", "LEFT JOIN _pf_paid p", "WHERE p.url IS NULL OR p.url <= g.url")
 
 
@@ -296,24 +347,43 @@ def test_each_difference_only_adds_to_the_shared_rule():
     shared = cg._pf_current_ddl(**args).splitlines()
     with_paid = cg._pf_current_ddl(**args, paid="public.p").splitlines()
     with_line25 = cg._pf_current_ddl(**args, line25_amount="sigocpyamoun").splitlines()
+    with_names = cg._pf_current_ddl(**args, line25_amount="sigocpyamoun",
+                                    recipient_cols=cg._PF_NAME_COLS).splitlines()
     assert not [f for f in PAID_ONLY + FUTURE_ONLY if any(f in line for line in shared)]
     # the paid relation's url: lines added, none rewritten
     assert _rewritten(shared, with_paid) == [] and len(with_paid) > len(shared)
     # line 25: lines added, and the one line that decides forward fill rewritten
-    assert _rewritten(shared, with_line25) == ["FALSE AS _fill"]
+    assert _rewritten(shared, with_line25) == ["FALSE AS _fill,"]
     assert len(with_line25) > len(shared)
+    # the recipient's name beside it: lines added, and the one line that decides field fill rewritten
+    assert _rewritten(with_line25, with_names) == ["FALSE AS _field_fill"]
+    assert len(with_names) > len(with_line25)
+    # the names alone add nothing: field fill leans on line 25 as forward fill does
+    assert cg._pf_current_ddl(**args, recipient_cols=cg._PF_NAME_COLS).splitlines() == shared
 
 
-def test_line_25_decides_forward_fill_and_nothing_else():
+def test_line_25_decides_the_two_fills_and_nothing_else():
     ddl = cg._PF_CURRENT_DDL
     # pair_collapse is the repeated row alone, on both sides: no test of the block's sum against line 25
     assert "ABS(" not in ddl and "_full_sum" not in ddl
     rule = ddl[ddl.index("ruled AS ("):ddl.index("SELECT ruled.filerein")]
-    assert rule.count("_line25") == 2 and "AS _pair" in rule
+    assert rule.count("_line25") == 4 and "AS _pair" in rule
     # forward fill: one tuple, more than once in the filing itself, one copy on line 25 in either column
     assert "(p._one_tuple AND p._n_copies / CASE WHEN p._pair THEN 2 ELSE 1 END >= 2" in ddl
-    assert "AND p._amt > 0 AND (p._amt = p._line25_d OR p._amt = p._line25_a)) AS _fill" in ddl
-    assert cg.PAIR_COLLAPSE == "pair_collapse" and cg.FORWARD_FILL == "forward_fill"
+    assert "AND p._amt > 0 AND (p._amt = p._line25_d OR p._amt = p._line25_a)) AS _fill," in ddl
+    # field fill: not one tuple, the rows with an amount one grant, two or more of them in the filing itself,
+    # and the same line-25 test on the grant's amount
+    assert "(NOT p._one_tuple AND p._one_grant AND p._n_amt / CASE WHEN p._pair THEN 2 ELSE 1 END >= 2" in ddl
+    assert ("AND p._grant_amt > 0 AND (p._grant_amt = p._line25_d OR p._grant_amt = p._line25_a)) AS _field_fill"
+            in ddl)
+    # one grant: one amount and one name, as the three name columns have it, among the rows with an amount
+    name = "concat_ws(' ', c.sigocpyrpnam, c.sigocpyrbnbn1, c.sigocpyrbnbn2)"
+    assert ddl.count(name) == 2 and ddl.count("FILTER (WHERE c._amt <> 0) OVER fy") == 7
+    # it removes the later rows with the amount, and no other: a row without one is left to the lines below it
+    assert "WHEN _field_fill AND _amt <> 0 THEN _ctid = _first_amt\n           WHEN _pair THEN" in ddl
+    future = cg._PF_FUTURE_CURRENT_DDL
+    assert "_field_fill AND _amt" not in future and "FALSE AS _field_fill" in future
+    assert (cg.PAIR_COLLAPSE, cg.FORWARD_FILL, cg.FIELD_FILL) == ("pair_collapse", "forward_fill", "field_fill")
 
 
 def test_line_25_is_the_kept_urls_own():
