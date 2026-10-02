@@ -1039,15 +1039,23 @@ reads (PR #56) are the same.
   | | **1,331** | **5,548** | **$2,424,207,602** | $675,354,173 |
 
   $2.42B counted too often where $675M was paid, tax years 2013 to 2024,
-  the largest single filer-year $194.9M. 61 of 61 checked against the XML
-  are the fill (30 with one such row, 30 with more, and EIN 475268267 /
-  tax year 2021, whose line 25 differs from its Part XV total and which
-  this signature therefore misses): none is a total line the filer typed.
+  the largest single filer-year $194.9M. 88 of the 1,331 were checked
+  against the XML: 60 drawn across the list (30 with one such row, 30 with
+  more) and the largest filer-year of each of the 28 largest filers. **87
+  are the fill. One is not:** The Colorado Trust, tax year 2019
+  (`202033189349104058`), whose XML has 373 groups, each with an amount of
+  its own, one of them ("Zarlengo Foundation", $9,589,893) the sum of the
+  other 372. The return itself carries the total as a grant, and the
+  signature takes it all the same. Also the fill, and outside the
+  signature: EIN 475268267 / tax year 2021, whose line 25 differs from its
+  Part XV total. PR #62's description lists 20 of the 87 with their XML,
+  their TEOS image and the queries that show them.
   **The matcher has matched 2,279 of the 5,548 rows, $1.34B**, in 509
   filer-years, to whatever the filing's last group names. Not built here:
   it is another rule with its own design points (no one-name condition
-  can hold, a filer-typed total row looks the same, the same shape under a
-  repeated row is not measured) and a much larger move of the matcher's
+  can hold, a total the return itself carries looks the same in the table
+  (one found, above), the same shape under a repeated row is not measured)
+  and a much larger move of the matcher's
   input. It wants its own measurement, XML sample and proof.
 - **Fills under several names** (7.3): 31 filer-years, $18,580,222. They
   are the same thing seen from the other side: named groups without an

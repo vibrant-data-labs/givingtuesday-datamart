@@ -215,9 +215,11 @@ raw staging:
     the name of the filing's last group. 1,331 filer-years without a
     repeated row hold line 25 on k >= 1 rows beside rows that add up to
     it: 5,548 rows and $2.42B counted too often, where $675M was paid.
-    61 of 61 checked against the XML are the fill, and the matcher has
-    matched 2,279 of those rows ($1.34B). The two fills are its
-    one-amount case (``docs/pf_doubling_basic_row_test.md``, section 7).
+    87 of 88 checked against the XML are the fill (the 88th, EIN 840994055
+    / tax year 2019, states the total in a group of its own), and the
+    matcher has matched 2,279 of those rows ($1.34B). The two fills are
+    its one-amount case (``docs/pf_doubling_basic_row_test.md``, section
+    7).
     A forward fill of $0 rows (3 filer-years, 7 rows, no dollars).
 
 * ``public.basic_fields_current`` (990 filer financials, issue #34)

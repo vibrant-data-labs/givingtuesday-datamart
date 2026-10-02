@@ -209,11 +209,13 @@ groups with a recipient and an amount, $574,909 in all, then 14 groups of
 
 Counted from the tables alone (a filer-year whose rows hold the return's
 line 25 amount on one or more rows, beside other rows that add up to that
-same amount): **1,331 filer-years, 5,548 such rows, $2.42B that was never
-paid, where the returns paid $675M.** Tax years 2013 to 2024. We checked
-61 of them against the XML and all 61 are filled groups, not a total line
-the filer entered. This is the largest form of category D by an order of
-magnitude, and it attributes the dollars to a named recipient.
+same amount): **1,331 filer-years, 5,548 such rows, about $2.42B that was
+never paid, where the returns paid $675M.** Tax years 2013 to 2024. We
+checked 88 of them against the XML: 87 are filled groups, and one is a
+return whose own XML states the total as a group (84-0994055 / 2019), so
+the count from the tables runs slightly high. This is the largest form of
+category D by an order of magnitude, and it attributes the dollars to a
+named recipient.
 
 ## What would fix it upstream
 
