@@ -47,7 +47,7 @@ from givingtuesday_datamart.ingestion import datamart_config
 SIDES = {
     "paid": ("scratch_pgc_", "privategrants_current",
              dict(source="public.privategrants", content_cols=cg._PF_CONTENT_COLS, all_cols=cg._PF_ALL_COLS,
-                  line25_amount="sigocpyamoun"), "sigocpyamoun"),
+                  line25_amount="sigocpyamoun", recipient_cols=cg._PF_NAME_COLS), "sigocpyamoun"),
     "future": ("scratch_pgfc_", "privategrants_future_current",
                dict(source="public.privategrants_future", content_cols=cg._PF_FUTURE_CONTENT_COLS,
                     all_cols=cg._PF_FUTURE_ALL_COLS), "sigocaffamou"),

@@ -16,6 +16,12 @@ batch changes no row (6.2), so `pair_collapse` is now the same test on
 both sides. Section 6 has what was built, what it changes and what happens
 next. The production tables are not rebuilt yet.
 
+**Built on 2026-10-01** on top of it: the fill 6.6 left, copies of one
+grant that differ in a field, is a second fill rule, `field_fill`, proved
+on a scratch copy the same way. Section 7 has the rule, its design points,
+the XML checks and what it changes, and 7.8 a larger shape of the same
+defect that neither fill reaches.
+
 ## Summary
 
 GivingTuesday's 2025 and 2026 batches emit some 990-PF filings twice, and
@@ -626,9 +632,13 @@ what this session was asked to build. Six more filer-years have the shape
 under a repeated row, and 53 have one amount under several names with line
 25 equal to one copy ($28.1M on the rows), not checked.
 
+Built and checked on 2026-10-01: section 7.
+
 ### 6.7 After the merge
 
-Nothing here was run. The steps, and who runs them:
+Nothing here was run. The steps, and who runs them. The numbers to expect
+are of the rules of this section alone: with `field_fill` merged before the
+rebuild, they are the ones of 7.7.
 
 1. **Rebuild `privategrants_current`.** The matcher does it at the start
    of its next run. Alone, which Zein runs or approves:
@@ -683,14 +693,397 @@ Made for this proof and dropped at its end, each time it was run:
 were counted from). `pf_current_scratch build` makes the first two
 again.
 
-## 7. Files
+## 7. Field fill, as built (2026-10-01)
+
+6.6 left a fill the one-tuple rule cannot see: the copies of one grant
+differ in a field. It is built as a second fill rule, `field_fill`, in
+`current_grants._pf_current_ddl`, paid only, and proved on a scratch copy.
+Nothing was rebuilt: `privategrants_current` holds the rows of the rule
+before section 6, and no matcher ran.
+
+### 7.1 The counts of 6.6, measured again
+
+`python -m givingtuesday_datamart.exploratory.pf_doubling_basic_rows measure --sql data/exploratory/pf_field_fill.sql`
+(about four minutes: one pass over `public.privategrants`, temp tables
+only). Of 1,007,142 filer-years, 49,961 hold two or more rows with an
+amount, all of them with one amount. Of those, the blocks that are not one
+tuple, under the kept url, by what line 25 says of the amount:
+
+| repeated row | names on the rows with the amount | line 25 | filer-years | rows with the amount | on the rows | one copy | counted too often |
+|---|---|---|---:|---:|---:|---:|---:|
+| no | one | = one copy | 45 | 216 | $205,981,712 | $79,729,241 | **$126,252,471** |
+| no | one | = every copy (legitimate repeats) | 156 | 513 | $14,632,739 | | |
+| no | one | neither | 5 | 11 | $125,000 | | |
+| no | several | = one copy | 53 | 175 | $28,087,148 | $8,340,102 | |
+| yes | one | = one copy | 6 | 18 | $438,204 | | |
+
+The 45, the 53 and the 6 are 6.6's, to the dollar. 6.6 had 155 and 7 where
+this has 156 and 5. Line 25 is now the kept url's own, and EIN 821352282 /
+tax year 2022 states every copy there, where the row 6.6 read states
+neither. And the name is now the three name columns as they are: one
+filer-year whose names differ only in their case counts as several names.
+Neither change touches the 45.
+
+### 7.2 What the extract does
+
+The mechanism, read off the XML group by group. A group of Part XV that
+holds an `Amt` **and** anything beside it comes out as it is. Every other
+group comes out as **one same row for the whole filing**: each field the
+last value any group of the filing gives it, and the amount the block's
+own total, `TotalGrantOrContriPdDurYrAmt`, which follows the groups (where
+the filing pays one grant, that grant's amount). "Every other group" is
+three kinds:
+
+| the group holds | example | comes out as |
+|---|---|---|
+| `<Amt>0</Amt>` and nothing else | the empty groups of 6.3 | the filled row |
+| no `Amt`, and a text | the rest of a status or purpose that runs over two groups: "PUBLIC CHAR" after "501(C)(3)" | the filled row, the text included: it is the last value of its field |
+| an `Amt` and nothing else | EIN 844092575 / tax year 2024: a named group at `<Amt>0</Amt>`, then a group that is `<Amt>14000</Amt>` alone | the filled row |
+| an `Amt` and a text or a name | a recipient the filer lists at $0. A group that holds a status and `<Amt>0</Amt>` | as it is: a $0 row, with only what the group holds |
+
+So the filled rows of a filing are identical to each other, and a filing
+that pays one grant holds it as at most two tuples: the real group's own
+row, once, and the filled row, once per filled group. They are one tuple
+where no later group changes a field (section 6.3's forward fill) and two
+where one does (this section).
+
+`pf_doubling_basic_rows xml` now states this beside each filing:
+`xml_amounts` (groups with an amount of their own), `xml_filled` (groups
+the extract fills), and `as_predicted`, whether the table's rows are, by
+name and amount, the ones this reading gives (`extract_rows`). Run on
+every filing checked for this section:
+
+| checked | blocks | groups | as predicted, in the groups' order | in another order | twice (a doubled filing) | not as predicted |
+|---|---:|---:|---:|---:|---:|---:|
+| paid (3a) | 177 | 2,422 | 169 | 2 | 6 | 0 |
+| future (3b) | 16 | 37 | 16 | 0 | 0 | 0 |
+
+The future extract fills the same way with one difference: its filled row
+takes the last amount a group states, not the block's total (EIN 346500595
+/ tax year 2020, section 6.4: two amount-only groups, the second amount on
+both rows). The names the 2012 schema gives the two blocks are read too
+(`_OLDER_NAMES`): at least five of the filings checked use them.
+
+The order of the rows is the groups' order in all but two blocks
+(`202323189349101432`, `202020509349100212`), which hold the same rows in
+another order.
+
+### 7.3 The rule and its design points
+
+Under the kept url, where the block is **not** one tuple: the rows with an
+amount (a number other than 0) all carry ONE amount and ONE recipient
+name, the filing itself holds two or more of them, and that amount, above
+zero, EQUALS line 25 in column (d) or column (a). The filer-year keeps ONE
+of those rows and carries `field_fill`.
+
+It is forward fill's test on a wider shape, and the two never meet: a
+block is one tuple or it is not. Forward fill's own text in the DDL is not
+touched.
+
+- *Which row is kept when the copies differ.* The first in the extract's
+  order (`ctid`). In all 46 fills the rule takes, that row is the real
+  group's own, every field of it. The order alone would not be proof (two
+  blocks of 177 are out of order), and it does not have to be: by 7.2 the
+  rows with the amount are at most two tuples (two in 39 of the 46, one in
+  7), they carry one name and one amount by the rule's own condition, and
+  the address is the same on every copy of all 47. What the choice decides
+  is which status, purpose or relationship text the kept row shows. An
+  alternative was measured and not built: "the tuple held once, else the
+  first" names the real group wherever it stands. It agrees with "the
+  first" on all 46, and costs a second window over the block.
+- *The $0 rows beside the copies stay* (halved under a repeated row, as
+  every row is). They are not copies of the grant. Each is a group of its
+  own that the extract did not fill: 71 rows in 26 of the filer-years, 35
+  of which name a recipient the filer listed at $0 (28 of them in one
+  filing, EIN 263352699 / tax year 2012) and 36 of which name no one (a
+  group that holds a text such as "+-" or "*" and `<Amt>0</Amt>`).
+- *The name must match.* 53 filer-years hold one amount under several
+  names with line 25 equal to one copy. All 53 were checked against the
+  XML: 31 are fills (a named group without an amount of its own is filled,
+  and the filled row carries the filing's last name: $18,580,222 counted
+  too often) and **22 are N grants to N recipients**, each group with its
+  own amount, in a return whose line 25 states one of them in one column
+  (EIN 206197750 / tax year 2023: two grants of $500,000, column (d)
+  $500,000, column (a) $1,000,000). Nothing in the table tells the two
+  kinds apart, so the rule leaves all 53. And among the 31 fills the first
+  row is the real group's in 24 only: without one name there is also no
+  safe row to keep. The name is the three name columns as they are;
+  folding the case changes no filer-year the rule takes.
+- *Under a repeated row.* After `pair_collapse`, on what the filing itself
+  holds, as forward fill. Of the 6 filer-years of 7.1, two are fills in a
+  doubled filing: halved and then filled to one row
+  (`pair_collapse+field_fill`: EIN 934026763 / tax year 2024, three groups,
+  six rows; EIN 042133872 / tax year 2024, two groups, four rows). The
+  other four are a doubled filing with ONE row with an amount beside $0
+  rows: the filing holds the amount once, and they stay `pair_collapse`.
+- *Legitimate repeats are untouched.* 156 filer-years have the shape with
+  line 25 equal to every copy, to the dollar, and 5 state neither. None
+  changes in the scratch copy.
+- *Lineage.* `field_fill` is a `dedup_rule` value of its own, `+`-joined
+  after `latest_url` and `pair_collapse` like the others.
+- *One of the 47 is not the extract's doing.* EIN 320702437 / tax year 2024
+  (`202501309349100310`) lists one recipient twice at $27,366, in two
+  groups that each hold their own amount, with the purpose worded two ways.
+  Part XV totals $54,732. Line 25 states $27,366 in column (a) and 0 in
+  column (d). The rule keeps one row: what Part I says was paid, and not
+  what Part XV lists. The table cannot tell it from a fill (two tuples, one
+  name, one amount, line 25 equal to one). It is also a self-match in the
+  matcher's output: the filer names itself.
+
+### 7.4 The XML checks
+
+Every filer-year the rule takes, with the scratch copy read in place of
+the production table
+(`pf_doubling_basic_rows xml OID ... --current scratch_pgc_fieldfill`).
+Rows after = one row with the amount and the rows without one.
+
+| EIN / tax year | object id | raw rows | with the amount | XML groups with an amount | XML groups filled | the amount | line 25 (d) / (a) | the copies differ in | rows after | with the amount | rule after |
+|---|---|---:|---:|---:|---:|---:|---|---|---:|---:|---|
+| 133703640 / 2021 | `202203449349100000` | 2 | 2 | 1 | 1 | 64,350,000 | 64,350,000 / 64,350,000 | status | 1 | 1 | `field_fill` |
+| 430666753 / 2016 | `201723209349100112` | 3 | 3 | 1 | 2 | 6,794,381 | 6,794,381 / 6,794,381 | purpose | 1 | 1 | `field_fill` |
+| 481210113 / 2022 | `202343119349101864` | 14 | 13 | 1 | 12 | 552,382 | 552,382 / 552,382 | status | 2 | 1 | `field_fill` |
+| 481210113 / 2021 | `202222209349101422` | 14 | 13 | 1 | 12 | 522,546 | 522,546 / 522,546 | status | 2 | 1 | `field_fill` |
+| 481210113 / 2018 | `201902279349100800` | 14 | 13 | 1 | 12 | 480,767 | 480,767 / 480,767 | status | 2 | 1 | `field_fill` |
+| 481210113 / 2020 | `202101949349100200` | 14 | 13 | 1 | 12 | 477,322 | 477,322 / 477,322 | status | 2 | 1 | `field_fill` |
+| 481210113 / 2019 | `202032109349100408` | 14 | 13 | 1 | 12 | 475,183 | 475,183 / 475,183 | status | 2 | 1 | `field_fill` |
+| 481210113 / 2017 | `201822139349100802` | 14 | 13 | 1 | 12 | 458,836 | 458,836 / 458,836 | status | 2 | 1 | `field_fill` |
+| 571217214 / 2020 | `202141349349100214` | 29 | 28 | 1 | 27 | 183,802 | 183,802 / 183,802 | relationship | 2 | 1 | `field_fill` |
+| 900581077 / 2022 | `202342199349100214` | 2 | 2 | 1 | 1 | 3,675,000 | 3,675,000 / 3,675,000 | purpose | 1 | 1 | `field_fill` |
+| 310983188 / 2013 | `201411419349100101` | 5 | 4 | 1 | 3 | 202,503 | 202,503 / 202,503 | purpose | 2 | 1 | `field_fill` |
+| 310983188 / 2016 | `201731279349100153` | 5 | 4 | 1 | 3 | 188,295 | 0 / 188,295 | purpose | 2 | 1 | `field_fill` |
+| 310983188 / 2014 | `201501239349100300` | 5 | 4 | 1 | 3 | 172,490 | 0 / 172,490 | purpose | 2 | 1 | `field_fill` |
+| 310983188 / 2015 | `201621389349100417` | 5 | 4 | 1 | 3 | 169,017 | 0 / 169,017 | purpose | 2 | 1 | `field_fill` |
+| 310983188 / 2017 | `201821259349100402` | 5 | 4 | 1 | 3 | 162,050 | 0 / 162,050 | purpose | 2 | 1 | `field_fill` |
+| 310983188 / 2018 | `201902519349100300` | 5 | 4 | 1 | 3 | 131,925 | 0 / 131,925 | purpose | 2 | 1 | `field_fill` |
+| 900581077 / 2023 | `202430269349100403` | 2 | 2 | 1 | 1 | 284,164 | 284,164 / 284,164 | purpose | 1 | 1 | `field_fill` |
+| 382831525 / 2015 | `201602099349100500` | 9 | 3 | 1 | 2 | 76,040 | 76,040 / 76,040 | purpose | 7 | 1 | `field_fill` |
+| 382831525 / 2014 | `201502179349100505` | 9 | 3 | 1 | 2 | 75,500 | 75,500 / 75,500 | purpose | 7 | 1 | `field_fill` |
+| 934026763 / 2024 | `202543399349101109` | 6 | 6 | 1 | 2 | 60,000 | 60,000 / 60,000 | purpose | 1 | 1 | `pair_collapse+field_fill` |
+| 382831525 / 2016 | `201732619349100303` | 9 | 3 | 1 | 2 | 55,040 | 55,040 / 55,040 | purpose | 7 | 1 | `field_fill` |
+| 113040576 / 2024 | `202520769349100912` | 4 | 3 | 1 | 2 | 18,525 | 18,525 / 18,525 | relationship | 2 | 1 | `field_fill` |
+| 201640639 / 2024 | `202531349349103308` | 6 | 2 | 1 | 1 | 35,000 | 0 / 35,000 | nothing | 5 | 1 | `field_fill` |
+| 042921512 / 2019 | `202032679349100203` | 3 | 2 | 1 | 1 | 31,000 | 31,000 / 31,000 | nothing | 2 | 1 | `field_fill` |
+| 042921512 / 2020 | `202230739349100218` | 3 | 2 | 1 | 1 | 29,000 | 29,000 / 29,000 | nothing | 2 | 1 | `field_fill` |
+| 320702437 / 2024 | `202501309349100310` | 2 | 2 | 2 | 0 | 27,366 | 0 / 27,366 | purpose | 1 | 1 | `field_fill` |
+| 461274956 / 2022 | `202441979349100569` | 2 | 2 | 1 | 1 | 19,849 | 19,849 / 19,849 | purpose | 1 | 1 | `field_fill` |
+| 811849962 / 2018 | `201903199349105520` | 5 | 4 | 1 | 3 | 3,450 | 0 / 3,450 | status | 2 | 1 | `field_fill` |
+| 042133872 / 2020 | `202133149349101698` | 2 | 2 | 1 | 1 | 9,000 | 9,000 / 9,000 | purpose | 1 | 1 | `field_fill` |
+| 461274956 / 2021 | `202341809349101009` | 2 | 2 | 1 | 1 | 8,699 | 8,699 / 8,699 | purpose | 1 | 1 | `field_fill` |
+| 042133872 / 2021 | `202222979349100422` | 2 | 2 | 1 | 1 | 8,500 | 8,500 / 8,500 | purpose | 1 | 1 | `field_fill` |
+| 042133872 / 2022 | `202312969349100631` | 2 | 2 | 1 | 1 | 8,500 | 8,500 / 8,500 | purpose | 1 | 1 | `field_fill` |
+| 042133872 / 2023 | `202442899349100959` | 2 | 2 | 1 | 1 | 8,000 | 8,000 / 8,000 | purpose | 1 | 1 | `field_fill` |
+| 042133872 / 2024 | `202513149349101936` | 4 | 4 | 1 | 1 | 8,000 | 8,000 / 8,000 | purpose | 1 | 1 | `pair_collapse+field_fill` |
+| 201902617 / 2022 | `202332139349100703` | 10 | 9 | 1 | 8 | 1,000 | 0 / 1,000 | nothing | 2 | 1 | `field_fill` |
+| 546299823 / 2018 | `201902439349100500` | 6 | 5 | 1 | 4 | 2,000 | 0 / 2,000 | nothing | 2 | 1 | `field_fill` |
+| 136193966 / 2018 | `201903179349100225` | 3 | 3 | 1 | 2 | 3,650 | 3,650 / 3,650 | purpose | 1 | 1 | `field_fill` |
+| 136193966 / 2017 | `201833189349103608` | 3 | 3 | 1 | 2 | 3,550 | 3,550 / 3,550 | purpose | 1 | 1 | `field_fill` |
+| 136193966 / 2019 | `202023179349103117` | 3 | 3 | 1 | 2 | 3,500 | 3,500 / 3,500 | purpose | 1 | 1 | `field_fill` |
+| 136193966 / 2016 | `201713189349102721` | 3 | 3 | 1 | 2 | 2,836 | 2,836 / 2,836 | purpose | 1 | 1 | `field_fill` |
+| 263297255 / 2024 | `202520669349100202` | 2 | 2 | 1 | 1 | 5,000 | 5,000 / 5,000 | purpose | 1 | 1 | `field_fill` |
+| 363739087 / 2020 | `202212799349100226` | 2 | 2 | 1 | 1 | 5,000 | 5,000 / 5,000 | purpose | 1 | 1 | `latest_url+field_fill` |
+| 461274956 / 2023 | `202531919349100303` | 2 | 2 | 1 | 1 | 3,393 | 3,393 / 3,393 | purpose | 1 | 1 | `field_fill` |
+| 136193966 / 2020 | `202200259349100115` | 3 | 3 | 1 | 2 | 1,500 | 1,500 / 1,500 | purpose | 1 | 1 | `field_fill` |
+| 462878283 / 2016 | `201741249349101129` | 3 | 2 | 1 | 1 | 2,500 | 0 / 2,500 | nothing | 2 | 1 | `field_fill` |
+| 562093339 / 2014 | `201532049349100003` | 3 | 2 | 1 | 1 | 1,000 | 1,000 / 1,000 | purpose | 2 | 1 | `field_fill` |
+| 263352699 / 2012 | `201323179349100107` | 30 | 2 | 1 | 1 | 180 | 0 / 180 | nothing | 29 | 1 | `field_fill` |
+
+In 46 of the 47 the rows with the amount after equal the XML's groups with
+an amount, one. The 47th is the filer's own double entry of 7.3 (two
+groups with an amount, one row after). 30 differ in the purpose, 8 in the
+status and 2 in the relationship. In 7 the copies are identical and the
+block is more than one tuple only because $0 rows stand beside them.
+
+Also checked: the four doubled filings that hold the amount once (EIN
+272520016, 844092575 and 853214297 / tax year 2024, 853780748 / tax year
+2025), all `pair_collapse` and one row with the amount after, and all 53
+several-names filer-years, all `passthrough` or `latest_url` and unchanged.
+
+### 7.5 The proof on a scratch copy
+
+`pf_current_scratch build paid --suffix fieldfill` (29 minutes), then
+`compare paid --suffix fieldfill`: every column of every row,
+`dedup_rule` included, per filer-year, against the production table,
+which still holds the rows of the rule before section 6. So the
+comparison shows section 6's change and this one together:
+
+| `dedup_rule` today | in the scratch copy | filer-years | rows today | rows after | dollars leaving | |
+|---|---|---:|---:|---:|---:|---|
+| `passthrough` | `pair_collapse` | 2,480 | 5,748 | 2,874 | $23,727,731 | section 6, as in 6.1 |
+| `latest_url` | `latest_url+pair_collapse` | 23 | 162 | 81 | $583,858 | section 6 |
+| `passthrough` | `forward_fill` | 103 | 403 | 103 | $63,864,652 | section 6 |
+| `pair_collapse` | `forward_fill` | 94 | 164 | 94 | $12,619,857 | section 6 |
+| `latest_url+pair_collapse` | `latest_url+forward_fill` | 1 | 1 | 1 | $0 | section 6 |
+| `pair_collapse` | `pair_collapse+forward_fill` | 1 | 3 | 1 | $4,440 | section 6 |
+| `passthrough` | `pair_collapse+forward_fill` | 1 | 6 | 1 | $228,040 | section 6 |
+| `passthrough` | `field_fill` | 44 | 285 | 115 | $126,247,471 | **new** |
+| `latest_url` | `latest_url+field_fill` | 1 | 2 | 1 | $5,000 | **new** |
+| `pair_collapse` | `pair_collapse+field_fill` | 2 | 5 | 2 | $128,000 | **new** |
+| | | **2,750** | **6,779** | **3,273** | **$227,409,049** | |
+
+The seven lines of section 6 are 6.1's, to the row and the dollar, and the
+other 1,004,392 filer-years are identical row for row. What this rule
+changes, and nothing else:
+
+| | filer-years | rows before | rows after | rows leaving | dollars before | dollars after | dollars leaving |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `field_fill` | 44 | 285 | 115 | 170 | $205,971,712 | $79,724,241 | $126,247,471 |
+| `latest_url+field_fill` | 1 | 2 | 1 | 1 | $10,000 | $5,000 | $5,000 |
+| `pair_collapse+field_fill` | 2 | 5 | 2 | 3 | $196,000 | $68,000 | $128,000 |
+| | **47** | **292** | **118** | **174** | **$206,177,712** | **$79,797,241** | **$126,380,471** |
+
+The 118 rows after are 47 rows with the amount and the 71 rows without
+one. Checked row for row beside the count: the filer-years that carry
+`field_fill` in the scratch copy are exactly the 47, each holds one row
+with the amount and line 25 as its total, and the rows kept are the first
+row with the amount and every row without one (106 tuples of 106). The two
+filer-years under a repeated row are halved today by the old line-25 test
+(6 rows to 3, 4 to 2), which is why their "rows before" are 5.
+
+`privategrants_current` by rule, after sections 6 and 7:
+
+| `dedup_rule` | filer-years | rows |
+|---|---:|---:|
+| `passthrough` | 983,578 | 15,791,161 |
+| `latest_url` | 10,653 | 664,164 |
+| `pair_collapse` | 12,547 | 190,851 |
+| `latest_url+pair_collapse` | 117 | 1,426 |
+| `forward_fill` | 197 | 197 |
+| `field_fill` | 44 | 115 |
+| `pair_collapse+field_fill` | 2 | 2 |
+| `pair_collapse+forward_fill` | 2 | 2 |
+| `latest_url+forward_fill` | 1 | 1 |
+| `latest_url+field_fill` | 1 | 1 |
+| | 1,007,142 | 16,647,920 |
+
+16,651,426 rows today, 16,648,094 after section 6, 16,647,920 after this.
+The watch of 6.2 finds nothing on the scratch copy. The future relation is
+not touched: its DDL gains a constant `FALSE AS _field_fill`, and a
+scratch copy built from it is `privategrants_future_current` row for row
+(25,800 filer-years, 441,358 rows, $181,296,385,866 on both).
+
+By filer, the dollars that leave: $64,350,000 the Metropolitan Museum
+grant (EIN 133703640), $35,604,432 EIN 481210113 (six years of "See
+Attached list", 72 rows), $13,588,762 EIN 430666753, $4,962,654 EIN
+571217214, $3,959,164 EIN 900581077, $3,078,840 EIN 310983188, and
+$836,619 over the other 17 filers.
+
+### 7.6 Placeholder recovery: measured, not applied
+
+`pf_current_scratch placeholders --suffix fieldfill`. The 14 work-list
+filings 6.5 left over line 25 come down to one copy:
+
+| filer (EIN) | filings | `placeholder_paid` today | from the scratch copy | still over line 25 |
+|---|---:|---:|---:|---|
+| 481210113, 2017 to 2022 | 6 | $38,571,468 | $2,967,036 | no |
+| 382831525, 2014 to 2016 | 3 | $619,740 | $206,580 | no |
+| 136193966, 2016 to 2020 | 5 | $45,108 | $15,036 | no |
+| the 22 of 6.5 | 22 | $42,980,947 | $8,015,203 | no |
+| | **36** | **$82,217,263** | **$11,203,855** | 0 of 36 |
+
+All 36 would lose `placeholder_exceeds_declared` once the production table
+and the work list are rebuilt. No list loads beyond the five of 6.5: of
+the 14, two have a readable attachment. `202343119349101864` (481210113 /
+2022) has no list that adds up to $552,382, and `201732619349100303`
+(382831525 / 2016) is not read yet. Nothing was loaded and the work list
+was not rebuilt.
+
+### 7.7 After the merge, and what the regression gate will see
+
+The steps are 6.7's, in the same order and by the same hands. With this
+rule merged before the rebuild, expect in step 1 **16,647,920 rows** and
+the rule counts of 7.5, in step 2 the future relation unchanged, and in
+step 3 **36** work-list filings with a smaller `placeholder_paid` and
+without `placeholder_exceeds_declared` (22 under section 6 alone), the
+same five loading.
+
+The gate, from this rule alone, on top of 6.7's table. Every row that
+leaves has the name and the address of the row that stays, so the
+matcher's keys are the same and so are its matches: a matched grant keeps
+one row, and its copies leave.
+
+| check | today | after section 6 | after this rule | why |
+|---|---:|---:|---:|---|
+| `privategrants_w_recipients` rows | 7,578,795 | 7,578,518 | 7,578,476 | 42 matched rows leave, in 12 of the 47 filer-years: $86,981,346 of matched dollars, $64,350,000 of it the Metropolitan Museum grant |
+| `unioned_grants` rows | | 277 fewer | 42 fewer again | the same rows |
+| placeholder rows matched (ceiling 349) | 349 | 349 | 349 | none of the 42 is one: the "See Attached" copies were never matched |
+| self-matches (ceiling 3,641) | 3,641 | 3,640 | 3,639 | one leaves: EIN 320702437 / tax year 2024, the filer's own double entry (7.3) |
+| corporate, foreign, person rows | 14 / 2 / 0 | the same | the same | none among the 42 |
+| sentinels (Michael J. Fox, Johns Hopkins, Gates Trust) | | the same | the same | none among the 42 |
+| labeled-pair coverage | 63.1% / 94.5% | the same | the same | every matched grant keeps a row, so no funder-recipient pair is lost |
+| matched rows and dollars against raw (hard rules) | 0 / 0 | 0 / 0 | 0 / 0 | rows only leave |
+
+Counted on the matcher's output as it stands, which holds every copy of
+these 47 filer-years today (none is touched by section 6, and the two
+under a repeated row are not matched). The 5 matched $0 rows of these
+filer-years stay.
+
+Second-order, through placeholder recovery: none measured. The 14 filings
+of 7.6 lose a flag and load nothing new, so the recovered rows the matcher
+reads (PR #56) are the same.
+
+### 7.8 What neither fill reaches
+
+- **A fill in a filing that pays more than one amount. This is the large
+  one.** By 7.2 each filled group is one more row carrying the block's
+  TOTAL, under the name of the filing's last group. With one grant that
+  total is the grant, which is the two fills of 6.3 and 7.3. With several,
+  the table holds the list, and then the whole list's total again once per
+  filled group. Measured on 2026-10-01 with a signature that needs no XML
+  (no repeated row; more than one amount; k >= 1 rows whose amount equals
+  line 25 in either column; the other rows add up to that same amount):
+
+  | rows carrying the total | filer-years | such rows | on those rows | line 25 |
+  |---|---:|---:|---:|---:|
+  | one | 585 | 585 | $298,222,916 | $298,222,916 |
+  | two or more | 746 | 4,963 | $2,125,984,686 | $377,131,257 |
+  | | **1,331** | **5,548** | **$2,424,207,602** | $675,354,173 |
+
+  $2.42B counted too often where $675M was paid, tax years 2013 to 2024,
+  the largest single filer-year $194.9M. 88 of the 1,331 were checked
+  against the XML: 60 drawn across the list (30 with one such row, 30 with
+  more) and the largest filer-year of each of the 28 largest filers. **87
+  are the fill. One is not:** The Colorado Trust, tax year 2019
+  (`202033189349104058`), whose XML has 373 groups, each with an amount of
+  its own, one of them ("Zarlengo Foundation", $9,589,893) the sum of the
+  other 372. The return itself carries the total as a grant, and the
+  signature takes it all the same. Also the fill, and outside the
+  signature: EIN 475268267 / tax year 2021, whose line 25 differs from its
+  Part XV total. PR #62's description lists 20 of the 87 with their XML,
+  their TEOS image and the queries that show them.
+  **The matcher has matched 2,279 of the 5,548 rows, $1.34B**, in 509
+  filer-years, to whatever the filing's last group names. Not built here:
+  it is another rule with its own design points (no one-name condition
+  can hold, a total the return itself carries looks the same in the table
+  (one found, above), the same shape under a repeated row is not measured)
+  and a much larger move of the matcher's
+  input. It wants its own measurement, XML sample and proof.
+- **Fills under several names** (7.3): 31 filer-years, $18,580,222. They
+  are the same thing seen from the other side: named groups without an
+  amount of their own.
+- **The filer's own double entry** (7.3): taken by the rule, one
+  filer-year, $27,366.
+- **The future relation** (6.4): unchanged, two filings, $201,000.
+
+### 7.9 Scratch objects
+
+Made for this section and dropped at its end: `public.scratch_pgc_fieldfill`
+(the paid copy), `public.scratch_pgfc_fieldfill` (the future copy), and
+nine summary tables named `public.scratch_pgc_ff_*`. The suffix is this
+section's own: `pf_current_scratch build` drops the table it is about to
+build, and its default suffix is shared by every session on the database.
+
+## 8. Files
 
 - `givingtuesday_datamart/exploratory/pf_doubling_basic_rows.py` and
   `data/exploratory/pf_doubling_basic_rows.sql`: the measurement, one
   session, temp tables only; substitutes the rule's own content hashes so
-  the tuples are the rule's tuples. `xml OID ...` is the spot check.
-- `tests/test_pf_doubling_basic_rows.py`: the XML group classifier and the
-  SQL rendering.
+  the tuples are the rule's tuples. `xml OID ...` is the spot check, and
+  since section 7 it also says whether the table's rows are the ones the
+  fill of 7.2 predicts.
+- `data/exploratory/pf_field_fill.sql`: section 7.1's counts and the object
+  ids of 7.4, run by the same script (`measure --sql`).
+- `tests/test_pf_doubling_basic_rows.py`: the XML group classifier, the
+  predicted rows and the SQL rendering.
 - `givingtuesday_datamart/exploratory/pf_current_scratch.py`: the proof of
   section 6. `build` renders the production DDL under a scratch name,
   `compare` sets the copy beside production row for row, `placeholders` is
