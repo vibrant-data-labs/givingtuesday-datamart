@@ -1,6 +1,6 @@
 """How two readings of a page are compared: the (name key, amount) pairs.
 
-The ground-truth scorer (``exploratory/placeholder_ground_truth.py``) and
+The ground-truth scorer (``placeholder_recovery/ground_truth.py``) and
 the page gate (``page_verdicts.agree``) must agree on what "the same
 reading" means, so the comparison lives here and both import it. The
 rule, settled on the 83 ground-truth pages (the pipeline doc's *Ground

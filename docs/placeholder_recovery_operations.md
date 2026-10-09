@@ -47,8 +47,14 @@ future payment, from GivingTuesday's `990PFPart14Grants3B` (source
 The first and the last table, the view and the commands that write them
 are the package `givingtuesday_datamart/placeholder_recovery/`, where
 the pipeline's production code goes from September 28 on. The three
-tables between them are modules of their own, and the frame's commands
-are still in `exploratory/`.
+tables between them are modules of their own. The run over a frame file
+(`sample`, `estimate`, `transcribe`, `report`, `run`) is the package's
+`frame` module, the scorer its `ground_truth` and the population by year its
+`population`, moved in from `exploratory/` on October 9. Proofs and
+measurements that write nothing of production's are the package
+`givingtuesday_datamart/proofs/` (`matching_subset`, `recovered_rows`,
+`renderer_widths`); the two 990-PF rule proofs join it once the total-row
+fill lands.
 
 The PDFs sit in `s3://givingtuesday-datamart/irs/pdf/<object_id>.pdf`,
 kept indefinitely, with the SHA-256 on the row and as the S3 checksum.
@@ -498,12 +504,12 @@ of every grant holds a lock a load of recovered grants waits for, so the
 subset takes a copy of the recovered rows first and reads that.
 
 ```bash
-python -m givingtuesday_datamart.matching_subset build --workers 4     # ~40 min on a laptop
-python -m givingtuesday_datamart.matching_subset report
+python -m givingtuesday_datamart.proofs.matching_subset build --workers 4     # ~40 min on a laptop
+python -m givingtuesday_datamart.proofs.matching_subset report
 python -m givingtuesday_datamart.matching_regression_checks --prefix scratch_matcher_
 python -m givingtuesday_datamart.corrections_preflight --prefix scratch_matcher_preflight_ --grants scratch_matcher_grants
-python -m givingtuesday_datamart.matching_subset drop
-python -m givingtuesday_datamart.matching_subset drop --prefix scratch_matcher_preflight_
+python -m givingtuesday_datamart.proofs.matching_subset drop
+python -m givingtuesday_datamart.proofs.matching_subset drop --prefix scratch_matcher_preflight_
 ```
 
 ## Set up a box once
@@ -793,29 +799,29 @@ python -m givingtuesday_datamart.placeholder_recovery check --policy v2
 python -m givingtuesday_datamart.grant_matching [--recovered-policy VERSION] [--no-resume]
 python -m givingtuesday_datamart.matching_regression_checks [--fast] [--prefix scratch_matcher_]
 python -m givingtuesday_datamart.corrections_preflight [--prefix scratch_matcher_preflight_ --grants scratch_matcher_grants]
-python -m givingtuesday_datamart.matching_subset build|report|drop
+python -m givingtuesday_datamart.proofs.matching_subset build|report|drop
 
 # the frame and the population
-python -m givingtuesday_datamart.exploratory.placeholder_recovery sample --expand-1000
-python -m givingtuesday_datamart.exploratory.placeholder_population
+python -m givingtuesday_datamart.placeholder_recovery.frame sample --expand-1000
+python -m givingtuesday_datamart.placeholder_recovery.population
 
 # fetch, read, decide, by hand
-python -m givingtuesday_datamart.filing_images fetch data/exploratory/placeholder_sample_1000.csv
+python -m givingtuesday_datamart.filing_images fetch data/placeholder_recovery/placeholder_sample_1000.csv
 python -m givingtuesday_datamart.filing_images status
 python -m givingtuesday_datamart.filing_images recut [--dry-run]        # after a change to irs_source.RENDERED_WIDTHS
-python -m givingtuesday_datamart.page_readings read data/exploratory/placeholder_sample_1000.csv --model alibaba/qwen3-vl-instruct --workers 80
+python -m givingtuesday_datamart.page_readings read data/placeholder_recovery/placeholder_sample_1000.csv --model alibaba/qwen3-vl-instruct --workers 80
 python -m givingtuesday_datamart.page_readings status
-python -m givingtuesday_datamart.page_verdicts agree data/exploratory/placeholder_sample_1000.csv --policy v2
+python -m givingtuesday_datamart.page_verdicts agree data/placeholder_recovery/placeholder_sample_1000.csv --policy v2
 python -m givingtuesday_datamart.page_verdicts status --policy v2
 python -m givingtuesday_datamart.page_verdicts base-pair --policy v2
 
 # the whole run, the cost gate alone, the stored-only re-derivation, the report
-python -m givingtuesday_datamart.exploratory.placeholder_recovery run --policy v2 --sample data/exploratory/placeholder_sample_1000.csv --cache /data/irs_index [--dry-run]
-python -m givingtuesday_datamart.exploratory.placeholder_recovery estimate --policy v2 --sample data/exploratory/placeholder_sample_1000.csv
-python -m givingtuesday_datamart.exploratory.placeholder_recovery transcribe --policy v2 --sample data/exploratory/placeholder_sample_1000.csv --stored-only
-python -m givingtuesday_datamart.exploratory.placeholder_recovery report --policy v2 --sample data/exploratory/placeholder_sample_1000.csv --out data/exploratory/placeholder_report_v2_1000.csv [--flagged leave_out] [--with-future]
+python -m givingtuesday_datamart.placeholder_recovery.frame run --policy v2 --sample data/placeholder_recovery/placeholder_sample_1000.csv --cache /data/irs_index [--dry-run]
+python -m givingtuesday_datamart.placeholder_recovery.frame estimate --policy v2 --sample data/placeholder_recovery/placeholder_sample_1000.csv
+python -m givingtuesday_datamart.placeholder_recovery.frame transcribe --policy v2 --sample data/placeholder_recovery/placeholder_sample_1000.csv --stored-only
+python -m givingtuesday_datamart.placeholder_recovery.frame report --policy v2 --sample data/placeholder_recovery/placeholder_sample_1000.csv --out data/placeholder_recovery/placeholder_report_v2_1000.csv [--flagged leave_out] [--with-future]
 
 # the scorer
-python -m givingtuesday_datamart.exploratory.placeholder_ground_truth verdicts --policy v2
-python -m givingtuesday_datamart.exploratory.placeholder_ground_truth flagged --policy v2 --out data/exploratory/placeholder_flagged_check.csv
+python -m givingtuesday_datamart.placeholder_recovery.ground_truth verdicts --policy v2
+python -m givingtuesday_datamart.placeholder_recovery.ground_truth flagged --policy v2 --out data/placeholder_recovery/placeholder_flagged_check.csv
 ```

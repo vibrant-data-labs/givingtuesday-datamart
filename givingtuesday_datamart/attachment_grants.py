@@ -97,7 +97,7 @@ PLACEHOLDER = re.compile(
 # name may be a bare reference ("SCHEDULE ATTACHED", "STATEMENT 25",
 # "ATCH 4") or a bare category ("GRANTS", "TOTAL"). "Available upon
 # request" is not a pointer: nothing is attached. See
-# data/exploratory/placeholder_classifier_assessment.sql.
+# data/placeholder_recovery/placeholder_classifier_assessment.sql.
 WITHHELD = re.compile(r"upon request|on request|on file|hipaa|hippa|not required|privacy|confidential", re.I)
 _POINTER_NAME = re.compile(
     r"\b(?:see|refer)\w*\b.{0,40}\b(?:attach|schedul|statement|stmt|list|exhibit|detail|footnote|supplement)"

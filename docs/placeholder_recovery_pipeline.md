@@ -7,7 +7,14 @@ The findings as of the 1,000-filing frame are in
 [placeholder_grant_recovery.md](placeholder_grant_recovery.md); how to run
 the pipeline, and the tables it writes, is in
 [placeholder_recovery_operations.md](placeholder_recovery_operations.md),
-which absorbed the storage spec and the EC2 runbook. Every stage is
+which absorbed the storage spec and the EC2 runbook. Paths below are the
+ones of the time: on October 9 the frame's commands moved from
+`exploratory/placeholder_recovery.py` to `placeholder_recovery/frame.py`,
+the scorer to `placeholder_recovery/ground_truth.py`, the population by
+year to `placeholder_recovery/population.py`, the measurements
+`placeholder_recovered_rows`, `renderer_widths` and `matching_subset` to
+`proofs/`, and the placeholder data files from `data/exploratory/` to
+`data/placeholder_recovery/`. Every stage is
 built. Stages 1 to 4 and 6 are the three table modules, the selector and
 `exploratory/placeholder_recovery.py` (`sample`, `estimate`, `run`,
 `transcribe`, `report`); stage 0, the work list, and stage 5, the load

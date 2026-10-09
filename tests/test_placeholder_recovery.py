@@ -10,7 +10,7 @@ from test_page_readings import OID, _seed
 from givingtuesday_datamart import filing_images as fi
 from givingtuesday_datamart import page_readings as pr
 from givingtuesday_datamart import page_verdicts as pv
-from givingtuesday_datamart.exploratory import placeholder_recovery as rec
+from givingtuesday_datamart.placeholder_recovery import frame as rec
 
 QWEN, GEMINI, FLASH, SONNET = pv.POLICY_V2["base"] + pv.POLICY_V2["escalation"]
 

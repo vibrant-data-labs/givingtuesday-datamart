@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from givingtuesday_datamart.exploratory import placeholder_recovered_rows as rr
+from givingtuesday_datamart.proofs import recovered_rows as rr
 
 
 NAMES = [("111", "river fund inc", "NY"), ("222", "open door ministries", "NC"),

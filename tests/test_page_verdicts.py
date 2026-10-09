@@ -517,7 +517,7 @@ def _truth_rows(page, rows, oid=OID):
 
 
 def test_the_scorer_counts_right_wrong_flagged_and_unreadable_verdicts_against_the_truth(stores, tmp_path, capsys):
-    from givingtuesday_datamart.exploratory import placeholder_ground_truth as gt
+    from givingtuesday_datamart.placeholder_recovery import ground_truth as gt
 
     _decided(stores, tmp_path)                                        # p3 agreed, p4 escalated, p5 flagged, p6 unreadable
     truth = {(OID, 3): _truth_rows(3, _rows(2)),                      # the accepted reading (Qwen's two rows): right
@@ -538,7 +538,7 @@ def test_the_scorer_counts_right_wrong_flagged_and_unreadable_verdicts_against_t
 
 
 def test_the_scorer_counts_a_not_a_list_page_and_lists_it_when_the_truth_has_rows(stores, tmp_path, capsys):
-    from givingtuesday_datamart.exploratory import placeholder_ground_truth as gt
+    from givingtuesday_datamart.placeholder_recovery import ground_truth as gt
 
     for page in (3, 4):
         _other(stores, OID, page, QWEN); _other(stores, OID, page, GEMINI)

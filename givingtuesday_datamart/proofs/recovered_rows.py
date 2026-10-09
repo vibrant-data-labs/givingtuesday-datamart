@@ -1,9 +1,9 @@
 """What the recovered rows carry for the matcher, measured on a frame.
 
-    python -m givingtuesday_datamart.exploratory.placeholder_recovered_rows address --policy v2 \
-        --sample data/exploratory/placeholder_sample_1000.csv
-    python -m givingtuesday_datamart.exploratory.placeholder_recovered_rows names --policy v2 \
-        --sample data/exploratory/placeholder_sample_1000.csv
+    python -m givingtuesday_datamart.proofs.recovered_rows address --policy v2 \
+        --sample data/placeholder_recovery/placeholder_sample_1000.csv
+    python -m givingtuesday_datamart.proofs.recovered_rows names --policy v2 \
+        --sample data/placeholder_recovery/placeholder_sample_1000.csv
 
 The rows are the ones a load would write for the frame's filings: the rows
 of every reconciled paid list, derived again from ``page_verdicts`` and
@@ -46,9 +46,9 @@ from givingtuesday_datamart.placeholder_recovery.loader import select_paid
 
 logger = logging.getLogger(__name__)
 
-FRAME = Path("data/exploratory/placeholder_sample_1000.csv")
-ADDRESS_OUT = Path("data/exploratory/placeholder_recovered_address.csv")
-NAMES_OUT = Path("data/exploratory/placeholder_recovered_names.csv")
+FRAME = Path("data/placeholder_recovery/placeholder_sample_1000.csv")
+ADDRESS_OUT = Path("data/placeholder_recovery/placeholder_recovered_address.csv")
+NAMES_OUT = Path("data/placeholder_recovery/placeholder_recovered_names.csv")
 UNIVERSE_VIEWS = ("basic_fields_unique_names_view", "basic_fields_pf_unique_names_view",
                   "corrections_unique_names_view")
 

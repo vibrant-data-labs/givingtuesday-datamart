@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from givingtuesday_datamart import grant_matching as gm
-from givingtuesday_datamart import matching_subset as ms
+from givingtuesday_datamart.proofs import matching_subset as ms
 
 
 def test_a_subset_is_written_under_a_scratch_prefix_only():

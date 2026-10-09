@@ -2,7 +2,7 @@
 ``filing_images`` row per filing saying where it came from, what it holds,
 and what went wrong when nothing did.
 
-    python -m givingtuesday_datamart.filing_images fetch data/exploratory/placeholder_sample_1000.csv
+    python -m givingtuesday_datamart.filing_images fetch data/placeholder_recovery/placeholder_sample_1000.csv
     python -m givingtuesday_datamart.filing_images status
     python -m givingtuesday_datamart.filing_images verify
     python -m givingtuesday_datamart.filing_images recut --dry-run

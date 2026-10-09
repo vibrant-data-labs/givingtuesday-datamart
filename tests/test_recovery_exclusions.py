@@ -7,7 +7,7 @@ from datetime import date
 
 import pytest
 
-from givingtuesday_datamart.exploratory import placeholder_recovery as frame
+from givingtuesday_datamart.placeholder_recovery import frame as frame
 from givingtuesday_datamart.placeholder_recovery import exclusions as ex
 
 HEADER = "filerein,filer_name,evidence,excluded_on\n"

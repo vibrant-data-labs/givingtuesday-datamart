@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from givingtuesday_datamart.exploratory import placeholder_recovered_rows as rr
+from givingtuesday_datamart.proofs import recovered_rows as rr
 from givingtuesday_datamart.placeholder_recovery import address as ad
 
 
@@ -56,5 +56,5 @@ def test_split_name_takes_the_place_off_a_name_printed_with_it(name, expected):
     assert ad.split_name(name) == expected
 
 
-def test_the_exploratory_module_still_offers_both():
+def test_the_proof_module_still_offers_both():
     assert rr.state_zip is ad.state_zip and rr.split_name is ad.split_name
