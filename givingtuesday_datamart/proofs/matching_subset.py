@@ -1,8 +1,8 @@
 """Prove a matcher change on a subset, beside production.
 
-    python -m givingtuesday_datamart.matching_subset build
-    python -m givingtuesday_datamart.matching_subset report
-    python -m givingtuesday_datamart.matching_subset drop
+    python -m givingtuesday_datamart.proofs.matching_subset build
+    python -m givingtuesday_datamart.proofs.matching_subset report
+    python -m givingtuesday_datamart.proofs.matching_subset drop
 
 Every worktree shares one database, and products read the matcher's
 output. ``grant_matching.match_records`` rebuilds the ``_current`` tables
@@ -57,7 +57,7 @@ the 990 side's canary; the join table,
 The output tables hold every row of a matched tuple of the subset, whichever
 funder it belongs to. ``build`` also writes the tuples with both matches to
 ``~/.cache/matching_subset/tuples.parquet``, which ``report`` reads; the
-report's tables go to ``data/exploratory/placeholder_matching_subset_*.csv``.
+report's tables go to ``data/placeholder_recovery/placeholder_matching_subset_*.csv``.
 
 The gate reads the output with ``matching_regression_checks --prefix
 scratch_matcher_``. Its name counts and its two recipient sentinels are
@@ -121,8 +121,8 @@ SCHEDULE_I = "schedule_i_subset"
 FIDELITY = "110303001"
 ONE_IN = 25
 TUPLES = Path.home() / ".cache" / "matching_subset" / "tuples.parquet"
-REPORT = Path("data/exploratory/placeholder_matching_subset_report.csv")
-EXAMPLES = Path("data/exploratory/placeholder_matching_subset_examples.csv")
+REPORT = Path("data/placeholder_recovery/placeholder_matching_subset_report.csv")
+EXAMPLES = Path("data/placeholder_recovery/placeholder_matching_subset_examples.csv")
 
 # The tiers as the report names them, in the order a match is credited to
 # them. "Zip and name" is the address tiers: nearly all their pairs come

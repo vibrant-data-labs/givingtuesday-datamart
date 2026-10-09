@@ -2,9 +2,9 @@
 
     python -m givingtuesday_datamart.placeholder_recovery run --policy v2 --tax-years 2020-2025 --cache /data/irs_index
     python -m givingtuesday_datamart.placeholder_recovery run --policy v2 --tax-years 2020-2025 --dry-run --no-fetch
-    python -m givingtuesday_datamart.placeholder_recovery run --policy v2 --sample data/exploratory/placeholder_sample_1000.csv
+    python -m givingtuesday_datamart.placeholder_recovery run --policy v2 --sample data/placeholder_recovery/placeholder_sample_1000.csv
 
-The run itself is ``exploratory.placeholder_recovery.run``, stage by stage
+The run itself is ``placeholder_recovery.frame.run``, stage by stage
 as the operations doc describes it, and it takes a frame file. So the work
 list is rebuilt from the loaded tables, the filings chosen (``--tax-years``,
 ``--limit``) are written to ``<logs>/work_list.csv`` in the frame's columns,
@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Collection, Iterable, Mapping, Sequence
 
 from givingtuesday_datamart._internal.logger import logger
-from givingtuesday_datamart.exploratory import placeholder_recovery as frame_run
+from givingtuesday_datamart.placeholder_recovery import frame as frame_run
 from givingtuesday_datamart.page_readings import MAX_ERRORS
 from givingtuesday_datamart.placeholder_recovery import work_list
 from givingtuesday_datamart.placeholder_recovery.work_list import PlaceholderFiling

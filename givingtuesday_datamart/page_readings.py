@@ -2,7 +2,7 @@
 by one model under one prompt, and ``read_pages``, the bulk cache-or-run that
 reads only what is missing.
 
-    python -m givingtuesday_datamart.page_readings read data/exploratory/placeholder_sample_1000.csv --model alibaba/qwen3-vl-instruct --workers 40
+    python -m givingtuesday_datamart.page_readings read data/placeholder_recovery/placeholder_sample_1000.csv --model alibaba/qwen3-vl-instruct --workers 40
     python -m givingtuesday_datamart.page_readings status
 
 ``docs/placeholder_recovery_operations.md`` (Part B of the storage spec it
@@ -37,7 +37,7 @@ fix recovers every page it applies to at no cost — the bare-amount rule
 did that for the sample from the folders.
 
 **Rendering.** PNGs go to ``<cache_dir>/pages<DPI>/<object_id>/pNNN.png``,
-the layout ``exploratory/placeholder_recovery.transcribe`` already uses, so
+the layout ``placeholder_recovery/frame.transcribe`` already uses, so
 pages rendered there are reused. Rendering runs in its own small pool, one
 job per chunk of ``RENDER_CHUNK`` pages of a filing: ``pdftoppm`` is a
 subprocess, so the GIL is not the limit; bounding it to ``RENDER_WORKERS``

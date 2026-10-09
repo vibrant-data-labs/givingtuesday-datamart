@@ -10,4 +10,10 @@ data/corrections/*.csv -filter -diff -merge text
 # evidence. Plain text for the same reason as the corrections registry.
 # The LFS attributes are reset, not unset: "-diff" would mark the file
 # binary and a pull request would hide the row it adds.
-data/placeholder_recovery/*.csv !filter !diff !merge text
+data/placeholder_recovery/exclusions.csv !filter !diff !merge text
+# The three measurement files committed as plain text under the earlier
+# wildcard stay as they are; the placeholder data files moved here from
+# data/exploratory on 2026-10-09 stay LFS pointers, as they were.
+data/placeholder_recovery/fetch_test_pre2020.csv !filter !diff !merge text
+data/placeholder_recovery/renderer_widths.csv !filter !diff !merge text
+data/placeholder_recovery/renderer_widths_sample.csv !filter !diff !merge text

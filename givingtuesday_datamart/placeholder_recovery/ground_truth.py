@@ -4,11 +4,11 @@ Filing-level reconciliation cannot see a row whose amount slid onto its
 neighbour (the page sum barely moves), so the vision readers are scored
 here on (name, amount) pairs against pages transcribed from the image.
 
-    python -m givingtuesday_datamart.exploratory.placeholder_ground_truth add OID PAGE < rows.txt
-    python -m givingtuesday_datamart.exploratory.placeholder_ground_truth show OID PAGE
-    python -m givingtuesday_datamart.exploratory.placeholder_ground_truth crop OID PAGE 0.3 0.7
-    python -m givingtuesday_datamart.exploratory.placeholder_ground_truth score
-    python -m givingtuesday_datamart.exploratory.placeholder_ground_truth verdicts --policy v1
+    python -m givingtuesday_datamart.placeholder_recovery.ground_truth add OID PAGE < rows.txt
+    python -m givingtuesday_datamart.placeholder_recovery.ground_truth show OID PAGE
+    python -m givingtuesday_datamart.placeholder_recovery.ground_truth crop OID PAGE 0.3 0.7
+    python -m givingtuesday_datamart.placeholder_recovery.ground_truth score
+    python -m givingtuesday_datamart.placeholder_recovery.ground_truth verdicts --policy v1
 
 The pages to check are listed in ``placeholder_gt_pages.csv``. The first
 83 were drawn on the sample: six pages from each cell of density (rows on
@@ -53,11 +53,11 @@ from givingtuesday_datamart import reading_pairs
 # The frame contains the 100-filing sample the pages were first drawn from,
 # so it is what names a filing here. ``score`` also reads the sample's
 # fetch manifest, archived on 2026-09-28 with the sample's files.
-SAMPLE_CSV = Path("data/exploratory/placeholder_sample_1000.csv")
-STAGING_CSV = Path("data/exploratory/placeholder_staging.csv")
+SAMPLE_CSV = Path("data/placeholder_recovery/placeholder_sample_1000.csv")
+STAGING_CSV = Path("data/placeholder_recovery/placeholder_staging.csv")
 ARCHIVE = "s3://givingtuesday-datamart/placeholder-recovery/archive/placeholder-sample-files-2026-09-28.zip"
-PAGES_CSV = Path("data/exploratory/placeholder_gt_pages.csv")
-TRUTH_CSV = Path("data/exploratory/placeholder_ground_truth.csv")
+PAGES_CSV = Path("data/placeholder_recovery/placeholder_gt_pages.csv")
+TRUTH_CSV = Path("data/placeholder_recovery/placeholder_ground_truth.csv")
 CACHE = Path.home() / ".cache" / "irs_index"
 READERS = {
     "qwen v2": "alibaba__qwen3-vl-instruct",
@@ -112,7 +112,7 @@ def _sample() -> dict[str, dict]:
 def _staged() -> dict[str, dict]:
     if not STAGING_CSV.exists():
         sys.exit(f"{STAGING_CSV} is not in the tree: score reads the sample's fetch manifest, "
-                 f"which is in {ARCHIVE}; unzip it into data/exploratory/")
+                 f"which is in {ARCHIVE}; unzip it into data/placeholder_recovery/")
     return {r["object_id"]: r for r in csv.DictReader(STAGING_CSV.open())}
 
 
@@ -769,7 +769,7 @@ def main() -> None:
                    help="the verdicts an override of the flagged rule decided, under <version>-<rule>")
     p = sub.add_parser("flagged", help="score the reading a load_single policy loads for the checked flagged pages, by band")
     p.add_argument("--policy", default="v2", help="a registered version or a JSON file with the policy")
-    p.add_argument("--out", type=Path, default=None, help="per-page CSV, e.g. data/exploratory/placeholder_flagged_check.csv")
+    p.add_argument("--out", type=Path, default=None, help="per-page CSV, e.g. data/placeholder_recovery/placeholder_flagged_check.csv")
     args = parser.parse_args()
     if args.command == "flagged":
         from givingtuesday_datamart._internal.db import get_session

@@ -3,8 +3,8 @@ under a policy version saying which reading to load, if any, and ``agree``,
 which reads what the policy needs (through ``read_pages``, a no-op for
 stored readings) and decides.
 
-    python -m givingtuesday_datamart.page_verdicts agree data/exploratory/placeholder_sample_1000.csv --policy v2
-    python -m givingtuesday_datamart.page_verdicts agree data/exploratory/placeholder_sample_1000.csv --policy v2 --stored-only
+    python -m givingtuesday_datamart.page_verdicts agree data/placeholder_recovery/placeholder_sample_1000.csv --policy v2
+    python -m givingtuesday_datamart.page_verdicts agree data/placeholder_recovery/placeholder_sample_1000.csv --policy v2 --stored-only
     python -m givingtuesday_datamart.page_verdicts status --policy v2
     python -m givingtuesday_datamart.page_verdicts base-pair --policy v2
 

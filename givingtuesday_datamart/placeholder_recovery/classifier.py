@@ -2,7 +2,7 @@
 
 A pointer row is a grant row whose recipient name points at an attachment
 ("SEE ATTACHED", "STATEMENT 25", "ATCH 4") instead of naming a grantee. The
-pattern is version ``v2`` of ``data/exploratory/placeholder_population_by_year.sql``,
+pattern is version ``v2`` of ``data/placeholder_recovery/placeholder_population_by_year.sql``,
 where it was measured; a test holds the two texts equal. It is the SQL form
 of ``attachment_grants.is_pointer``: the two agreed on every one of 13,589
 filer-years when checked on 2026-09-28. A row that withholds the list

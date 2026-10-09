@@ -15,7 +15,7 @@ import sys
 import time
 from pathlib import Path
 
-from givingtuesday_datamart.exploratory.placeholder_recovery import CACHE, COST_CAP
+from givingtuesday_datamart.placeholder_recovery.frame import CACHE, COST_CAP
 from givingtuesday_datamart.page_readings import MAX_ERRORS
 from givingtuesday_datamart.page_verdicts import FLAGGED_RULES, POLICIES, load_policy, with_flagged
 from givingtuesday_datamart.placeholder_recovery import checks, loader, run, view, work_list

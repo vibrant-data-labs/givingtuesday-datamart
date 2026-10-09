@@ -1,11 +1,11 @@
 """Placeholder filings by tax year, on the loaded datamart.
 
-    python -m givingtuesday_datamart.exploratory.placeholder_population
+    python -m givingtuesday_datamart.placeholder_recovery.population
 
-Runs ``data/exploratory/placeholder_population_by_year.sql`` (the broadened
+Runs ``data/placeholder_recovery/placeholder_population_by_year.sql`` (the broadened
 classifier's rule on ``privategrants_current`` joined to the declared
 totals in ``basic_fields_pf_current``) and writes one row per tax year to
-``data/exploratory/placeholder_population_by_year.csv``: PF filings with
+``data/placeholder_recovery/placeholder_population_by_year.csv``: PF filings with
 grants, their declared dollars, the placeholder filings and dollars, the
 addressable ones (patient assistance and individual-dominant filings taken
 out), and the classes the rule leaves aside (mixed, withheld, "various").
@@ -29,11 +29,11 @@ from pathlib import Path
 from sqlalchemy import text
 
 from givingtuesday_datamart._internal.db import get_session
-from givingtuesday_datamart.exploratory.placeholder_recovery import PATIENT_ASSISTANCE
+from givingtuesday_datamart.placeholder_recovery.frame import PATIENT_ASSISTANCE
 from givingtuesday_datamart.ingestion import datamart_config
 
-SQL_PATH = Path("data/exploratory/placeholder_population_by_year.sql")
-OUT_PATH = Path("data/exploratory/placeholder_population_by_year.csv")
+SQL_PATH = Path("data/placeholder_recovery/placeholder_population_by_year.sql")
+OUT_PATH = Path("data/placeholder_recovery/placeholder_population_by_year.csv")
 
 
 def population(session, sql_path: Path = SQL_PATH) -> list[dict]:

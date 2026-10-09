@@ -4,16 +4,16 @@ Four steps, run in order. Each is separately cached, because the expensive
 parts (downloading images, paying a model) must not be repeated when the
 cheap part (the selector) changes.
 
-    python -m givingtuesday_datamart.exploratory.placeholder_recovery sample
-    python -m givingtuesday_datamart.exploratory.placeholder_recovery sample --expand-1000
-    python -m givingtuesday_datamart.exploratory.placeholder_recovery estimate --policy v2 \\
-        --sample data/exploratory/placeholder_sample_1000.csv
-    python -m givingtuesday_datamart.exploratory.placeholder_recovery run --policy v2 \\
-        --sample data/exploratory/placeholder_sample_1000.csv --cache /data/irs_index
-    python -m givingtuesday_datamart.exploratory.placeholder_recovery transcribe --policy v2
-    python -m givingtuesday_datamart.exploratory.placeholder_recovery report --policy v2 \\
-        --out data/exploratory/placeholder_report_v2_1000.csv
-    python -m givingtuesday_datamart.exploratory.placeholder_recovery report \\
+    python -m givingtuesday_datamart.placeholder_recovery.frame sample
+    python -m givingtuesday_datamart.placeholder_recovery.frame sample --expand-1000
+    python -m givingtuesday_datamart.placeholder_recovery.frame estimate --policy v2 \\
+        --sample data/placeholder_recovery/placeholder_sample_1000.csv
+    python -m givingtuesday_datamart.placeholder_recovery.frame run --policy v2 \\
+        --sample data/placeholder_recovery/placeholder_sample_1000.csv --cache /data/irs_index
+    python -m givingtuesday_datamart.placeholder_recovery.frame transcribe --policy v2
+    python -m givingtuesday_datamart.placeholder_recovery.frame report --policy v2 \\
+        --out data/placeholder_recovery/placeholder_report_v2_1000.csv
+    python -m givingtuesday_datamart.placeholder_recovery.frame report \\
         --results ~/.cache/irs_index/unstructured
 
 ``sample`` builds the stratified frame from GT's combined grants extract.
@@ -109,9 +109,9 @@ COMBINED_CSV = Path.home() / "Downloads" / "combined-grants-datamarts-gt_team_pr
 # contains the sample (its rows are the frame's ``classifier = v1``), so the
 # sample's own files were archived on 2026-09-28 and every command defaults
 # to the frame: s3://givingtuesday-datamart/placeholder-recovery/archive/.
-SAMPLE_CSV = Path("data/exploratory/placeholder_sample_100.csv")
-EXPANDED = Path("data/exploratory/placeholder_sample_expanded.csv")
-FRAME_1000 = Path("data/exploratory/placeholder_sample_1000.csv")
+SAMPLE_CSV = Path("data/placeholder_recovery/placeholder_sample_100.csv")
+EXPANDED = Path("data/placeholder_recovery/placeholder_sample_expanded.csv")
+FRAME_1000 = Path("data/placeholder_recovery/placeholder_sample_1000.csv")
 CACHE = Path.home() / ".cache" / "irs_index"
 PF_SOURCES = ("990PF_P14_3A", "990PF_P14_3B")
 SEED = 20260921
@@ -1372,7 +1372,7 @@ def main() -> None:
                    help="add the frame's future-payment amount as a second target, as the frame was first measured")
 
     p = sub.add_parser("compare", help="filing-level reconciliation across engines")
-    p.add_argument("reports", nargs="+", metavar="NAME=CSV", help="report --out files, e.g. qwen=data/exploratory/x.csv")
+    p.add_argument("reports", nargs="+", metavar="NAME=CSV", help="report --out files, e.g. qwen=data/placeholder_recovery/x.csv")
     p.add_argument("--out", type=Path, default=None)
 
     args = parser.parse_args()

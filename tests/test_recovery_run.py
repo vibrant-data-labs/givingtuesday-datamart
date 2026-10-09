@@ -14,7 +14,7 @@ from test_placeholder_recovery import _banners, _run, box, run_stores  # noqa: F
 from test_vlm_transcription import _Client
 
 from givingtuesday_datamart import page_verdicts as pv
-from givingtuesday_datamart.exploratory import placeholder_recovery as rec
+from givingtuesday_datamart.placeholder_recovery import frame as rec
 from givingtuesday_datamart.placeholder_recovery import run
 from givingtuesday_datamart.placeholder_recovery import work_list as wl
 

@@ -1,5 +1,7 @@
 """Placeholder recovery, the production package: the work list a run reads
-(stage 0) and the load of the recovered grants into the datamart (stage 5).
+(stage 0), the load of the recovered grants into the datamart (stage 5),
+and since October 9 the run over a frame file, the scorer and the
+population by year, which were ``exploratory`` modules.
 
     python -m givingtuesday_datamart.placeholder_recovery work-list
     python -m givingtuesday_datamart.placeholder_recovery run --policy v2 --tax-years 2020-2025 --dry-run --no-fetch
@@ -18,5 +20,8 @@ stages 0 and 5; how to run it is ``docs/placeholder_recovery_operations.md``.
 ``loader``                  ``privategrants_recovered``: one row per recovered grant
 ``view``                    ``privategrants_current_w_recovered``
 ``run``                     ``run`` over the work list in place of a frame file
+``frame``                   the run over a frame file: ``sample``, ``estimate``, ``transcribe``, ``report``, ``run``, ``compare``
+``ground_truth``            pages read by hand, and the readers scored on them
+``population``              placeholder filings by tax year, on the loaded datamart
 ==========================  ==================================================
 """

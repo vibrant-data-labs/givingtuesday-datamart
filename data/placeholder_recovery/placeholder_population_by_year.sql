@@ -5,7 +5,7 @@
 -- patient-assistance EINs and filings whose grants go to individuals taken
 -- out as placeholder_recovery._addressable does. Same rules as
 -- placeholder_classifier_assessment.sql. Run by
--- `python -m givingtuesday_datamart.exploratory.placeholder_population`,
+-- `python -m givingtuesday_datamart.placeholder_recovery.population`,
 -- which substitutes __PA__ with the EINs of
 -- data/placeholder_recovery/exclusions.csv (three when the CSV beside this
 -- file was written, six since 2026-09-28) and writes

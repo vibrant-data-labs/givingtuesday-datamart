@@ -151,7 +151,7 @@ fetch the PDF when pointer rows hold at least half of that figure, the
 whole year's grants from the form's top section rather than the amount
 on the pointer row. A pointer
 row reads like "SEE ATTACHED", "STATEMENT 25" or "SCHEDULE ATTACHED". The
-query is `data/exploratory/placeholder_population_by_year.sql`, run by
+query is `data/placeholder_recovery/placeholder_population_by_year.sql`, run by
 `placeholder_population.py`; the classes and the pattern's precision and
 recall are measured in `placeholder_classifier_assessment.sql`.
 
@@ -707,7 +707,7 @@ compare names with their amounts, not amounts alone.
 drawn from the sample across row density and reader agreement plus every
 page of seven near-miss filings, and 57 flagged pages from bands C and D
 of the frame (two already in the sample's draw). The truth is
-`data/exploratory/placeholder_ground_truth.csv`; the scorer is
+`data/placeholder_recovery/placeholder_ground_truth.csv`; the scorer is
 `placeholder_ground_truth.py`, and every number below reproduces from it.
 
 On the 83 sample pages:
@@ -1062,7 +1062,7 @@ about 500,000 grant rows.
 ## What is out of reach
 
 On the frame, 447 filings and $5.02B of paid grants. On the sample the
-list with links is `data/exploratory/placeholder_unreachable.csv`.
+list with links is `data/placeholder_recovery/placeholder_unreachable.csv`.
 
 - No PDF served: 169 filings. 66 are indexed but return an error page,
   all generated in 2022; 103 have no image listed.
@@ -1307,20 +1307,20 @@ the checks extended to them.
 | `givingtuesday_datamart/attachment_grants.py` | choosing the list: reconciliation plus evidence |
 | `givingtuesday_datamart/placeholder_recovery/` | the production package: `work-list`, `run`, `load`, `view`, `check`; the pointer pattern as SQL, the exclusions, the state and zip of an address |
 | `data/placeholder_recovery/exclusions.csv` | the six filers left out, by EIN, each with its evidence and date; plain text, not LFS |
-| `givingtuesday_datamart/exploratory/placeholder_recovery.py` | `sample`, `estimate`, `run`, `transcribe`, `report`, `compare` |
-| `givingtuesday_datamart/exploratory/placeholder_ground_truth.py` | the hand-checked pages and the scorer: `verdicts`, `flagged`, `score` |
-| `givingtuesday_datamart/exploratory/placeholder_population.py` | the population by tax year |
-| `givingtuesday_datamart/exploratory/placeholder_recovered_rows.py` | what the recovered rows carry for the matcher: `address`, `names` |
+| `givingtuesday_datamart/placeholder_recovery/frame.py` | `sample`, `estimate`, `run`, `transcribe`, `report`, `compare` |
+| `givingtuesday_datamart/placeholder_recovery/ground_truth.py` | the hand-checked pages and the scorer: `verdicts`, `flagged`, `score` |
+| `givingtuesday_datamart/placeholder_recovery/population.py` | the population by tax year |
+| `givingtuesday_datamart/proofs/recovered_rows.py` | what the recovered rows carry for the matcher: `address`, `names` |
 | `givingtuesday_datamart/grant_matching.py` | the matcher: `clean_name`, the name-only tier, `Relations`; reads `privategrants_current_w_recovered` since September 29 |
-| `givingtuesday_datamart/matching_subset.py` | a matcher change proved on a subset, beside production: `build`, `report`, `drop` |
-| `data/exploratory/placeholder_matching_subset_report.csv`, `placeholder_matching_subset_examples.csv` | the recovered grants by tier, the sampled foundations' grants before and after, and twenty examples of each change |
-| `data/exploratory/placeholder_sample_1000.csv` | the frame, drawn from GivingTuesday's one-off extract |
-| `data/exploratory/placeholder_report_v2_1000.csv` | per-filing outcomes on the frame under `POLICY_V2` and the loading rule: the pages read, the paid amount; regenerated on 2026-09-28, the earlier one is in git history |
-| `data/exploratory/placeholder_ground_truth.csv`, `placeholder_gt_pages.csv`, `placeholder_flagged_check.csv` | the 138 pages read from the image, the draw, and Sonnet's score on the flagged ones |
-| `data/exploratory/placeholder_population_by_year.sql`, `.csv` | the population by tax year |
-| `data/exploratory/placeholder_recovered_address.csv`, `placeholder_recovered_names.csv` | the frame's recovered rows by what their address gives, and their exact-name matches by cleaning level |
-| `data/exploratory/placeholder_classifier_assessment.sql` | the classifier's classes, precision and recall |
-| `data/exploratory/placeholder_404_images_expanded.csv`, `placeholder_unreachable.csv` | the IRS's unserved images; the sample's out-of-reach filings with links |
+| `givingtuesday_datamart/proofs/matching_subset.py` | a matcher change proved on a subset, beside production: `build`, `report`, `drop` |
+| `data/placeholder_recovery/placeholder_matching_subset_report.csv`, `placeholder_matching_subset_examples.csv` | the recovered grants by tier, the sampled foundations' grants before and after, and twenty examples of each change |
+| `data/placeholder_recovery/placeholder_sample_1000.csv` | the frame, drawn from GivingTuesday's one-off extract |
+| `data/placeholder_recovery/placeholder_report_v2_1000.csv` | per-filing outcomes on the frame under `POLICY_V2` and the loading rule: the pages read, the paid amount; regenerated on 2026-09-28, the earlier one is in git history |
+| `data/placeholder_recovery/placeholder_ground_truth.csv`, `placeholder_gt_pages.csv`, `placeholder_flagged_check.csv` | the 138 pages read from the image, the draw, and Sonnet's score on the flagged ones |
+| `data/placeholder_recovery/placeholder_population_by_year.sql`, `.csv` | the population by tax year |
+| `data/placeholder_recovery/placeholder_recovered_address.csv`, `placeholder_recovered_names.csv` | the frame's recovered rows by what their address gives, and their exact-name matches by cleaning level |
+| `data/placeholder_recovery/placeholder_classifier_assessment.sql` | the classifier's classes, precision and recall |
+| `data/placeholder_recovery/placeholder_404_images_expanded.csv`, `placeholder_unreachable.csv` | the IRS's unserved images; the sample's out-of-reach filings with links |
 | `s3://givingtuesday-datamart/placeholder-recovery/archive/placeholder-sample-era-data-2026-09-25.zip` | the sample-era reads and frames (the single-read reports, the 610-filing frame and its manifest, the engine differences), archived on 2026-09-25 with a manifest of hashes; the engineering log discusses their numbers |
 | `s3://givingtuesday-datamart/placeholder-recovery/archive/placeholder-sample-files-2026-09-28.zip` | the 100-filing sample's own files (the sample, its XML rows, its fetch manifest, its reports under both policies, the two single-reader policies), archived on 2026-09-28; the frame contains the sample |
 | `s3://givingtuesday-datamart/placeholder-recovery/archive/placeholder-frame-xml-rows-2026-09-28.zip` | `placeholder_sample_1000_xml_rows.csv`, the rows GivingTuesday's extract itemised for 139 of the frame's filings (571 rows, $564.9M), archived on 2026-09-28 with a manifest of hashes when they left the search |

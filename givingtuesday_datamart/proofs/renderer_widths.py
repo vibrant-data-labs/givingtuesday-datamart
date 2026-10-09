@@ -1,7 +1,7 @@
 """Which page widths the IRS's older renderers produced: the measurement
 behind ``irs_source.RENDERED_WIDTHS`` (2026-09-29).
 
-    python -m givingtuesday_datamart.exploratory.renderer_widths --cache ~/.cache/irs_index
+    python -m givingtuesday_datamart.proofs.renderer_widths --cache ~/.cache/irs_index
 
 The cut between the IRS's rendering and the filer's attachment is made on
 page widths, and the five widths known until now were measured on images
