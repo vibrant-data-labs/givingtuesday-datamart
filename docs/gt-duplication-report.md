@@ -166,7 +166,8 @@ Three things about the mechanism that may help find it:
   item, so the count above leaves them out. Counted on their own (every
   row with an amount carries the same amount and the same recipient,
   while line 25 equals that amount once): 45 more filer-years and about
-  $126M more, 7 of 7 checked.
+  $126M more. All 45 are checked against the XML: 44 are this defect, and
+  one is a return that itself lists the grant twice.
 - **It does not depend on the order of the groups.** In the 3B extract
   the empty groups come first: 47-5268267 / 2021
   (`202233189349105123`) has two empty groups and then one real one
@@ -181,6 +182,40 @@ Three things about the mechanism that may help find it:
 
 A group-by-group emit, with a field left empty when the group does not
 carry it, would remove all three.
+
+*Added October 1, 2026: what the fill does exactly, and its larger form.*
+
+Read group by group against the XML of 177 paid blocks and 16
+future-payment blocks (2,459 groups), the extract's rows are, by recipient
+and amount, the ones the following predicts in every block:
+
+- A group that holds an `Amt` **and** at least one other field is emitted
+  as it is.
+- Every other group is emitted as **one same row for the whole filing**,
+  each field the last value any group of the filing gives it. That covers
+  a group that is `<Amt>0</Amt>` alone, a group with no `Amt` (the rest of
+  a long text), and a group that is an `Amt` alone.
+- In the 3A extract the amount of that row is the block's own total,
+  `TotalGrantOrContriPdDurYrAmt`, the element that follows the groups. In
+  the 3B extract it is the last amount a group states.
+
+Where the filing pays one grant, the total is that grant, and the result
+is the copies described above. **Where it pays several, every such group
+adds a row that carries the filing's whole total**, under the name and
+address of its last group. 13-3981257 / 2015 (`201602239349100010`): 15
+groups with a recipient and an amount, $574,909 in all, then 14 groups of
+`<Amt>0</Amt>`. The 3A extract has 29 rows, 14 of them $574,909 each:
+**$8,623,635 where $574,909 was paid.**
+
+Counted from the tables alone (a filer-year whose rows hold the return's
+line 25 amount on one or more rows, beside other rows that add up to that
+same amount): **1,331 filer-years, 5,548 such rows, about $2.42B that was
+never paid, where the returns paid $675M.** Tax years 2013 to 2024. We
+checked 88 of them against the XML: 87 are filled groups, and one is a
+return whose own XML states the total as a group (84-0994055 / 2019), so
+the count from the tables runs slightly high. This is the largest form of
+category D by an order of magnitude, and it attributes the dollars to a
+named recipient.
 
 ## What would fix it upstream
 
