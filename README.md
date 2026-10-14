@@ -180,7 +180,17 @@ Run this after a successful `refresh`. It rebuilds:
 - `public.nonprofit_canonical` — one row per EIN. Identity fields
   (name, DBAs, address) and the latest filing's identifiers, picked via
   `DISTINCT ON (filerein)` ordered by tax year desc, tax-period-end
-  desc, ingested_at desc as deterministic tiebreaks.
+  desc, ingested_at desc as deterministic tiebreaks. Every row is joined
+  to the IRS Business Master File (`public.eo_bmf`) for `irs_name`,
+  `irs_sort_name`, `subsection`, `classification`, `foundation_code`,
+  `ntee_cd`, `group_exemption`, `ruling_year`, `filing_req_cd`,
+  `bmf_status`, `bmf_tax_period`, the three `bmf_*_amt` amounts and an
+  `in_bmf` flag (false for the ~140K revoked or terminated orgs, which
+  stay because they hold historical grants). The 990 name is never
+  replaced by the BMF's: for group-exemption subordinates the BMF name is
+  the parent's. Orgs the BMF knows but no 990 does (990-N filers,
+  churches: about 1.19M) are added as rows with the BMF name and
+  `name_source = 'BMF'`; `name_source` is `990`, `990-EZ` or `BMF`.
 - `public.nonprofit_text` — one row per EIN, built from the **latest
   taxyear only** across five source fields (mission statement, Part III
   program activities 1/2/3, Schedule O Part III narrative). `DENSE_RANK`
@@ -196,7 +206,9 @@ Run this after a successful `refresh`. It rebuilds:
   are not in the FTS index. A per-EIN `n_snippets` column exposes the
   count of distinct snippets for monitoring.
 - `public.funder_canonical` — analogous to `nonprofit_canonical` but
-  built from the 990-PF universe.
+  built from the 990-PF universe, with the same BMF columns; the ~13K
+  private foundations the BMF lists with a 990-PF requirement but no
+  filing in our data are added with `name_source = 'BMF'`.
 - `public.schedule_o_part_iii` — Schedule O rows filtered to Form
   990 / 990-EZ Part III continuation narratives only, via
   case-insensitive word-boundary regex on `sidfalrdesc`.
@@ -315,7 +327,8 @@ python -m givingtuesday_datamart.sources loaded
 # 4. Rebuild the canonical layer (~10 min). Checks that
 #    basic_fields[_pf]_current match staging before building identity
 #    from them, and rebuilds only if they don't — normally a no-op,
-#    since step 2 already did it.
+#    since step 2 already did it. Reads public.eo_bmf for the BMF
+#    columns, so refresh irs_eo_bmf first when the IRS has republished.
 python -m givingtuesday_datamart.sources build-canonical
 
 # 5. Corrections preflight (~10 min, any machine). Required after any

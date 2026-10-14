@@ -89,7 +89,7 @@ export function OrgPageClient() {
         )}
       </div>
       <div className="mt-12">
-        <LineageFooter lineage={org!.lineage} orgType={org!.orgType} />
+        <LineageFooter lineage={org!.lineage} orgType={org!.orgType} nameSource={org!.nameSource} />
       </div>
     </div>
   );

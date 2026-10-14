@@ -58,3 +58,12 @@ exclude = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["givingtuesday_datamart"]
+
+[tool.pytest.ini_options]
+# `db` tests build into a scratch schema of the datamart database and need
+# the operator's config.ini; they are opt-in (`pytest -m db`). Everything
+# else runs offline.
+markers = [
+    "db: needs the gt_datamart database; opt in with `pytest -m db`",
+]
+addopts = "-m 'not db'"

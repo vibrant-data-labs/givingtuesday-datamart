@@ -8,7 +8,12 @@ tables, and we want query-time cost to be zero):
   latest-filing identifiers, over the UNION of 990 and 990-EZ filers. The
   "winning" row for each EIN is selected via ``DISTINCT ON (filerein)``
   ordered by tax year desc, then tax-period-end desc, then form (990 before
-  990-EZ), then ingested_at desc as a deterministic tiebreak.
+  990-EZ), then ingested_at desc as a deterministic tiebreak. Every row is
+  then joined to the IRS Business Master File (``public.eo_bmf``) for the
+  IRS name of record, subsection, foundation code, NTEE and the rest of
+  the BMF columns, and the 1.2M active orgs the BMF knows but no 990 does
+  (990-N filers, churches) are added as rows with ``name_source = 'BMF'``.
+  See ``_BMF_COLUMNS_SQL`` for the name rule.
 
   Built from ``basic_fields_current``, not raw staging: the ordering above
   cannot separate an original filing from its amendment (same taxyear, same
@@ -95,6 +100,69 @@ SCHEDULE_O_PART_III_FILTER = (
 # nonprofit text. A future enhancement could pick per-row based on a language
 # hint, but there isn't one available in the raw data today.
 FTS_CONFIG = "english"
+
+# The IRS Exempt Organizations Business Master File, ingested as source
+# irs_eo_bmf: one row per EIN for every currently recognized exempt org.
+EO_BMF_TABLE = "public.eo_bmf"
+
+# BMF columns carried on both identity tables, projected from an alias ``b``
+# over EO_BMF_TABLE (LEFT JOINed for 990 filers, the row itself for
+# BMF-only orgs). Typed where the staging TEXT is known-clean: amounts are
+# all-digit on every row, RULING is always six digits.
+#
+# The name rule (settled 2026-10-14, docs/bmf-assessment.md): for any org
+# with a 990 in our data, ``name`` / ``name_secondary`` stay the latest-990
+# lines and the BMF name of record rides alongside as ``irs_name`` /
+# ``irs_sort_name``. The BMF name is never swapped in: for group-exemption
+# subordinates the BMF NAME is the parent ("FRATERNAL ORDER OF EAGLES") with
+# the unit only in SORT_NAME ("3741 AERIE"), so a swap would misname about
+# 4% of our nonprofits. ``name_source`` says which source the name came
+# from: '990', '990-EZ', '990-PF' or 'BMF'.
+#
+# Code columns stay the IRS's codes (subsection '03', foundation '15',
+# status '01'); the doc has the legend. GROUP '0000' and RULING '000000'
+# mean "none" and become NULL.
+_BMF_COLUMNS_SQL = """
+                b.name                                  AS irs_name,
+                b.sort_name                             AS irs_sort_name,
+                b.subsection                            AS subsection,
+                b.classification                        AS classification,
+                b.foundation                            AS foundation_code,
+                b.ntee_cd                               AS ntee_cd,
+                NULLIF(b."group", '0000')               AS group_exemption,
+                NULLIF(LEFT(b.ruling, 4), '0000')::int  AS ruling_year,
+                b.filing_req_cd                         AS filing_req_cd,
+                b.status                                AS bmf_status,
+                b.tax_period                            AS bmf_tax_period,
+                b.asset_amt::bigint                     AS bmf_asset_amt,
+                b.income_amt::bigint                    AS bmf_income_amt,
+                b.revenue_amt::bigint                   AS bmf_revenue_amt,
+                (b.ein IS NOT NULL)                     AS in_bmf"""
+
+# Address and in-care-of lines for a BMF-only row. The IRS keys the
+# in-care-of name with a leading "% " (its convention for c/o); the 990's
+# incarenm is a plain name, so strip it. Spelled with chr(37) because a
+# literal percent sign in a statement that ever gains a bind parameter
+# would be read by the driver as a placeholder. ZIP '00000-0000' is the
+# IRS blank for a foreign address.
+_BMF_ONLY_ADDRESS_SQL = """
+                NULLIF(ltrim(b.ico, chr(37) || ' '), '') AS care_of,
+                b.street                                AS addr_line_1,
+                NULL::text                              AS addr_line_2,
+                b.city                                  AS city,
+                b.state                                 AS state,
+                NULLIF(b.zip, '00000-0000')             AS zip,
+                NULL::text                              AS addr_country"""
+
+# A BMF-only org is one with no filing of any form in our data. The IRS's
+# own flag decides which identity table it joins: PF_FILING_REQ_CD = '1'
+# (a 990-PF return is required: 13K orgs, 98% carrying a private-foundation
+# FOUNDATION code) goes to funder_canonical, everything else (990-N filers,
+# churches, 990-required orgs we have no return for) to nonprofit_canonical.
+_NO_FILING_SQL = """
+                NOT EXISTS (SELECT 1 FROM public.basic_fields_current    f WHERE f.filerein = b.ein)
+            AND NOT EXISTS (SELECT 1 FROM public.basic_fields_ez_current f WHERE f.filerein = b.ein)
+            AND NOT EXISTS (SELECT 1 FROM public.basic_fields_pf_current f WHERE f.filerein = b.ein)"""
 
 
 @dataclass
@@ -235,7 +303,7 @@ def _build_schedule_o_part_iii(session) -> int:
     return count
 
 
-def _build_nonprofit_canonical(session) -> int:
+def _build_nonprofit_canonical(session, table: str = NONPROFIT_CANONICAL_TABLE) -> int:
     """DROP + CREATE + populate public.nonprofit_canonical. Returns rowcount.
 
     Built from the UNION of 990 (``basic_fields_current``) and 990-EZ
@@ -256,16 +324,25 @@ def _build_nonprofit_canonical(session) -> int:
     describes one real filing rather than a composite stitched across
     forms, matching the row-level selection rule in ``current_grants``.
     ``source_form`` says which form the winning row came from.
+
+    Every winner is LEFT JOINed to the BMF (``_BMF_COLUMNS_SQL``); the 990
+    name stays, ``in_bmf`` is false for the ~140K revoked or terminated
+    orgs the BMF no longer lists (they hold historical grants and stay).
+    Then the BMF-only orgs — active, no filing of any form in our data,
+    not flagged as 990-PF filers — are appended with the BMF name as
+    ``name`` / ``name_secondary``, ``name_source = 'BMF'``, and lineage
+    pointing at the eo_bmf ingest run. ``table`` overrides the target for
+    a preview build into another schema; production callers leave it.
     """
-    logger.info("Building %s…", NONPROFIT_CANONICAL_TABLE)
-    session.execute(text(f"DROP TABLE IF EXISTS {NONPROFIT_CANONICAL_TABLE}"))
+    logger.info("Building %s…", table)
+    session.execute(text(f"DROP TABLE IF EXISTS {table}"))
     # Build as a CTAS; the DISTINCT ON picks the winning row per filerein.
     # NULLIF + CAST keeps row selection robust against blank-string taxyears —
     # they sort last (NULLS LAST), so any row with a real taxyear wins.
     session.execute(
         text(
             f"""
-            CREATE TABLE {NONPROFIT_CANONICAL_TABLE} AS
+            CREATE TABLE {table} AS
             WITH unified AS (
                 SELECT
                     filerein, filername1, filername2,
@@ -296,43 +373,80 @@ def _build_nonprofit_canonical(session) -> int:
                     2                                   AS source_rank,
                     _ingest_run_id, _source_version, _ingested_at
                 FROM public.basic_fields_ez_current
+            ),
+            winners AS (
+                SELECT DISTINCT ON (filerein)
+                    filerein                                AS ein,
+                    filername1                              AS name,
+                    filername2                              AS name_secondary,
+                    dbanbnline11                            AS dba_1,
+                    dbanbnline22                            AS dba_2,
+                    incarenm                                AS care_of,
+                    filerus1                                AS addr_line_1,
+                    filerus2                                AS addr_line_2,
+                    fileruscity                             AS city,
+                    filerusstate                            AS state,
+                    fileruszip                              AS zip,
+                    filerforctry                            AS addr_country,
+                    website                                 AS website,
+                    formationorm                            AS formation_year,
+                    taxyear                                 AS latest_taxyear,
+                    taxperend                               AS latest_taxperend,
+                    source_form                             AS source_form,
+                    _ingest_run_id                          AS source_run_id,
+                    _source_version                         AS source_version
+                FROM unified
+                ORDER BY
+                    filerein,
+                    CAST(NULLIF(taxyear, '') AS INT) DESC NULLS LAST,
+                    taxperend DESC NULLS LAST,
+                    source_rank,
+                    _ingested_at DESC NULLS LAST
             )
-            SELECT DISTINCT ON (filerein)
-                filerein                                AS ein,
-                filername1                              AS name,
-                filername2                              AS name_secondary,
-                dbanbnline11                            AS dba_1,
-                dbanbnline22                            AS dba_2,
-                incarenm                                AS care_of,
-                filerus1                                AS addr_line_1,
-                filerus2                                AS addr_line_2,
-                fileruscity                             AS city,
-                filerusstate                            AS state,
-                fileruszip                              AS zip,
-                filerforctry                            AS addr_country,
-                website                                 AS website,
-                formationorm                            AS formation_year,
-                taxyear                                 AS latest_taxyear,
-                taxperend                               AS latest_taxperend,
-                source_form                             AS source_form,
-                _ingest_run_id                          AS source_run_id,
-                _source_version                         AS source_version,
+            -- 990 / 990-EZ filers: the filing's identity, the BMF alongside.
+            SELECT
+                w.ein, w.name, w.name_secondary, w.dba_1, w.dba_2, w.care_of,
+                w.addr_line_1, w.addr_line_2, w.city, w.state, w.zip, w.addr_country,
+                w.website, w.formation_year, w.latest_taxyear, w.latest_taxperend,
+                w.source_form,
+                w.source_form                           AS name_source,
+                {_BMF_COLUMNS_SQL},
+                w.source_run_id, w.source_version,
                 NOW() AT TIME ZONE 'UTC'                AS _built_at
-            FROM unified
-            ORDER BY
-                filerein,
-                CAST(NULLIF(taxyear, '') AS INT) DESC NULLS LAST,
-                taxperend DESC NULLS LAST,
-                source_rank,
-                _ingested_at DESC NULLS LAST
+            FROM winners w
+            LEFT JOIN {EO_BMF_TABLE} b ON b.ein = w.ein
+            UNION ALL
+            -- BMF-only orgs: no filing of any form in our data, not a
+            -- 990-PF filer by the IRS's flag (those go to funder_canonical).
+            SELECT
+                b.ein,
+                b.name                                  AS name,
+                b.sort_name                             AS name_secondary,
+                NULL::text                              AS dba_1,
+                NULL::text                              AS dba_2,
+                {_BMF_ONLY_ADDRESS_SQL},
+                NULL::text                              AS website,
+                NULL::text                              AS formation_year,
+                NULL::text                              AS latest_taxyear,
+                NULL::text                              AS latest_taxperend,
+                NULL::text                              AS source_form,
+                'BMF'::text                             AS name_source,
+                {_BMF_COLUMNS_SQL},
+                b._ingest_run_id                        AS source_run_id,
+                b._source_version                       AS source_version,
+                NOW() AT TIME ZONE 'UTC'                AS _built_at
+            FROM {EO_BMF_TABLE} b
+            WHERE b.pf_filing_req_cd IS DISTINCT FROM '1'
+              AND {_NO_FILING_SQL}
             """
         )
     )
-    # ein is a natural primary key once DISTINCT ON enforces uniqueness.
+    # ein is a natural primary key: DISTINCT ON makes the filers unique and
+    # the BMF-only arm excludes every EIN with a filing.
     session.execute(
         text(
             f"""
-            ALTER TABLE {NONPROFIT_CANONICAL_TABLE}
+            ALTER TABLE {table}
             ADD CONSTRAINT nonprofit_canonical_pkey PRIMARY KEY (ein)
             """
         )
@@ -346,7 +460,7 @@ def _build_nonprofit_canonical(session) -> int:
     session.execute(
         text(
             f"""
-            ALTER TABLE {NONPROFIT_CANONICAL_TABLE}
+            ALTER TABLE {table}
             ADD COLUMN domain TEXT GENERATED ALWAYS AS (
                 lower(
                     regexp_replace(
@@ -369,15 +483,15 @@ def _build_nonprofit_canonical(session) -> int:
         text(
             f"""
             CREATE INDEX ix_nonprofit_canonical_domain
-            ON {NONPROFIT_CANONICAL_TABLE} (domain)
+            ON {table} (domain)
             WHERE domain <> ''
             """
         )
     )
     count = session.execute(
-        text(f"SELECT COUNT(*) FROM {NONPROFIT_CANONICAL_TABLE}")
+        text(f"SELECT COUNT(*) FROM {table}")
     ).scalar_one()
-    logger.info("%s: %s rows", NONPROFIT_CANONICAL_TABLE, f"{count:,}")
+    logger.info("%s: %s rows", table, f"{count:,}")
     return count
 
 
@@ -535,7 +649,7 @@ def _build_nonprofit_text(session) -> int:
     return count
 
 
-def _build_funder_canonical(session) -> int:
+def _build_funder_canonical(session, table: str = FUNDER_CANONICAL_TABLE) -> int:
     """DROP + CREATE + populate public.funder_canonical from basic_fields_pf_current.
 
     Private-foundation identity table — mirrors ``nonprofit_canonical``'s
@@ -546,55 +660,96 @@ def _build_funder_canonical(session) -> int:
     v1 — it's a Phase 3 enrichment task that needs external funder-type
     data. v1 carries identity + address + contact only.
 
+    Same BMF treatment as ``nonprofit_canonical``: every 990-PF filer LEFT
+    JOINed to the BMF (name kept, ``in_bmf`` false for the ~35K no longer
+    listed), then the BMF-only private foundations — no filing of any form
+    in our data, PF_FILING_REQ_CD = '1' — appended with ``name_source =
+    'BMF'``. ``table`` overrides the target for a preview build.
+
     Note: many grant-making 501(c)(3)s (community foundations, etc.) file
     990, not 990-PF. They live in ``nonprofit_canonical`` today. A future
     ``funder_canonical`` could be widened to a UNION of grant-makers across
     both form types; keeping the scope narrow here matches the "private
     foundation-centric" grant-making data we already have.
     """
-    logger.info("Building %s…", FUNDER_CANONICAL_TABLE)
-    session.execute(text(f"DROP TABLE IF EXISTS {FUNDER_CANONICAL_TABLE}"))
+    logger.info("Building %s…", table)
+    session.execute(text(f"DROP TABLE IF EXISTS {table}"))
     session.execute(
         text(
             f"""
-            CREATE TABLE {FUNDER_CANONICAL_TABLE} AS
-            SELECT DISTINCT ON (filerein)
-                filerein                                AS ein,
-                filername1                              AS name,
-                filername2                              AS name_secondary,
-                filerus1                                AS addr_line_1,
-                filerus2                                AS addr_line_2,
-                fileruscity                             AS city,
-                filerusstate                            AS state,
-                fileruszip                              AS zip,
-                filerforctry                            AS addr_country,
-                filerphone                              AS phone,
-                taxyear                                 AS latest_taxyear,
-                taxperend                               AS latest_taxperend,
-                _ingest_run_id                          AS source_run_id,
-                _source_version                         AS source_version,
+            CREATE TABLE {table} AS
+            WITH winners AS (
+                SELECT DISTINCT ON (filerein)
+                    filerein                                AS ein,
+                    filername1                              AS name,
+                    filername2                              AS name_secondary,
+                    filerus1                                AS addr_line_1,
+                    filerus2                                AS addr_line_2,
+                    fileruscity                             AS city,
+                    filerusstate                            AS state,
+                    fileruszip                              AS zip,
+                    filerforctry                            AS addr_country,
+                    filerphone                              AS phone,
+                    taxyear                                 AS latest_taxyear,
+                    taxperend                               AS latest_taxperend,
+                    _ingest_run_id                          AS source_run_id,
+                    _source_version                         AS source_version
+                FROM public.basic_fields_pf_current
+                ORDER BY
+                    filerein,
+                    CAST(NULLIF(taxyear, '') AS INT) DESC NULLS LAST,
+                    taxperend DESC NULLS LAST,
+                    _ingested_at DESC NULLS LAST
+            )
+            SELECT
+                w.ein, w.name, w.name_secondary,
+                w.addr_line_1, w.addr_line_2, w.city, w.state, w.zip, w.addr_country,
+                w.phone, w.latest_taxyear, w.latest_taxperend,
+                '990-PF'::text                          AS name_source,
+                {_BMF_COLUMNS_SQL},
+                w.source_run_id, w.source_version,
                 NOW() AT TIME ZONE 'UTC'                AS _built_at
-            FROM public.basic_fields_pf_current
-            ORDER BY
-                filerein,
-                CAST(NULLIF(taxyear, '') AS INT) DESC NULLS LAST,
-                taxperend DESC NULLS LAST,
-                _ingested_at DESC NULLS LAST
+            FROM winners w
+            LEFT JOIN {EO_BMF_TABLE} b ON b.ein = w.ein
+            UNION ALL
+            -- BMF-only private foundations: a 990-PF is required by the
+            -- IRS's flag but we hold no filing of any form.
+            SELECT
+                b.ein,
+                b.name                                  AS name,
+                b.sort_name                             AS name_secondary,
+                b.street                                AS addr_line_1,
+                NULL::text                              AS addr_line_2,
+                b.city                                  AS city,
+                b.state                                 AS state,
+                NULLIF(b.zip, '00000-0000')             AS zip,
+                NULL::text                              AS addr_country,
+                NULL::text                              AS phone,
+                NULL::text                              AS latest_taxyear,
+                NULL::text                              AS latest_taxperend,
+                'BMF'::text                             AS name_source,
+                {_BMF_COLUMNS_SQL},
+                b._ingest_run_id                        AS source_run_id,
+                b._source_version                       AS source_version,
+                NOW() AT TIME ZONE 'UTC'                AS _built_at
+            FROM {EO_BMF_TABLE} b
+            WHERE b.pf_filing_req_cd = '1'
+              AND {_NO_FILING_SQL}
             """
         )
     )
     session.execute(
         text(
             f"""
-            ALTER TABLE {FUNDER_CANONICAL_TABLE}
+            ALTER TABLE {table}
             ADD CONSTRAINT funder_canonical_pkey PRIMARY KEY (ein)
             """
         )
     )
     count = session.execute(
-        text(f"SELECT COUNT(*) FROM {FUNDER_CANONICAL_TABLE}")
+        text(f"SELECT COUNT(*) FROM {table}")
     ).scalar_one()
-    logger.info("%s: %s rows", FUNDER_CANONICAL_TABLE, f"{count:,}")
+    logger.info("%s: %s rows", table, f"{count:,}")
     return count
 
 
@@ -973,6 +1128,7 @@ def build_canonical(*, include_people: bool = False) -> BuildResult:
 __all__ = [
     "BuildResult",
     "CANONICAL_BUILDS_TABLE",
+    "EO_BMF_TABLE",
     "FTS_CONFIG",
     "FUNDER_CANONICAL_TABLE",
     "NONPROFIT_CANONICAL_TABLE",
