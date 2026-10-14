@@ -9,20 +9,24 @@ subsection number because the return form does not ask for them, so the BMF is
 the candidate source for both, and a candidate identity spine: 990-N filers and
 churches appear here and nowhere else.
 
-This module measures, repeatably, what the BMF would add to and disagree with
-in gt_datamart. It reads the database and writes nothing to it.
+This module measures, repeatably, what the BMF adds to and disagrees with
+in gt_datamart. It reads the database and writes nothing to it. The BMF is
+read from ``public.eo_bmf``, the registered source ``irs_eo_bmf`` (one row
+per EIN, ingested by ``python -m givingtuesday_datamart.sources refresh
+--source irs_eo_bmf``), so the measurement is always against the version the
+datamart actually holds.
 
-    python -m givingtuesday_datamart.exploratory.bmf_assessment            # download (~700 MB) + measure
-    python -m givingtuesday_datamart.exploratory.bmf_assessment --refresh  # re-download even if present
+    python -m givingtuesday_datamart.exploratory.bmf_assessment
 
 Outputs:
   * a markdown report on stdout, also written to ``--report`` (default
     data/exploratory/bmf_assessment_report.md, git-ignored);
   * detail CSVs next to it (bmf_assessment_*.csv, git-ignored);
-  * the download manifest (size, sha256, server Last-Modified per file) in
-    ``--dest/manifest.json`` and in the report header. That manifest is the
-    version stamp: the IRS republishes under the same filenames roughly
-    monthly, so a report is only comparable to another at the same stamp.
+  * the ingest run's manifest (per file: server Last-Modified, bytes, sha256,
+    rows) in the report header, read from ``datamart_meta.ingest_runs``. That
+    manifest is the version stamp: the IRS republishes under the same
+    filenames roughly monthly, so a report is only comparable to another at
+    the same stamp.
 
 Results of the 2026-10-14 run and what they mean: docs/bmf-assessment.md.
 
@@ -42,39 +46,35 @@ Measurements:
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
 import numbers
+import posixpath
 import re
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 import numpy
 import pandas as pd
-import requests
 from sqlalchemy import text
 
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart.grant_matching import normalize_org_name
-from givingtuesday_datamart.ingestion import datamart_config
+from givingtuesday_datamart.ingestion import INGEST_RUNS_TABLE, datamart_config
 
-BMF_BASE_URL = "https://www.irs.gov/pub/irs-soi/"
-# Four regions, international (eo_xx) and Puerto Rico (eo_pr). eo4 ("all other
-# areas") is a few thousand rows: territories and foreign addresses.
-BMF_FILES = ("eo1", "eo2", "eo3", "eo4", "eo_xx", "eo_pr")
-# The file has 28 columns; these are the ones the assessment reads.
+BMF_SOURCE = "irs_eo_bmf"
+BMF_TABLE = "public.eo_bmf"
+# The table has the file's 28 columns; these are the ones the assessment reads.
 BMF_COLUMNS = (
-    "EIN", "NAME", "SORT_NAME", "CITY", "STATE", "ZIP", "GROUP", "SUBSECTION",
-    "CLASSIFICATION", "RULING", "FOUNDATION", "STATUS", "TAX_PERIOD",
-    "FILING_REQ_CD", "ASSET_AMT", "INCOME_AMT", "REVENUE_AMT", "NTEE_CD",
+    "ein", "name", "sort_name", "city", "state", "zip", "group", "subsection",
+    "classification", "ruling", "foundation", "status", "tax_period",
+    "filing_req_cd", "asset_amt", "income_amt", "revenue_amt", "ntee_cd",
 )
-_CATEGORICAL = ("subsection", "classification", "foundation", "status", "filing_req_cd", "state", "source_file")
+_CATEGORICAL = ("subsection", "classification", "foundation", "status", "filing_req_cd", "state")
 SUBSECTION_BUCKETS = ("03", "04", "05", "06", "07")
 
-DEFAULT_DEST = Path("data/source_data/eo_bmf")
 DEFAULT_REPORT = Path("data/exploratory/bmf_assessment_report.md")
 
 # Identity tables and whether they carry the two DBA columns.
@@ -94,103 +94,50 @@ NAME_STOPWORDS = frozenset({
 JACCARD_SAME_ORG = 0.5
 
 
-# --- download -----------------------------------------------------------------
+# --- load ---------------------------------------------------------------------
 
 @dataclass(frozen=True)
-class BmfFile:
-    name: str
-    path: str
-    size: int
-    sha256: str
-    last_modified: str | None
+class BmfRun:
+    """The ingest run the measurement is against: ``source_version`` is the
+    newest server Last-Modified (YYYY_MM_DD); ``manifest`` has one entry per
+    file with url, last_modified, bytes, sha256 and rows streamed."""
+    run_id: str
+    source_version: str
+    finished_at: datetime | None
+    manifest: list[dict]
 
 
-def _sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
+def load_bmf_run(session) -> BmfRun:
+    row = session.execute(text(f"""
+        SELECT run_id::text, source_version, finished_at, source_manifest
+        FROM {INGEST_RUNS_TABLE}
+        WHERE logical_name = :name AND status = 'success'
+        ORDER BY finished_at DESC LIMIT 1"""), {"name": BMF_SOURCE}).first()
+    if row is None:
+        raise LookupError(
+            f"no successful ingest of {BMF_SOURCE}; run "
+            f"`python -m givingtuesday_datamart.sources refresh --source {BMF_SOURCE}` first")
+    return BmfRun(row.run_id, row.source_version, row.finished_at, list(row.source_manifest or []))
 
-
-def needs_download(exists: bool, refresh: bool, recorded_last_modified: str | None, server_last_modified: str | None) -> bool:
-    """A local file is reused only when the manifest recorded the same server
-    Last-Modified for it; the IRS republishes under the same filenames, so a
-    file on disk with no record, or a different one, is a stale copy."""
-    if refresh or not exists:
-        return True
-    return recorded_last_modified is None or recorded_last_modified != server_last_modified
-
-
-def fetch_bmf(dest: Path, *, refresh: bool = False, http: requests.Session | None = None) -> list[BmfFile]:
-    """Download the six BMF files into ``dest``, reusing a file already there
-    only if ``dest/manifest.json`` recorded the server's current Last-Modified
-    for it (see ``needs_download``), then rewrite the manifest with size,
-    sha256 and Last-Modified per file and return its rows."""
-    dest.mkdir(parents=True, exist_ok=True)
-    http = http or requests.Session()
-    manifest_path = dest / "manifest.json"
-    recorded: dict[str, str | None] = {}
-    if manifest_path.exists():
-        recorded = {f["name"]: f.get("last_modified") for f in json.loads(manifest_path.read_text()).get("files", [])}
-    files: list[BmfFile] = []
-    for name in BMF_FILES:
-        url = f"{BMF_BASE_URL}{name}.csv"
-        path = dest / f"{name}.csv"
-        head = http.head(url, timeout=60, allow_redirects=True)
-        head.raise_for_status()
-        server_last_modified = head.headers.get("Last-Modified")
-        if needs_download(path.exists(), refresh, recorded.get(name), server_last_modified):
-            logger.info("Downloading %s", url)
-            part = path.with_suffix(".csv.part")
-            with http.get(url, stream=True, timeout=600) as resp:
-                resp.raise_for_status()
-                with open(part, "wb") as fh:
-                    for chunk in resp.iter_content(1 << 20):
-                        fh.write(chunk)
-            part.replace(path)
-        files.append(BmfFile(name, str(path), path.stat().st_size, _sha256(path), server_last_modified))
-    manifest = {"fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "files": [asdict(f) for f in files]}
-    manifest_path.write_text(json.dumps(manifest, indent=2))
-    return files
-
-
-# --- load ---------------------------------------------------------------------
 
 def normalise_ein(value) -> str:
     """Digits only, left-padded to nine (the BMF drops no zeros, our tables sometimes do)."""
     return re.sub(r"\D", "", str(value or "")).zfill(9)
 
 
-def dedupe_bmf(bmf: pd.DataFrame) -> pd.DataFrame:
-    """One row per EIN. A few thousand EINs repeat across the regional files;
-    the latest TAX_PERIOD wins, then the earlier file in BMF_FILES order."""
-    order = {name: i for i, name in enumerate(BMF_FILES)}
-    ranked = bmf.assign(_order=bmf["source_file"].map(order))
-    ranked = ranked.sort_values(["ein", "tax_period", "_order"], ascending=[True, False, True], kind="mergesort")
-    return ranked.drop_duplicates("ein", keep="first").drop(columns="_order").set_index("ein")
-
-
-def load_bmf(files: list[BmfFile]) -> pd.DataFrame:
-    """All six files as one frame indexed by nine-digit EIN, strings only,
-    blanks as empty strings, low-cardinality columns as categories."""
-    frames = []
-    for f in files:
-        df = pd.read_csv(f.path, dtype=str, usecols=list(BMF_COLUMNS), keep_default_na=False,
-                         encoding="utf-8", encoding_errors="replace")
-        df.columns = [c.lower() for c in df.columns]
-        for c in df.columns:
-            df[c] = df[c].str.strip()
-        df["source_file"] = f.name
-        frames.append(df)
-    bmf = pd.concat(frames, ignore_index=True)
+def load_bmf(session) -> pd.DataFrame:
+    """``public.eo_bmf`` as one frame indexed by nine-digit EIN, strings only,
+    blanks as empty strings, low-cardinality columns as categories. The
+    table is already one row per EIN (the source's dedupe rule: latest
+    TAX_PERIOD, then file order)."""
+    cols = ", ".join(f'"{c}"' for c in BMF_COLUMNS)
+    bmf = pd.read_sql(text(f"SELECT {cols} FROM {BMF_TABLE}"), session.connection(), dtype="string")
+    bmf = bmf.fillna("").astype(str)
     bmf["ein"] = bmf["ein"].map(normalise_ein)
-    rows_read = len(bmf)
-    bmf = dedupe_bmf(bmf)
-    bmf.attrs["rows_read"] = rows_read
+    bmf = bmf.set_index("ein")
     for c in _CATEGORICAL:
         bmf[c] = bmf[c].astype("category")
-    logger.info("BMF: %s rows read, %s distinct EINs", f"{bmf.attrs['rows_read']:,}", f"{len(bmf):,}")
+    logger.info("BMF: %s EINs read from %s", f"{len(bmf):,}", BMF_TABLE)
     return bmf
 
 
@@ -389,15 +336,26 @@ def md_table(df: pd.DataFrame) -> str:
     return "\n".join(lines)
 
 
-def render_report(files: list[BmfFile], bmf: pd.DataFrame, fill: dict, cov: pd.DataFrame,
+def snapshot_table(run: BmfRun) -> pd.DataFrame:
+    """The run's per-file manifest as a table keyed by file name."""
+    rows = [{"name": posixpath.basename(urlparse(f["url"]).path), "bytes": f.get("bytes"),
+             "sha256": f.get("sha256"), "last_modified": f.get("last_modified"), "rows": f.get("rows")}
+            for f in run.manifest]
+    return pd.DataFrame(rows, columns=["name", "bytes", "sha256", "last_modified", "rows"]).set_index("name")
+
+
+def render_report(run: BmfRun, bmf: pd.DataFrame, fill: dict, cov: pd.DataFrame,
                   names: dict[str, tuple], gain: tuple, totals: dict, sample: int) -> str:
+    streamed = sum(int(f.get("rows") or 0) for f in run.manifest)
     out = ["# EO BMF assessment", "",
            f"Generated {datetime.now(timezone.utc).isoformat(timespec='seconds')} by "
            "`givingtuesday_datamart.exploratory.bmf_assessment`.", "",
            "## Snapshot", "",
-           md_table(pd.DataFrame([asdict(f) for f in files]).set_index("name").drop(columns="path")), "",
-           f"Rows read {bmf.attrs.get('rows_read', len(bmf)):,}; distinct EINs {len(bmf):,} "
-           "(duplicates across files resolved by latest TAX_PERIOD, then file order).", "",
+           f"`{BMF_SOURCE}` version {run.source_version}, ingest run `{run.run_id}` "
+           f"(finished {run.finished_at}).", "",
+           md_table(snapshot_table(run)), "",
+           f"Rows streamed {streamed:,}; rows in {BMF_TABLE} {len(bmf):,} "
+           "(one per EIN: duplicates across files resolved by latest TAX_PERIOD, then file order).", "",
            "## 1. NTEE fill", "", md_table(fill["overall"]), "", md_table(fill["by_subsection"].head(12)), "",
            "Filing requirement (02 = 990-N postcard filers, 01 = 990/990-EZ, 06 = churches not required):", "",
            md_table(fill["filing_requirement"].head(8)), "",
@@ -422,10 +380,10 @@ def render_report(files: list[BmfFile], bmf: pd.DataFrame, fill: dict, cov: pd.D
     return "\n".join(out)
 
 
-def run(dest: Path = DEFAULT_DEST, report_path: Path = DEFAULT_REPORT, *, refresh: bool = False, sample: int = 12) -> str:
-    files = fetch_bmf(dest, refresh=refresh)
-    bmf = load_bmf(files)
+def run(report_path: Path = DEFAULT_REPORT, *, sample: int = 12) -> str:
     with get_session(config=datamart_config()) as session:
+        bmf_run = load_bmf_run(session)
+        bmf = load_bmf(session)
         canon = {t: load_canonical(session, t, with_dba) for t, with_dba in CANONICAL_TABLES.items()}
         grantees = load_grantee_totals(session)
         totals = load_grant_totals(session)
@@ -436,7 +394,7 @@ def run(dest: Path = DEFAULT_DEST, report_path: Path = DEFAULT_REPORT, *, refres
     names = {t: name_agreement(bmf, df) for t, df in canon.items()}
     canonical_eins = canon["nonprofit_canonical"].index.union(canon["funder_canonical"].index)
     gain = matcher_gain(bmf, grantees, canonical_eins)
-    report = render_report(files, bmf, fill, cov, names, gain, totals, sample)
+    report = render_report(bmf_run, bmf, fill, cov, names, gain, totals, sample)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(report)
     stem = report_path.with_suffix("")
@@ -451,12 +409,10 @@ def run(dest: Path = DEFAULT_DEST, report_path: Path = DEFAULT_REPORT, *, refres
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--dest", type=Path, default=DEFAULT_DEST, help="where the BMF files are kept")
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT, help="markdown report path")
-    parser.add_argument("--refresh", action="store_true", help="re-download even if the files exist")
     parser.add_argument("--sample", type=int, default=12, help="disagreement examples per table")
     args = parser.parse_args(argv)
-    print(run(args.dest, args.report, refresh=args.refresh, sample=args.sample))
+    print(run(args.report, sample=args.sample))
     return 0
 
 

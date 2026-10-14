@@ -4,8 +4,9 @@
 Subcommands:
 
 * ``status`` — print each registered source alongside the newest matching file
-  currently in S3. Answers "is our pinned ingestion stale?" without running a
-  full refresh. S3-only; no DB connection.
+  currently in S3 (or, for direct-HTTPS sources such as the IRS BMF, the
+  newest server Last-Modified). Answers "is our pinned ingestion stale?"
+  without running a full refresh. Network only; no DB connection.
 * ``loaded`` — print the most recent run per source from
   ``datamart_meta.ingest_runs``. Answers "what tables have been loaded, at
   what version, and how long ago?" Hits the DB; no S3.
@@ -24,11 +25,12 @@ import argparse
 import logging
 import sys
 
+import requests
 from botocore.exceptions import BotoCoreError, ClientError
 
 from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart.sources.registry import REGISTRY, S3_BUCKET, S3_PREFIX, get_source
-from givingtuesday_datamart.sources.resolver import list_bucket, resolve_latest
+from givingtuesday_datamart.sources.resolver import BucketListing, list_bucket, resolve_source
 from givingtuesday_datamart.sources.spec import SourceSpec
 
 
@@ -51,7 +53,9 @@ def _configure_cli_logging() -> None:
     logger.addHandler(handler)
 
 
-def _format_size(size: int) -> str:
+def _format_size(size: int | None) -> str:
+    if size is None:
+        return "—"
     if size >= 1024 * 1024 * 1024:
         return f"{size / (1024 ** 3):.2f} GB"
     if size >= 1024 * 1024:
@@ -61,9 +65,29 @@ def _format_size(size: int) -> str:
     return f"{size} B"
 
 
+def _list_bucket_if_needed(specs: list[SourceSpec]) -> BucketListing | None:
+    """One S3 listing shared by every S3-resolved spec in ``specs``; None
+    when none of them needs it (a `refresh --source irs_eo_bmf` never
+    touches S3). Raises the boto errors for the caller to report."""
+    if not any(not s.urls for s in specs):
+        return None
+    return list_bucket(S3_BUCKET, S3_PREFIX)
+
+
+def _resolve_for_cli(spec: SourceSpec, listing: BucketListing | None):
+    """resolve_source, with a direct source's HTTP failure reported as a
+    missing source rather than a crash, so one unreachable server does not
+    hide the status of every other source."""
+    try:
+        return resolve_source(spec, listing=listing)
+    except requests.RequestException as err:
+        logger.error("Failed to HEAD %s for %s: %s", spec.urls[0] if spec.urls else "?", spec.logical_name, err)
+        return None
+
+
 def cmd_status() -> int:
     try:
-        listing = list_bucket(S3_BUCKET, S3_PREFIX)
+        listing = _list_bucket_if_needed(list(REGISTRY))
     except (BotoCoreError, ClientError) as err:
         logger.error("Failed to list s3://%s/%s: %s", S3_BUCKET, S3_PREFIX, err)
         return 2
@@ -72,7 +96,7 @@ def cmd_status() -> int:
     rows: list[tuple[str, str, str, str, str]] = []
     missing: list[SourceSpec] = []
     for spec in REGISTRY:
-        resolved = resolve_latest(spec, listing=listing)
+        resolved = _resolve_for_cli(spec, listing)
         if resolved is None:
             missing.append(spec)
             rows.append((spec.logical_name, spec.staging_table_name, "—", "NOT FOUND", ""))
@@ -101,9 +125,12 @@ def cmd_status() -> int:
         print(fmt_row(row))
     if missing:
         logger.warning(
-            "%d source(s) did not match any file in S3: %s",
+            "%d source(s) could not be resolved: %s",
             len(missing),
-            ", ".join(f"{s.logical_name} (regex={s.filename_regex})" for s in missing),
+            ", ".join(
+                f"{s.logical_name} ({'urls=' + s.urls[0] + '…' if s.urls else 'regex=' + s.filename_regex})"
+                for s in missing
+            ),
         )
         return 1
     return 0
@@ -363,7 +390,7 @@ def cmd_refresh(source_names: list[str] | None, *, force: bool) -> int:
         return 2
 
     try:
-        listing = list_bucket(S3_BUCKET, S3_PREFIX)
+        listing = _list_bucket_if_needed(specs)
     except (BotoCoreError, ClientError) as err:
         logger.error("Failed to list s3://%s/%s: %s", S3_BUCKET, S3_PREFIX, err)
         return 2
@@ -372,21 +399,24 @@ def cmd_refresh(source_names: list[str] | None, *, force: bool) -> int:
     summary_rows: list[tuple[str, str, str, str]] = []
     reloaded_tables: set[str] = set()
     for i, spec in enumerate(specs, start=1):
-        resolved = resolve_latest(spec, listing=listing)
+        resolved = _resolve_for_cli(spec, listing)
         if resolved is None:
-            logger.error(
-                "No file matching regex=%r in s3://%s/%s for %s — skipping.",
-                spec.filename_regex,
-                spec.s3_bucket,
-                spec.s3_prefix,
-                spec.logical_name,
-            )
+            if spec.urls:
+                logger.error("Could not resolve %s from its URLs — skipping.", spec.logical_name)
+            else:
+                logger.error(
+                    "No file matching regex=%r in s3://%s/%s for %s — skipping.",
+                    spec.filename_regex,
+                    spec.s3_bucket,
+                    spec.s3_prefix,
+                    spec.logical_name,
+                )
             summary_rows.append((spec.logical_name, "—", "missing_source", ""))
             exit_code = 1
             continue
 
         logger.info(
-            "[%d/%d] %s: latest S3 version %s (%s, %s) -> %s",
+            "[%d/%d] %s: latest version %s (%s, %s) -> %s",
             i,
             len(specs),
             spec.logical_name,

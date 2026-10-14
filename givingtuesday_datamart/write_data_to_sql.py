@@ -9,14 +9,20 @@ would split those mid-row and silently produce "malformed" rows.
 No disk caching, no in-memory load of the full file: suitable for multi-GB
 inputs on memory-constrained hosts. Columns are created as TEXT; caller may
 pass ``extra_columns`` to stamp constant values (lineage metadata) on every
-row during the same COPY pass.
+row during the same COPY pass. The bytes are counted and SHA-256'd as they
+stream past, so the caller gets a content fingerprint of exactly what was
+loaded without a second read.
 """
 
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import sys
+import tempfile
+import time
+from dataclasses import dataclass
 
 import requests
 from sqlalchemy import text
@@ -38,6 +44,36 @@ STREAMING_BATCH_SIZE = 50000
 # Bytes per iter_content chunk. 256 KB is urllib3's ball-park default and
 # keeps the number of Python-level iterations manageable on multi-GB inputs.
 HTTP_CHUNK_SIZE = 256 * 1024
+
+# Attempts at downloading a spooled file before giving up (see
+# ``spool_to_disk``). Each attempt re-downloads the whole file.
+SPOOL_ATTEMPTS = 3
+
+
+@dataclass(frozen=True)
+class StreamResult:
+    """What one ``stream_csv_url_to_table`` call loaded: rows written, bytes
+    of (transport-decoded) CSV read, and their SHA-256. The hash is over the
+    same bytes a download to disk would hold, so it is comparable to a
+    ``sha256sum`` of the file."""
+
+    rows: int
+    bytes: int
+    sha256: str
+
+
+class _ByteTally:
+    """Counts and hashes the chunks of a byte iterator as they stream past."""
+
+    def __init__(self) -> None:
+        self.digest = hashlib.sha256()
+        self.nbytes = 0
+
+    def wrap(self, chunks):
+        for chunk in chunks:
+            self.digest.update(chunk)
+            self.nbytes += len(chunk)
+            yield chunk
 
 
 class _IterBytesReader(io.RawIOBase):
@@ -76,6 +112,40 @@ class _IterBytesReader(io.RawIOBase):
         b[:take] = self._buffer[:take]
         self._buffer = self._buffer[take:]
         return take
+
+
+def _spool_response(url: str, tally: "_ByteTally"):
+    """Download ``url`` completely into an anonymous temp file, hashing as
+    it goes, and return the file positioned at the start.
+
+    For servers that drop a connection a slow reader holds open: irs.gov
+    closed the BMF stream after ~15 MB while a COPY batch was running
+    (``IncompleteRead``), where S3 happily waits. Reading at full speed to
+    disk first makes the parse-and-COPY pace irrelevant. Retries a failed
+    download from scratch up to SPOOL_ATTEMPTS times; a partial file is
+    never handed on.
+    """
+    last_error: Exception | None = None
+    for attempt in range(1, SPOOL_ATTEMPTS + 1):
+        spool = tempfile.TemporaryFile()
+        fresh = _ByteTally()
+        try:
+            with requests.get(url, stream=True, timeout=3600) as response:
+                response.raise_for_status()
+                for chunk in fresh.wrap(response.iter_content(chunk_size=HTTP_CHUNK_SIZE)):
+                    spool.write(chunk)
+        except requests.exceptions.RequestException as err:
+            spool.close()
+            last_error = err
+            logger.warning(f"Download attempt {attempt}/{SPOOL_ATTEMPTS} of {url} failed: {err}")
+            time.sleep(2 * attempt)
+            continue
+        spool.seek(0)
+        tally.digest, tally.nbytes = fresh.digest, fresh.nbytes
+        logger.info(f"Spooled {fresh.nbytes:,} bytes from {url} to disk (attempt {attempt})")
+        return spool
+    assert last_error is not None
+    raise last_error
 
 
 def _sanitize_column_name(col: str) -> str:
@@ -173,7 +243,8 @@ def stream_csv_url_to_table(
     batch_size: int = STREAMING_BATCH_SIZE,
     extra_columns: dict[str, str] | None = None,
     db_config: dict | None = None,
-) -> int:
+    spool_to_disk: bool = False,
+) -> StreamResult:
     """Stream a CSV from ``url`` directly into ``table_name`` via COPY.
 
     Parses the response with ``csv.reader`` over a ``TextIOWrapper`` with
@@ -190,9 +261,13 @@ def stream_csv_url_to_table(
             constant on every row at COPY time.
         db_config: Optional config dict override (targets a non-default
             database). Same shape as :func:`ingestion.datamart_config`.
+        spool_to_disk: Download the whole file to a temp file first (with
+            retries) and parse from there, for servers that close a slow
+            stream. Default streams straight from the response.
 
     Returns:
-        Number of rows written.
+        A :class:`StreamResult` with the rows written and the byte count and
+        SHA-256 of the CSV as read.
     """
     logger.info(f"Streaming CSV from: {url}")
     logger.info(f"Target table: {table_name}")
@@ -202,20 +277,24 @@ def stream_csv_url_to_table(
     extra_vals: list[str] = [extra_columns[k] for k in extra_names] if extra_columns else []
 
     try:
-        response = requests.get(url, stream=True, timeout=3600)
-        response.raise_for_status()
+        tally = _ByteTally()
+        if spool_to_disk:
+            buffered = _spool_response(url, tally)
+        else:
+            response = requests.get(url, stream=True, timeout=3600)
+            response.raise_for_status()
 
-        total_size = int(response.headers.get('content-length', 0))
-        if total_size > 0:
-            logger.info(f"File size: {total_size / (1024 ** 3):.2f} GB (uncompressed server hint)")
+            total_size = int(response.headers.get('content-length', 0))
+            if total_size > 0:
+                logger.info(f"File size: {total_size / (1024 ** 3):.2f} GB (uncompressed server hint)")
 
-        # Feed bytes through iter_content (the supported streaming API) rather
-        # than response.raw — the latter closes out from under us on
-        # minutes-long streams. Layer: iter_content -> RawIOBase wrapper ->
-        # BufferedReader -> TextIOWrapper -> csv.reader.
-        byte_chunks = response.iter_content(chunk_size=HTTP_CHUNK_SIZE)
-        raw_stream = _IterBytesReader(byte_chunks, response)
-        buffered = io.BufferedReader(raw_stream, buffer_size=HTTP_CHUNK_SIZE)
+            # Feed bytes through iter_content (the supported streaming API) rather
+            # than response.raw — the latter closes out from under us on
+            # minutes-long streams. Layer: iter_content -> RawIOBase wrapper ->
+            # BufferedReader -> TextIOWrapper -> csv.reader.
+            byte_chunks = tally.wrap(response.iter_content(chunk_size=HTTP_CHUNK_SIZE))
+            raw_stream = _IterBytesReader(byte_chunks, response)
+            buffered = io.BufferedReader(raw_stream, buffer_size=HTTP_CHUNK_SIZE)
 
         # newline="" is required so the csv module controls newline handling;
         # otherwise TextIOWrapper's universal newline translation would split
@@ -281,8 +360,11 @@ def stream_csv_url_to_table(
                     total_rows += len(batch)
 
                 cursor.close()
-                logger.info(f"Successfully wrote {total_rows:,} rows to '{table_name}'")
-                return total_rows
+                logger.info(
+                    f"Successfully wrote {total_rows:,} rows to '{table_name}' "
+                    f"({tally.nbytes:,} bytes, sha256 {tally.digest.hexdigest()[:12]}…)"
+                )
+                return StreamResult(rows=total_rows, bytes=tally.nbytes, sha256=tally.digest.hexdigest())
             finally:
                 raw_conn.close()
 

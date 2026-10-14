@@ -263,6 +263,51 @@ def _check_schema_drift(
     return results
 
 
+def _check_unique_key(
+    spec: SourceSpec,
+    staging_table: str,
+    row_count: int,
+    dedupe_removed: int | None,
+    db_config: dict,
+) -> CheckResult:
+    """For sources with a ``DedupeSpec``: the key must be unique after the
+    post-COPY collapse. Hard fail otherwise — a duplicate surviving means
+    the dedupe step did not run or its ORDER BY left ties, and every
+    consumer joining on the key would double rows. The detail records how
+    many source rows the collapse removed, so the run row carries the
+    full story (rows streamed = rows kept + rows removed)."""
+    if spec.dedupe is None:
+        return CheckResult(
+            name="unique_key",
+            status="pass",
+            detail="No dedupe declared for this source (skipped).",
+        )
+    key = ", ".join(f'"{c}"' for c in spec.dedupe.key)
+    with get_session(config=db_config) as session:
+        distinct = session.execute(
+            text(f"SELECT COUNT(*) FROM (SELECT DISTINCT {key} FROM {staging_table}) k")
+        ).scalar_one()
+    label = "+".join(spec.dedupe.key)
+    if distinct != row_count:
+        return CheckResult(
+            name="unique_key",
+            status="fail",
+            detail=(
+                f"{label} is not unique: {row_count:,} rows but {distinct:,} distinct keys "
+                f"after dedupe (ORDER BY {spec.dedupe.order_by})."
+            ),
+        )
+    removed = f"{dedupe_removed:,}" if dedupe_removed is not None else "an unrecorded number of"
+    return CheckResult(
+        name="unique_key",
+        status="pass",
+        detail=(
+            f"{label} unique over {row_count:,} rows; {removed} duplicate source rows "
+            f"removed (kept first by {spec.dedupe.order_by}, then file order)."
+        ),
+    )
+
+
 def _check_row_count_delta(row_count: int, prior_row_count: int | None) -> CheckResult:
     if prior_row_count is None or prior_row_count == 0:
         return CheckResult(
@@ -294,6 +339,7 @@ def validate_ingest(
     source_version: str,
     row_count: int,
     db_config: dict,
+    dedupe_removed: int | None = None,
 ) -> tuple[list[CheckResult], list[str]]:
     """Run all post-ingest validation checks.
 
@@ -331,6 +377,9 @@ def validate_ingest(
     results.append(_check_lineage_columns(staging_table, all_columns, db_config))
     results.append(
         _check_required_columns(spec, staging_table, column_list, row_count, db_config)
+    )
+    results.append(
+        _check_unique_key(spec, staging_table, row_count, dedupe_removed, db_config)
     )
     results.extend(_check_schema_drift(column_list, prior_column_list))
     results.append(_check_row_count_delta(row_count, prior_row_count))

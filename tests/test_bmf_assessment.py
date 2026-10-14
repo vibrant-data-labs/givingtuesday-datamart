@@ -9,23 +9,13 @@ from givingtuesday_datamart.exploratory import bmf_assessment as ba
 
 
 def _bmf(rows):
+    """A frame shaped like load_bmf's: one row per nine-digit EIN, blanks as ''."""
     df = pd.DataFrame(rows)
     for c in ("sort_name", "city", "state", "zip", "classification", "foundation", "status",
-              "filing_req_cd", "ntee_cd", "tax_period", "subsection", "source_file"):
+              "filing_req_cd", "ntee_cd", "tax_period", "subsection"):
         df[c] = df[c].fillna("") if c in df else ""
     df["ein"] = df["ein"].map(ba.normalise_ein)
-    return ba.dedupe_bmf(df)
-
-
-@pytest.mark.parametrize("exists,refresh,recorded,server,expected", [
-    (False, False, None, "Tue, 13 Oct 2026", True),          # nothing on disk
-    (True, True, "Tue, 13 Oct 2026", "Tue, 13 Oct 2026", True),  # --refresh
-    (True, False, None, "Tue, 13 Oct 2026", True),           # on disk but never recorded
-    (True, False, "Mon, 14 Sep 2026", "Tue, 13 Oct 2026", True),  # IRS republished since
-    (True, False, "Tue, 13 Oct 2026", "Tue, 13 Oct 2026", False),  # same published version
-])
-def test_needs_download(exists, refresh, recorded, server, expected):
-    assert ba.needs_download(exists, refresh, recorded, server) is expected
+    return df.set_index("ein")
 
 
 @pytest.mark.parametrize("raw,expected", [("01-2345678", "012345678"), (12345678, "012345678"), (None, "000000000")])
@@ -59,16 +49,17 @@ def test_classify_disagreement():
     assert ba.classify_disagreement(0.0, "", "same").startswith("no token in common: same period")
 
 
-def test_dedupe_keeps_latest_period_then_file_order():
-    bmf = _bmf([
-        {"ein": "1", "name": "OLD", "tax_period": "202312", "source_file": "eo1"},
-        {"ein": "1", "name": "NEW", "tax_period": "202412", "source_file": "eo2"},
-        {"ein": "2", "name": "FIRST", "tax_period": "202412", "source_file": "eo1"},
-        {"ein": "2", "name": "SECOND", "tax_period": "202412", "source_file": "eo3"},
+def test_snapshot_table_names_files_from_the_run_manifest():
+    run = ba.BmfRun("run-1", "2026_10_13", None, [
+        {"url": "https://www.irs.gov/pub/irs-soi/eo1.csv", "size": None, "last_modified": "Tue, 13 Oct 2026 19:13:10 GMT",
+         "bytes": 48985524, "sha256": "ea09", "rows": 343210},
+        {"url": "https://www.irs.gov/pub/irs-soi/eo_pr.csv", "size": None, "last_modified": "Tue, 13 Oct 2026 19:13:59 GMT",
+         "bytes": 454192, "sha256": "cbe1", "rows": 3100},
     ])
-    assert bmf.loc["000000001", "name"] == "NEW"
-    assert bmf.loc["000000002", "name"] == "FIRST"
-    assert len(bmf) == 2
+    table = ba.snapshot_table(run)
+    assert list(table.index) == ["eo1.csv", "eo_pr.csv"]
+    assert table.loc["eo1.csv", "bytes"] == 48985524
+    assert "| eo_pr.csv | 454,192 | cbe1 | Tue, 13 Oct 2026 19:13:59 GMT | 3,100 |" in ba.md_table(table)
 
 
 def test_fill_rates_and_coverage():

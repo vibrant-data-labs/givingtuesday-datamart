@@ -1,15 +1,26 @@
 """
-Resolve the latest version of a Datamart source from the public S3 bucket.
+Resolve the current version of a Datamart source.
 
-Uses boto3 with anonymous (unsigned) credentials — the bucket is public-read
-and public-list, so no AWS credentials are required.
+Two resolvers, one per way a ``SourceSpec`` locates its files:
+
+* :func:`resolve_latest` lists GivingTuesday's public S3 bucket (boto3 with
+  anonymous, unsigned credentials — the bucket is public-read and
+  public-list) and picks the newest dated filename.
+* :func:`resolve_direct` HEADs each plain HTTPS URL of a source republished
+  in place and takes the newest ``Last-Modified`` as the version.
+
+Both return a :class:`ResolvedVersion`; ingestion treats them alike.
 """
 
 from __future__ import annotations
 
+import posixpath
 from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
+from urllib.parse import urlparse
 
 import boto3
+import requests
 from botocore import UNSIGNED
 from botocore.config import Config
 
@@ -31,12 +42,27 @@ class BucketListing:
 
 
 @dataclass(frozen=True)
+class SourceFile:
+    """One file of a resolved version, as the server described it before
+    download. ``size`` is None when the server sends no usable
+    Content-Length (irs.gov does not); ingestion records the bytes actually
+    streamed in the run's manifest."""
+
+    url: str
+    size: int | None
+    last_modified: str | None
+
+
+@dataclass(frozen=True)
 class ResolvedVersion:
     source: SourceSpec
     version_date: str
     filename: str
     url: str
-    size: int
+    size: int | None
+    # Every file that makes up this version, in ingest order. One entry for
+    # an S3 source; one per URL for a direct source.
+    files: tuple[SourceFile, ...] = ()
 
 
 def list_bucket(bucket: str, prefix: str) -> BucketListing:
@@ -83,10 +109,75 @@ def resolve_latest(
     if best is None:
         return None
     version_date, obj, filename = best
+    url = source.url_for(filename)
     return ResolvedVersion(
         source=source,
         version_date=version_date,
         filename=filename,
-        url=source.url_for(filename),
+        url=url,
         size=obj.size,
+        files=(SourceFile(url=url, size=obj.size, last_modified=obj.last_modified),),
     )
+
+
+def last_modified_version(last_modified: list[str | None]) -> str:
+    """The newest of several HTTP ``Last-Modified`` values as ``YYYY_MM_DD``,
+    the same shape as the dated S3 filenames, so ``source_version`` sorts
+    and displays the same way for every source. Raises if no file carried
+    the header: without it there is no version to record, and a run that
+    cannot be told apart from the previous one must not be stamped."""
+    dates = [parsedate_to_datetime(v) for v in last_modified if v]
+    if not dates:
+        raise LookupError("no Last-Modified header on any file; cannot version the source")
+    return max(dates).strftime("%Y_%m_%d")
+
+
+def resolve_direct(
+    source: SourceSpec,
+    *,
+    http: requests.Session | None = None,
+    timeout: int = 60,
+) -> ResolvedVersion:
+    """HEAD each URL of a direct-HTTPS source and version the set by its
+    newest ``Last-Modified``. ``filename`` lists the file basenames;
+    ``url`` is the first file (``ingest_runs.source_url`` holds one URL,
+    the per-file manifest holds them all)."""
+    http = http or requests.Session()
+    files: list[SourceFile] = []
+    for url in source.urls:
+        head = http.head(url, timeout=timeout, allow_redirects=True)
+        head.raise_for_status()
+        # A HEAD's Content-Length describes the encoded body the server
+        # would send, not the file: irs.gov answers HEAD with a gzip-encoded
+        # empty body, so it reads 20. Only trust it unencoded.
+        length = head.headers.get("Content-Length")
+        encoded = bool(head.headers.get("Content-Encoding"))
+        files.append(
+            SourceFile(
+                url=url,
+                size=int(length) if length and not encoded else None,
+                last_modified=head.headers.get("Last-Modified"),
+            )
+        )
+    sizes = [f.size for f in files if f.size is not None]
+    return ResolvedVersion(
+        source=source,
+        version_date=last_modified_version([f.last_modified for f in files]),
+        filename=", ".join(posixpath.basename(urlparse(f.url).path) for f in files),
+        url=files[0].url,
+        size=sum(sizes) if len(sizes) == len(files) else None,
+        files=tuple(files),
+    )
+
+
+def resolve_source(
+    source: SourceSpec,
+    *,
+    listing: BucketListing | None = None,
+) -> ResolvedVersion | None:
+    """Resolve whichever way ``source`` is configured: direct URLs by
+    Last-Modified, otherwise the newest dated file in the S3 listing (None
+    if nothing matches)."""
+    if source.urls:
+        return resolve_direct(source)
+    return resolve_latest(source, listing=listing)
