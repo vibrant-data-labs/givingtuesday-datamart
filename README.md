@@ -605,6 +605,9 @@ givingtuesday_datamart/
   match_explainer.py    # Why did/didn't a grant row match an EIN (CLI + fns)
   matching_regression_checks.py  # Post-matching gate: coverage floors,
                                  # sentinel filers, precision ceilings
+  exploratory/
+    bmf_assessment.py   # IRS EO Business Master File vs gt_datamart: NTEE
+                        # fill, coverage, name agreement, matcher gain
 data/
   corrections/
     org_identities.csv  # Human-verified identity rows added to the filer
@@ -613,6 +616,8 @@ frontend/               # Next.js peerlo app (reads gt_datamart via pg pool)
 docs/
   backbone-plan.md      # Detailed architecture + decision history
   corrections-plan.md   # Corrections-registry design + curation workflow
+  bmf-assessment.md     # What the IRS Business Master File adds (NTEE,
+                        # subsection, identity spine) and how to rerun it
 pyproject.toml          # pip-installable; [ingest] extra for the heavy path
 ```
 
