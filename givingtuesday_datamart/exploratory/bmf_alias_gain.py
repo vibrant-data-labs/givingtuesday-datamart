@@ -20,12 +20,14 @@ Method:
    pseudo-random sample of them (ORDER BY md5 of the keys).
 3. Slice the universe to every row that blocks with a sampled tuple (same
    clean_zip, or same full_name), run blocking -> Compare -> both filter
-   stages -> winner resolution, and read who won each tuple and from which
-   arm (source).
+   stages -> precision guards -> winner resolution, and read who won each
+   tuple and from which arm (source). Resolve the same scored pairs once
+   more without the guards, to see what they refuse.
 4. Report wins by source, the grant rows and dollars behind the eo_bmf wins,
-   the name-score distribution of those wins, and a hand-checkable sample of
-   grant name vs BMF alias. Scale the sampled win rate to the unmatched
-   population for the expected gain of a full rerun.
+   the name-score distribution of those wins by BMF line (NAME / SORT_NAME),
+   the wins the precision guards refused, the SORT_NAME wins below 0.85, and
+   a hand-checkable sample of grant name vs BMF alias. Scale the sampled win
+   rate to the unmatched population for the expected gain of a full rerun.
 
 Why the slice is faithful: every decision that picks a tuple's winner is
 per-pair and deterministic, and the slice holds every universe row any
@@ -51,7 +53,8 @@ from givingtuesday_datamart.corrections_preflight import (
     _KEY8,
     _UNIVERSE_SQL,
     _clean_like_run,
-    _match_slice,
+    _resolve_winners,
+    _score_slice,
 )
 from givingtuesday_datamart.grant_matching import _load_corrections, create_or_replace_views
 from givingtuesday_datamart.ingestion import datamart_config
@@ -130,9 +133,30 @@ def wins_by_source(winners: pd.DataFrame, universe_slice: pd.DataFrame, sample: 
     )
 
 
+def guard_refusals(unguarded: pd.DataFrame, guarded: pd.DataFrame) -> pd.DataFrame:
+    """The unguarded wins the precision guards took away: tuples no longer
+    won, or won by a different universe row (an exact pair of another EIN
+    that the refused pair had outscored)."""
+    if unguarded.empty:
+        return unguarded
+    now = guarded[["private_foundations_df_index", "basic_fields_df_index"]].rename(
+        columns={"basic_fields_df_index": "_now"})
+    merged = unguarded.merge(now, on="private_foundations_df_index", how="left")
+    return merged[merged["_now"].isna() | (merged["_now"] != merged["basic_fields_df_index"])].drop(columns="_now")
+
+
+_BANDS = ([0, 0.85, 0.95, 0.99, 1.0001], ["0.70–0.85", "0.85–0.95", "0.95–0.99", "0.99–1.00"])
+
+
+def _win_line(r) -> str:
+    return (f"- {r.full_name!r} @ {r.clean_zip} -> {r.full_name_univ!r} ({r.filerein_key_univ}, "
+            f"{getattr(r, 'alias_kind', r.source_univ)}) name {r.name_score:.3f} addr {r.addr_score:.3f}")
+
+
 def render_report(sample_n: int, unmatched_total: int, matched_tuples: int, universe_rows: int,
                   slice_rows: int, wu: pd.DataFrame, bmf_rows_dollars: tuple[int, float],
-                  all_rows_dollars: tuple[int, float], alias_kinds: pd.Series, examples: pd.DataFrame) -> str:
+                  all_rows_dollars: tuple[int, float], tagged: pd.DataFrame, examples: pd.DataFrame,
+                  refused: pd.DataFrame) -> str:
     by_source = wu["source_univ"].value_counts()
     bmf = wu[wu["source_univ"] == "eo_bmf"]
     lines = ["# BMF alias gain on a slice of currently unmatched grant tuples", "",
@@ -155,19 +179,22 @@ def render_report(sample_n: int, unmatched_total: int, matched_tuples: int, univ
                   f"Scaled to the {unmatched_total:,} unmatched tuples: about {len(bmf) * scale:,.0f} tuples, "
                   f"{rows * scale:,.0f} grant rows, ${dollars * scale / 1e9:,.2f}B through BMF aliases "
                   f"(all sources: {arows * scale:,.0f} rows, ${adollars * scale / 1e9:,.2f}B).", "",
-                  "Name score of the BMF wins:", "",
-                  "| name_score | tuples |", "|---|---|"]
-        bins = pd.cut(bmf["name_score"], [0, 0.85, 0.95, 0.99, 1.0001], right=False,
-                      labels=["0.70–0.85", "0.85–0.95", "0.95–0.99", "0.99–1.00"])
-        for label, n in bins.value_counts().sort_index().items():
-            lines.append(f"| {label} | {n:,} |")
-        lines += ["", "Which BMF line won:", "", "| alias | tuples |", "|---|---|"]
-        for kind, n in alias_kinds.items():
-            lines.append(f"| {kind} | {n:,} |")
+                  "Name score of the BMF wins, by which BMF line won (NAME or SORT_NAME):", "",
+                  "| alias | " + " | ".join(_BANDS[1]) + " | all |", "|---|" + "---|" * (len(_BANDS[1]) + 1)]
+        bands = pd.cut(tagged["name_score"], _BANDS[0], right=False, labels=_BANDS[1])
+        tab = pd.crosstab(tagged["alias_kind"], bands, margins=True, margins_name="all")
+        for kind, row in tab.iterrows():
+            lines.append(f"| {kind} | " + " | ".join(f"{int(row.get(b, 0)):,}" for b in _BANDS[1]) + f" | {int(row['all']):,} |")
+        low_sort = tagged[(tagged["alias_kind"] == "sort_name") & (tagged["name_score"] < 0.85)].sort_values("name_score")
+        lines += ["", f"SORT_NAME wins below name 0.85 ({len(low_sort)}), for the per-alias floor question:", ""]
+        lines += [_win_line(r) for r in low_sort.itertuples()]
         lines += ["", f"Sample of {len(examples)} BMF wins (grant name @ zip -> BMF alias, EIN, name_score, addr_score):", ""]
-        for r in examples.itertuples():
-            lines.append(f"- {r.full_name!r} @ {r.clean_zip} -> {r.full_name_univ!r} ({r.filerein_key_univ}, "
-                         f"{r.alias_kind}) name {r.name_score:.3f} addr {r.addr_score:.3f}")
+        lines += [_win_line(r) for r in examples.itertuples()]
+    lines += ["", "## Precision guards", "",
+              f"Resolving the same scored pairs without the guards wins {len(wu) + len(refused):,} tuples; "
+              f"the guards refuse {len(refused):,} of those wins"
+              + (f" ({dict(refused['source_univ'].value_counts())})" if len(refused) else "") + ".", ""]
+    lines += [_win_line(r) for r in refused.sort_values("name_score").itertuples()]
     return "\n".join(lines) + "\n"
 
 
@@ -191,12 +218,18 @@ def run(sample_n: int = 2000, report_path: Path = DEFAULT_REPORT, examples: int 
     logger.info("unmatched %s tuples; sampled %s", f"{unmatched_total:,}", f"{len(sample):,}")
     u_slice = slice_universe(universe, sample)
     logger.info("slice: %s universe rows", f"{len(u_slice):,}")
-    winners = _match_slice(u_slice, sample)
-    wu = wins_by_source(winners, u_slice, sample) if len(winners) else pd.DataFrame(columns=["source_univ"])
+    features = _score_slice(u_slice, sample)
+    winners = _resolve_winners(features, u_slice, sample)
+    refused = guard_refusals(_resolve_winners(features, u_slice, sample, guards=False), winners)
+    empty = pd.DataFrame(columns=["source_univ", "name_score"])
+    wu = wins_by_source(winners, u_slice, sample) if len(winners) else empty
+    refused = wins_by_source(refused, u_slice, sample) if len(refused) else empty
     report_path.parent.mkdir(parents=True, exist_ok=True)
     if len(wu):
         # The expensive part is done; keep it before the dollars query.
         wu.to_csv(report_path.with_name(report_path.stem + "_wins.csv"), index=False)
+    if len(refused):
+        refused.to_csv(report_path.with_name(report_path.stem + "_refused.csv"), index=False)
     bmf = wu[wu["source_univ"] == "eo_bmf"] if len(wu) else wu
     with get_session(config=config) as session:
         per_tuple = rows_dollars_by_tuple(session.connection(), wu) if len(wu) else pd.DataFrame()
@@ -206,16 +239,15 @@ def run(sample_n: int = 2000, report_path: Path = DEFAULT_REPORT, examples: int 
         hit = frame[_KEY7].merge(per_tuple, on=_KEY7, how="left")
         return int(hit["n_rows"].fillna(0).sum()), float(hit["dollars"].fillna(0).astype(float).sum())
     bmf_rd, all_rd = _rd(bmf), _rd(wu)
-    kinds = pd.Series(dtype=int)
+    tagged = pd.DataFrame(columns=["alias_kind", "name_score"])
     ex = pd.DataFrame()
     if len(bmf):
         tagged = bmf.merge(alias_kind, left_on=["filerein_key_univ", "name1_key_univ"],
                            right_on=["filerein_key", "name1_key"], how="left")
         tagged["alias_kind"] = tagged["alias_kind"].fillna("name")
-        kinds = tagged["alias_kind"].value_counts()
         ex = tagged.sample(min(examples, len(tagged)), random_state=7).sort_values("name_score")
     report = render_report(len(sample), unmatched_total, len(matched), len(universe), len(u_slice),
-                           wu, bmf_rd, all_rd, kinds, ex)
+                           wu, bmf_rd, all_rd, tagged, ex, refused)
     report_path.write_text(report)
     logger.info("Report written to %s", report_path)
     return report
