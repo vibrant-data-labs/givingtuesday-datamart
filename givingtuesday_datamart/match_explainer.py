@@ -19,7 +19,9 @@ matching pipeline's own cleaning/scoring code:
      normalized full_name — there is no state block; state only gates the
      cross-zip exact-name tier.)
   2. The four scores (zip/name/addr/state).
-  3. Which final filter tier passes or comes closest, and by how much.
+  3. Which final filter tier passes or comes closest, and by how much —
+     and whether a precision guard (government-named recipient below an
+     exact name) refuses a pair the tiers accept.
 
 Optionally append a hypothetical corrections row to the filer's identity
 rows, so "would this correction fix it?" is answerable before editing
@@ -57,6 +59,7 @@ from givingtuesday_datamart.grant_matching import (
     create_clean_address,
     create_full_name,
     filter_match_rules,
+    guard_government_names,
 )
 from givingtuesday_datamart.ingestion import datamart_config
 
@@ -85,6 +88,10 @@ _UNIVERSE_SQL = """
         UNION ALL
         SELECT *, 'basic_fields_pf' AS source
         FROM public.basic_fields_pf_unique_names_view
+        WHERE filerein_key = :ein
+        UNION ALL
+        SELECT *, 'eo_bmf' AS source
+        FROM public.eo_bmf_unique_names_view
         WHERE filerein_key = :ein
         UNION ALL
         SELECT *, 'correction' AS source
@@ -182,11 +189,22 @@ def _score_pairs(
     ]
 
     kept = filter_match_rules(features_df=features, **FINAL_FILTER_RULES)
+    passes_tier = features.index.isin(kept.index)
+    # The precision guards run on the tier survivors, as in the matcher.
+    kept = guard_government_names(kept, grants["full_name"], universe["full_name"],
+                                  grant_index_col="grant_idx", universe_index_col="universe_idx")
     features["passes_filter"] = features.index.isin(kept.index)
+    features["guard_refused"] = passes_tier & ~features["passes_filter"]
     features["would_match"] = features["passes_filter"] & (
         features["blocked_via"] != "NOT BLOCKED"
     )
     features["explanation"] = features.apply(_tier_report, axis=1)
+    features.loc[features["guard_refused"], "explanation"] = (
+        "REFUSED by the government-name guard (government-named recipient, name "
+        + features.loc[features["guard_refused"], "name_score"].map("{:.3f}".format)
+        + " below exact and the filer row says something the grant row does not): "
+        + features.loc[features["guard_refused"], "explanation"]
+    )
 
     out = features.merge(
         universe[_KEY_COLS + ["source", "full_name"]].add_prefix("filer_"),
@@ -205,7 +223,7 @@ def _score_pairs(
         "grant_addressstate_key", "grant_addresszip_key", "grant_n_grant_rows",
         "filer_full_name", "filer_address1_key", "filer_addresszip_key",
         "filer_source", "blocked_via", "zip_score", "name_score", "addr_score",
-        "state_score", "would_match", "explanation", "current_match_ein",
+        "state_score", "would_match", "guard_refused", "explanation", "current_match_ein",
     ]]
 
 

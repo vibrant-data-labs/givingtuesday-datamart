@@ -260,16 +260,37 @@ python -m givingtuesday_datamart.grant_matching --chunk-size 50000 --resume-work
 
 Uses [`recordlinkage`](https://recordlinkage.readthedocs.io/) to compare
 private-grant recipient names + addresses against the filer universe
-(990 filers ∪ 990-PF filers ∪ the corrections registry —
+(990 filers ∪ 990-PF filers ∪ the IRS Business Master File's names ∪ the
+corrections registry —
 [`data/corrections/org_identities.csv`](data/corrections/org_identities.csv)).
-At the start of every run it reloads the corrections CSV, rebuilds all
-four filing-version-deduped `_current` relations
+The BMF arm (`eo_bmf_unique_names_view`) contributes the IRS name of
+record and, where set, the SORT_NAME line as separate alias rows at the
+BMF address, keyed by EIN: it is what makes 990-N filers and churches
+matchable at all, and it carries the IRS's spelling of every other org's
+name. Lines that carry a host rather than the org are left out: a
+SORT_NAME naming a trustee or a bank, a SORT_NAME that is a government or
+public-institution name (a chapter's campus), and a government-named NAME
+on a group subordinate's or a non-charity's record (a 4-H club filed
+under its university's group exemption, a staff union named after the
+university). Every matched row records which arm supplied the winning identity
+in `match_source` (`basic_fields` / `basic_fields_pf` / `eo_bmf` /
+`correction`), the filer name it matched (`match_name`) and the winning
+pair's two scores (`match_name_score`, `match_addr_score`). Between the
+final filter tiers and winner resolution a precision guard refuses the
+non-exact wins the universe cannot hold: a grant row naming a government
+or public institution ("city of", "county of", "university of" ...) may
+match below an exact name only when the filer row says nothing the grant
+row does not, so "university of utah" no longer resolves to the
+University of Utah Asia Campus
+([docs/matching-precision-guards.md](docs/matching-precision-guards.md)).
+At the start of every run it reloads the corrections CSV,
+rebuilds all four filing-version-deduped `_current` relations
 ([`current_grants.py`](givingtuesday_datamart/current_grants.py), issues
 #33 and #34), and recreates the matching views — no separate step needed.
 
 Candidate-pair chunks are written to S3 keyed on the full input lineage:
 the source versions of `irs_990pf_grants` / `irs_990_basic_fields` /
-`irs_990pf_basic_fields`, the corrections CSV content hash, and
+`irs_990pf_basic_fields` / `irs_eo_bmf`, the corrections CSV content hash, and
 `MATCHING_INPUT_SHAPE_VERSION` (a hand-bumped constant in
 `grant_matching.py` — bump it whenever a code change alters the input
 views' row order: dedup rules, view definitions, name normalization,
@@ -345,8 +366,9 @@ python -m givingtuesday_datamart.corrections_preflight
 python -m givingtuesday_datamart.grant_matching
 
 # 7. Regression gate — run before trusting or shipping the new match
-#    output. Compares coverage floors, sentinel filers, and precision
-#    ceilings against the last accepted baselines. On FAIL, follow
+#    output. Compares coverage floors, sentinel filers, precision
+#    ceilings, the match_source breakdown and the precision guard's own
+#    rule against the last accepted baselines. On FAIL, follow
 #    docs/matching-regression-runbook.md before touching any threshold.
 python -m givingtuesday_datamart.matching_regression_checks
 ```
@@ -650,6 +672,10 @@ givingtuesday_datamart/
   exploratory/
     bmf_assessment.py   # public.eo_bmf vs gt_datamart: NTEE fill, coverage,
                         # name agreement, matcher gain
+    bmf_alias_gain.py   # What the BMF alias arm wins, proved on a slice of
+                        # unmatched grant tuples (no full matcher run)
+    government_name_guard.py  # What the government-name guard refuses,
+                              # measured on the last run's output
 data/
   corrections/
     org_identities.csv  # Human-verified identity rows added to the filer
@@ -657,6 +683,8 @@ data/
 frontend/               # Next.js peerlo app (reads gt_datamart via pg pool)
 docs/
   backbone-plan.md      # Detailed architecture + decision history
+  matching-precision-guards.md  # The government-name guard: rule, measurements,
+                                # alternatives weighed, follow-ups
   corrections-plan.md   # Corrections-registry design + curation workflow
   bmf-assessment.md     # What the IRS Business Master File adds (NTEE,
                         # subsection, identity spine) and how to rerun it

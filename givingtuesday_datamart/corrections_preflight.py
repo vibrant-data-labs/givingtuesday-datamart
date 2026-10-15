@@ -11,8 +11,8 @@ Exit code 0 = all checks pass; 1 = at least one FAIL.
 For each CSV row it verifies, using the matcher's own functions (clean_zip /
 create_full_name / create_clean_address, the same recordlinkage blocking and
 Compare, filter_match_rules with the imported CHUNK/FINAL threshold sets,
-and the same best-per-recipient-tuple winner resolution) over the matcher's
-own SQL against the real views:
+the precision guards, and the same best-per-recipient-tuple winner
+resolution) over the matcher's own SQL against the real views:
 
   (a) the row survives the DISTINCT ON universe dedup — if it collapses
       into an organic filing with the same key tuple, the correction does
@@ -75,6 +75,7 @@ from givingtuesday_datamart.grant_matching import (
     create_full_name,
     create_or_replace_views,
     filter_match_rules,
+    guard_government_names,
 )
 from givingtuesday_datamart.ingestion import datamart_config
 from givingtuesday_datamart.matching_regression_checks import AMT, Gate
@@ -123,7 +124,10 @@ _UNIVERSE_SQL = """
             SELECT *, 'basic_fields_pf' AS source, 2 AS source_rank
             FROM public.basic_fields_pf_unique_names_view
             UNION ALL
-            SELECT *, 'correction' AS source, 3 AS source_rank
+            SELECT *, 'eo_bmf' AS source, 3 AS source_rank
+            FROM public.eo_bmf_unique_names_view
+            UNION ALL
+            SELECT *, 'correction' AS source, 4 AS source_rank
             FROM public.corrections_unique_names_view
         ) arms
         ORDER BY filerein_key, name1_key, name2_key, address1_key,
@@ -219,14 +223,24 @@ def _score_slice(universe_slice: pd.DataFrame, grants_slice: pd.DataFrame) -> pd
     return features.reset_index()
 
 
-def _match_slice(universe_slice: pd.DataFrame, grants_slice: pd.DataFrame) -> pd.DataFrame:
-    """match_records' blocking → Compare → two-stage filter → winner
-    resolution, on a slice. Returns one row per matched grant tuple with
-    the winning universe row's index in basic_fields_df_index.
+def _resolve_winners(
+    features: pd.DataFrame, universe_slice: pd.DataFrame, grants_slice: pd.DataFrame,
+    guards: bool = True,
+) -> pd.DataFrame:
+    """match_records' two-stage filter → precision guards → winner
+    resolution over scored pairs (one row per candidate pair, as
+    _score_slice returns them). Returns one row per matched grant tuple
+    with the winning universe row's index in basic_fields_df_index.
+
+    ``guards=False`` skips the precision guards: what the matcher decided
+    before they existed, for measuring what they refuse.
     """
-    features = _score_slice(universe_slice, grants_slice)
     features = filter_match_rules(features_df=features, **CHUNK_FILTER_RULES)
     matches = filter_match_rules(features_df=features, **FINAL_FILTER_RULES).copy()
+    if guards:
+        matches = guard_government_names(
+            matches, grants_slice["full_name"], universe_slice["full_name"]
+        )
     matches = matches.drop_duplicates()
     if matches.empty:
         return matches
@@ -237,6 +251,19 @@ def _match_slice(universe_slice: pd.DataFrame, grants_slice: pd.DataFrame) -> pd
     matches = matches.sort_values("_combined_score", ascending=False, kind="mergesort")
     matches = matches.drop_duplicates(subset=["private_foundations_df_index"], keep="first")
     return matches.drop(columns="_combined_score")
+
+
+def _match_slice(
+    universe_slice: pd.DataFrame, grants_slice: pd.DataFrame, guards: bool = True
+) -> pd.DataFrame:
+    """match_records' blocking → Compare → two-stage filter → precision
+    guards → winner resolution, on a slice. Returns one row per matched
+    grant tuple with the winning universe row's index in
+    basic_fields_df_index.
+    """
+    return _resolve_winners(
+        _score_slice(universe_slice, grants_slice), universe_slice, grants_slice, guards
+    )
 
 
 def _rows_dollars_won(conn, tuples: pd.DataFrame) -> tuple[int, float]:
@@ -292,7 +319,8 @@ def run_preflight() -> int:
         create_or_replace_views(conn)
         logger.info(
             "Reading filer universe: basic_fields_unique_names_view "
-            "∪ basic_fields_pf_unique_names_view ∪ corrections_unique_names_view"
+            "∪ basic_fields_pf_unique_names_view ∪ eo_bmf_unique_names_view "
+            "∪ corrections_unique_names_view"
         )
         universe = pd.read_sql_query(text(_UNIVERSE_SQL), conn)
         logger.info("Reading public.privategrants_unique_names_view")

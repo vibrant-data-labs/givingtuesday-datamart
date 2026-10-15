@@ -346,4 +346,6 @@ Three stacked PRs, proposed as a session on October 14, 2026:
 3. **Matcher aliases.** BMF NAME and SORT_NAME with city, state and zip as
    extra alias rows keyed by EIN, with their own source value so match
    lineage records which alias won. Prove on a subset; the full matcher
-   rerun is a separate, scheduled step.
+   rerun is a separate, scheduled step. Built: `eo_bmf_unique_names_view`
+   is the fourth arm of the filer universe (`match_source = 'eo_bmf'`),
+   and `exploratory/bmf_alias_gain.py` is the slice proof.
