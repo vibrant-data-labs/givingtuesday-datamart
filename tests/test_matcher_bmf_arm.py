@@ -103,3 +103,30 @@ def test_unmatched_sample_is_deterministic_and_excludes_matched_tuples():
     assert a.attrs["unmatched_total"] == 6 and len(a) == 3
     assert a[keys].equals(b[keys])
     assert not set(a["name1_key"]) & set(matched["name1_key"])
+
+
+def test_guard_report_does_not_double_count_rerouted_tuples():
+    import pandas as pd
+
+    unguarded = pd.DataFrame({
+        "private_foundations_df_index": [0, 1, 2],
+        "basic_fields_df_index": [10, 11, 12],
+        "source_univ": ["basic_fields"] * 3,
+        "full_name": ["university of example"] * 3,
+        "clean_zip": ["90001"] * 3,
+        "full_name_univ": ["university of example affiliate"] * 3,
+        "filerein_key_univ": ["123456789"] * 3,
+        "name_score": [0.95] * 3,
+        "addr_score": [1.0] * 3,
+    })
+    # One original win remains, one reroutes to another EIN, one is lost.
+    guarded = unguarded.iloc[:2].copy()
+    guarded.loc[guarded.index[1], "basic_fields_df_index"] = 20
+    refused = bmf_alias_gain.guard_refusals(unguarded, guarded)
+    assert refused["private_foundations_df_index"].tolist() == [1, 2]
+    report = bmf_alias_gain.render_report(
+        3, 3, 0, 20, 20, guarded, (0, 0.0), (0, 0.0),
+        pd.DataFrame(), pd.DataFrame(), refused, unguarded_count=len(unguarded),
+    )
+    assert "without the guards wins 3 tuples" in report
+    assert "the guards refuse 2 of those wins" in report

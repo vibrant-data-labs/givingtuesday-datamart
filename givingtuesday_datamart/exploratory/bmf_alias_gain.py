@@ -156,7 +156,7 @@ def _win_line(r) -> str:
 def render_report(sample_n: int, unmatched_total: int, matched_tuples: int, universe_rows: int,
                   slice_rows: int, wu: pd.DataFrame, bmf_rows_dollars: tuple[int, float],
                   all_rows_dollars: tuple[int, float], tagged: pd.DataFrame, examples: pd.DataFrame,
-                  refused: pd.DataFrame) -> str:
+                  refused: pd.DataFrame, *, unguarded_count: int) -> str:
     by_source = wu["source_univ"].value_counts()
     bmf = wu[wu["source_univ"] == "eo_bmf"]
     lines = ["# BMF alias gain on a slice of currently unmatched grant tuples", "",
@@ -191,7 +191,7 @@ def render_report(sample_n: int, unmatched_total: int, matched_tuples: int, univ
         lines += ["", f"Sample of {len(examples)} BMF wins (grant name @ zip -> BMF alias, EIN, name_score, addr_score):", ""]
         lines += [_win_line(r) for r in examples.itertuples()]
     lines += ["", "## Precision guards", "",
-              f"Resolving the same scored pairs without the guards wins {len(wu) + len(refused):,} tuples; "
+              f"Resolving the same scored pairs without the guards wins {unguarded_count:,} tuples; "
               f"the guards refuse {len(refused):,} of those wins"
               + (f" ({dict(refused['source_univ'].value_counts())})" if len(refused) else "") + ".", ""]
     lines += [_win_line(r) for r in refused.sort_values("name_score").itertuples()]
@@ -220,7 +220,8 @@ def run(sample_n: int = 2000, report_path: Path = DEFAULT_REPORT, examples: int 
     logger.info("slice: %s universe rows", f"{len(u_slice):,}")
     features = _score_slice(u_slice, sample)
     winners = _resolve_winners(features, u_slice, sample)
-    refused = guard_refusals(_resolve_winners(features, u_slice, sample, guards=False), winners)
+    unguarded = _resolve_winners(features, u_slice, sample, guards=False)
+    refused = guard_refusals(unguarded, winners)
     empty = pd.DataFrame(columns=["source_univ", "name_score"])
     wu = wins_by_source(winners, u_slice, sample) if len(winners) else empty
     refused = wins_by_source(refused, u_slice, sample) if len(refused) else empty
@@ -247,7 +248,7 @@ def run(sample_n: int = 2000, report_path: Path = DEFAULT_REPORT, examples: int 
         tagged["alias_kind"] = tagged["alias_kind"].fillna("name")
         ex = tagged.sample(min(examples, len(tagged)), random_state=7).sort_values("name_score")
     report = render_report(len(sample), unmatched_total, len(matched), len(universe), len(u_slice),
-                           wu, bmf_rd, all_rd, tagged, ex, refused)
+                           wu, bmf_rd, all_rd, tagged, ex, refused, unguarded_count=len(unguarded))
     report_path.write_text(report)
     logger.info("Report written to %s", report_path)
     return report
