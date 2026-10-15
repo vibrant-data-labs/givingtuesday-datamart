@@ -523,49 +523,59 @@ the run before them until this sequence. Each step reads the one before
 it. `status` before the first step and after the last, and after any step
 in doubt: it shows which rules the relations hold, the view's policy, the
 loaded rows, the verdicts and the matcher's shape, and writes nothing.
-Before the first step, on the tables as they stood on 2026-10-15, it
-shows no line-25 rule in `privategrants_current`, the view on `v2`, the
-recovered rows under `v2` only, and no `match_tier` in the matcher's
-output.
+Not while a rebuild or the matcher runs, though: its count of
+`privategrants_current` holds a share lock on the relation for about a
+minute, and a `DROP` waits behind it. Before the first step, on the
+tables as they stood on 2026-10-15, it shows no line-25 rule in
+`privategrants_current`, the view on `v2`, the recovered rows under `v2`
+only, and no `match_tier` in the matcher's output.
 
 1. **The sources.** `python -m givingtuesday_datamart.sources refresh`
    takes every source of the registry, `irs_990pf_grants_future` among
    them, and rebuilds the basic-fields `_current` relations. It leaves the
-   grants `_current` relations alone on purpose: they cost 10 to 30
-   minutes each and only the matcher reads them.
-2. **The grants relations**, so the work list reads the new rules: steps
+   grants `_current` relations alone on purpose, since they cost 10 to 30
+   minutes each and the matcher rebuilds them at the start of its run;
+   the work list, the view, the checks and `status` read them too, which
+   is why step 3 rebuilds them before the work list.
+2. **The canonical build.** `python -m givingtuesday_datamart.sources
+   build-canonical`, right after the refresh, as the README's pipeline
+   has it: it reads the basic-fields relations step 1 rebuilt, and nothing
+   later in this sequence touches them. Left to the end it would hold the
+   identity layer on the old drop for as long as step 5 waits on its go.
+3. **The grants relations**, so the work list reads the new rules: steps
    1 and 2 of *Rebuilding `privategrants_current`*, the paid relation then
    the future one. The command reads the view's policy before the
    rebuild and creates the matching views again for it; with no view it
-   says so first and leaves them to the matcher run. On a new batch the
-   numbers of that section's table are the batch's own; `status` says
-   which rules the relation holds, and the build's last line names any
-   filing that looks doubled without a repeated row, to check against its
-   XML before the matcher runs.
-3. **The work list.** `placeholder_recovery work-list`.
-4. **The read of the filings not yet read, under `v3`.** First
+   says so first and leaves them to the matcher run. The matcher rebuilds
+   the paid relation again at the start of its own run (step 7), so the
+   25 to 40 minutes are spent twice; this step is for the work list, not
+   the matcher. On a new batch the numbers of that section's table are
+   the batch's own; `status` says which rules the relation holds, and the
+   build's last line names any filing that looks doubled without a
+   repeated row, to check against its XML before the matcher runs.
+4. **The work list.** `placeholder_recovery work-list`.
+5. **The read of the filings not yet read, under `v3`.** First
    `placeholder_recovery run --policy v3 --tax-years 2020-2025 --keep-list
    --dry-run --no-fetch` from the laptop, for the projection from what is
    stored; then, on the box (*The one command*), the same without
    `--dry-run --no-fetch`: the fetch, the cut and the read, under the cap
    and on an explicit go, since it buys model calls. One fetcher at a time
    against the IRS. The 2015 to 2019 filings are fetched and cut already
-   and wait on the same go ($436 projected under `v3`).
-5. **The load, the view and the checks, under `v3`.** `load --policy v3`,
+   and wait on the same go: `--tax-years 2015-2019`, $436 projected under
+   `v3`.
+6. **The load, the view and the checks, under `v3`.** `load --policy v3`,
    `view --policy v3`, `check --policy v3`. The pages read before this
    drop have their `v3` verdicts in `page_verdicts` at no cost, and the
    load reads them with the new ones. Never load while the matcher runs:
    a load between two starts of the run makes the second start compute
    from scratch.
-6. **The matcher.** *The matcher rerun*, steps 2 to 4: the corrections
+7. **The matcher.** *The matcher rerun*, steps 2 to 4: the corrections
    preflight (hours), the run (about eight hours on the big box; it
    rebuilds the `_current` relations itself and reads the policy the view
    shows), the regression gate. The gate's baselines move in the commit
    that accepts the run (`docs/matching-regression-runbook.md`, *Updating
    the baselines*); what the rules alone move is in the doubling doc,
    sections 6.7, 7.7 and 8.6, on top of the batch's own changes.
-7. **The canonical build.** `python -m givingtuesday_datamart.sources
-   build-canonical`, as the README's pipeline has it.
 8. **`status` once more.** The three line-25 rules in
    `privategrants_current`, the view on `v3`, the loaded rows under `v3`,
    `match_tier` in the matcher's output. Then the rows of the data

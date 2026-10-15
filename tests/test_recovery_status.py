@@ -33,6 +33,20 @@ def test_the_matcher_line_reads_the_shape_off_the_column():
                                     "about 16,010,358 rows; no match_tier column, so the tables predate PR #56 and "
                                     "the rerun is to come")
     assert st.matcher_line(st.Matcher(True, 1, 2)).endswith("present, so the run read the recovered grants (PR #56)")
+    # a table the planner never analysed estimates -1, which gather turns into None
+    assert st.matcher_line(st.Matcher(True, None, 2)).startswith(
+        "matcher output: privategrants_w_recipients row count unknown (never analysed), unioned_grants about 2 rows")
+
+
+def test_the_rule_names_are_the_ones_the_ddl_writes():
+    from givingtuesday_datamart import current_grants as cg
+    assert [rule for rule, _ in st.LINE25_RULES] == [cg.FORWARD_FILL, cg.FIELD_FILL, cg.TOTAL_ROW]
+
+
+def test_an_empty_paid_relation_is_not_the_old_rows():
+    screen = st.render(st.Status({}, 0, None, (), {}, None, None))
+    assert screen.splitlines()[0] == "privategrants_current: empty"
+    assert "predate" not in screen
 
 
 FULL = st.Status(
@@ -82,4 +96,5 @@ def test_as_dict_is_json_and_keeps_the_numbers():
                                      "dollars": 16_205_000_000.0}
     assert found["matcher"] == {"has_match_tier": False, "recipients_rows_about": 7_583_106,
                                 "unioned_rows_about": 16_010_358}
+    assert isinstance(st.as_dict(FULL)["recovered"], list)
     assert json.loads(json.dumps(st.as_dict(EMPTY)))["work_list"] is None

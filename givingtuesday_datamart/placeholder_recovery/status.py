@@ -12,21 +12,21 @@ runbook's *The next GivingTuesday drop*
 shows here, and nothing else does.
 
 About a minute: the count of ``privategrants_current`` by rule reads the
-whole relation (16.6M rows); the rest are index reads or the planner's
-statistics, which are marked "about". A relation that does not exist yet
+whole relation (16.6M rows) and holds a share lock on it for that long, so
+not during a rebuild, whose ``DROP`` would wait behind it; the rest are
+index reads or the planner's statistics, which are marked "about". A relation that does not exist yet
 is reported absent, not as an error, so the command runs on a fresh
 database too.
 """
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass
-from decimal import Decimal
 from typing import Mapping
 
 from sqlalchemy import text
 
+from givingtuesday_datamart.current_grants import FIELD_FILL, FORWARD_FILL, TOTAL_ROW
 from givingtuesday_datamart.placeholder_recovery import loader, work_list
 from givingtuesday_datamart.placeholder_recovery.view import VIEW, shown_policy
 
@@ -38,7 +38,7 @@ UNIONED = "unioned_grants"
 # The rules of _pf_current_ddl that read Part I line 25, and the pull
 # request each came in with: which of them a relation holds says how far
 # the rebuild is.
-LINE25_RULES = (("forward_fill", "#61"), ("field_fill", "#62"), ("total_row", "#69"))
+LINE25_RULES = ((FORWARD_FILL, "#61"), (FIELD_FILL, "#62"), (TOTAL_ROW, "#69"))
 # The column PR #56 added to the matcher's output: its presence says the
 # output was written by a run that read the recovered grants.
 MATCH_TIER = "match_tier"
@@ -63,8 +63,8 @@ class WorkList:
 @dataclass(frozen=True)
 class Matcher:
     has_match_tier: bool
-    recipients_rows_about: int
-    unioned_rows_about: int
+    recipients_rows_about: int | None     # the planner's estimate; None where the table was never analysed
+    unioned_rows_about: int | None
 
 
 @dataclass(frozen=True)
@@ -102,11 +102,14 @@ def line25_rules_line(by_rule: Mapping[str, int]) -> str:
 def matcher_line(matcher: Matcher | None) -> str:
     if matcher is None:
         return f"matcher output: {RECIPIENTS} absent; the matcher has not run on this database"
-    rows = (f"{RECIPIENTS} about {matcher.recipients_rows_about:,} rows, "
-            f"{UNIONED} about {matcher.unioned_rows_about:,} rows")
+    rows = f"{RECIPIENTS} {_about(matcher.recipients_rows_about)}, {UNIONED} {_about(matcher.unioned_rows_about)}"
     if matcher.has_match_tier:
         return f"matcher output: {rows}; {MATCH_TIER} present, so the run read the recovered grants (PR #56)"
     return f"matcher output: {rows}; no {MATCH_TIER} column, so the tables predate PR #56 and the rerun is to come"
+
+
+def _about(estimate: int | None) -> str:
+    return "row count unknown (never analysed)" if estimate is None else f"about {estimate:,} rows"
 
 
 def render(status: Status) -> str:
@@ -114,6 +117,8 @@ def render(status: Status) -> str:
     lines: list[str] = []
     if status.paid_by_rule is None:
         lines.append(f"{PAID_CURRENT}: absent")
+    elif not status.paid_by_rule:
+        lines.append(f"{PAID_CURRENT}: empty")
     else:
         total = sum(status.paid_by_rule.values())
         lines.append(f"{PAID_CURRENT}: {total:,} rows by rule")
@@ -146,14 +151,11 @@ def render(status: Status) -> str:
 
 
 def as_dict(status: Status) -> dict:
-    """JSON-ready: dataclasses to dicts, decimals to floats."""
-    return json.loads(json.dumps(asdict(status), default=_plain))
-
-
-def _plain(value):
-    if isinstance(value, Decimal):
-        return float(value)
-    raise TypeError(f"{type(value).__name__} is not JSON serialisable")
+    """JSON-ready: every value is a built-in already (``gather`` casts them),
+    so this is ``asdict`` with the tuple of loaded rows as a list."""
+    found = asdict(status)
+    found["recovered"] = list(found["recovered"])
+    return found
 
 
 def _exists(session, relation: str) -> bool:
@@ -192,8 +194,11 @@ def gather(session) -> Status:
             SELECT count(*) FROM information_schema.columns
             WHERE table_schema = 'public' AND table_name = :table AND column_name = :column"""),
             {"table": RECIPIENTS, "column": MATCH_TIER}).scalar())
-        about = {name: int(n) for name, n in session.execute(text(
-            "SELECT relname, reltuples::bigint FROM pg_class WHERE relname IN (:a, :b)"),
-            {"a": RECIPIENTS, "b": UNIONED})}
-        matcher = Matcher(has_tier, about.get(RECIPIENTS, 0), about.get(UNIONED, 0))
+        # the planner's estimate, public only (search_path could hold a
+        # same-named relation elsewhere); -1 is "never analysed" since PG 14
+        about = {name: (int(n) if n is not None and n >= 0 else None) for name, n in session.execute(text("""
+            SELECT c.relname, c.reltuples::bigint FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'public' AND c.relname IN (:a, :b)"""), {"a": RECIPIENTS, "b": UNIONED})}
+        matcher = Matcher(has_tier, about.get(RECIPIENTS), about.get(UNIONED))
     return Status(paid_by_rule, future_rows, shown_policy(session), recovered, verdicts, found_work_list, matcher)
