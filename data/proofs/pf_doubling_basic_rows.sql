@@ -1,7 +1,7 @@
 -- Doubled 990-PF filings: the repeated basic_fields_pf row as a signal for
 -- privategrants_current's pair_collapse rule. Measured 2026-09-30 on batch
 -- 2026_06_16; see docs/pf_doubling_basic_row_test.md.
--- Run by `python -m givingtuesday_datamart.exploratory.pf_doubling_basic_rows`,
+-- Run by `python -m givingtuesday_datamart.proofs.pf_doubling_basic_rows`,
 -- which substitutes __PF_HASH__ and __SI_HASH__ (the line-item content hashes
 -- current_grants builds from _PF_CONTENT_COLS / _SCHED_I_CONTENT_COLS, so the
 -- tuples here are the rule's tuples) and __NUMERIC_RE__, runs every statement

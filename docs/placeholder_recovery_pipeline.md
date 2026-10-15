@@ -14,7 +14,10 @@ the scorer to `placeholder_recovery/ground_truth.py`, the population by
 year to `placeholder_recovery/population.py`, the measurements
 `placeholder_recovered_rows`, `renderer_widths` and `matching_subset` to
 `proofs/`, and the placeholder data files from `data/exploratory/` to
-`data/placeholder_recovery/`. Every stage is
+`data/placeholder_recovery/`. On October 15 `pf_current_scratch` and
+`pf_doubling_basic_rows` followed them into `proofs/` with their SQL under
+`data/proofs/`, and the frame module lost its `sample` and `compare`
+commands, whose work is finished and recorded here. Every stage is
 built. Stages 1 to 4 and 6 are the three table modules, the selector and
 `exploratory/placeholder_recovery.py` (`sample`, `estimate`, `run`,
 `transcribe`, `report`); stage 0, the work list, and stage 5, the load

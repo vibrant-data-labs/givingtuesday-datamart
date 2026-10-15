@@ -1,10 +1,10 @@
 """Scratch copies of the 990-PF ``_current`` relations: a rule change proved
 without rebuilding the production tables.
 
-    python -m givingtuesday_datamart.exploratory.pf_current_scratch build paid|future [--suffix S] [--paid-scratch]
-    python -m givingtuesday_datamart.exploratory.pf_current_scratch compare paid|future [--suffix S]
-    python -m givingtuesday_datamart.exploratory.pf_current_scratch placeholders [--suffix S] [--policy v2]
-    python -m givingtuesday_datamart.exploratory.pf_current_scratch drop [--suffix S]
+    python -m givingtuesday_datamart.proofs.pf_current_scratch build paid|future [--suffix S] [--paid-scratch]
+    python -m givingtuesday_datamart.proofs.pf_current_scratch compare paid|future [--suffix S]
+    python -m givingtuesday_datamart.proofs.pf_current_scratch placeholders [--suffix S] [--policy v2]
+    python -m givingtuesday_datamart.proofs.pf_current_scratch drop [--suffix S]
 
 ``build`` renders the DDL ``current_grants`` builds a relation from against
 another table name (``public.scratch_pgc_<suffix>`` for the paid rows,
@@ -41,7 +41,7 @@ from sqlalchemy import text
 
 from givingtuesday_datamart import current_grants as cg
 from givingtuesday_datamart._internal.db import get_session
-from givingtuesday_datamart.exploratory.pf_doubling_basic_rows import table
+from givingtuesday_datamart.proofs.pf_doubling_basic_rows import table
 from givingtuesday_datamart.ingestion import datamart_config
 
 # side -> (scratch prefix, production relation, the builder's arguments, amount column)

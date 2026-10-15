@@ -785,10 +785,10 @@ python -m givingtuesday_datamart.current_grants --only privategrants_future_curr
 # the paid relation alone, after a change to its rule (drops the views: see "Rebuilding privategrants_current")
 python -m givingtuesday_datamart.current_grants --only privategrants_current
 # a rule change proved on scratch copies, the production tables untouched
-python -m givingtuesday_datamart.exploratory.pf_current_scratch build paid|future [--suffix S] [--paid-scratch]
-python -m givingtuesday_datamart.exploratory.pf_current_scratch compare paid|future [--suffix S]
-python -m givingtuesday_datamart.exploratory.pf_current_scratch placeholders [--suffix S] [--policy v2]
-python -m givingtuesday_datamart.exploratory.pf_current_scratch drop [--suffix S]
+python -m givingtuesday_datamart.proofs.pf_current_scratch build paid|future [--suffix S] [--paid-scratch]
+python -m givingtuesday_datamart.proofs.pf_current_scratch compare paid|future [--suffix S]
+python -m givingtuesday_datamart.proofs.pf_current_scratch placeholders [--suffix S] [--policy v2]
+python -m givingtuesday_datamart.proofs.pf_current_scratch drop [--suffix S]
 
 # the work list, the run over it, the load, the view, the checks
 python -m givingtuesday_datamart.placeholder_recovery work-list
@@ -803,8 +803,7 @@ python -m givingtuesday_datamart.matching_regression_checks [--fast] [--prefix s
 python -m givingtuesday_datamart.corrections_preflight [--prefix scratch_matcher_preflight_ --grants scratch_matcher_grants]
 python -m givingtuesday_datamart.proofs.matching_subset build|report|drop
 
-# the frame and the population
-python -m givingtuesday_datamart.placeholder_recovery.frame sample --expand-1000
+# the population by year
 python -m givingtuesday_datamart.placeholder_recovery.population
 
 # fetch, read, decide, by hand

@@ -4,7 +4,7 @@
 -- 2026-10-14 on batch 2026_06_16; see docs/pf_doubling_basic_row_test.md,
 -- section 8, and the total_row rule of current_grants.
 -- Run by
---   python -m givingtuesday_datamart.exploratory.pf_doubling_basic_rows measure --sql data/exploratory/pf_total_row.sql
+--   python -m givingtuesday_datamart.proofs.pf_doubling_basic_rows measure --sql data/proofs/pf_total_row.sql
 -- which substitutes __PF_HASH__ (the rule's own tuple) and __NUMERIC_RE__, runs
 -- every statement in ONE session (temp tables only, nothing written under
 -- public) and prints each `-- name:` result. About five minutes: one pass

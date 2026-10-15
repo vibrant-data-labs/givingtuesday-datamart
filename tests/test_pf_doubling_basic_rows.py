@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from givingtuesday_datamart.exploratory import pf_doubling_basic_rows as m
+from givingtuesday_datamart.proofs import pf_doubling_basic_rows as m
 
 
 def test_paid_groups_counts_real_and_empty():
@@ -140,7 +140,7 @@ def test_the_tally_counts_the_paid_blocks_by_prediction_and_fill():
 
 
 def test_the_total_row_sql_renders_and_writes_nothing_under_public():
-    path = Path("data/exploratory/pf_total_row.sql")
+    path = Path("data/proofs/pf_total_row.sql")
     rendered = m.render_sql(path.read_text())
     assert "__PF_HASH__" not in rendered and "__NUMERIC_RE__" not in rendered
     found = m.statements(rendered)
@@ -166,7 +166,7 @@ def test_the_total_row_sql_renders_and_writes_nothing_under_public():
 
 
 def test_the_field_fill_sql_renders_and_writes_nothing_under_public():
-    path = Path("data/exploratory/pf_field_fill.sql")
+    path = Path("data/proofs/pf_field_fill.sql")
     rendered = m.render_sql(path.read_text())
     assert "__PF_HASH__" not in rendered and "__NUMERIC_RE__" not in rendered
     found = m.statements(rendered)

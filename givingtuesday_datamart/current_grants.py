@@ -295,7 +295,7 @@ raw staging:
     than one tuple, and half the block is closer to line 25(d) than the
     whole. It changes no row. The build logs the count, and a WARNING
     naming the first of them when it is not zero. It is zero on this
-    batch. (The measurement script ``exploratory.pf_doubling_basic_rows``
+    batch. (The measurement script ``proofs.pf_doubling_basic_rows``
     shows the same as a "multi tuple" line of its
     ``halved_without_doubled_row_shape``, by hand.)
 
@@ -1065,7 +1065,7 @@ if __name__ == "__main__":
     # step: each table build is a 10-30 min transaction, and a failure in
     # a later step must not roll an earlier table back.
     from givingtuesday_datamart.grant_matching import create_or_replace_views
-    from givingtuesday_datamart.placeholder_recovery.view import shown_policy
+    from givingtuesday_datamart.placeholder_recovery.view import VIEW, shown_policy
 
     _parser = argparse.ArgumentParser(prog="python -m givingtuesday_datamart.current_grants")
     _parser.add_argument("--only", action="append", choices=[t for t, _ in _TABLES], default=None,
@@ -1079,12 +1079,22 @@ if __name__ == "__main__":
     # created again for that policy, never for a default.
     with get_session(config=datamart_config()) as session:
         _policy = shown_policy(session)
+    _needs_views = any(t in _MATCHING_VIEW_TABLES for t, _ in _wanted)
+    if _needs_views and _policy is None:
+        # Said before the builds, not after them: with no view there is no
+        # policy to create the matching views for, and a run of the matcher
+        # would stop at the same point.
+        logger.warning(
+            "%s is absent, so no policy is known for the recovered grants: the tables are rebuilt, and the "
+            "matching views are NOT created here. Create the view (`python -m "
+            "givingtuesday_datamart.placeholder_recovery view --policy <version>`); the next matcher run "
+            "creates the matching views on it.", VIEW)
     for _table, _ddl in _wanted:
         with get_session(config=datamart_config()) as session:
             _build_one(session.connection(), _table, _ddl)
     with get_session(config=datamart_config()) as session:
         conn = session.connection()
-        if any(t in _MATCHING_VIEW_TABLES for t, _ in _wanted):
+        if _needs_views and _policy is not None:
             create_or_replace_views(conn, recovered_policy=_policy)
         rules = conn.execute(text("""
             SELECT 'sched_i' AS side, dedup_rule, COUNT(*) AS rows

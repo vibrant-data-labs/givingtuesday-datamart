@@ -3,7 +3,7 @@
 -- 2026-10-01 on batch 2026_06_16; see docs/pf_doubling_basic_row_test.md,
 -- section 7, and the field_fill rule of current_grants.
 -- Run by
---   python -m givingtuesday_datamart.exploratory.pf_doubling_basic_rows measure --sql data/exploratory/pf_field_fill.sql
+--   python -m givingtuesday_datamart.proofs.pf_doubling_basic_rows measure --sql data/proofs/pf_field_fill.sql
 -- which substitutes __PF_HASH__ (the rule's own tuple) and __NUMERIC_RE__, runs
 -- every statement in ONE session (temp tables only, nothing written under
 -- public) and prints each `-- name:` result. About four minutes: one pass
