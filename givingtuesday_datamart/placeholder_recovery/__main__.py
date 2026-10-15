@@ -5,11 +5,13 @@
     python -m givingtuesday_datamart.placeholder_recovery load --policy v2 [--object-id ID] [--dry-run]
     python -m givingtuesday_datamart.placeholder_recovery view --policy v2
     python -m givingtuesday_datamart.placeholder_recovery check --policy v2
+    python -m givingtuesday_datamart.placeholder_recovery status [--json]
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 import time
@@ -18,7 +20,7 @@ from pathlib import Path
 from givingtuesday_datamart.placeholder_recovery.frame import CACHE, COST_CAP
 from givingtuesday_datamart.page_readings import MAX_ERRORS
 from givingtuesday_datamart.page_verdicts import FLAGGED_RULES, POLICIES, load_policy, with_flagged
-from givingtuesday_datamart.placeholder_recovery import checks, loader, run, view, work_list
+from givingtuesday_datamart.placeholder_recovery import checks, loader, run, status, view, work_list
 
 logger = logging.getLogger("givingtuesday_datamart")
 
@@ -30,6 +32,10 @@ def _parser() -> argparse.ArgumentParser:
     policy_help = f"a registered version ({', '.join(POLICIES)}) or a JSON file"
 
     sub.add_parser("work-list", help=f"build {work_list.TABLE} from the loaded tables; counts by tax year and band")
+
+    p = sub.add_parser("status", help="where the reload stands: the rules in the tables, the view's policy, the loaded "
+                                     "rows, the verdicts, the work list and the matcher's shape; writes nothing")
+    p.add_argument("--json", action="store_true", help="the same as JSON, for scripts")
 
     p = sub.add_parser("run", help="the whole run of the work list, or of a frame file; safe to run again")
     p.add_argument("--policy", default="v2", help=policy_help)
@@ -104,6 +110,10 @@ def main(argv: list[str] | None = None) -> None:
     with get_session(config=datamart_config()) as session:
         if args.command == "work-list":
             _work_list(session)
+            return
+        if args.command == "status":
+            found = status.gather(session)
+            print(json.dumps(status.as_dict(found), indent=2) if args.json else status.render(found))
             return
         policy = with_flagged(load_policy(args.policy), args.flagged)
         if args.command == "load":
