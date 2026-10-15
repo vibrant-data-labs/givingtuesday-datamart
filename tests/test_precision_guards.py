@@ -297,3 +297,27 @@ def test_full_name_sql_and_government_sql_regex_agree_with_python_on_real_names(
     diff = names[names["government_sql"] != names["government_py"]]
     assert diff.empty, diff.head(10).to_string()
     assert names["government_py"].sum() > 0
+
+
+@pytest.mark.db
+def test_full_name_sql_matches_cleaner_edge_cases():
+    from sqlalchemy import text
+    from givingtuesday_datamart._internal.db import get_session
+    from givingtuesday_datamart.ingestion import datamart_config
+
+    cases = [
+        ("the river fund, inc.", ""),
+        ("boys & girls clubs", "llc"),
+        ("university of o’grady", "corporation inc"),
+        ("nature conservancy, the", ""),
+        ("the", ""), ("inc.", ""), ("", ""),
+        ("  board of trustees ", " university of example, ltd."),
+    ]
+    sql = text(f"SELECT {grant_matching.FULL_NAME_SQL} FROM "
+               "(SELECT CAST(:name1 AS text) AS name1_key, CAST(:name2 AS text) AS name2_key) names")
+    assert set(sql.compile().params) == {"name1", "name2"}
+    with get_session(config=datamart_config()) as session:
+        for name1, name2 in cases:
+            actual = session.execute(sql, {"name1": name1, "name2": name2}).scalar_one()
+            expected = create_full_name({"name1_key": name1, "name2_key": name2})
+            assert actual == expected, (name1, name2)

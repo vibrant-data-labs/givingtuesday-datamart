@@ -1419,7 +1419,9 @@ FULL_NAME_SQL = f"regexp_replace({FULL_NAME_SQL}, '[''’`]', '', 'g')"
 FULL_NAME_SQL = f"replace({FULL_NAME_SQL}, '&', ' and ')"
 FULL_NAME_SQL = f"trim(regexp_replace(regexp_replace({FULL_NAME_SQL}, '[^a-z0-9 ]+', ' ', 'g'), '\\s+', ' ', 'g'))"
 FULL_NAME_SQL = f"regexp_replace(regexp_replace({FULL_NAME_SQL}, '^the ', ''), ' the$', '')"
-FULL_NAME_SQL = f"trim(regexp_replace({FULL_NAME_SQL}, '( ({_LEGAL_ENDINGS}))+$', ''))"
+# Capturing groups avoid SQLAlchemy treating the :inc in (?:inc|...) as a bind.
+_LEGAL_ENDINGS_SQL = _LEGAL_ENDINGS.replace("(?:", "(")
+FULL_NAME_SQL = f"trim(regexp_replace({FULL_NAME_SQL}, '( {_LEGAL_ENDINGS_SQL})+$', ''))"
 
 
 def is_government_name(full_name: str) -> bool:
