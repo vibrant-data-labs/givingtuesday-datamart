@@ -48,7 +48,7 @@ The first and the last table, the view and the commands that write them
 are the package `givingtuesday_datamart/placeholder_recovery/`, where
 the pipeline's production code goes from September 28 on. The three
 tables between them are modules of their own. The run over a frame file
-(`sample`, `estimate`, `transcribe`, `report`, `run`) is the package's
+(`estimate`, `transcribe`, `report`, `run`) is the package's
 `frame` module, the scorer its `ground_truth` and the population by year its
 `population`, moved in from `exploratory/` on October 9. Proofs and
 measurements that write nothing of production's are the package

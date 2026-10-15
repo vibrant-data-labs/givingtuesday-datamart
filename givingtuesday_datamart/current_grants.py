@@ -1054,7 +1054,9 @@ def build_current_relations(connection) -> dict[str, int]:
     ``privategrants_current`` (the matching keys/unique views). Callers
     that need those views must recreate them afterwards —
     ``grant_matching._do_match_records`` does, and the standalone CLI
-    below does too.
+    below does when the recovered view's policy is known; with no view it
+    says so up front, builds the tables, and leaves the matching views to
+    the next matcher run.
     """
     return {table: _build_one(connection, table, ddl) for table, ddl in _TABLES}
 
@@ -1085,7 +1087,7 @@ if __name__ == "__main__":
         # policy to create the matching views for, and a run of the matcher
         # would stop at the same point.
         logger.warning(
-            "%s is absent, so no policy is known for the recovered grants: the tables are rebuilt, and the "
+            "%s is absent or shows no policy, so none is known for the recovered grants: the tables are rebuilt, and the "
             "matching views are NOT created here. Create the view (`python -m "
             "givingtuesday_datamart.placeholder_recovery view --policy <version>`); the next matcher run "
             "creates the matching views on it.", VIEW)

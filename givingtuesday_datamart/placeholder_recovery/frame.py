@@ -20,8 +20,8 @@ drawn on 2026-09-21 and 2026-09-23 from GivingTuesday's one-off combined
 grants extract by a ``sample`` command, removed on 2026-10-15 with the
 extract's last use (its design and its draws are in
 ``docs/placeholder_recovery_pipeline.md``). The population is violently
-top-heavy — 22 filings carry $4.67B while 6,755 carry $1.76B — so band A
-is a census and B, C and D are sampled and extrapolated. A run's list now
+top-heavy — 22 filings carry $4.67B while 6,755 carry $1.76B — so bands A
+and B are a census and C and D a 6% sample, extrapolated. A run's list now
 comes from the loaded tables (``givingtuesday_datamart.placeholder_recovery``,
 ``work-list`` and ``run``), and nothing from the extract is loaded.
 
@@ -97,7 +97,6 @@ from givingtuesday_datamart.page_readings import MAX_ERRORS, frame_pages, readin
 from givingtuesday_datamart.page_verdicts import (
     FLAGGED_RULES, POLICIES, POLICY_V1, VERDICTS, WORKERS, AgreeResult, accepted_readings, agree,
     load_policy, reader_settings, summary, with_flagged)
-from givingtuesday_datamart.placeholder_recovery.exclusions import load_exclusions
 from givingtuesday_datamart.placeholder_recovery.loader import selector_input
 
 # The frame every command defaults to. The 100-filing sample it grew from
@@ -106,9 +105,6 @@ from givingtuesday_datamart.placeholder_recovery.loader import selector_input
 FRAME_1000 = Path("data/placeholder_recovery/placeholder_sample_1000.csv")
 CACHE = Path.home() / ".cache" / "irs_index"
 
-# The filers left out, by EIN: data/placeholder_recovery/exclusions.csv is
-# the one place they are named.
-PATIENT_ASSISTANCE = {ein: row.filer_name for ein, row in load_exclusions().items()}
 VERDICT_KINDS = VERDICTS + ("no_verdict",)
 # The cost gate's numbers (``estimate``), measured on the 1,000-filing frame
 # run of 2026-09-24 — 9,926 attachment pages under POLICY_V2, the pipeline

@@ -7,7 +7,6 @@ from datetime import date
 
 import pytest
 
-from givingtuesday_datamart.placeholder_recovery import frame as frame
 from givingtuesday_datamart.placeholder_recovery import exclusions as ex
 
 HEADER = "filerein,filer_name,evidence,excluded_on\n"
@@ -33,8 +32,8 @@ def test_the_file_is_plain_text_in_git_not_an_lfs_pointer():
     assert ex.EXCLUSIONS_CSV.read_text().startswith(HEADER)
 
 
-def test_the_frame_commands_read_the_same_file():
-    assert frame.PATIENT_ASSISTANCE == {ein: row.filer_name for ein, row in ex.load_exclusions().items()}
+def test_the_population_reads_the_same_file():
+    assert ex.PATIENT_ASSISTANCE == {ein: row.filer_name for ein, row in ex.load_exclusions().items()}
 
 
 @pytest.mark.parametrize("body, message", [

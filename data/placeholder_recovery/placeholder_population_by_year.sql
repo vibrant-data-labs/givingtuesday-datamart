@@ -3,7 +3,8 @@
 -- column d) against the filings the broadened classifier sends to the PDF
 -- (pointer rows hold >= 50% of the declared total), with the
 -- patient-assistance EINs and filings whose grants go to individuals taken
--- out as placeholder_recovery._addressable does. Same rules as
+-- out as the frame's exclusions do (data/placeholder_recovery/exclusions.csv,
+-- and recipient_foundation_status = 'I'). Same rules as
 -- placeholder_classifier_assessment.sql. Run by
 -- `python -m givingtuesday_datamart.placeholder_recovery.population`,
 -- which substitutes __PA__ with the EINs of

@@ -57,3 +57,8 @@ def _exclusion(line: dict[str, str], where: str) -> Exclusion:
     except ValueError as exc:
         raise ValueError(f"{where}: {line['excluded_on']!r} is not a date") from exc
     return Exclusion(ein, line["filer_name"].strip(), evidence, excluded_on)
+
+
+# The filers left out, by EIN, with their names: the population's SQL and
+# the work list read it. The CSV is the one place they are named.
+PATIENT_ASSISTANCE = {ein: row.filer_name for ein, row in load_exclusions().items()}
