@@ -189,3 +189,4 @@ givingtuesday_datamart/exploratory/vlm_bakeoff/pages*/
 
 # placeholder_recovery run: the stage logs (kept in scratch or on the box, not in git)
 logs/
+data/exploratory/bmf_assessment_*

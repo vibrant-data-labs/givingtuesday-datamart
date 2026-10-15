@@ -209,7 +209,8 @@ def test_funder_arm_is_name_and_ein_only():
     assert "ein_hits" in sql
     # No URL surface and no DBA columns on funders.
     assert "url_hits" not in sql
-    assert "dba_1" not in sql
+    assert "c.dba_1" not in sql
+    assert "NULL::text AS dba_1" in sql
 
 
 def test_url_only_skips_funder_arm():

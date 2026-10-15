@@ -9,12 +9,42 @@ itself can produce ``None`` for empty strings).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 
+def combine_dba(*lines: str | None) -> str | None:
+    """Join the filing's DBA lines without treating business line 2 as DBA."""
+    return " ".join(line.strip() for line in lines if line and line.strip()) or None
+
+
+@dataclass(frozen=True, kw_only=True)
+class NamedIdentity:
+    """Serialized name aliases shared by client identity results."""
+
+    businessname1: str | None = field(init=False)
+    businessname2: str | None = field(init=False)
+    dba_name: str | None = None
+
+    def __post_init__(self):
+        object.__setattr__(self, "businessname1", self.name)
+        object.__setattr__(self, "businessname2", self.name_secondary)
+        if hasattr(self, "dba_1"):
+            object.__setattr__(self, "dba_name", combine_dba(self.dba_1, self.dba_2))
+
+
 @dataclass(frozen=True)
-class NonprofitHit:
+class FunderIdentity:
+    """One current funder identity, keyed by normalized EIN."""
+
+    ein: str
+    businessname1: str | None
+    businessname2: str | None
+    dba_name: str | None
+
+
+@dataclass(frozen=True)
+class NonprofitHit(NamedIdentity):
     """Result of an FTS search over ``public.nonprofit_text``.
 
     ``unique_text`` is the full deduped text for the EIN (already collapsed
@@ -32,7 +62,7 @@ class NonprofitHit:
 
 
 @dataclass(frozen=True)
-class IdentityHit:
+class IdentityHit(NamedIdentity):
     """One ranked hit from ``GtDatamartClient.search_identity``.
 
     ``org_type`` is ``"nonprofit"`` (990 filers, ``nonprofit_canonical``) or
@@ -81,7 +111,7 @@ class IdentityQuery:
 
 
 @dataclass(frozen=True)
-class CanonicalIdentity:
+class CanonicalIdentity(NamedIdentity):
     """One identity row streamed by ``GtDatamartClient.iter_identity_universe``.
 
     The local-matching escape hatch: name matching can't be pushed into
@@ -104,7 +134,7 @@ class CanonicalIdentity:
 
 
 @dataclass(frozen=True)
-class Nonprofit:
+class Nonprofit(NamedIdentity):
     """One row from ``public.nonprofit_canonical`` (DISTINCT ON winner per
     EIN, latest taxyear → taxperend → ingested_at), enriched with
     ``unique_text`` from ``public.nonprofit_text`` when present.
@@ -132,7 +162,7 @@ class Nonprofit:
 
 
 @dataclass(frozen=True)
-class BasicFieldsRow:
+class BasicFieldsRow(NamedIdentity):
     """One row of multi-year IRS 990 basic fields for an EIN.
 
     Sourced from the all-TEXT ``public.basic_fields`` staging table; numeric
@@ -184,14 +214,21 @@ class Grant:
     grant_status: str | None
     grant_relationship: str | None
 
+    granter_businessname1: str | None = field(init=False)
+    granter_businessname2: str | None = field(init=False)
+    granter_dba_name: str | None = None
+
+    def __post_init__(self):
+        object.__setattr__(self, "granter_businessname1", self.granter_name)
+        object.__setattr__(self, "granter_businessname2", self.granter_name2)
+
 
 @dataclass(frozen=True)
 class GrantSummary:
     """Per-(EIN, taxyear) aggregate over ``public.unioned_grants``.
 
-    Returned by ``GtDatamartClient.get_grant_summaries``. The granter sets are
-    deduped server-side via ``ARRAY_AGG(DISTINCT ...)`` and resolved through
-    the same canonical-name fallback as ``Grant.granter_name``, so consumers
+    Returned by ``GtDatamartClient.get_grant_summaries``. Granter records carry
+    current canonical identities keyed by EIN, so consumers
     that just need yearly totals + funder rollups can skip the per-row pull.
     """
 
@@ -199,5 +236,4 @@ class GrantSummary:
     taxyear: int | None
     total_grant_amount: float | None
     grant_count: int
-    granter_eins: list[str]
-    granter_names: list[str]
+    granters: list[FunderIdentity]

@@ -26,6 +26,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from givingtuesday_datamart.client.models import (
     BasicFieldsRow,
+    FunderIdentity,
+    combine_dba,
     CanonicalIdentity,
     Grant,
     GrantSummary,
@@ -403,6 +405,7 @@ class GtDatamartClient:
                 fts.ein,
                 nc.name,
                 nc.name_secondary,
+                nc.dba_1, nc.dba_2,
                 nc.city,
                 nc.state,
                 fts.rank,
@@ -435,6 +438,7 @@ class GtDatamartClient:
                 ein=r["ein"],
                 name=r["name"],
                 name_secondary=r["name_secondary"],
+                dba_name=combine_dba(r.get("dba_1"), r.get("dba_2")),
                 city=r["city"],
                 state=r["state"],
                 rank=float(r["rank"]),
@@ -477,6 +481,7 @@ class GtDatamartClient:
                 n.ein,
                 nc.name,
                 nc.name_secondary,
+                nc.dba_1, nc.dba_2,
                 nc.city,
                 nc.state,
                 0.0::float AS rank,
@@ -500,6 +505,7 @@ class GtDatamartClient:
                 ein=r["ein"],
                 name=r["name"],
                 name_secondary=r["name_secondary"],
+                dba_name=combine_dba(r.get("dba_1"), r.get("dba_2")),
                 city=r["city"],
                 state=r["state"],
                 rank=float(r["rank"]),
@@ -611,6 +617,7 @@ class GtDatamartClient:
                 m.ein,
                 c.name,
                 c.name_secondary,
+                {"c.dba_1, c.dba_2" if arm == "nonprofit" else "NULL::text AS dba_1, NULL::text AS dba_2"},
                 c.city,
                 c.state,
                 NULLIF(c.latest_taxyear, '')::int AS latest_taxyear,
@@ -733,6 +740,7 @@ class GtDatamartClient:
                         ein=r["ein"],
                         name=r["name"],
                         name_secondary=r["name_secondary"],
+                        dba_name=combine_dba(r.get("dba_1"), r.get("dba_2")),
                         city=r["city"],
                         state=r["state"],
                         latest_taxyear=(
@@ -863,6 +871,7 @@ class GtDatamartClient:
                     m.ein,
                     c.name,
                     c.name_secondary,
+                    {"c.dba_1, c.dba_2" if arm == "nonprofit" else "NULL::text AS dba_1, NULL::text AS dba_2"},
                     c.city,
                     c.state,
                     NULLIF(c.latest_taxyear, '')::int AS latest_taxyear,
@@ -878,7 +887,7 @@ class GtDatamartClient:
                 FROM matched m
                 {join}
             )
-            SELECT key, ein, name, name_secondary, city, state,
+            SELECT key, ein, name, name_secondary, dba_1, dba_2, city, state,
                    latest_taxyear, rank, signal
             FROM ranked
             {rank_filter}
@@ -1051,6 +1060,7 @@ class GtDatamartClient:
                                 ein=r["ein"],
                                 name=r["name"],
                                 name_secondary=r["name_secondary"],
+                                dba_name=combine_dba(r.get("dba_1"), r.get("dba_2")),
                                 city=r["city"],
                                 state=r["state"],
                                 latest_taxyear=(
@@ -1237,6 +1247,7 @@ class GtDatamartClient:
                 filerein                                AS ein,
                 filername1                              AS name,
                 filername2                              AS name_secondary,
+                dbanbnline11 AS dba_1, dbanbnline22 AS dba_2,
                 NULLIF(taxyear, '')::int                AS taxyear,
                 filerus1                                AS addr_line_1,
                 filerus2                                AS addr_line_2,
@@ -1259,7 +1270,8 @@ class GtDatamartClient:
 
         with self._session() as session:
             rows = session.execute(text(sql), params).mappings().all()
-        return [BasicFieldsRow(**dict(r)) for r in rows]
+        return [BasicFieldsRow(**{k: v for k, v in r.items() if k not in ("dba_1", "dba_2")},
+                               dba_name=combine_dba(r["dba_1"], r["dba_2"])) for r in rows]
 
     def get_grants(
         self,
@@ -1312,6 +1324,10 @@ class GtDatamartClient:
                     CASE WHEN ug.filesha256 IS NOT NULL THEN nc.name_secondary ELSE fc.name_secondary END,
                     ug.granter_name2
                 ) AS granter_name2,
+                CASE WHEN ug.filesha256 IS NOT NULL AND fc.ein IS NOT NULL
+                     THEN NULL ELSE nc.dba_1 END AS granter_dba_1,
+                CASE WHEN ug.filesha256 IS NOT NULL AND fc.ein IS NOT NULL
+                     THEN NULL ELSE nc.dba_2 END AS granter_dba_2,
                 ug.filesha256,
                 ug.url,
                 ug.taxyear,
@@ -1341,7 +1357,37 @@ class GtDatamartClient:
 
         with self._session() as session:
             rows = session.execute(text(sql), params).mappings().all()
-        return [Grant(**dict(r)) for r in rows]
+        return [Grant(**{k: v for k, v in r.items() if k not in ("granter_dba_1", "granter_dba_2")},
+                      granter_dba_name=combine_dba(r["granter_dba_1"], r["granter_dba_2"])) for r in rows]
+
+    def get_funder_identities(self, eins: list[str]) -> list[FunderIdentity]:
+        """Current identities, PF preferred; unknown EINs retain null names.
+
+        EINs are nine digits (hyphenated inputs are normalized). Invalid IDs
+        fail explicitly rather than silently dropping a funding relationship.
+        """
+        normalized = set()
+        for ein in eins:
+            if not isinstance(ein, str) or not re.fullmatch(r"\d{2}-?\d{7}", ein.strip()):
+                raise ValueError(f"Invalid funder EIN: {ein!r}")
+            normalized.add(ein.strip().replace("-", ""))
+        if not normalized:
+            return []
+        sql = """
+            SELECT ids.ein,
+                   CASE WHEN fc.ein IS NOT NULL THEN fc.name ELSE nc.name END AS businessname1,
+                   CASE WHEN fc.ein IS NOT NULL THEN fc.name_secondary ELSE nc.name_secondary END AS businessname2,
+                   CASE WHEN fc.ein IS NULL THEN nc.dba_1 END AS dba_1,
+                   CASE WHEN fc.ein IS NULL THEN nc.dba_2 END AS dba_2
+            FROM unnest(CAST(:eins AS text[])) ids(ein)
+            LEFT JOIN public.funder_canonical fc USING (ein)
+            LEFT JOIN public.nonprofit_canonical nc USING (ein)
+            ORDER BY ids.ein
+        """
+        with self._session() as session:
+            rows = session.execute(text(sql), {"eins": sorted(normalized)}).mappings().all()
+        return [FunderIdentity(r["ein"], r["businessname1"], r["businessname2"],
+                               combine_dba(r["dba_1"], r["dba_2"])) for r in rows]
 
     def get_grant_summaries(
         self,
@@ -1354,9 +1400,8 @@ class GtDatamartClient:
 
         Same row-set as ``get_grants`` for the same args, but rolled up to one
         row per ``(ein, taxyear)`` with ``SUM(grant_amount)`` and the deduped
-        granter EIN / name arrays. The granter-name COALESCE matches
-        ``get_grants`` exactly so consumers see the same canonical names —
-        this is the "I just need yearly totals + funder rollups" path that
+        structured granter identities (current PF canonical preferred). This is
+        the "I just need yearly totals + funder rollups" path that
         avoids transferring 4M+ raw grant rows for queries that immediately
         group them.
 
@@ -1372,53 +1417,19 @@ class GtDatamartClient:
         ein_col = "grantee_ein" if role == "grantee" else "granter_ein"
 
         params: dict[str, object] = {"eins": list(eins)}
-        # Resolve the canonical granter name once in the inner SELECT, then
-        # aggregate over it in the outer query. ``ARRAY_AGG ... FILTER (WHERE
-        # granter_name IS NOT NULL)`` reads cleanly; doing it inline would
-        # mean duplicating the three-way COALESCE in both the aggregate and
-        # the filter clause.
-        #
-        # TODO: collapse the inner SELECT to a single LEFT JOIN +
-        # ``COALESCE(co.name, ug.granter_name)`` once the unified canonical
-        # table lands — see
-        # https://github.com/vibrant-data-labs/givingtuesday-datamart/issues/22.
-        #
-        # ``COALESCE(SUM(...), 0)`` keeps the total numeric even when an
-        # EIN has grants but every grant_amount is NULL — otherwise NaN
-        # propagates through downstream mean/threshold filters and silently
-        # drops the EIN.
+        # Aggregate amounts before resolving identities: joins must not multiply grants.
         where_taxyear = "AND ug.taxyear >= :min_taxyear" if min_taxyear is not None else ""
         if min_taxyear is not None:
             params["min_taxyear"] = min_taxyear
         sql = f"""
-            WITH resolved AS (
-                SELECT
-                    ug.{ein_col}        AS ein,
-                    ug.taxyear          AS taxyear,
-                    ug.grant_amount     AS grant_amount,
-                    ug.granter_ein      AS granter_ein,
-                    COALESCE(
-                        CASE WHEN ug.filesha256 IS NOT NULL THEN fc.name ELSE nc.name END,
-                        CASE WHEN ug.filesha256 IS NOT NULL THEN nc.name ELSE fc.name END,
-                        ug.granter_name
-                    )                   AS granter_name
-                FROM public.unioned_grants ug
-                LEFT JOIN public.nonprofit_canonical nc ON nc.ein = ug.granter_ein
-                LEFT JOIN public.funder_canonical    fc ON fc.ein = ug.granter_ein
-                WHERE ug.{ein_col} = ANY(:eins)
-                  {where_taxyear}
-            )
-            SELECT
-                ein,
-                taxyear,
-                COALESCE(SUM(grant_amount), 0)::double precision    AS total_grant_amount,
-                COUNT(*)                                            AS grant_count,
-                ARRAY_AGG(DISTINCT granter_ein)
-                    FILTER (WHERE granter_ein IS NOT NULL)          AS granter_eins,
-                ARRAY_AGG(DISTINCT granter_name)
-                    FILTER (WHERE granter_name IS NOT NULL)         AS granter_names
-            FROM resolved
-            GROUP BY ein, taxyear
+            SELECT ug.{ein_col} AS ein, ug.taxyear,
+                   COALESCE(SUM(ug.grant_amount), 0)::double precision AS total_grant_amount,
+                   COUNT(*) AS grant_count,
+                   ARRAY_AGG(DISTINCT ug.granter_ein)
+                       FILTER (WHERE ug.granter_ein IS NOT NULL) AS granter_eins
+            FROM public.unioned_grants ug
+            WHERE ug.{ein_col} = ANY(:eins) {where_taxyear}
+            GROUP BY ug.{ein_col}, ug.taxyear
         """
 
         logger.info(
@@ -1430,6 +1441,9 @@ class GtDatamartClient:
         with self._session() as session:
             rows = session.execute(text(sql), params).mappings().all()
         logger.info("get_grant_summaries: %d (ein, taxyear) rows", len(rows))
+        identities = {identity.ein: identity for identity in self.get_funder_identities(
+            sorted({ein for r in rows for ein in (r["granter_eins"] or [])})
+        )}
         return [
             GrantSummary(
                 ein=r["ein"],
@@ -1438,8 +1452,7 @@ class GtDatamartClient:
                     float(r["total_grant_amount"]) if r["total_grant_amount"] is not None else None
                 ),
                 grant_count=int(r["grant_count"]),
-                granter_eins=list(r["granter_eins"] or []),
-                granter_names=list(r["granter_names"] or []),
+                granters=[identities[ein] for ein in sorted({e.strip().replace("-", "") for e in (r["granter_eins"] or [])})],
             )
             for r in rows
         ]

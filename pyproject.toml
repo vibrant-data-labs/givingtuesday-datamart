@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "givingtuesday-datamart"
-version = "0.1.0"
+version = "0.2.0"
 description = "Internal data backbone for the Giving Tuesday Datamart — staging, canonical surfaces, grant matching, and a read-only Python client."
 readme = "README.md"
 license = {text = "MIT"}
