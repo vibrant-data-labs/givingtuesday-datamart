@@ -23,10 +23,12 @@ from sqlalchemy import text
 from givingtuesday_datamart import current_grants as cg
 
 PAID, FUTURE = "paid", "future"
-# side -> (content columns, every column, the recipient-name column, the amount column, the purpose column)
+# side -> (content columns, every column, the recipient-name column, the amount column, the purpose column,
+#          the city column)
 COLUMNS = {
-    PAID: (cg._PF_CONTENT_COLS, cg._PF_ALL_COLS, "sigocpyrbnbn1", "sigocpyamoun", "sigocpypogoc"),
-    FUTURE: (cg._PF_FUTURE_CONTENT_COLS, cg._PF_FUTURE_ALL_COLS, "sigocaffrbnb1", "sigocaffamou", "sigocaffpogo"),
+    PAID: (cg._PF_CONTENT_COLS, cg._PF_ALL_COLS, "sigocpyrbnbn1", "sigocpyamoun", "sigocpypogoc", "sigocpyrfaci"),
+    FUTURE: (cg._PF_FUTURE_CONTENT_COLS, cg._PF_FUTURE_ALL_COLS, "sigocaffrbnb1", "sigocaffamou", "sigocaffpogo",
+             "sigocaffrfaci"),
 }
 A, B = ("ALPHA FUND", 1000), ("BETA TRUST", 250)
 EMPTY = ("", 0)                               # the nameless $0 row of a filing with no grants
@@ -34,6 +36,11 @@ EMPTY = ("", 0)                               # the nameless $0 row of a filing 
 # One name, one amount, another purpose: two tuples
 A1, A2 = ("ALPHA FUND", 1000, "GENERAL SUPPORT OF THE"), ("ALPHA FUND", 1000, "MISSION")
 NAMED_ZERO = ("GAMMA SOCIETY", 0)             # a group of its own that names a recipient and pays nothing
+# A list of two grants, and the row a filled group comes out as in a filing that pays several amounts: the
+# block's total under the last group's name (section 7.2 of docs/pf_doubling_basic_row_test.md)
+D, E = ("DELTA HOUSE", 600), ("EPSILON ARTS", 400)
+TOTAL = ("EPSILON ARTS", 1000)
+TYPED_TOTAL = ("ZETA FOUNDATION", 1000)       # a total the filer typed as a group of its own (The Colorado Trust)
 
 
 @dataclass(frozen=True)
@@ -41,7 +48,7 @@ class Case:
     """One filer-year: its rows in the extract, its ``basic_fields_pf`` rows
     and line 25, and what each relation must keep of it."""
     name: str
-    rows: tuple                               # (recipient, amount[, purpose]), in the extract's order
+    rows: tuple                               # (recipient, amount[, purpose[, city]]), in the extract's order
     paid: tuple                               # (rows kept, dedup_rule) in the paid relation
     future: tuple                             # the same in the future one
     line25_d: int = 0                         # Part I line 25 column (d), in cash
@@ -123,6 +130,73 @@ CASES = (
     Case("one name under two amounts", (A1, ("ALPHA FUND", 250, "MISSION")), (2, "passthrough"), (2, "passthrough"),
          line25_d=1000),
     Case("one grant beside a $0 row", (A, NAMED_ZERO), (2, "passthrough"), (2, "passthrough"), line25_d=1000),
+    # the two columns of line 25 disagree: one states one copy, the other every copy. The block is held whole,
+    # whichever column states the copy (note 1 of the review of PR #62)
+    Case("a forward fill whose other column states every copy", (A, A, A), (3, "passthrough"), (3, "passthrough"),
+         line25_d=1000, line25_a=3000),
+    Case("a field fill whose other column states every copy", (A1, A2), (2, "passthrough"), (2, "passthrough"),
+         line25_d=2000, line25_a=1000),
+    # the copies of a grant may differ in the address: the name must match, and nothing else is asked
+    Case("a field fill whose copies differ in address", (("ALPHA FUND", 1000, None, "BOSTON"),
+                                                         ("ALPHA FUND", 1000, None, "CAMBRIDGE")),
+         (1, "field_fill"), (2, "passthrough"), line25_d=1000),
+    # a negative amount beside the copies is another amount: not one grant, and the block stays
+    Case("a field fill beside a negative row", (A1, A2, ("ALPHA FUND", -100)), (3, "passthrough"),
+         (3, "passthrough"), line25_d=1000),
+    # total row: paid only, as the two fills are. A filing that pays several amounts, read with the fill of 7.2,
+    # holds its whole total once more per filled group, under the last group's name. The rows carrying line 25
+    # leave where the other rows add up to that amount; the other rows stay as they are
+    Case("a total row", (D, E, TOTAL), (2, "total_row"), (3, "passthrough"), line25_d=1000),
+    Case("a total row, three of them", (D, E, TOTAL, TOTAL, TOTAL), (2, "total_row"), (5, "passthrough"),
+         line25_d=1000),
+    Case("a total row line 25 states per books only", (D, E, TOTAL), (2, "total_row"), (3, "passthrough"),
+         line25_d=0, line25_a=1000),
+    Case("a total row beside a $0 row", (D, NAMED_ZERO, E, TOTAL), (3, "total_row"), (4, "passthrough"),
+         line25_d=1000),
+    Case("a total row beside a negative row", (D, ("EPSILON ARTS", 500), ("EPSILON ARTS", -100), TOTAL),
+         (3, "total_row"), (4, "passthrough"), line25_d=1000),
+    # the negative row can lift a grant above the total (EIN 223088744 / tax year 2016: "See Statement" $247,931,
+    # a $21,000 refund, and the filled row at $226,931): line 25 names the total, not the block's largest amount
+    Case("a total row below the largest grant", (("DELTA HOUSE", 1200), ("EPSILON ARTS", -200), TOTAL),
+         (2, "total_row"), (3, "passthrough"), line25_d=1000),
+    # the other column states an amount of its own: the rule reads both, and one of them names the total
+    Case("a total row with the other column elsewhere", (D, E, TOTAL), (2, "total_row"), (3, "passthrough"),
+         line25_d=1000, line25_a=900),
+    # and beside a negative row each column can pass the test on a different amount: under (d) X is the total,
+    # under (a) the three Y. The table cannot say which, and the block is held whole
+    Case("two totals, one a column", (("X FUND", 1000), ("Y HOUSE", 500), ("Y HOUSE", 500), ("Y HOUSE", 500),
+                                      ("Z TRUST", -500)), (5, "passthrough"), (5, "passthrough"),
+         line25_d=1000, line25_a=500),
+    # the filer typed the total as a group of its own: the row carries a name of its own, and leaves the same
+    Case("a total the filer typed as a group", (D, E, TYPED_TOTAL), (2, "total_row"), (3, "passthrough"),
+         line25_d=1000),
+    # after the halving, on what the filing itself holds: every row carrying the total leaves, both halves
+    Case("a total row in a doubled filing", (D, E, TOTAL, TOTAL, D, E, TOTAL, TOTAL),
+         (2, "pair_collapse+total_row"), (4, "pair_collapse"), line25_d=1000, basic_shas=("s1", "s1")),
+    Case("a total row whose earlier version declares another total", (D, E, TOTAL), (2, "latest_url+total_row"),
+         (3, "latest_url"), line25_d=1000, older_url_rows=(B,), older_line25=250),
+    # what the total row must leave alone
+    Case("a list whose line 25 states every row", (D, E, TOTAL), (3, "passthrough"), (3, "passthrough"),
+         line25_d=2000),
+    Case("a list whose two columns disagree", (D, E, TOTAL), (3, "passthrough"), (3, "passthrough"),
+         line25_d=1000, line25_a=2000),
+    Case("a list whose line 25 states another amount", (D, E, TOTAL), (3, "passthrough"), (3, "passthrough"),
+         line25_d=1500),
+    Case("a list whose line 25 states nothing", (D, E, TOTAL), (3, "passthrough"), (3, "passthrough"),
+         line25_d=0),
+    Case("a list whose largest grant is on line 25 and the rest fall short", (D, ("EPSILON ARTS", 300), TOTAL),
+         (3, "passthrough"), (3, "passthrough"), line25_d=1000),
+    Case("a list whose largest grant is on line 25 and the rest run over", (D, ("EPSILON ARTS", 500), TOTAL),
+         (3, "passthrough"), (3, "passthrough"), line25_d=1000),
+    # equal grants to several recipients, the rest adding up to one of them, line 25 stating one (EIN 363815138 /
+    # tax year 2024: sixteen scholarships, fourteen of $1,000): the rows carrying line 25 are not one tuple
+    Case("a list of equal grants with line 25 on one of them", (A, ("BETA TRUST", 1000), D, E), (4, "passthrough"),
+         (4, "passthrough"), line25_d=1000),
+    # two rows carrying the total that differ in a field are two tuples: not the fill, whose filled rows are
+    # identical to each other, and the block is held whole
+    Case("two total rows that differ in purpose", (D, E, ("EPSILON ARTS", 1000, "GENERAL"),
+                                                   ("EPSILON ARTS", 1000, "MISSION")),
+         (4, "passthrough"), (4, "passthrough"), line25_d=1000),
 )
 TAX_YEAR = "2024"
 # A filer-year whose paid rows are held under a later url than its future rows
@@ -138,16 +212,16 @@ def _url(ein: str, version: int = 2) -> str:
 
 
 def _grant_rows(side: str) -> list[dict]:
-    _content, every, name, amount, purpose = COLUMNS[side]
+    _content, every, name, amount, purpose, city = COLUMNS[side]
     rows = []
     for index, case in enumerate(CASES):
         ein = _ein(index)
         for version, grants in ((1, case.older_url_rows), (2, case.rows)):
-            for recipient, dollars, *text_of in grants:
+            for recipient, dollars, *rest in grants:
                 row = dict.fromkeys(every, None)
                 row.update(filerein=ein, taxyear=TAX_YEAR, url=_url(ein, version), filername1=case.name,
                            filesha256=f"s{version - 1}", **{name: recipient, amount: str(dollars)},
-                           **{purpose: text_of[0] for _ in text_of})
+                           **dict(zip((purpose, city), rest)))
                 rows.append(row)
     if side == FUTURE:
         row = dict.fromkeys(every, None)
@@ -179,7 +253,7 @@ def _load(session, table: str, columns: list[str], rows: list[dict]) -> None:
 
 def _build(session, side: str) -> dict[str, list]:
     """The relation ``side``'s DDL builds from the fixtures: its rows by EIN."""
-    content, every, _name, amount, _purpose = COLUMNS[side]
+    content, every, _name, amount, _purpose, _city = COLUMNS[side]
     _load(session, f"t_{side}_src", every, _grant_rows(side))
     differences = ({"line25_amount": amount, "recipient_cols": cg._PF_NAME_COLS} if side == PAID
                    else {"paid": "pg_temp.t_paid_held"})
@@ -255,7 +329,7 @@ def test_halving_keeps_half_of_each_tuple_and_a_forward_fill_one_row(built, side
 
 @pytest.mark.db
 def test_a_field_fill_keeps_the_first_copy_of_the_grant_and_the_rows_without_an_amount(built):
-    name, amount, purpose = COLUMNS[PAID][2:]
+    name, amount, purpose = COLUMNS[PAID][2:5]
     by_case = {case.name: built[PAID][_ein(index)] for index, case in enumerate(CASES)}
     kept = lambda case: sorted((row[name], row[amount], row[purpose]) for row in by_case[case])  # noqa: E731
     first = tuple(str(value) for value in A1)                   # the real group's own row, purpose and all
@@ -268,6 +342,32 @@ def test_a_field_fill_keeps_the_first_copy_of_the_grant_and_the_rows_without_an_
     assert kept("a doubled single grant beside a $0 row") == one_and_the_named_zero
     # the future relation has no fill rule: its rows are as the extract has them
     assert len(built[FUTURE][_ein([case.name for case in CASES].index("a field fill beside a $0 row"))]) == 4
+    # the copies may differ in the address: the first is kept
+    assert [(row[name], row[amount], row[COLUMNS[PAID][5]]) for row in by_case["a field fill whose copies differ in address"]] \
+        == [("ALPHA FUND", "1000", "BOSTON")]
+
+
+@pytest.mark.db
+def test_a_total_row_leaves_every_row_carrying_the_total_and_keeps_the_list(built):
+    name, amount = COLUMNS[PAID][2:4]
+    by_case = {case.name: built[PAID][_ein(index)] for index, case in enumerate(CASES)}
+    kept = lambda case: sorted((row[name], row[amount]) for row in by_case[case])  # noqa: E731
+    the_list = [("DELTA HOUSE", "600"), ("EPSILON ARTS", "400")]
+    for case in ("a total row", "a total row, three of them", "a total row line 25 states per books only",
+                 "a total the filer typed as a group", "a total row whose earlier version declares another total",
+                 "a total row in a doubled filing", "a total row with the other column elsewhere"):
+        assert kept(case) == the_list, case
+    # held whole: every row stays, the rows carrying the total among them
+    assert kept("two total rows that differ in purpose") == sorted(the_list + [("EPSILON ARTS", "1000")] * 2)
+    assert kept("two totals, one a column") == [("X FUND", "1000"), ("Y HOUSE", "500"), ("Y HOUSE", "500"),
+                                                ("Y HOUSE", "500"), ("Z TRUST", "-500")]
+    # the rows without an amount, and a negative row, are groups of their own and stay
+    assert kept("a total row beside a $0 row") == the_list + [("GAMMA SOCIETY", "0")]
+    assert kept("a total row beside a negative row") == [("DELTA HOUSE", "600"), ("EPSILON ARTS", "-100"),
+                                                         ("EPSILON ARTS", "500")]
+    assert kept("a total row below the largest grant") == [("DELTA HOUSE", "1200"), ("EPSILON ARTS", "-200")]
+    # the future relation has no total-row rule
+    assert len(built[FUTURE][_ein([case.name for case in CASES].index("a total row, three of them"))]) == 5
 
 
 @pytest.mark.db
@@ -315,12 +415,14 @@ SHARED = (
     "CASE WHEN _pair THEN 'pair_collapse' END",
     "CASE WHEN _fill THEN 'forward_fill' END",
     "CASE WHEN _field_fill THEN 'field_fill' END",
+    "CASE WHEN _total_row THEN 'total_row' END",
     "WHERE CASE WHEN _fill THEN _copy_rank = 1",                                         # what is kept
     "WHEN _pair THEN _copy_rank <= _n_copies / 2",
 )
-# The differences: line 25 on the paid side (the two fill rules), the paid relation's url on the future side.
+# The differences: line 25 on the paid side (the three line-25 rules), the paid relation's url on the future side.
 PAID_ONLY = ("_pf_line25", "arecgpdcprps", "arecprexpnss", "_amt", "_line25_d", "_line25_a",
-             "_n_amt", "_first_amt", "_grant_amt", "_one_grant")
+             "_n_amt", "_first_amt", "_grant_amt", "_one_grant",
+             "_sum_amt", "_t_d", "_rest_d", "_t_a", "_rest_a", "_total_row AND _amt = _total")
 FUTURE_ONLY = ("CREATE TEMP TABLE _pf_paid AS", "LEFT JOIN _pf_paid p", "WHERE p.url IS NULL OR p.url <= g.url")
 
 
@@ -352,38 +454,62 @@ def test_each_difference_only_adds_to_the_shared_rule():
     assert not [f for f in PAID_ONLY + FUTURE_ONLY if any(f in line for line in shared)]
     # the paid relation's url: lines added, none rewritten
     assert _rewritten(shared, with_paid) == [] and len(with_paid) > len(shared)
-    # line 25: lines added, and the one line that decides forward fill rewritten
-    assert _rewritten(shared, with_line25) == ["FALSE AS _fill,"]
+    # line 25: lines added, and the lines that decide forward fill and the total row rewritten
+    assert _rewritten(shared, with_line25) == ["FALSE AS _fill,", "FALSE AS _total_row,", "NULL::numeric AS _total"]
     assert len(with_line25) > len(shared)
     # the recipient's name beside it: lines added, and the one line that decides field fill rewritten
-    assert _rewritten(with_line25, with_names) == ["FALSE AS _field_fill"]
+    assert _rewritten(with_line25, with_names) == ["FALSE AS _field_fill,"]
     assert len(with_names) > len(with_line25)
     # the names alone add nothing: field fill leans on line 25 as forward fill does
     assert cg._pf_current_ddl(**args, recipient_cols=cg._PF_NAME_COLS).splitlines() == shared
 
 
-def test_line_25_decides_the_two_fills_and_nothing_else():
+HELD = "CASE WHEN p._pair THEN 2 ELSE 1 END"
+# The guard the three line-25 rules share: the whole block the filing holds is on line 25 in neither column
+GUARD = f"AND NOT (p._sum_amt / {HELD} IN (p._line25_d, p._line25_a)))"
+
+
+def test_line_25_decides_the_three_line_25_rules_and_nothing_else():
     ddl = cg._PF_CURRENT_DDL
     # pair_collapse is the repeated row alone, on both sides: no test of the block's sum against line 25
     assert "ABS(" not in ddl and "_full_sum" not in ddl
     rule = ddl[ddl.index("ruled AS ("):ddl.index("SELECT ruled.filerein")]
-    assert rule.count("_line25") == 4 and "AS _pair" in rule
+    assert "(b._all_even AND b._repeated) AS _pair" in rule
+    # every reading of line 25 in the rule is one of the three rules' or the guard's, on the block's own row:
+    # forward fill 2 + its guard 2, field fill 2 + 2, total row 2 + 2 (the two columns) + 6 (both repeated in
+    # the hold-whole test, and (d) <> (a)) + 2 (guard), and _total 4; a reading added anywhere else moves it
+    assert rule.count("_line25") == 24
+    assert all(line.strip().startswith(("(p.", "OR (p.", "AND p.", "AND NOT (p.", "AND NOT ((p.", "CASE WHEN (p.",
+                                        "(((p."))
+               for line in rule.splitlines() if "_line25" in line)
+    assert "_line25" not in ddl[ddl.index("SELECT ruled.filerein"):ddl.index("DROP TABLE _pf_repeated")]   # nor in what is kept
     # forward fill: one tuple, more than once in the filing itself, one copy on line 25 in either column
-    assert "(p._one_tuple AND p._n_copies / CASE WHEN p._pair THEN 2 ELSE 1 END >= 2" in ddl
-    assert "AND p._amt > 0 AND (p._amt = p._line25_d OR p._amt = p._line25_a)) AS _fill," in ddl
+    assert f"(p._one_tuple AND p._n_copies / {HELD} >= 2" in ddl
+    assert f"AND p._amt > 0 AND (p._amt = p._line25_d OR p._amt = p._line25_a)\n            {GUARD} AS _fill," in ddl
     # field fill: not one tuple, the rows with an amount one grant, two or more of them in the filing itself,
     # and the same line-25 test on the grant's amount
-    assert "(NOT p._one_tuple AND p._one_grant AND p._n_amt / CASE WHEN p._pair THEN 2 ELSE 1 END >= 2" in ddl
-    assert ("AND p._grant_amt > 0 AND (p._grant_amt = p._line25_d OR p._grant_amt = p._line25_a)) AS _field_fill"
-            in ddl)
+    assert f"(NOT p._one_tuple AND p._one_grant AND p._n_amt / {HELD} >= 2" in ddl
+    assert (f"AND p._grant_amt > 0 AND (p._grant_amt = p._line25_d OR p._grant_amt = p._line25_a)\n"
+            f"            {GUARD} AS _field_fill") in ddl
     # one grant: one amount and one name, as the three name columns have it, among the rows with an amount
     name = "concat_ws(' ', c.sigocpyrpnam, c.sigocpyrbnbn1, c.sigocpyrbnbn2)"
     assert ddl.count(name) == 2 and ddl.count("FILTER (WHERE c._amt <> 0) OVER fy") == 7
     # it removes the later rows with the amount, and no other: a row without one is left to the lines below it
-    assert "WHEN _field_fill AND _amt <> 0 THEN _ctid = _first_amt\n           WHEN _pair THEN" in ddl
+    assert "WHEN _field_fill AND _amt <> 0 THEN _ctid = _first_amt\n" in ddl
+    # total row: the rows carrying line 25, above zero, in either column, are one tuple, and the other rows add
+    # up to that amount (twice it in a doubled filing); the rows carrying it leave, the others go to the lines below
+    for column in ("d", "a"):
+        assert f"(p._line25_{column} > 0 AND p._t_{column} = 1 AND p._rest_{column} = p._line25_{column} * {HELD})" in ddl
+        assert f"COUNT(*) FILTER (WHERE c._amt = c._line25_{column} AND c._copy_rank = 1) OVER fy AS _t_{column}," in ddl
+        assert f"COALESCE(SUM(c._amt) FILTER (WHERE c._amt <> c._line25_{column}) OVER fy, 0) AS _rest_{column}" in ddl
+    assert f"{GUARD} AS _total_row," in ddl and "SUM(c._amt) OVER fy AS _sum_amt," in ddl
+    assert "THEN p._line25_d ELSE p._line25_a END AS _total" in ddl
+    assert "WHEN _total_row AND _amt = _total THEN FALSE\n           WHEN _pair THEN" in ddl
     future = cg._PF_FUTURE_CURRENT_DDL
     assert "_field_fill AND _amt" not in future and "FALSE AS _field_fill" in future
-    assert (cg.PAIR_COLLAPSE, cg.FORWARD_FILL, cg.FIELD_FILL) == ("pair_collapse", "forward_fill", "field_fill")
+    assert "_total_row AND _amt" not in future and "FALSE AS _total_row" in future
+    assert (cg.PAIR_COLLAPSE, cg.FORWARD_FILL, cg.FIELD_FILL, cg.TOTAL_ROW) == (
+        "pair_collapse", "forward_fill", "field_fill", "total_row")
 
 
 def test_line_25_is_the_kept_urls_own():

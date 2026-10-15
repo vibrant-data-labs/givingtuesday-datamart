@@ -300,12 +300,12 @@ python -m givingtuesday_datamart.placeholder_recovery check --policy POLICY
 
 | step | what to expect |
 |---|---|
-| 1 | 16,651,426 rows become 16,647,920; `pair_collapse` on 12,668 filer-years (10,259 today), `forward_fill` on 200, `field_fill` on 47. Step 1 is also what the matcher does at the start of a run, so a matcher rerun makes it unnecessary |
+| 1 | 16,651,426 rows become 16,642,387; `pair_collapse` on 12,668 filer-years (10,259 today), `forward_fill` on 200, `field_fill` on 47, `total_row` on 1,329 (1,304 alone, 23 with `latest_url`, 2 with `pair_collapse`). The paid build took about 40 minutes on the scratch run of October 14, beside another session's queries, where "25 to 35" is the usual. Step 1 is also what the matcher does at the start of a run, so a matcher rerun makes it unnecessary |
 | 1, the watch | the build's last log line counts the filer-years that look doubled and are held whole (every line item an even number of times, more than one line item, half the block closer to line 25 than the whole, no repeated row). Expect `0 filer-years look doubled without a repeated basic row`. Anything else is a WARNING that names the first of them: a batch that doubled the grants and not the basic row, which the rule no longer halves. Check them against their XML before the matcher runs |
 | 1, the views | the `DROP ... CASCADE` takes the matching views and `privategrants_current_w_recovered`. The command reads the policy the view shows BEFORE the rebuild and creates all of them again for that policy (since PR #56). With no view to read a policy from, it rebuilds the table and stops before the matching views, saying to run `placeholder_recovery view --policy`; the matching views are then created by the next matcher run, which starts with them |
 | 2 | unchanged, 441,358 rows: the future relation reads the paid one for its urls only, and no filer-year's url moves |
-| 3, `work-list` | 36 filings whose placeholder amount was in the table N times come down to one copy ($82,217,263 to $11,203,855) and lose `placeholder_exceeds_declared`: 22 through `forward_fill`, 14 through `field_fill`. The work list does not depend on the policy |
-| 3, `load` | measured on the rows read under v2, and the same under v3's verdicts: five of the 36 load, 145 rows and $5,857,441 (EIN 205905161, tax years 2020 to 2024). Their lists add up to the corrected amount and never could to five times it |
+| 3, `work-list` | 50 filings change. 36 whose placeholder amount was in the table N times come down to one copy ($82,217,263 to $11,203,855) and lose `placeholder_exceeds_declared`: 22 through `forward_fill`, 14 through `field_fill`. 14 more lose a total row that carried a placeholder name (`total_row`; doubling doc 8.5): $31,214,844 to $6,589,158. The work list does not depend on the policy |
+| 3, `load` | measured on the rows read under v2, and the same under v3's verdicts: five of the 36 load, 145 rows and $5,857,441 (EIN 205905161, tax years 2020 to 2024). Their lists add up to the corrected amount and never could to five times it. One of the 14 loads too: EIN 222741682 / 2023 (`202541299349101534`), 93 rows and $1,468,836, which no list could add up to while the work list held $20,563,704 for it |
 
 What does NOT follow from these steps: `privategrants_w_recipients` and
 `unioned_grants`, which the products read, are written by the matcher and
@@ -313,19 +313,20 @@ change only when it reruns. That rerun is Zein's, about eight hours, and
 PR #56 (the recovered grants into the matcher, merged October 1) needs
 the same one, so one rerun carries both. The regression gate runs after it
 (`docs/matching-regression-runbook.md`). From these changes alone it
-should show 319 fewer matched rows (7,578,795 to 7,578,476: 277 of the
-rules of September 30, 42 of `field_fill`) and two self-matches fewer
-(3,641 to 3,639), and nothing else: the placeholder, corporate, foreign
-and person counts, the three sentinels, the labeled-pair coverage and the
-two hard rules stay where they are. The doubling doc, sections 6.7 and
-7.7, has the reasoning for each line.
+should show 2,596 fewer matched rows (7,578,795 to 7,576,199: 277 of the
+rules of September 30, 42 of `field_fill`, 2,277 of `total_row`, those
+last carrying $1,338,669,335), two self-matches fewer (3,641 to 3,639),
+Johns Hopkins at 1,823 (from 1,826; floor 1,735), and nothing else: the
+placeholder, corporate, foreign and person counts, the other two
+sentinels, the labeled-pair coverage (every funder-recipient pair on the
+rows that leave is on another matched row) and the two hard rules stay
+where they are. The doubling doc, sections 6.7, 7.7 and 8.6, has the
+reasoning for each line.
 
-Still wrong after the rebuild, and listed in the doubling doc: the fill in
-filings that pay more than one amount, which puts the filing's total on a
-row of its own once per filled group (7.8: 1,331 filer-years, $2.42B
-counted too often, 2,279 of those rows matched), 31 filer-years filled
-under several names (7.3), and two future-payment filings that are
-forward-filled (6.4).
+Still wrong after the rebuild, and listed in the doubling doc: 31
+filer-years filled under several names (7.3), two total rows whose line 25
+differs from the Part XV total (8.1), and two future-payment filings that
+are forward-filled (6.4).
 
 ## How a page is decided
 
@@ -427,6 +428,7 @@ without a new measurement.
 | what loads | lists within 0.5% of the declared total; rows from pages that were read only; rows from pages labelled expenditure responsibility only where a list needs them, labelled |
 | targets | the work list's paid amount and, since 2026-09-29, its future amount, from GivingTuesday's future-payment datamart (`990PFPart14Grants3B`); each list is searched for on its own; future lists load marked `future`, outside the view |
 | doubled blocks in the future-payment file | halved when every row is paired and the filing's `basic_fields_pf` row is repeated; nothing else is halved. The paid rule still tests against line 25; Zein chose on 2026-09-30 to add the repeated row beside it (PR #57 measured it), a change still to be made and gated |
+| the total row (PR #69) | in a filing that pays several amounts, the rows carrying line 25, in either column, leave where they are one line item and the other rows add up to that amount; a total the filer typed as a group leaves the same way (`total_row` for both); where the whole block the filing holds is on either column of line 25 nothing leaves, for all three line-25 rules; where the two columns each name a total of their own (a negative row beside them) the block is held whole |
 | a placeholder amount over both columns of line 25 | the filing is read and its list loads, every row labelled `placeholder_exceeds_declared`; a consumer filters on it |
 | the view | drops a filing's placeholder row once its list is loaded; shows one policy; stays an object of its own, which the matcher's first view reads |
 | the name cleaner | `grant_matching.clean_name`, for every grant: punctuation, "&", a leading or trailing "the" and the legal endings; one level and no more. It says when two names are the same; names that are not score on the normalized name, as before |

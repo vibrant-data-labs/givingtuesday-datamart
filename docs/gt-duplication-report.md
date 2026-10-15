@@ -217,6 +217,18 @@ the count from the tables runs slightly high. This is the largest form of
 category D by an order of magnitude, and it attributes the dollars to a
 named recipient.
 
+*Added October 14, 2026.* Repaired on our side as the `total_row` rule of
+`privategrants_current` (`current_grants.py`; section 8 of
+`pf_doubling_basic_row_test.md`): where the rows carrying line 25 are one
+line item and the other rows add up to that amount, the rows carrying it
+leave. 139 of the filer-years the rule takes were checked against the XML,
+drawn by what the table shows of them (the typed total above among them,
+already one of the 88): 138 are filled groups and one is that typed total,
+which the rule drops the same way (the return's Part XV then adds up to
+its own line 25). The shape is weaker than it looks without line
+25: 10,101 filer-years hold a list whose largest grant happens to equal
+the sum of the others, and their line 25 states the whole block.
+
 ## What would fix it upstream
 
 In order of value to consumers:

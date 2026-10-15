@@ -57,15 +57,17 @@ raw staging:
        doubled). The shape alone decides nothing: it is a legitimate
        repeat, N grants to one recipient, as often as it is a defect. A
        total is needed to tell them apart, which is difference (a).
-    6. ``dedup_rule`` — ``latest_url``, ``pair_collapse``, ``forward_fill``
-       and ``field_fill``, ``+``-joined when more than one took rows from
-       the filer-year, else ``passthrough``. The two fills never meet: a
-       block is one tuple or it is not.
+    6. ``dedup_rule`` — ``latest_url``, ``pair_collapse``, ``forward_fill``,
+       ``field_fill`` and ``total_row``, ``+``-joined when more than one
+       took rows from the filer-year, else ``passthrough``. The three
+       line-25 rules never meet: a block is one tuple or it is not, and the
+       rows beside the ones carrying line 25 add up to nothing for the two
+       fills and to line 25 itself for the total row.
 
     The differences, and why each is there:
 
-    a. forward_fill and field_fill: paid only, one test on two shapes.
-       GivingTuesday's extract fills a group's
+    a. forward_fill, field_fill and total_row: paid only, one test on three
+       shapes. GivingTuesday's extract fills a group's
        missing fields from another group of the same filing. A return
        that enters ONE real grant group and N-1 empty ones (``<Amt>0</Amt>``
        and nothing else) comes out as N copies of the real group, amount
@@ -99,7 +101,7 @@ raw staging:
        (``pair_collapse+forward_fill``, 2 filer-years). A doubled
        single-grant filing (one tuple twice under a repeated row) is step
        4's alone and stays ``pair_collapse``. Line 25 is read for the
-       two fills and for nothing else.
+       three line-25 rules below and for nothing else.
 
        field_fill is the same repair where the block is NOT one tuple.
        What the extract does, checked group by group on 2026-10-01 against
@@ -162,6 +164,98 @@ raw staging:
          The rule keeps one row: what Part I says was paid, and not what
          Part XV lists. The table cannot tell it from a fill.
 
+       total_row is the same fill in a filing that pays SEVERAL amounts.
+       There the filled row carries the block's whole total, under the
+       last group's name and address, once per filled group: EIN 133981257
+       / tax year 2015 lists 15 grants of $574,909 in all and 14 empty
+       groups, and the table holds 29 rows, 14 of them $574,909 (EIN
+       061600601 / tax year 2021: three grants of $97,430,000 in all, two
+       empty groups, two rows of $97,430,000 under "THE CONNECTICUT
+       PROJECT INC", both matched). The rule: where the rows of the block
+       that carry line 25, above zero, in column (d) or in column (a), are
+       ONE tuple, and the OTHER rows add up to exactly that amount, the
+       rows carrying it leave and the other rows stay as they are.
+       Measured 2026-10-14 on batch ``2026_06_16``: 1,329 filer-years,
+       5,533 rows and $2,424,287,603 leave, where line 25 states
+       $675,447,174; the matcher has matched 2,277 of those rows,
+       $1,338,669,335 in 507 filer-years, to whatever the filing's last
+       group names. 139 of the 1,329 were checked against the XML, drawn
+       by class (the 61 whose total row's name stands on no other row, the
+       2 under a repeated row, 30 of the 94 with several identical total
+       rows under such a name, the 6 whose total row's address differs
+       from the named row's, 40 at random, and the one whose total lies
+       below its largest grant): 138 are the fill and 1 is the typed
+       total below. The design points:
+
+       - Which rows leave: every row carrying the total, and no other. The
+         filled rows of a filing are identical to each other (7.2), so the
+         rule asks that the rows carrying the total be one tuple and there
+         is no copy to choose among. The one filer-year of the shape whose
+         total rows differ is not a fill: EIN 363815138 / tax year 2024
+         lists sixteen scholarships, fourteen of $1,000, and states
+         $1,000 on line 25(a); the XML fills no group. It is held whole.
+         The $0 rows, and a negative row, are groups of their own and stay
+         (the rest adds them in: a clawback row lowers the total the
+         filing states, and the filled rows carry that lower total, which
+         can lie BELOW a real grant: EIN 223088744 / tax year 2016 holds
+         "See Statement" $247,931, a $21,000 refund, and the filled row at
+         $226,931, which is line 25). So line 25 names the total, not the
+         block's largest amount, and it is read in both columns: EIN
+         273789587 / tax year 2019 states $70,000 in (d) and the total,
+         $65,000, in (a), and 13 filled rows carry $65,000. Both columns
+         state the total in 915 of the 1,329, (d) alone in 8, (a) alone
+         in 406. Beside a negative row the two columns can each pass the
+         test on a DIFFERENT amount (X $1,000; Y $500 three times as one
+         tuple; Z -$500; (d) $1,000, (a) $500: under (d) X is the total,
+         under (a) the three Y). The table cannot say which, so the block
+         is held whole; none on this batch.
+       - A total the filer typed as a group of its own leaves the same
+         way, and ``dedup_rule`` says ``total_row`` for both, because the
+         table cannot tell them apart and the row is a total either way.
+         The Colorado Trust, EIN 840994055 / tax year 2019
+         (``202033189349104058``): 373 groups each with an amount of its
+         own, one of them ("Zarlengo Foundation", $9,589,893) the sum of
+         the other 372, and line 25(d) that amount. The XML fills no group;
+         the return itself carries its total as a grant. Dropping it
+         leaves Part XV adding up to line 25, as every fill does. It is the
+         one such case among the 139 checked here and the 88 checked
+         before (section 7.8 of the doc).
+       - No one-name condition can hold: the other rows are the list, each
+         under its own recipient. Nor does the total row's name have to
+         recur in the filing: the fill is per field, so a filled row can
+         carry a person's name from one group beside an organization's
+         from another ("RELIGIOUS MINISTER Universal Heritage In"), and a
+         name that stands on no other row. 155 of the 1,329 are so, and
+         all 61 of them with one total row are the fill in the XML.
+       - Line 25, not the block's largest amount, names the total: the
+         same shape with line 25 elsewhere is 10,101 filer-years whose
+         largest grant happens to equal the sum of the others (three
+         grants of $500, $300 and $200) and whose line 25 states the whole
+         block. They are left whole. So are the 67 whose line 25 states
+         another amount (EIN 475268267 / tax year 2021 is the fill with a
+         line 25 that differs from its Part XV total: left, $6.8M on 160
+         rows) and the 13 whose line 25 states nothing.
+       - The guard, carried from the review of PR #62 and applied to all
+         three rules: where the whole block the filing holds is on line 25
+         in EITHER column, nothing leaves. The two columns disagree in
+         exactly the way that misleads a one-column test: a filer that
+         pays one recipient twice, $2,000 in cash and $1,000 per books,
+         has one column on one copy and the other on every copy. For the
+         total row the whole block is (k + 1) x the total, and 4
+         filer-years ($162,000) have that on the other column: held whole.
+         On this batch the guard changes nothing for the two fills.
+       - Order: after step 4, on what the filing itself holds, as the two
+         fills. A doubled filing holds every row twice, so the other rows
+         add up to twice the total and every row carrying it leaves, both
+         halves (``pair_collapse+total_row``, 2 filer-years, $29,070).
+       - Composition: the two fills are this rule's one-amount case, where
+         the other rows add up to 0 and the filled rows carry the one
+         grant. They stay rules of their own with their own names and
+         kept-row choices (the rows are copies of a grant there, and
+         totals here); the three are disjoint by construction and share
+         the line-25 reading and the guard. Line 25 is read for the three
+         and for nothing else.
+
        The future side has no forward-fill repair, because the rule leans
        on line 25 and nothing states a future total. Its 13 one-tuple
        blocks without a repeated row were all checked against their XML
@@ -209,18 +303,10 @@ raw staging:
     was not doubled with it (none known, see above). A filer that really
     lists every grant twice under a repeated row (none known). A fill
     whose copies carry several names (31 filer-years, $18.6M, see
-    field_fill above). And the largest by far, measured 2026-10-01 and
-    left for a rule of its own: a fill in a filing that pays MORE than one
-    amount. Each filled group is one more row of the block's total, under
-    the name of the filing's last group. 1,331 filer-years without a
-    repeated row hold line 25 on k >= 1 rows beside rows that add up to
-    it: 5,548 rows and $2.42B counted too often, where $675M was paid.
-    87 of 88 checked against the XML are the fill (the 88th, EIN 840994055
-    / tax year 2019, states the total in a group of its own), and the
-    matcher has matched 2,279 of those rows ($1.34B). The two fills are
-    its one-amount case (``docs/pf_doubling_basic_row_test.md``, section
-    7).
-    A forward fill of $0 rows (3 filer-years, 7 rows, no dollars).
+    field_fill above). A total row whose line 25 states another amount
+    than the Part XV total, or nothing (80 filer-years, $6.9M, see
+    total_row above). A forward fill of $0 rows (3 filer-years, 7 rows,
+    no dollars).
 
 * ``public.basic_fields_current`` (990 filer financials, issue #34)
 * ``public.basic_fields_pf_current`` (990-PF filer financials)
@@ -258,8 +344,8 @@ raw staging:
 Every surviving row carries provenance: ``n_urls_for_year`` (grants),
 ``n_filings_for_year`` (distinct shas in basic_fields[_pf]), and
 ``dedup_rule`` — ``passthrough`` | ``latest_url`` | ``amend_distinct`` |
-``pair_collapse`` | ``forward_fill`` | ``field_fill`` (``+``-joined when more
-than one applied) on the grants side, ``passthrough`` | ``latest_filing`` |
+``pair_collapse`` | ``forward_fill`` | ``field_fill`` | ``total_row``
+(``+``-joined when more than one applied) on the grants side, ``passthrough`` | ``latest_filing`` |
 ``duplicate_row`` on the basic fields side — so every kept or dropped row
 is explainable from the relation alone.
 
@@ -476,6 +562,7 @@ WHERE n_filings_for_year < 2 OR _copy_rank = 1;
 PAIR_COLLAPSE = "pair_collapse"
 FORWARD_FILL = "forward_fill"
 FIELD_FILL = "field_fill"
+TOTAL_ROW = "total_row"
 # The recipient's name on a paid row: the person's, and the two lines of the
 # organization's. The field-fill rule asks that the copies of a grant carry one.
 _PF_NAME_COLS = ["sigocpyrpnam", "sigocpyrbnbn1", "sigocpyrbnbn2"]
@@ -527,6 +614,13 @@ def _pf_current_ddl(*, table: str, source: str, content_cols: list[str], all_col
     """
     line25 = line25_amount is not None
     field = line25 and bool(recipient_cols)
+    # what the filing itself holds: half of a doubled block
+    held = "CASE WHEN p._pair THEN 2 ELSE 1 END"
+    # the guard the three line-25 rules share: where the whole block the
+    # filing holds is on line 25, in either column, every row is declared and
+    # nothing leaves. The two columns can disagree (one states one copy, the
+    # other every copy), and a rule that read one alone would drop a real grant
+    guard = f"AND NOT (p._sum_amt / {held} IN (p._line25_d, p._line25_a))"
     line25_table = f"""
 CREATE TEMP TABLE _pf_line25 AS
     -- grants paid as the filing declares it, Part I line 25: column (d),
@@ -566,8 +660,36 @@ ANALYZE _pf_paid;""" if paid else ""
     # than once (a doubled filing holds half the copies), and line 25, in
     # either column, equals ONE copy. A legitimate repeat declares every
     # copy on line 25.
-    fill = """(p._one_tuple AND p._n_copies / CASE WHEN p._pair THEN 2 ELSE 1 END >= 2
-            AND p._amt > 0 AND (p._amt = p._line25_d OR p._amt = p._line25_a))""" if line25 else "FALSE"
+    fill = f"""(p._one_tuple AND p._n_copies / {held} >= 2
+            AND p._amt > 0 AND (p._amt = p._line25_d OR p._amt = p._line25_a)
+            {guard})""" if line25 else "FALSE"
+    # the total row: the block's sum, and for each column of line 25 the
+    # tuples whose rows carry it (a tuple is counted at its first copy) beside
+    # what the other rows add up to. The windows run in the same pass as the
+    # ones above
+    total_cols = """,
+           SUM(c._amt) OVER fy AS _sum_amt,
+           COUNT(*) FILTER (WHERE c._amt = c._line25_d AND c._copy_rank = 1) OVER fy AS _t_d,
+           COALESCE(SUM(c._amt) FILTER (WHERE c._amt <> c._line25_d) OVER fy, 0) AS _rest_d,
+           COUNT(*) FILTER (WHERE c._amt = c._line25_a AND c._copy_rank = 1) OVER fy AS _t_a,
+           COALESCE(SUM(c._amt) FILTER (WHERE c._amt <> c._line25_a) OVER fy, 0) AS _rest_a""" if line25 else ""
+    # total row: the rows carrying line 25, above zero, in column (d) or (a),
+    # are ONE tuple (identical to each other, as the filled rows of a filing
+    # are), and the other rows add up to that same amount (twice it in a
+    # doubled filing, which holds every row twice). The rows carrying it
+    # leave, whether the extract filled them or the filer typed a total as a
+    # group. With positive amounts the two columns can fire only where they
+    # agree; beside a negative row they can fire on DIFFERENT amounts (X
+    # $1,000; Y $500 three times, one tuple; Z -$500; (d) $1,000 and (a)
+    # $500: under (d) X leaves, under (a) the three Y). Nothing in the table
+    # says which, so the block is held whole (none on batch 2026_06_16)
+    total_d = f"(p._line25_d > 0 AND p._t_d = 1 AND p._rest_d = p._line25_d * {held})"
+    total_a = f"(p._line25_a > 0 AND p._t_a = 1 AND p._rest_a = p._line25_a * {held})"
+    total_row = f"""(({total_d}
+             OR {total_a})
+            AND NOT ({total_d} AND {total_a} AND p._line25_d <> p._line25_a)
+            {guard})""" if line25 else "FALSE"
+    total_amount = f"CASE WHEN {total_d} THEN p._line25_d ELSE p._line25_a END" if line25 else "NULL::numeric"
     # field fill: the same test where the block is NOT one tuple. The rows
     # with an amount are one grant (one amount, one recipient name), the
     # filing itself holds two or more of them, and line 25 equals ONE.
@@ -584,10 +706,13 @@ ANALYZE _pf_paid;""" if paid else ""
            (MIN(c._amt) FILTER (WHERE c._amt <> 0) OVER fy = MAX(c._amt) FILTER (WHERE c._amt <> 0) OVER fy
             AND MIN({name}) FILTER (WHERE c._amt <> 0) OVER fy
               = MAX({name}) FILTER (WHERE c._amt <> 0) OVER fy) AS _one_grant""" if field else ""
-    field_fill = """(NOT p._one_tuple AND p._one_grant AND p._n_amt / CASE WHEN p._pair THEN 2 ELSE 1 END >= 2
-            AND p._grant_amt > 0 AND (p._grant_amt = p._line25_d OR p._grant_amt = p._line25_a))""" if field else "FALSE"
+    field_fill = f"""(NOT p._one_tuple AND p._one_grant AND p._n_amt / {held} >= 2
+            AND p._grant_amt > 0 AND (p._grant_amt = p._line25_d OR p._grant_amt = p._line25_a)
+            {guard})""" if field else "FALSE"
     field_kept = """
            WHEN _field_fill AND _amt <> 0 THEN _ctid = _first_amt""" if field else ""
+    total_kept = """
+           WHEN _total_row AND _amt = _total THEN FALSE""" if line25 else ""
     return f"""
 CREATE TEMP TABLE _pf_repeated AS
     -- the repeated-row signal: a filing whose rows are in every extract
@@ -654,18 +779,22 @@ blocks AS (
     -- tax year 2024, multiplicities 2-4, full sum exactly 2x line 25.
     SELECT c.*,
            BOOL_AND(c._n_copies % 2 = 0) OVER fy AS _all_even,
-           (c._n_copies = COUNT(*) OVER fy) AS _one_tuple{grant_cols}
+           (c._n_copies = COUNT(*) OVER fy) AS _one_tuple{total_cols}{grant_cols}
     FROM copies c
     WINDOW fy AS (PARTITION BY c.filerein, c.taxyear)
 ),
 ruled AS (
     -- _pair: every tuple is even and the filing's basic-fields row is
     -- repeated, so the filing is in the extract twice and the block is
-    -- halved. _fill, _field_fill: the two fill rules, on what the filing
-    -- itself holds. A block is one tuple or it is not, so at most one is true.
+    -- halved. _fill, _field_fill, _total_row: the three line-25 rules, on
+    -- what the filing itself holds. At most one is true: a block is one
+    -- tuple or it is not, and the rows beside the ones carrying line 25
+    -- add up to nothing for the two fills and to line 25 for the total row.
     SELECT p.*,
            {fill} AS _fill,
-           {field_fill} AS _field_fill
+           {field_fill} AS _field_fill,
+           {total_row} AS _total_row,
+           {total_amount} AS _total
     FROM (
         SELECT b.*, (b._all_even AND b._repeated) AS _pair FROM blocks b
     ) p
@@ -678,7 +807,8 @@ SELECT {", ".join(f"ruled.{c}" for c in all_cols)},
            CASE WHEN n_urls_for_year > 1 THEN 'latest_url' END,
            CASE WHEN _pair THEN '{PAIR_COLLAPSE}' END,
            CASE WHEN _fill THEN '{FORWARD_FILL}' END,
-           CASE WHEN _field_fill THEN '{FIELD_FILL}' END
+           CASE WHEN _field_fill THEN '{FIELD_FILL}' END,
+           CASE WHEN _total_row THEN '{TOTAL_ROW}' END
        ), ''), 'passthrough') AS dedup_rule
 FROM ruled
 LEFT JOIN pf_filings pf
@@ -686,10 +816,12 @@ LEFT JOIN pf_filings pf
  AND pf.taxyear IS NOT DISTINCT FROM ruled.taxyear
 -- forward fill keeps ONE row. field fill keeps one of the rows with the
 -- amount, the first in the extract's order, and leaves the rows without an
--- amount to the lines below. pair_collapse keeps HALF of each tuple's
--- copies (not one): multiplicity 4 -> 2 keeps a legitimately repeated
--- grant that was swept up in the doubling
-WHERE CASE WHEN _fill THEN _copy_rank = 1{field_kept}
+-- amount to the lines below. The total row drops EVERY row carrying the
+-- total (both halves of a doubled filing) and leaves the other rows to the
+-- lines below. pair_collapse keeps HALF of each tuple's copies (not one):
+-- multiplicity 4 -> 2 keeps a legitimately repeated grant that was swept
+-- up in the doubling
+WHERE CASE WHEN _fill THEN _copy_rank = 1{field_kept}{total_kept}
            WHEN _pair THEN _copy_rank <= _n_copies / 2
            ELSE TRUE END;
 DROP TABLE _pf_repeated;{drop_line25}{drop_paid}
