@@ -154,7 +154,9 @@ def test_the_total_row_sql_renders_and_writes_nothing_under_public():
     for column in ("d", "a"):
         assert (f"(s.line25_{column} > 0 AND s.tuples_{column} = 1 AND s.rest_{column} = s.line25_{column} * s.div) "
                 f"AS fires_{column}") in rendered
-    assert "(t.fires_d OR t.fires_a) AND t.sum_amt / t.div NOT IN (t.line25_d, t.line25_a) AS taken" in rendered
+    assert ("(t.fires_d OR t.fires_a) AND NOT (t.fires_d AND t.fires_a AND t.line25_d <> t.line25_a)\n"
+            "           AND t.sum_amt / t.div NOT IN (t.line25_d, t.line25_a) AS taken") in rendered
+    assert "AS both_columns_on_different_amounts" in rendered and "NULLIF(k.max_amt, 0)" in rendered
     assert "CASE WHEN t.fires_d THEN t.line25_d WHEN t.fires_a THEN t.line25_a ELSE t.max_amt END AS total" in rendered
     assert "(s.k_held >= 1 AND s.rest = s.total * s.div) AS shape" in rendered
     assert "WHEN s.total IN (s.line25_d, s.line25_a) THEN 'the total'" in rendered

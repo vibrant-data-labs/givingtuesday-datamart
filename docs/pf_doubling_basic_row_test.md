@@ -1090,7 +1090,7 @@ name. It is built as a third line-25 rule, `total_row`, in
 Nothing was rebuilt: `privategrants_current` holds the rows of the rule
 before section 6, and no matcher ran. This changes the matcher's input by
 far more than sections 6 and 7 together ($1.34B of matched dollars leave),
-so merging it is Zein's decision.
+so merging it is a decision, not a step in the reload.
 
 ### 8.1 The counts of 7.8, measured again
 
@@ -1218,7 +1218,7 @@ The design points, in the order the brief asked them:
   dropping it leaves Part XV adding up to line 25 as every fill does.
   `dedup_rule` says `total_row` for both, because the table cannot tell
   them apart and the row is a total either way. It is the one such case in
-  the 138 checked here and the 88 checked for 7.8.
+  the 139 checked here and the 88 checked for 7.8 (it is in both).
 - *No one-name condition can hold.* The other rows are the list, each
   under its own recipient, and the total row's own name recurs in the
   filing in 1,174 of the 1,329 only (8.1). The rule reads no name.
@@ -1237,8 +1237,9 @@ The design points, in the order the brief asked them:
   and the guard below, and keep their own names and kept-row choices: the
   rows are copies of a grant there and totals here, and a reader of
   `dedup_rule` should see which. Note 4 of the review of PR #62 proposed
-  one branch for the three; Zein chose a fourth branch, and the text of
-  the two fills is touched only by the guard.
+  one branch for the three; a fourth branch was the choice, not the
+  one-branch refactor, and the text of the two fills is touched only by
+  the guard.
 - *The guard, note 1 of the same review, on all three rules.* Where the
   whole block the filing holds is on line 25 in either column, nothing
   leaves. The columns can disagree the way that misleads a one-column
@@ -1249,14 +1250,25 @@ The design points, in the order the brief asked them:
   fills the guard changes nothing on this batch (the scratch copy of 8.4
   differs from production in no `forward_fill` or `field_fill` filer-year
   beyond 7.5's).
+- *Where the two columns each name a total of their own.* With positive
+  amounts the two columns can pass the test only on the same amount.
+  Beside a negative row they can pass it on different ones: X $1,000; Y
+  $500 three times as one tuple; Z -$500; column (d) $1,000 and column
+  (a) $500. Under (d) the rest is $1,000 and X is the total; under (a) the
+  rest is $500 and the three Y are. Nothing in the table says which, so
+  the block is held whole (`passthrough`). It is a corner the review of
+  this rule built as a case, and the measurement counts it
+  (`both_columns_on_different_amounts` in `rule_check`): 0 filer-years
+  on this batch, so it moves no row here.
 - *What `dedup_rule` says.* `total_row`, a value of its own, `+`-joined
   after `latest_url` and `pair_collapse` like the others; it never meets
   `forward_fill` or `field_fill`.
 
 ### 8.3 The XML checks
 
-197 filings, drawn by the classes of 8.1 and 8.2 so that each kind the rule
-decides is in the sample, read against GivingTuesday's mirror
+198 filings, drawn by the classes of 8.1 and 8.2 so that each kind the rule
+decides is in the sample (197 in one run and the clawback case after it),
+read against GivingTuesday's mirror
 (`pf_doubling_basic_rows xml OID ...`, which now ends with a tally). A
 block "filled" has at least one group the extract fills (`xml_filled`); a
 block the fill predicts with no group filled is a return whose rows the
@@ -1460,6 +1472,11 @@ section's own, for the reason 7.9 gives.
   ids of 7.4, run by the same script (`measure --sql`).
 - `data/exploratory/pf_total_row.sql`: section 8's counts, classes, what
   the matcher holds of them, and the object ids of 8.4, run the same way.
+  Its `fires_d`, `fires_a`, guard and total copy the rule's predicate by
+  hand and are held in step by string asserts in
+  `tests/test_pf_doubling_basic_rows.py`; substituting the fragments from
+  `current_grants` the way `__PF_HASH__` is substituted is the next thing
+  to do to it.
 - `tests/test_pf_doubling_basic_rows.py`: the XML group classifier, the
   predicted rows and the SQL rendering.
 - `givingtuesday_datamart/exploratory/pf_current_scratch.py`: the proof of

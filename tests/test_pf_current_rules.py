@@ -159,6 +159,14 @@ CASES = (
     # a $21,000 refund, and the filled row at $226,931): line 25 names the total, not the block's largest amount
     Case("a total row below the largest grant", (("DELTA HOUSE", 1200), ("EPSILON ARTS", -200), TOTAL),
          (2, "total_row"), (3, "passthrough"), line25_d=1000),
+    # the other column states an amount of its own: the rule reads both, and one of them names the total
+    Case("a total row with the other column elsewhere", (D, E, TOTAL), (2, "total_row"), (3, "passthrough"),
+         line25_d=1000, line25_a=900),
+    # and beside a negative row each column can pass the test on a different amount: under (d) X is the total,
+    # under (a) the three Y. The table cannot say which, and the block is held whole
+    Case("two totals, one a column", (("X FUND", 1000), ("Y HOUSE", 500), ("Y HOUSE", 500), ("Y HOUSE", 500),
+                                      ("Z TRUST", -500)), (5, "passthrough"), (5, "passthrough"),
+         line25_d=1000, line25_a=500),
     # the filer typed the total as a group of its own: the row carries a name of its own, and leaves the same
     Case("a total the filer typed as a group", (D, E, TYPED_TOTAL), (2, "total_row"), (3, "passthrough"),
          line25_d=1000),
@@ -184,6 +192,11 @@ CASES = (
     # tax year 2024: sixteen scholarships, fourteen of $1,000): the rows carrying line 25 are not one tuple
     Case("a list of equal grants with line 25 on one of them", (A, ("BETA TRUST", 1000), D, E), (4, "passthrough"),
          (4, "passthrough"), line25_d=1000),
+    # two rows carrying the total that differ in a field are two tuples: not the fill, whose filled rows are
+    # identical to each other, and the block is held whole
+    Case("two total rows that differ in purpose", (D, E, ("EPSILON ARTS", 1000, "GENERAL"),
+                                                   ("EPSILON ARTS", 1000, "MISSION")),
+         (4, "passthrough"), (4, "passthrough"), line25_d=1000),
 )
 TAX_YEAR = "2024"
 # A filer-year whose paid rows are held under a later url than its future rows
@@ -342,8 +355,12 @@ def test_a_total_row_leaves_every_row_carrying_the_total_and_keeps_the_list(buil
     the_list = [("DELTA HOUSE", "600"), ("EPSILON ARTS", "400")]
     for case in ("a total row", "a total row, three of them", "a total row line 25 states per books only",
                  "a total the filer typed as a group", "a total row whose earlier version declares another total",
-                 "a total row in a doubled filing"):
+                 "a total row in a doubled filing", "a total row with the other column elsewhere"):
         assert kept(case) == the_list, case
+    # held whole: every row stays, the rows carrying the total among them
+    assert kept("two total rows that differ in purpose") == sorted(the_list + [("EPSILON ARTS", "1000")] * 2)
+    assert kept("two totals, one a column") == [("X FUND", "1000"), ("Y HOUSE", "500"), ("Y HOUSE", "500"),
+                                                ("Y HOUSE", "500"), ("Z TRUST", "-500")]
     # the rows without an amount, and a negative row, are groups of their own and stay
     assert kept("a total row beside a $0 row") == the_list + [("GAMMA SOCIETY", "0")]
     assert kept("a total row beside a negative row") == [("DELTA HOUSE", "600"), ("EPSILON ARTS", "-100"),
@@ -458,8 +475,12 @@ def test_line_25_decides_the_three_line_25_rules_and_nothing_else():
     assert "ABS(" not in ddl and "_full_sum" not in ddl
     rule = ddl[ddl.index("ruled AS ("):ddl.index("SELECT ruled.filerein")]
     assert "(b._all_even AND b._repeated) AS _pair" in rule
-    # every reading of line 25 in the rule is one of the three rules' or the guard's, on the block's own row
-    assert all(line.strip().startswith(("(p.", "OR (p.", "AND p.", "AND NOT (p.", "CASE WHEN (p.", "(((p."))
+    # every reading of line 25 in the rule is one of the three rules' or the guard's, on the block's own row:
+    # forward fill 2 + its guard 2, field fill 2 + 2, total row 2 + 2 (the two columns) + 6 (both repeated in
+    # the hold-whole test, and (d) <> (a)) + 2 (guard), and _total 4; a reading added anywhere else moves it
+    assert rule.count("_line25") == 24
+    assert all(line.strip().startswith(("(p.", "OR (p.", "AND p.", "AND NOT (p.", "AND NOT ((p.", "CASE WHEN (p.",
+                                        "(((p."))
                for line in rule.splitlines() if "_line25" in line)
     assert "_line25" not in ddl[ddl.index("SELECT ruled.filerein"):ddl.index("DROP TABLE _pf_repeated")]   # nor in what is kept
     # forward fill: one tuple, more than once in the filing itself, one copy on line 25 in either column

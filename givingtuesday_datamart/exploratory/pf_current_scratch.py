@@ -150,11 +150,12 @@ def placeholders(session, suffix: str, policy_token: str = "v2") -> list[dict]:
         WHERE (g.filerein, g.taxyear) IN (SELECT filerein, taxyear::text FROM pf_placeholder_filings)
           AND {classifier.prefilter_sql('g')} AND {classifier.pointer_sql('n.name')}
         GROUP BY 1, 2"""))}
-    ids = [r[0] for r in session.execute(text(REPEATED_PLACEHOLDERS))]
+    repeated = {r[0] for r in session.execute(text(REPEATED_PLACEHOLDERS))}
     today = session.execute(text(
         "SELECT object_id, filerein, taxyear, placeholder_paid, placeholder_rows FROM pf_placeholder_filings")).all()
-    ids += [r.object_id for r in today if r.object_id not in ids
-            and scratch.get((r.filerein, int(r.taxyear)), (Decimal(0), 0)) != (r.placeholder_paid, r.placeholder_rows)]
+    ids = sorted(repeated) + [r.object_id for r in today if r.object_id not in repeated
+                              and scratch.get((r.filerein, int(r.taxyear)), (Decimal(0), 0))
+                              != (r.placeholder_paid, r.placeholder_rows)]
     filings = work_list._store(session).get(ids)
     images = filing_images._store(session)
     fetched = images.get(filings)
@@ -173,7 +174,9 @@ def placeholders(session, suffix: str, policy_token: str = "v2") -> list[dict]:
 
     rows = []
     for oid, filing in sorted(filings.items(), key=lambda item: -item[1].placeholder_paid):
-        one_copy = filing.placeholder_paid / filing.placeholder_rows
+        # one copy of a repeated placeholder amount; outside that shape (a total row under a placeholder name)
+        # the quotient means nothing, and a list that happened to add up to it would read as a reconciliation
+        one_copy = filing.placeholder_paid / filing.placeholder_rows if oid in repeated else None
         corrected, corrected_rows = scratch.get((filing.filerein, filing.taxyear), (Decimal(0), 0))
         row = {"object_id": oid, "ein": filing.filerein, "tax_year": str(filing.taxyear),
                "rows_today": filing.placeholder_rows, "placeholder_paid_today": filing.placeholder_paid,
@@ -183,7 +186,8 @@ def placeholders(session, suffix: str, policy_token: str = "v2") -> list[dict]:
                "readable": oid in readable, "list_vs_scratch_amount": "", "list_vs_one_copy": ""}
         if oid in readable:
             row["list_vs_scratch_amount"] = adds_up(filing, corrected)
-            row["list_vs_one_copy"] = adds_up(filing, one_copy)
+            if one_copy is not None:
+                row["list_vs_one_copy"] = adds_up(filing, one_copy)
         rows.append(row)
     return rows
 
@@ -222,7 +226,7 @@ def main() -> None:
             print(table(rows))
             for label, key in (("today", "placeholder_paid_today"), ("one copy", "one_copy"),
                                ("scratch", "placeholder_paid_scratch")):
-                print(f"{label:>9}: {sum(row[key] for row in rows):,.0f}")
+                print(f"{label:>9}: {sum(row[key] or 0 for row in rows):,.0f}")
         else:
             print("dropped: " + ", ".join(drop(session, args.suffix)))
     print(f"\n{time.monotonic() - started:.0f} s")

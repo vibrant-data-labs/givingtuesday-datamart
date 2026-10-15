@@ -204,7 +204,11 @@ raw staging:
          273789587 / tax year 2019 states $70,000 in (d) and the total,
          $65,000, in (a), and 13 filled rows carry $65,000. Both columns
          state the total in 915 of the 1,329, (d) alone in 8, (a) alone
-         in 406.
+         in 406. Beside a negative row the two columns can each pass the
+         test on a DIFFERENT amount (X $1,000; Y $500 three times as one
+         tuple; Z -$500; (d) $1,000, (a) $500: under (d) X is the total,
+         under (a) the three Y). The table cannot say which, so the block
+         is held whole; none on this batch.
        - A total the filer typed as a group of its own leaves the same
          way, and ``dedup_rule`` says ``total_row`` for both, because the
          table cannot tell them apart and the row is a total either way.
@@ -674,12 +678,16 @@ ANALYZE _pf_paid;""" if paid else ""
     # are), and the other rows add up to that same amount (twice it in a
     # doubled filing, which holds every row twice). The rows carrying it
     # leave, whether the extract filled them or the filer typed a total as a
-    # group. Both columns can fire only where they agree, so _total is one
-    # amount
+    # group. With positive amounts the two columns can fire only where they
+    # agree; beside a negative row they can fire on DIFFERENT amounts (X
+    # $1,000; Y $500 three times, one tuple; Z -$500; (d) $1,000 and (a)
+    # $500: under (d) X leaves, under (a) the three Y). Nothing in the table
+    # says which, so the block is held whole (none on batch 2026_06_16)
     total_d = f"(p._line25_d > 0 AND p._t_d = 1 AND p._rest_d = p._line25_d * {held})"
     total_a = f"(p._line25_a > 0 AND p._t_a = 1 AND p._rest_a = p._line25_a * {held})"
     total_row = f"""(({total_d}
              OR {total_a})
+            AND NOT ({total_d} AND {total_a} AND p._line25_d <> p._line25_a)
             {guard})""" if line25 else "FALSE"
     total_amount = f"CASE WHEN {total_d} THEN p._line25_d ELSE p._line25_a END" if line25 else "NULL::numeric"
     # field fill: the same test where the block is NOT one tuple. The rows

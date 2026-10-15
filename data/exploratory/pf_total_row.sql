@@ -45,9 +45,12 @@ CREATE TEMP TABLE t_tr_fy AS
 SELECT * FROM (
     SELECT DISTINCT ON (filerein, taxyear) * FROM t_tr_url ORDER BY filerein, taxyear, url DESC
 ) k
-WHERE (k.max_amt > 0 AND k.sum_amt % k.max_amt = 0 AND k.sum_amt / k.max_amt >= 2 AND k.min_amt < k.max_amt)
-   OR (k.line25_d > 0 AND k.sum_amt % k.line25_d = 0 AND k.sum_amt / k.line25_d >= 2)
-   OR (k.line25_a > 0 AND k.sum_amt % k.line25_a = 0 AND k.sum_amt / k.line25_a >= 2);
+-- (NULLIF: the planner may test the division before the "> 0", and a
+-- block of $0 rows has a largest amount of 0)
+WHERE (k.max_amt > 0 AND k.sum_amt % NULLIF(k.max_amt, 0) = 0 AND k.sum_amt / NULLIF(k.max_amt, 0) >= 2
+       AND k.min_amt < k.max_amt)
+   OR (k.line25_d > 0 AND k.sum_amt % NULLIF(k.line25_d, 0) = 0 AND k.sum_amt / NULLIF(k.line25_d, 0) >= 2)
+   OR (k.line25_a > 0 AND k.sum_amt % NULLIF(k.line25_a, 0) = 0 AND k.sum_amt / NULLIF(k.line25_a, 0) >= 2);
 CREATE INDEX ON t_tr_fy (filerein, taxyear);
 ANALYZE t_tr_fy;
 
@@ -80,6 +83,8 @@ ANALYZE t_tr_rows;
 -- add up to it (twice it where pair_collapse halves the block: every tuple
 -- even under a repeated row), and the whole held block is on neither
 -- column (the guard of note 1 of PR #62: the two columns can disagree).
+-- Where both columns fire on different amounts, which a negative row
+-- allows, the block is held whole.
 -- The total is the column the test fires on; where it fires on neither,
 -- the shape of 7.8 is read with the largest amount, which the classes of
 -- what the rule leaves are counted against. (A negative row can lift a
@@ -87,7 +92,8 @@ ANALYZE t_tr_rows;
 -- reads line 25, not the largest amount.)
 CREATE TEMP TABLE t_tr_total AS
 SELECT t.*,
-       (t.fires_d OR t.fires_a) AND t.sum_amt / t.div NOT IN (t.line25_d, t.line25_a) AS taken,
+       (t.fires_d OR t.fires_a) AND NOT (t.fires_d AND t.fires_a AND t.line25_d <> t.line25_a)
+           AND t.sum_amt / t.div NOT IN (t.line25_d, t.line25_a) AS taken,
        CASE WHEN t.fires_d THEN t.line25_d WHEN t.fires_a THEN t.line25_a ELSE t.max_amt END AS total
 FROM (
     SELECT s.*,
@@ -171,6 +177,10 @@ SELECT COUNT(*) FILTER (WHERE taken) AS taken,
        COUNT(*) FILTER (WHERE NOT taken AND shape AND total_tuples = 1 AND total > 0 AND line25 = 'the total')
            AS shape_not_taken,
        COUNT(*) FILTER (WHERE taken AND fires_d AND fires_a) AS both_columns,
+       -- both fire on DIFFERENT amounts: possible beside a negative row (X $1,000; Y $500 three times as one
+       -- tuple; Z -$500; (d) $1,000 and (a) $500), where the rule holds the block whole
+       COUNT(*) FILTER (WHERE fires_d AND fires_a AND line25_d <> line25_a
+                          AND sum_amt / div NOT IN (line25_d, line25_a)) AS both_columns_on_different_amounts,
        COUNT(*) FILTER (WHERE taken AND fires_d AND NOT fires_a) AS column_d_only,
        COUNT(*) FILTER (WHERE taken AND fires_a AND NOT fires_d) AS column_a_only,
        COUNT(*) FILTER (WHERE taken AND total <> max_amt) AS taken_below_the_largest_amount
