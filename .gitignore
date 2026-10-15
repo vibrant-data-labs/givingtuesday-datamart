@@ -181,7 +181,6 @@ givingtuesday_datamart/exploratory/__marimo__/
 givingtuesday_datamart/exploratory/vlm_bakeoff/out/
 givingtuesday_datamart/exploratory/vlm_bakeoff/pages*/
 !data/exploratory/gt_*.csv
-!data/exploratory/placeholder_*.csv
 
 # Scratch filings pulled by irs_source / pushed through OCR — never artifacts.
 /*.pdf

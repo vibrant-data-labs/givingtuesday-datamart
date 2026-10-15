@@ -1,11 +1,10 @@
 """Measure how much placeholder grant money transcription can actually recover.
 
-Four steps, run in order. Each is separately cached, because the expensive
-parts (downloading images, paying a model) must not be repeated when the
-cheap part (the selector) changes.
+The run over a frame file: ``estimate`` (the cost gate), ``run`` (the whole
+run, inside tmux), ``transcribe`` and ``report``. Each is separately cached,
+because the expensive parts (downloading images, paying a model) must not be
+repeated when the cheap part (the selector) changes.
 
-    python -m givingtuesday_datamart.placeholder_recovery.frame sample
-    python -m givingtuesday_datamart.placeholder_recovery.frame sample --expand-1000
     python -m givingtuesday_datamart.placeholder_recovery.frame estimate --policy v2 \\
         --sample data/placeholder_recovery/placeholder_sample_1000.csv
     python -m givingtuesday_datamart.placeholder_recovery.frame run --policy v2 \\
@@ -16,17 +15,15 @@ cheap part (the selector) changes.
     python -m givingtuesday_datamart.placeholder_recovery.frame report \\
         --results ~/.cache/irs_index/unstructured
 
-``sample`` builds the stratified frame from GT's combined grants extract.
-The population is violently top-heavy — 22 filings carry $4.67B while 6,755
-carry $1.76B — so a uniform draw would spend 70% of the budget measuring
-noise. Bands A is a census; B, C and D are sampled and extrapolated. The
-expanded frames — ``--expand``, 610 filings with B a census; ``--expand-1000``,
-C and D topped up to 1,000 — are drawn on top of the 100 from the same
-seeded generator, so every earlier frame regenerates unchanged inside the
-next. The frame is the extract's last use: a run's list now comes from the
-loaded tables (``givingtuesday_datamart.placeholder_recovery``, ``work-list``
-and ``run``), and the rows the extract itemised for the frame's filings left
-the search on 2026-09-28, since nothing from the extract is loaded.
+The frame, ``data/placeholder_recovery/placeholder_sample_1000.csv``, was
+drawn on 2026-09-21 and 2026-09-23 from GivingTuesday's one-off combined
+grants extract by a ``sample`` command, removed on 2026-10-15 with the
+extract's last use (its design and its draws are in
+``docs/placeholder_recovery_pipeline.md``). The population is violently
+top-heavy — 22 filings carry $4.67B while 6,755 carry $1.76B — so bands A
+and B are a census and C and D a 6% sample, extrapolated. A run's list now
+comes from the loaded tables (``givingtuesday_datamart.placeholder_recovery``,
+``work-list`` and ``run``), and nothing from the extract is loaded.
 
 Two classes are excluded from the frame, for different reasons. The
 patient-assistance programs of ``data/placeholder_recovery/exclusions.csv``
@@ -79,7 +76,6 @@ import contextlib
 import csv
 import logging
 import os
-import re
 import shutil
 import socket
 import subprocess
@@ -89,51 +85,26 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import NoReturn, Sequence
+from typing import NoReturn
 
 from givingtuesday_datamart import (
     filing_images, irs_source, page_readings, page_verdicts, vlm_transcription)
 from givingtuesday_datamart.attachment_grants import (
-    PLACEHOLDER, candidate_tables, coverage, diagnose, extract_tables, is_pointer, load_elements,
+    candidate_tables, coverage, diagnose, extract_tables, load_elements,
     page_tables)
 from givingtuesday_datamart._internal.bulk import SystemicFailure
 from givingtuesday_datamart.page_readings import MAX_ERRORS, frame_pages, reading_key
 from givingtuesday_datamart.page_verdicts import (
     FLAGGED_RULES, POLICIES, POLICY_V1, VERDICTS, WORKERS, AgreeResult, accepted_readings, agree,
     load_policy, reader_settings, summary, with_flagged)
-from givingtuesday_datamart.placeholder_recovery.exclusions import load_exclusions
 from givingtuesday_datamart.placeholder_recovery.loader import selector_input
 
-COMBINED_CSV = Path.home() / "Downloads" / "combined-grants-datamarts-gt_team_priority-20260915.csv"
-# Where ``sample`` writes the 100-filing sample. The frame
-# contains the sample (its rows are the frame's ``classifier = v1``), so the
-# sample's own files were archived on 2026-09-28 and every command defaults
-# to the frame: s3://givingtuesday-datamart/placeholder-recovery/archive/.
-SAMPLE_CSV = Path("data/placeholder_recovery/placeholder_sample_100.csv")
-EXPANDED = Path("data/placeholder_recovery/placeholder_sample_expanded.csv")
+# The frame every command defaults to. The 100-filing sample it grew from
+# and the 610-filing expansion were archived on 2026-09-28
+# (s3://givingtuesday-datamart/placeholder-recovery/archive/).
 FRAME_1000 = Path("data/placeholder_recovery/placeholder_sample_1000.csv")
 CACHE = Path.home() / ".cache" / "irs_index"
-PF_SOURCES = ("990PF_P14_3A", "990PF_P14_3B")
-SEED = 20260921
 
-# The filers left out, by EIN: data/placeholder_recovery/exclusions.csv is
-# the one place they are named.
-PATIENT_ASSISTANCE = {ein: row.filer_name for ein, row in load_exclusions().items()}
-CANARIES = {"451742989": "Siegel", "912073258": "Bezos"}
-STRATA = (("A", 1e8, float("inf"), None), ("B", 1e7, 1e8, 44),
-          ("C", 1e6, 1e7, 22), ("D", 0.0, 1e6, 12))
-# The expanded frame: band B becomes a census, C and D grow; A already is
-# one. Drawn from the broadened classifier's population, on top of the
-# original 100, which are kept exactly as drawn.
-EXPANSION = {"B": None, "C": 100, "D": 50}
-# The 1,000-filing frame: bands C and D topped up on top of the 610 to the
-# same sampling fraction — 540 of the 9,055 filings in the two bands, 5.96%,
-# so 137 of C's 2,296 and 403 of D's 6,759 — as the next draws from the same
-# generator, so the 610 are kept exactly as drawn. A and B are already a
-# census. The split is Zein's to change (Session 4, 2026-09-23).
-EXPANSION_1000 = {"B": None, "C": 137, "D": 403}
-FRAMES = {"610": (EXPANSION,), "1000": (EXPANSION, EXPANSION_1000)}
-_OBJECT_ID = re.compile(r"(?<!\d)(\d{18})(?!\d)")
 VERDICT_KINDS = VERDICTS + ("no_verdict",)
 # The cost gate's numbers (``estimate``), measured on the 1,000-filing frame
 # run of 2026-09-24 — 9,926 attachment pages under POLICY_V2, the pipeline
@@ -178,140 +149,6 @@ COST_CAP = 800.0
 # key its bucket write check uses.
 MIN_FREE_GB = 15
 WRITE_CHECK_PREFIX = "irs/_run_check"
-
-
-def _read_population(pointer=None) -> dict:
-    """Placeholder filings from the combined extract, one record per filing.
-
-    ``pointer`` decides which recipient names are placeholders: the frozen
-    ``PLACEHOLDER`` pattern the 100-filing frame was drawn with (default),
-    or ``is_pointer`` for the broadened classifier."""
-    pointer = pointer or PLACEHOLDER.search
-    csv.field_size_limit(10 ** 9)
-    per: dict = collections.defaultdict(
-        lambda: {"amt": 0.0, "paid": 0.0, "future": 0.0, "rows": 0, "names": [], "filer": "",
-                 "period": "", "status": collections.Counter()})
-    with COMBINED_CSV.open(newline="", encoding="utf-8", errors="replace") as handle:
-        for row in csv.DictReader(handle):
-            if row["Source"] not in PF_SOURCES or not pointer(row["recipient_name"] or ""):
-                continue
-            match = _OBJECT_ID.search(row["URL"] or "")
-            key = (row["FILEREIN"], row["TAXYEAR"], match.group(1) if match else "")
-            try:
-                amount = float(row["total_grant_amount"] or 0)
-            except ValueError:
-                amount = 0.0
-            record = per[key]
-            record["amt"] += amount
-            # Part XV line 3a (paid) and 3b (approved for future payment) are
-            # separate declared totals and separate statements in the PDF.
-            record["paid" if row["Source"] == "990PF_P14_3A" else "future"] += amount
-            record["rows"] += 1
-            record["filer"] = row["FILERNAME1"]
-            record["period"] = row["TAXPEREND"]
-            record["status"][(row["recipient_foundation_status"] or "").strip().upper()] += 1
-            if row["recipient_name"] not in record["names"]:
-                record["names"].append(row["recipient_name"])
-    return per
-
-
-def _addressable(population: dict) -> dict:
-    return {key: value for key, value in population.items()
-            if key[0] not in PATIENT_ASSISTANCE and value["status"].most_common(1)[0][0] != "I"}
-
-
-def _row(label, key, value, pool, classifier):
-    ein, year, object_id = key
-    return {"stratum": label, "filerein": ein, "filer_name": value["filer"],
-            "taxyear": year, "taxperend": value["period"], "object_id": object_id,
-            "placeholder_amt": round(value["amt"], 2),
-            "placeholder_paid": round(value["paid"], 2),
-            "placeholder_future": round(value["future"], 2),
-            "placeholder_rows": value["rows"],
-            "placeholder_text": " || ".join(value["names"][:2]),
-            "stratum_pop": len(pool),
-            "stratum_pop_dollars": round(sum(v["amt"] for _, v in pool), 2),
-            "is_canary": ein in CANARIES, **({"classifier": classifier} if classifier else {})}
-
-
-def _print_bands(title: str, summary: list[tuple]) -> None:
-    """One draw's band table: filings picked of the band's pool, and dollars."""
-    print(title)
-    for label, pop_n, pick_n, pop_d, pick_d in summary:
-        print(f"  {label}  {pick_n:>3}/{pop_n:<5} ${pick_d/1e9:>6.2f}B of ${pop_d/1e9:>6.2f}B")
-
-
-def build_sample(out: Path, expansions: Sequence[dict] = ()) -> None:
-    """The 100-filing frame, or with ``expansions`` (``FRAMES``) the 610- and
-    1,000-filing ones on top of it.
-
-    The base draw is repeated exactly, so the original 100 regenerate
-    unchanged, and each expansion is drawn after the last from the same
-    generator, so the 610 regenerate unchanged inside the 1,000. The extra
-    filings come from the broadened classifier's population, with the
-    population columns restated for it.
-    """
-    import random
-
-    population = _read_population()
-    addressable = _addressable(population)
-    excluded = sum(v["amt"] for k, v in population.items() if k not in addressable)
-    print(f"population {len(population):,} filings ${sum(v['amt'] for v in population.values())/1e9:.2f}B")
-    print(f"excluded   {len(population)-len(addressable):,} filings ${excluded/1e9:.2f}B "
-          f"(patient assistance + individual recipients)")
-    print(f"addressable{len(addressable):>6,} filings ${sum(v['amt'] for v in addressable.values())/1e9:.2f}B\n")
-
-    rng = random.Random(SEED)
-    picked, summary, keys = [], [], []
-    for label, low, high, take in STRATA:
-        pool = sorted([(k, v) for k, v in addressable.items() if low <= v["amt"] < high],
-                      key=lambda kv: -kv[1]["amt"])
-        if take is None:
-            chosen = pool
-        else:
-            forced = [kv for kv in pool if kv[0][0] in CANARIES]
-            rest = [kv for kv in pool if kv[0][0] not in CANARIES]
-            chosen = forced + rng.sample(rest, max(0, min(take - len(forced), len(rest))))
-        summary.append((label, len(pool), len(chosen),
-                        sum(v["amt"] for _, v in pool), sum(v["amt"] for _, v in chosen)))
-        for key, value in chosen:
-            keys.append(key)
-            picked.append(_row(label, key, value, pool, "v1" if expansions else ""))
-    _print_bands(f"the base draw, {len(picked)} filings:", summary)
-
-    if expansions:
-        # Only now, so the RNG state behind the base draw is untouched.
-        wide = _addressable(_read_population(is_pointer))
-        print(f"broadened classifier: {len(wide):,} addressable filings "
-              f"${sum(v['amt'] for v in wide.values())/1e9:.2f}B\n")
-        already = set(keys)
-        pools = {label: sorted([(k, v) for k, v in wide.items() if low <= v["amt"] < high],
-                               key=lambda kv: -kv[1]["amt"]) for label, low, high, _ in STRATA}
-    for number, expansion in enumerate(expansions, 1):
-        summary = []
-        for label, _, _, _ in STRATA:
-            pool = pools[label]
-            base = [r for r in picked if r["stratum"] == label]
-            for r in base:                       # restate the population for the new frame
-                r["stratum_pop"], r["stratum_pop_dollars"] = len(pool), round(sum(v["amt"] for _, v in pool), 2)
-            take = expansion.get(label)
-            rest = [kv for kv in pool if kv[0] not in already]
-            extra = rest if take is None else rng.sample(rest, max(0, min(take - len(base), len(rest))))
-            for key, value in extra:
-                keys.append(key)
-                already.add(key)
-                picked.append(_row(label, key, value, pool, "v2"))
-            summary.append((label, len(pool), len(base) + len(extra), sum(v["amt"] for _, v in pool),
-                            sum(float(r["placeholder_amt"]) for r in picked if r["stratum"] == label)))
-        _print_bands(f"after expansion {number}, {len(picked)} filings:", summary)
-
-    picked.sort(key=lambda r: (r["stratum"], -r["placeholder_amt"]))
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with out.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(picked[0].keys()))
-        writer.writeheader()
-        writer.writerows(picked)
-    print(f"\n{len(picked)} filings -> {out}")
 
 
 def transcribe(
@@ -1272,67 +1109,9 @@ def report(
         print(f"per-filing detail -> {out}")
 
 
-def compare(reports: list[tuple[str, Path]], out: Path | None) -> None:
-    """Filing-level reconciliation across engines: the number that chooses.
-
-    Each report is a ``report --out`` CSV. Prints reconciled filings and
-    dollars per band for every engine, the union ("either"), and each
-    filing whose outcome differs between engines.
-    """
-    detail = {name: {r["object_id"]: r for r in csv.DictReader(path.open())} for name, path in reports}
-    names = [name for name, _ in reports]
-    ids = list(detail[names[0]])
-    bands = sorted({detail[names[0]][i]["stratum"] for i in ids})
-
-    def credited(name, object_id):
-        return float(detail[name][object_id]["recovered"] or 0)
-
-    print(f"{'band':<6}" + "".join(f"{n:>22}" for n in names) + f"{'either':>22}")
-    for band in bands + ["ALL"]:
-        chosen = [i for i in ids if band == "ALL" or detail[names[0]][i]["stratum"] == band]
-        cells = []
-        for name in names:
-            n = sum(1 for i in chosen if detail[name][i]["outcome"] == "reconciled")
-            cells.append(f"{n:>4} / ${sum(credited(name, i) for i in chosen)/1e6:>9,.1f}M")
-        n = sum(1 for i in chosen if any(detail[m][i]["outcome"] == "reconciled" for m in names))
-        dollars = sum(max(credited(m, i) for m in names) for i in chosen)
-        cells.append(f"{n:>4} / ${dollars/1e6:>9,.1f}M")
-        print(f"{band:<6}" + "".join(f"{c:>22}" for c in cells))
-    declared = sum(float(detail[names[0]][i]["declared"]) for i in ids)
-    print("\ndollar-weighted recovery: " + ", ".join(
-        f"{name} {100*sum(credited(name, i) for i in ids)/declared:.1f}%" for name in names)
-        + f", either {100*sum(max(credited(m, i) for m in names) for i in ids)/declared:.1f}%")
-
-    print(f"\nfilings whose outcome differs ({' | '.join(names)}):")
-    rows = []
-    for i in ids:
-        outcomes = [detail[m][i]["outcome"] for m in names]
-        if len(set(outcomes)) > 1:
-            r = detail[names[0]][i]
-            rows.append({"stratum": r["stratum"], "filer_name": r["filer_name"], "taxyear": r["taxyear"],
-                         "object_id": i, "declared": r["declared"],
-                         **{f"{m}_outcome": detail[m][i]["outcome"] for m in names},
-                         **{f"{m}_coverage": detail[m][i]["coverage"] for m in names}})
-            print(f"  {r['stratum']} {r['filer_name'][:34]:<34} {r['taxyear']} ${float(r['declared'])/1e6:>8,.1f}M  "
-                  + " | ".join(f"{o:<18}" for o in outcomes))
-    if out and rows:
-        with out.open("w", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
-            writer.writeheader()
-            writer.writerows(rows)
-        print(f"differences -> {out}")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
-
-    p = sub.add_parser("sample", help="build the stratified frame")
-    p.add_argument("--out", type=Path, default=None)
-    p.add_argument("--expand", action="store_true",
-                   help="the expanded frame: band B in full, C to 100, D to 50, on top of the 100 (610 filings)")
-    p.add_argument("--expand-1000", action="store_true",
-                   help="the 1,000-filing frame: C to 137 and D to 403, the same sampling fraction, on top of the 610")
 
     p = sub.add_parser("transcribe", help="decide the attachment pages under a policy, reading what the table lacks")
     p.add_argument("--policy", default="v1", help=f"a registered version ({', '.join(POLICIES)}) or a JSON file")
@@ -1371,37 +1150,25 @@ def main() -> None:
     p.add_argument("--with-future", action="store_true",
                    help="add the frame's future-payment amount as a second target, as the frame was first measured")
 
-    p = sub.add_parser("compare", help="filing-level reconciliation across engines")
-    p.add_argument("reports", nargs="+", metavar="NAME=CSV", help="report --out files, e.g. qwen=data/placeholder_recovery/x.csv")
-    p.add_argument("--out", type=Path, default=None)
-
     args = parser.parse_args()
-    if args.command == "compare":
-        compare([(name, Path(path)) for name, path in (item.split("=", 1) for item in args.reports)], args.out)
-        return
-    if args.command == "sample":
-        frame = "1000" if args.expand_1000 else "610" if args.expand else None
-        path = {"1000": FRAME_1000, "610": EXPANDED, None: SAMPLE_CSV}[frame]
-        build_sample(args.out or path, FRAMES.get(frame, ()))
-    else:
-        from givingtuesday_datamart._internal.db import get_session
-        from givingtuesday_datamart.ingestion import datamart_config
+    from givingtuesday_datamart._internal.db import get_session
+    from givingtuesday_datamart.ingestion import datamart_config
 
-        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
-        policy = with_flagged(load_policy(args.policy), getattr(args, "flagged", None))
-        if args.command == "run":
-            run(args.sample, policy, args.cache, dry_run=args.dry_run, cap=args.cap if args.cap > 0 else None,
-                logs=args.logs, max_errors=args.max_errors)
-            return
-        with get_session(config=datamart_config()) as session:
-            if args.command == "transcribe":
-                transcribe(session, args.sample, policy, args.cache, args.limit, args.only, args.max_errors,
-                           buy=not args.stored_only)
-            elif args.command == "estimate":
-                estimate(session, args.sample, policy, args.cap if args.cap > 0 else None, only=args.only)
-            else:
-                report(session, args.sample, args.out, policy=policy, results=args.results,
-                       with_future=args.with_future)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
+    policy = with_flagged(load_policy(args.policy), getattr(args, "flagged", None))
+    if args.command == "run":
+        run(args.sample, policy, args.cache, dry_run=args.dry_run, cap=args.cap if args.cap > 0 else None,
+            logs=args.logs, max_errors=args.max_errors)
+        return
+    with get_session(config=datamart_config()) as session:
+        if args.command == "transcribe":
+            transcribe(session, args.sample, policy, args.cache, args.limit, args.only, args.max_errors,
+                       buy=not args.stored_only)
+        elif args.command == "estimate":
+            estimate(session, args.sample, policy, args.cap if args.cap > 0 else None, only=args.only)
+        else:
+            report(session, args.sample, args.out, policy=policy, results=args.results,
+                   with_future=args.with_future)
 
 
 if __name__ == "__main__":

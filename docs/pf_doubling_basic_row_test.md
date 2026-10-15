@@ -2,7 +2,7 @@
 
 Measured 2026-09-30 on batch `2026_06_16`, read-only (temp tables; nothing
 rebuilt, no matcher run). Script:
-`python -m givingtuesday_datamart.exploratory.pf_doubling_basic_rows`
+`python -m givingtuesday_datamart.proofs.pf_doubling_basic_rows`
 (about 15 minutes) and its `xml OID ...` form for the spot checks. This
 doc is a proposal; changing `pair_collapse` moves matcher inputs and needs
 Zein's decision and the regression gate (`docs/matching-regression-runbook.md`).
@@ -294,7 +294,7 @@ line-25 test beside it on the paid side, was built on September 30 and
 taken out on October 1 (6.2).
 
 The refactor itself changed nothing. Proved on scratch copies
-(`python -m givingtuesday_datamart.exploratory.pf_current_scratch build|compare`),
+(`python -m givingtuesday_datamart.proofs.pf_current_scratch build|compare`),
 every column compared, `dedup_rule` included, per filer-year:
 
 | scratch copy | against | filer-years | differ | rows | dollars |
@@ -564,7 +564,7 @@ row-for-row comparison already says: Kiwanis Club of Cape May 2020 halved
 
 ### 6.5 Placeholder recovery: measured, not applied
 
-`python -m givingtuesday_datamart.exploratory.pf_current_scratch placeholders`.
+`python -m givingtuesday_datamart.proofs.pf_current_scratch placeholders`.
 On `pf_placeholder_filings`, 36 filings hold one placeholder amount N
 times with one copy equal to line 25: $82,217,263 on their rows,
 $11,203,855 real, all 36 `placeholder_exceeds_declared`, none loaded.
@@ -711,7 +711,7 @@ before section 6, and no matcher ran.
 
 ### 7.1 The counts of 6.6, measured again
 
-`python -m givingtuesday_datamart.exploratory.pf_doubling_basic_rows measure --sql data/exploratory/pf_field_fill.sql`
+`python -m givingtuesday_datamart.proofs.pf_doubling_basic_rows measure --sql data/proofs/pf_field_fill.sql`
 (about four minutes: one pass over `public.privategrants`, temp tables
 only). Of 1,007,142 filer-years, 49,961 hold two or more rows with an
 amount, all of them with one amount. Of those, the blocks that are not one
@@ -1094,7 +1094,7 @@ so merging it is a decision, not a step in the reload.
 
 ### 8.1 The counts of 7.8, measured again
 
-`python -m givingtuesday_datamart.exploratory.pf_doubling_basic_rows measure --sql data/exploratory/pf_total_row.sql`
+`python -m givingtuesday_datamart.proofs.pf_doubling_basic_rows measure --sql data/proofs/pf_total_row.sql`
 (about four minutes: one pass over `public.privategrants`, then the rows of
 the candidates through the index on `filerein`, then their matched rows
 through the index on `privategrants_w_recipients`; temp tables only). The
@@ -1461,16 +1461,16 @@ section's own, for the reason 7.9 gives.
 
 ## 9. Files
 
-- `givingtuesday_datamart/exploratory/pf_doubling_basic_rows.py` and
-  `data/exploratory/pf_doubling_basic_rows.sql`: the measurement, one
+- `givingtuesday_datamart/proofs/pf_doubling_basic_rows.py` and
+  `data/proofs/pf_doubling_basic_rows.sql`: the measurement, one
   session, temp tables only; substitutes the rule's own content hashes so
   the tuples are the rule's tuples. `xml OID ...` is the spot check, and
   since section 7 it also says whether the table's rows are the ones the
   fill of 7.2 predicts; since section 8 it ends with a tally of the paid
   blocks checked.
-- `data/exploratory/pf_field_fill.sql`: section 7.1's counts and the object
+- `data/proofs/pf_field_fill.sql`: section 7.1's counts and the object
   ids of 7.4, run by the same script (`measure --sql`).
-- `data/exploratory/pf_total_row.sql`: section 8's counts, classes, what
+- `data/proofs/pf_total_row.sql`: section 8's counts, classes, what
   the matcher holds of them, and the object ids of 8.4, run the same way.
   Its `fires_d`, `fires_a`, guard and total copy the rule's predicate by
   hand and are held in step by string asserts in
@@ -1479,7 +1479,7 @@ section's own, for the reason 7.9 gives.
   to do to it.
 - `tests/test_pf_doubling_basic_rows.py`: the XML group classifier, the
   predicted rows and the SQL rendering.
-- `givingtuesday_datamart/exploratory/pf_current_scratch.py`: the proof of
+- `givingtuesday_datamart/proofs/pf_current_scratch.py`: the proof of
   section 6. `build` renders the production DDL under a scratch name,
   `compare` sets the copy beside production row for row, `placeholders` is
   6.5, `drop` removes the copies.

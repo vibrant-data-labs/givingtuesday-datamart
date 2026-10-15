@@ -590,7 +590,7 @@ def test_a_build_splits_into_its_statements_and_drops_its_temp_tables(ddl):
 
 
 def test_a_scratch_copy_is_the_production_ddl_under_another_name():
-    from givingtuesday_datamart.exploratory import pf_current_scratch as scratch
+    from givingtuesday_datamart.proofs import pf_current_scratch as scratch
 
     for side, production, ddl in ((PAID, "privategrants_current", cg._PF_CURRENT_DDL),
                                   (FUTURE, "privategrants_future_current", cg._PF_FUTURE_CURRENT_DDL)):

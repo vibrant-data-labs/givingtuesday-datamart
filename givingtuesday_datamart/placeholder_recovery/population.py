@@ -29,7 +29,7 @@ from pathlib import Path
 from sqlalchemy import text
 
 from givingtuesday_datamart._internal.db import get_session
-from givingtuesday_datamart.placeholder_recovery.frame import PATIENT_ASSISTANCE
+from givingtuesday_datamart.placeholder_recovery.exclusions import PATIENT_ASSISTANCE
 from givingtuesday_datamart.ingestion import datamart_config
 
 SQL_PATH = Path("data/placeholder_recovery/placeholder_population_by_year.sql")

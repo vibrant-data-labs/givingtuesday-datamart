@@ -1,7 +1,7 @@
 """Doubled 990-PF filings: the repeated ``basic_fields_pf`` row as a signal.
 
-    python -m givingtuesday_datamart.exploratory.pf_doubling_basic_rows [measure] [--no-sched-i] [--sql PATH]
-    python -m givingtuesday_datamart.exploratory.pf_doubling_basic_rows xml OID [OID ...] [--current NAME]
+    python -m givingtuesday_datamart.proofs.pf_doubling_basic_rows [measure] [--no-sched-i] [--sql PATH]
+    python -m givingtuesday_datamart.proofs.pf_doubling_basic_rows xml OID [OID ...] [--current NAME]
 
 GivingTuesday's 2025-26 batches emit some filings twice: two identical rows
 under one url and one sha in ``basic_fields_pf``, and every paid line item
@@ -16,7 +16,7 @@ the table, as it should. The script stays the watch for what the new rule
 gave up: a "multi tuple" line in ``halved_without_doubled_row_shape`` is a
 block the old test halved and the repeated row does not see (none on
 2026_06_16).
-The first form runs ``data/exploratory/pf_doubling_basic_rows.sql``
+The first form runs ``data/proofs/pf_doubling_basic_rows.sql``
 in one read-only session (temp tables only) and prints the cross between
 the two signals, the shapes of the disagreements, and the row counts
 ``privategrants_current`` would have under each candidate rule, then the
@@ -47,7 +47,7 @@ that reading of the fill gives (``extract_rows``): ``yes``, ``reordered``
 (the same rows in another order), ``twice`` (a doubled filing) or ``no``. ``current_amounts`` is back at
 the filing's own once the fill is repaired (``field_fill`` and
 ``forward_fill`` of ``current_grants``). ``measure --sql
-data/exploratory/pf_field_fill.sql`` counts the per-field shape across the
+data/proofs/pf_field_fill.sql`` counts the per-field shape across the
 paid table and lists the object ids.
 """
 
@@ -72,7 +72,7 @@ from givingtuesday_datamart.current_grants import (
 from givingtuesday_datamart.ingestion import datamart_config
 from givingtuesday_datamart.irs_source import GT_DATALAKE, _get
 
-SQL_PATH = Path("data/exploratory/pf_doubling_basic_rows.sql")
+SQL_PATH = Path("data/proofs/pf_doubling_basic_rows.sql")
 _NAME = re.compile(r"^--\s*name:\s*(\S+)")
 _SCHED_I_MARK = "-- SCHED_I:"
 
