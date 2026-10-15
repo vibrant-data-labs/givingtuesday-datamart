@@ -10,6 +10,7 @@ from pathlib import Path
 import boto3
 import botocore.config
 import pandas as pd
+import jellyfish
 import pyarrow.parquet as pq
 import recordlinkage
 from sqlalchemy import text
@@ -32,6 +33,39 @@ from givingtuesday_datamart.canonical.build import (
 
 
 # --- 1. SQL DDL HELPERS ---
+
+# Government and public-institution name prefixes. Two readers: the BMF
+# alias view below leaves out SORT_NAME lines that are one (the IRS puts the
+# host institution on a chapter's record: "UNIVERSITY OF KANSAS" is the
+# SORT_NAME of a Psi Chi chapter), and the precision guard further down
+# refuses non-exact wins for grant rows that are one. Both regexes come from
+# this tuple: the Python one for create_full_name's output, the SQL one for
+# Postgres (\M = end of word).
+GOVERNMENT_NAME_PREFIXES = (
+    "city",
+    "county",
+    "town",
+    "village",
+    "borough",
+    "township",
+    "parish",
+    "municipality",
+    "state",
+    "commonwealth",
+    "government",
+    "department",
+    "university",
+    "univ",
+    "regents of the university",
+    "board of regents of the university",
+    "trustees of the university",
+    "board of trustees of the university",
+)
+_GOVERNMENT_NAME_PATTERN = (
+    "^(district of columbia|(" + "|".join(GOVERNMENT_NAME_PREFIXES) + ") of)"
+)
+GOVERNMENT_NAME_RE = re.compile(_GOVERNMENT_NAME_PATTERN + r"\b")
+GOVERNMENT_NAME_SQL_RE = _GOVERNMENT_NAME_PATTERN + r"\M"
 # These were previously in sql_queries/unique_fields_for_grants.sql. Lifted into
 # Python so the matching pipeline owns its own preconditions and postconditions
 # in one place. The views must exist before matching reads them; unioned_grants
@@ -232,10 +266,29 @@ _VIEW_DDL = [
     # concatenation that starts with the parent. SORT_NAME lines that name a
     # trustee or a bank ("WELLS FARGO BANK NA TTEE": 3% of them) are left
     # out — a grant row naming a bank must not resolve to a trust's EIN.
+    # Two more cuts, both for the same reason — the IRS writes the HOST
+    # institution on a record, and through the cross-zip exact-name tier
+    # every grant to the host in the state would resolve to that record at
+    # name 1.0, which no score rule can catch (docs/matching-precision-guards.md):
+    #   * SORT_NAME lines that are a government or public-institution name
+    #     (GOVERNMENT_NAME_PREFIXES; 1,154 of 400,614, nearly all a bare
+    #     "UNIVERSITY OF KANSAS" on a Psi Chi chapter's, a Beta Gamma Sigma
+    #     chapter's or a Marine Corps League department's record);
+    #   * NAME lines that are a government or public-institution name on a
+    #     record whose own name is the SORT_NAME: group-exemption
+    #     subordinates (affiliation 9 — "REGENTS OF THE UNIVERSITY OF
+    #     MINNESOTA" / "GOLDEN GOPHERS 4-H CLUB", "DEPARTMENT OF NEW YORK VFW
+    #     AUXILIARY" / "BREWSTER POST 672") and records outside 501(c)(1)/(3)
+    #     ("UNIVERSITY OF WASHINGTON" / "PROFESSIONAL STAFF ORGANIZATION", a
+    #     (c)(5) union); 4,004 rows. The institutions themselves are
+    #     independent (c)(3) records or group parents and keep their NAME
+    #     row: "UNIVERSITY OF UTAH", "REGENTS OF THE UNIVERSITY OF
+    #     CALIFORNIA" / "OFFICE OF THE PRESIDENT", "STATE OF WEST VIRGINIA" /
+    #     "WEST VIRGINIA UNIVERSITY" (affiliation 6).
     # No taxyear filter: every BMF row is a currently recognized org. The
     # same key expressions as basic_fields_w_column_keys_view; the matcher's
     # clean_zip pads and truncates on top.
-    """
+    f"""
     CREATE OR REPLACE VIEW public.eo_bmf_unique_names_view AS (
         SELECT
             filerein_key,
@@ -258,6 +311,11 @@ _VIEW_DDL = [
                 LOWER(LEFT(zip, 5)) addresszip_key
             FROM public.eo_bmf
             WHERE name IS NOT NULL
+              AND NOT (
+                    sort_name IS NOT NULL
+                    AND (affiliation = '9' OR COALESCE(subsection, '') NOT IN ('01', '03'))
+                    AND regexp_replace(LOWER(name), '^the ', '') ~ '{GOVERNMENT_NAME_SQL_RE}'
+              )
             UNION ALL
             SELECT
                 LOWER(ein),
@@ -272,6 +330,7 @@ _VIEW_DDL = [
             WHERE sort_name IS NOT NULL
               AND sort_name <> name
               AND sort_name !~ '\\m(TTEE|TRUSTEE|TRUSTEES|BANK|N A)\\M'
+              AND regexp_replace(LOWER(sort_name), '^the ', '') !~ '{GOVERNMENT_NAME_SQL_RE}'
         ) keyed
         GROUP BY
             filerein_key,
@@ -612,7 +671,10 @@ _MATCHING_INPUT_LOGICAL_NAMES = (
 #   v3 (2026-10-14): the IRS BMF's names join the filer universe as a fourth
 #   arm (eo_bmf_unique_names_view), shifting every row position after the
 #   first BMF tuple.
-MATCHING_INPUT_SHAPE_VERSION = 3
+#   v4 (2026-10-15): eo_bmf_unique_names_view leaves out the host-institution
+#   lines (government-named SORT_NAMEs, and government-named NAMEs on
+#   subordinates' and non-charities' records: about 5,200 rows).
+MATCHING_INPUT_SHAPE_VERSION = 4
 
 
 def _insert_started_build(build_id: str, started_at: datetime, source_runs: dict) -> None:
@@ -947,6 +1009,198 @@ FINAL_FILTER_RULES = dict(
     good_enough_name_addr_min=0.90,
     exact_name_name_min=0.99,
 )
+
+
+# --- Precision guards ---------------------------------------------------
+# Applied to the FINAL_FILTER_RULES survivors, before winner resolution, by
+# every reader of the matcher: the run itself (_do_match_records),
+# corrections_preflight._resolve_winners (which bmf_alias_gain reuses) and
+# match_explainer._score_pairs. Keep the three in lockstep — tests check it.
+#
+# Governments and public institutions are in no arm of the filer universe:
+# a city, a county, a state agency or a public university files no 990, and
+# the IRS Business Master File lists it only where it holds its own
+# 501(c)(3) ruling (the BMF has "City of Hope" and "Regents of the University
+# of California", not "City of New York" or "University of Michigan"). So a
+# grant row naming one can only ever be won by some charity within name 0.70
+# at the same address — "city of marietta" by a firefighters' local at city
+# hall, "university of utah" by its Asia campus, "university of iowa" by its
+# facilities corporation, "city of rock valley" by "friends of rock valley".
+# The BMF arm adds exactly the small orgs that share a government's address
+# (union locals, PTAs, booster clubs, alumni chapters), which makes this
+# likelier.
+#
+# The rule: a grant tuple whose normalized full_name starts with a
+# government or public-institution prefix may win below an exact name
+# (name_score < GOVERNMENT_NAME_EXACT_MIN) only if the filer row says
+# nothing the grant row does not — every substantive token of the filer
+# name is covered by a grant token (equal; a prefix of it or extended by it,
+# for truncations; the same state or word abbreviation; or a Jaro-Winkler
+# twin, for typos). What survives is the org present under a variant of the
+# grant's own name: "university of texas foundation" -> "university of texas
+# foundation inc", "university of relands" -> "university of redlands",
+# "university of new haven fbo sydney field" -> "university of new haven",
+# "university of pennsylvania trustees" -> "trustees of the university of
+# pennsylvania". What goes is the row that adds a word: "university of
+# cincinnati" -> "university of cincinnati foundation", "university of
+# washington" -> "university of washington club". A legal name longer than
+# the common one ("university of notre dame du lac", "university of detroit
+# mercy") is refused too; that is what a corrections-registry row is for.
+# Measured before and after on the August 4, 2026 output, and proved on the
+# BMF slice: docs/matching-precision-guards.md. The plain rule "no non-exact
+# win at all" was measured there as well and refuses about four times the
+# right matches for a fifth more wrong ones removed.
+# The prefixes and both regexes (GOVERNMENT_NAME_PREFIXES, GOVERNMENT_NAME_RE,
+# GOVERNMENT_NAME_SQL_RE) are defined with the view DDL above, which shares
+# them; the SQL form over FULL_NAME_SQL is what the regression gate and the
+# exploratory measurement select with, so they see exactly the tuples the
+# guard sees.
+# A win at or above this name_score is exact: the near-perfect-name and the
+# cross-zip exact-name tiers both start here, so an org present under the
+# grant's own name still wins above it, whatever the rule says.
+GOVERNMENT_NAME_EXACT_MIN = FINAL_FILTER_RULES["near_perfect_name_name_min"]
+
+# Tokens that carry no identity: function words and legal forms
+# ("foundation" and "foundation inc" are the same org).
+_NAME_STOP_TOKENS = frozenset({
+    "the", "of", "and", "a", "an", "at", "in", "for", "to", "on",
+    "inc", "incorporated", "corp", "corporation", "co", "llc", "ltd",
+})
+_STATE_ABBREVIATIONS = {
+    "al": "alabama", "ak": "alaska", "az": "arizona", "ar": "arkansas", "ca": "california",
+    "co": "colorado", "ct": "connecticut", "de": "delaware", "fl": "florida", "ga": "georgia",
+    "hi": "hawaii", "id": "idaho", "il": "illinois", "in": "indiana", "ia": "iowa",
+    "ks": "kansas", "ky": "kentucky", "la": "louisiana", "me": "maine", "md": "maryland",
+    "ma": "massachusetts", "mi": "michigan", "mn": "minnesota", "ms": "mississippi",
+    "mo": "missouri", "mt": "montana", "ne": "nebraska", "nv": "nevada", "nh": "new hampshire",
+    "nj": "new jersey", "nm": "new mexico", "ny": "new york", "nc": "north carolina",
+    "nd": "north dakota", "oh": "ohio", "ok": "oklahoma", "or": "oregon", "pa": "pennsylvania",
+    "ri": "rhode island", "sc": "south carolina", "sd": "south dakota", "tn": "tennessee",
+    "tx": "texas", "ut": "utah", "vt": "vermont", "va": "virginia", "wa": "washington",
+    "wv": "west virginia", "wi": "wisconsin", "wy": "wyoming", "dc": "district of columbia",
+}
+# Abbreviations and truncations grant rows use for words the filer spells
+# out ("univ of florida fndtn", "umass foundat", "mt st vincent"); each
+# pattern matches the whole token.
+_TOKEN_ABBREVIATIONS = [
+    (re.compile(r"^f(?:ou)?(?:nd(?:a(?:t(?:i(?:on?)?)?)?|n|tn)?|dt?n)$"), "foundation"),
+    (re.compile(r"^ass(?:n|oc?|ocia(?:t(?:i(?:on?)?)?)?)$"), "association"),
+    (re.compile(r"^alum$"), "alumni"),
+    (re.compile(r"^univ$"), "university"),
+    (re.compile(r"^st$"), "saint"),
+    (re.compile(r"^mt$"), "mount"),
+    (re.compile(r"^ft$"), "fort"),
+    (re.compile(r"^ctr$"), "center"),
+    (re.compile(r"^dept$"), "department"),
+    (re.compile(r"^intl$"), "international"),
+    (re.compile(r"^natl$"), "national"),
+    (re.compile(r"^hosp$"), "hospital"),
+    (re.compile(r"^med$"), "medical"),
+    (re.compile(r"^inst$"), "institute"),
+]
+# A typo twin: one edit away, or Jaro-Winkler 0.9, between tokens of six
+# letters or more ("charlseston" / "charleston", "relands" / "redlands",
+# "missippi" / "mississippi"); shorter tokens are too easily look-alikes
+# ("campus" / "camps", "wood" / "word").
+_TOKEN_TWIN_MIN_LEN = 6
+_TOKEN_TWIN_JW_MIN = 0.9
+
+# create_full_name / normalize_org_name as a Postgres expression over the
+# *_key columns the views emit (lowercased already): join the two name
+# lines, strip ' , . " , collapse whitespace, drop one leading "the ". Lets
+# SQL readers of privategrants_w_recipients (the regression gate) select the
+# same full_name the matcher scored. A `db` test keeps it equal to the
+# Python function on real names.
+FULL_NAME_SQL = (
+    "regexp_replace(trim(regexp_replace(regexp_replace("
+    "concat_ws(' ', NULLIF(trim(name1_key), ''), NULLIF(trim(name2_key), '')), "
+    """'[''",\\.]', '', 'g'), '\\s+', ' ', 'g')), '^the (?=.)', '')"""
+)
+
+
+def is_government_name(full_name: str) -> bool:
+    """True when a normalized recipient name (create_full_name's output)
+    starts with a government or public-institution prefix."""
+    return GOVERNMENT_NAME_RE.match(full_name) is not None
+
+
+def name_tokens(full_name: str) -> list[str]:
+    """The substantive tokens of a normalized name: split on anything but
+    letters and digits, stop tokens dropped, abbreviations spelled out."""
+    tokens = []
+    for token in re.split(r"[^a-z0-9]+", full_name):
+        if not token or token in _NAME_STOP_TOKENS:
+            continue
+        for pattern, word in _TOKEN_ABBREVIATIONS:
+            if pattern.match(token):
+                token = word
+                break
+        if token in _STATE_ABBREVIATIONS:
+            tokens.extend(_STATE_ABBREVIATIONS[token].split())
+        else:
+            tokens.append(token)
+    return tokens
+
+
+def _token_covered(token: str, grant_tokens: list[str]) -> bool:
+    for g in grant_tokens:
+        if g == token:
+            return True
+        if len(token) >= 3 and len(g) >= 3 and (g.startswith(token) or token.startswith(g)):
+            return True
+        if len(token) >= _TOKEN_TWIN_MIN_LEN and len(g) >= _TOKEN_TWIN_MIN_LEN and (
+            jellyfish.damerau_levenshtein_distance(g, token) <= 1
+            or jellyfish.jaro_winkler_similarity(g, token) >= _TOKEN_TWIN_JW_MIN
+        ):
+            return True
+    return False
+
+
+def government_refusal(grant_name: str, universe_name: str, name_score: float,
+                       exact_min: float = GOVERNMENT_NAME_EXACT_MIN) -> bool:
+    """The guard's decision for one scored pair: True = refuse. Both names
+    are create_full_name output; the rule is spelled out above."""
+    if name_score >= exact_min or not is_government_name(grant_name):
+        return False
+    grant_tokens = name_tokens(grant_name)
+    return any(not _token_covered(t, grant_tokens) for t in name_tokens(universe_name))
+
+
+def guard_government_names(
+    matches: pd.DataFrame,
+    grant_full_name: pd.Series,
+    universe_full_name: pd.Series,
+    grant_index_col: str = "private_foundations_df_index",
+    universe_index_col: str = "basic_fields_df_index",
+    exact_min: float = GOVERNMENT_NAME_EXACT_MIN,
+) -> pd.DataFrame:
+    """Drop the pairs government_refusal refuses.
+
+    ``matches`` is a filter_match_rules survivor frame; the two index
+    columns hold the grant and universe frames' index *labels*
+    (recordlinkage pairs carry labels, which equal positions in the full run
+    but not in a slice), and the two Series are those frames' full_name
+    columns. Pure and order-preserving; call it before winner resolution so
+    a tuple whose best-scoring pair is refused still falls to an exact-name
+    pair of another EIN when one exists.
+    """
+    if matches.empty:
+        return matches
+    grant_names = grant_full_name.loc[matches[grant_index_col].to_numpy()].to_numpy()
+    # Only government-named, non-exact pairs need the per-pair decision.
+    government = pd.Series(grant_names, index=matches.index).str.match(GOVERNMENT_NAME_RE).to_numpy()
+    candidates = matches[government & (matches["name_score"].to_numpy() < exact_min)]
+    if candidates.empty:
+        return matches
+    refused = [
+        government_refusal(g, u, score, exact_min)
+        for g, u, score in zip(
+            grant_full_name.loc[candidates[grant_index_col].to_numpy()].to_numpy(),
+            universe_full_name.loc[candidates[universe_index_col].to_numpy()].to_numpy(),
+            candidates["name_score"].to_numpy(),
+        )
+    ]
+    return matches.drop(index=candidates.index[refused])
 
 
 def match_records(
@@ -1306,6 +1560,19 @@ def _do_match_records(
     # no reset_index / rename gymnastics needed.
     matches = matches.copy()
 
+    # Precision guards (see guard_government_names): refuse the non-exact
+    # wins the universe cannot hold. Before winner resolution, so a tuple
+    # whose best-scoring pair is refused still falls to an exact-name pair
+    # of another EIN when one exists.
+    pre_guard_count = len(matches)
+    matches = guard_government_names(
+        matches, private_foundations_df['full_name'], basic_fields_df['full_name']
+    )
+    logger.info(
+        f"Government-name guard: refused {pre_guard_count - len(matches)} "
+        f"non-exact pairs for government-named recipients ({len(matches)} pairs left)."
+    )
+
     matches = matches.drop_duplicates()
 
     # Each private_foundations record (grant recipient) should map to exactly one
@@ -1337,6 +1604,11 @@ def _do_match_records(
     private_foundations_df['private_foundations_df_index'] = private_foundations_df.index
     # `source` comes from the basic_fields (filer-universe) side of the merge:
     # which arm of the universe union supplied the winning identity row.
+    # full_name_bf / name_score / addr_score are the winning universe row's
+    # normalized name and the winning pair's two scores, kept so every row
+    # of privategrants_w_recipients says what it matched and how closely
+    # (the regression gate re-applies the precision guards to them;
+    # match_explainer no longer has to recompute them to audit a row).
     full_data_df = basic_fields_df_matched.merge(private_foundations_df, on='private_foundations_df_index', suffixes=("_bf", ""))[[
         'filerein_key',
         'name1_key',
@@ -1347,11 +1619,17 @@ def _do_match_records(
         'addressstate_key',
         'addresszip_key',
         'source',
+        'full_name_bf',
+        'name_score',
+        'addr_score',
     ]].drop_duplicates()
 
     full_data_df.rename(columns={
         'filerein_key': 'recipeint_ein_key',
         'source': 'match_source',
+        'full_name_bf': 'match_name',
+        'name_score': 'match_name_score',
+        'addr_score': 'match_addr_score',
     }, inplace=True)
 
     temp_join_table_name = "pf_grant_matching_temp_table"
@@ -1376,7 +1654,10 @@ def _do_match_records(
             SELECT
                 pg.*,
                 pfgm.recipeint_ein_key,
-                pfgm.match_source
+                pfgm.match_source,
+                pfgm.match_name,
+                pfgm.match_name_score,
+                pfgm.match_addr_score
             INTO public.{private_grants_w_recipient_table_name}
             FROM public.privategrants_w_column_keys_view pg
             JOIN public.{temp_join_table_name} pfgm

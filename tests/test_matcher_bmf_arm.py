@@ -21,6 +21,11 @@ def test_bmf_view_emits_name_and_sort_name_rows_with_the_shared_key_columns():
     # SORT_NAME rows: only when set, different from NAME, and not a trustee or bank line.
     assert "sort_name <> name" in ddl
     assert "sort_name !~ '\\m(TTEE|TRUSTEE|TRUSTEES|BANK|N A)\\M'" in ddl
+    # ... nor a government or public-institution name (the host on a chapter's record).
+    assert ("regexp_replace(LOWER(sort_name), '^the ', '') !~ '" + grant_matching.GOVERNMENT_NAME_SQL_RE + "'") in ddl
+    # NAME rows: a government-named NAME on a subordinate's or a non-charity's record is the host, not the org.
+    assert ("AND NOT ( sort_name IS NOT NULL AND (affiliation = '9' OR COALESCE(subsection, '') NOT IN ('01', '03')) "
+            "AND regexp_replace(LOWER(name), '^the ', '') ~ '" + grant_matching.GOVERNMENT_NAME_SQL_RE + "' )") in ddl
     assert "taxyear" not in ddl  # every BMF row is a currently recognized org
     # Same DISTINCT-by-GROUP-BY and deterministic ORDER BY as the other unique-names views.
     assert ddl.count("filerein_key, name1_key, name2_key, address1_key, address2_key, addresscity_key, addressstate_key, addresszip_key") >= 2
@@ -47,8 +52,8 @@ def test_bmf_ranks_below_filings_and_above_corrections():
     assert order["basic_fields"] < order["basic_fields_pf"] < order["eo_bmf"] < order["correction"]
 
 
-def test_shape_version_bumped_for_the_fourth_arm():
-    assert grant_matching.MATCHING_INPUT_SHAPE_VERSION == 3
+def test_shape_version_bumped_for_the_fourth_arm_and_its_sort_name_exclusion():
+    assert grant_matching.MATCHING_INPUT_SHAPE_VERSION == 4
     assert "irs_eo_bmf" in grant_matching._MATCHING_INPUT_LOGICAL_NAMES
 
 
@@ -77,7 +82,7 @@ def test_checkpoint_prefix_carries_the_bmf_version(monkeypatch):
     })
     prefix = grant_matching._resolve_checkpoint_prefix(conn)
     assert prefix == ("grant_matching_checkpoints/pg_2026_06_16/bf_2026_06_16/bfpf_2026_06_16/"
-                      "bmf_2026_10_13/corr_abcd1234/shape_v3")
+                      "bmf_2026_10_13/corr_abcd1234/shape_v4")
 
 
 def test_checkpoint_prefix_refuses_without_a_bmf_ingest(monkeypatch):
