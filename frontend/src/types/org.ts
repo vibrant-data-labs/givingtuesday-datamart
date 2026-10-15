@@ -81,7 +81,7 @@ export interface OrgProfile {
   formationYear: string | null;
   // IRS Business Master File fields (null when the org is not in the BMF,
   // i.e. revoked or terminated). nteeCode is the National Taxonomy of
-  // Exempt Entities code; subsection the 501(c) paragraph ('03', '04', ...).
+  // Exempt Entities code; subsection the IRS code ('03' = 501(c)(3), '92' = 4947(a)(1), ...).
   nameSource: NameSource;
   inBmf: boolean;
   irsName: string | null;

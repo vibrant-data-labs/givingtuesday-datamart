@@ -1,5 +1,6 @@
 import type { OrgProfile } from '@/types/org';
 import { Card } from '@/components/ui/Card';
+import { formatIrsSubsection } from '@/lib/irs-subsection';
 
 interface OrgIdentityCardProps {
   org: OrgProfile;
@@ -59,7 +60,7 @@ export function OrgIdentityCard({ org }: OrgIdentityCardProps) {
         {hasSubsection && (
           <Field label="IRS Status">
             <span>
-              501(c)({parseInt(org.subsection!, 10) || org.subsection})
+              {formatIrsSubsection(org.subsection!)}
               {org.foundationCode ? ` · foundation code ${org.foundationCode}` : ''}
             </span>
           </Field>
