@@ -114,7 +114,7 @@ def _create_table_from_columns(engine, table_name: str, columns: list[str], over
     col_defs = ', '.join([f'"{col}" TEXT' for col in columns])
     with engine.connect() as conn:
         if overwrite:
-            # CASCADE: the matching views (grant_matching._VIEW_DDL) sit on top
+            # CASCADE: the matching views (grant_matching._view_ddl) sit on top
             # of the staging tables and block a plain DROP once matching has
             # run. They are rebuilt by create_or_replace_views() at the start
             # of every matching run, so dropping them with the table is safe.
