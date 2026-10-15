@@ -302,6 +302,38 @@ memory and needs an r7a.4xlarge-class host (~128 GB). A 16 GB laptop is
 killed at the indexing step. Checkpoints make interrupted runs cheap to
 resume on the same inputs.
 
+### Trace a filing back to the IRS
+
+```bash
+# bare object id, GT data lake url, or the frontend proxy link all work
+python -m givingtuesday_datamart.irs_source 202533119349102158
+
+# save both; --cache avoids re-downloading index_<year>.csv on the next lookup
+python -m givingtuesday_datamart.irs_source 202533119349102158 \
+    --xml f.xml --pdf f.pdf --cache ~/.cache/irs_index
+```
+
+Turns the `url` a grant row cites into the IRS's public PDF image and the
+filing XML — for defending a finding with the primary document, as in the
+placeholder cases in
+[docs/missing_grants_capture_analysis.md](docs/missing_grants_capture_analysis.md)
+and the amended filings in
+[docs/gt-duplication-report.md](docs/gt-duplication-report.md).
+
+Stdlib only, no database. The PDF comes from TEOS, which keys on
+(EIN, tax period, return type) — coarser than a filing, since an original and
+its amendment share a tax period. Where the IRS index carries a `RETURN_ID`
+that resolves to exactly one image; where it doesn't, every image for the
+period is listed and `--pdf` waits for `--image N` rather than guessing.
+Images are the whole return, so they run large for big filers (Fidelity's
+FY2022 990 is 347 MB / 32,829 pages).
+
+The XML is fetched from GT's mirror, which has been verified byte-identical
+to the IRS original by SHA-256 across filings from 43 KB to 51 MB. Pulling it
+from the IRS instead would mean cracking open a 250MB+ batch ZIP, and some
+batches are Deflate64, which zlib cannot read — not worth carrying for a file
+we can prove is the same. The IRS archive URL is printed either way.
+
 ### Recommended first run
 
 Refresh smallest-to-largest so that errors surface fast:

@@ -201,9 +201,10 @@ def test_guard_passes_an_empty_frame_through():
 
 def test_guard_runs_before_winner_resolution_so_an_exact_pair_of_another_ein_wins():
     grants = pd.DataFrame({"full_name": ["university of chicago"], "addresszip_key": ["60637"],
-                           "name1_key": ["university of chicago"], "name2_key": [""]})
+                           "name1_key": ["university of chicago"], "name2_key": [""],
+                           "address1_key": ["1 main st"], "address2_key": [""], "addressstate_key": ["il"]})
     universe = pd.DataFrame({"full_name": ["university of chicago cancer research foundation",
-                                           "university of chicago"]})
+                                           "university of chicago"], "filerein_key": ["111111111", "222222222"]})
     # The affiliate outscores the exact row on combined score (2*name + addr):
     # 2*0.8875 + 0.96 = 2.735 > 2*1.0 + 0.5 = 2.5. Without the guard it wins.
     features = pd.DataFrame({
@@ -223,21 +224,29 @@ def test_guard_runs_before_winner_resolution_so_an_exact_pair_of_another_ein_win
 # --- lockstep across the matcher's readers ---------------------------------
 
 def test_every_reader_applies_the_guard_between_the_final_tiers_and_resolution():
-    for fn in (grant_matching._do_match_records, corrections_preflight._resolve_winners,
-               match_explainer._score_pairs):
-        src = inspect.getsource(fn)
-        final = src.index("FINAL_FILTER_RULES")
-        guard = src.index("guard_government_names(")
-        assert final < guard, fn.__name__
-    run = inspect.getsource(grant_matching._do_match_records)
-    assert run.index("guard_government_names(") < run.index("_combined_score")
+    # The run and preflight now share winner resolution, including the guard.
+    assert "all_matches(" in inspect.getsource(grant_matching._do_match_records)
+    assert "all_matches(" in inspect.getsource(corrections_preflight._resolve_winners)
+    assert "resolve_matches(" in inspect.getsource(grant_matching.all_matches)
+    src = inspect.getsource(grant_matching.resolve_matches)
+    assert src.index("FINAL_FILTER_RULES") < src.index("guard_government_names(") < src.index("_combined_score")
+    src = inspect.getsource(match_explainer._score_pairs)
+    assert src.index("FINAL_FILTER_RULES") < src.index("guard_government_names(")
 
 
 def test_the_run_carries_the_winning_name_and_scores_into_the_output():
-    src = inspect.getsource(grant_matching._do_match_records)
-    assert "'full_name_bf': 'match_name'" in src
-    assert "'name_score': 'match_name_score'" in src
-    assert "'addr_score': 'match_addr_score'" in src
+    universe = pd.DataFrame({"filerein_key": ["222222222"], "source": ["eo_bmf"],
+                             "full_name": ["university of chicago"]})
+    grants = pd.DataFrame([{key: "" for key in grant_matching._KEYS}])
+    matches = pd.DataFrame({"basic_fields_df_index": [0], "private_foundations_df_index": [0],
+                           "match_tier": [grant_matching.ADDRESS_TIER], "match_name_words": [pd.NA],
+                           "name_score": [1.0], "addr_score": [0.5]})
+    found = grant_matching.matched_tuples(universe, grants, matches).iloc[0]
+    assert found["recipeint_ein_key"] == "222222222"
+    assert found["match_name"] == "university of chicago"
+    assert found["match_name_score"] == 1.0
+    assert found["match_addr_score"] == 0.5
+    src = inspect.getsource(grant_matching.write_matches)
     assert re.search(r"pfgm\.match_name,\s*pfgm\.match_name_score,\s*pfgm\.match_addr_score\s*INTO public", src)
 
 

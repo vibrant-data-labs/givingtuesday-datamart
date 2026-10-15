@@ -12,6 +12,11 @@ trusting or merging its output:
 Exit code 0 = all checks pass; 1 = at least one FAIL. WARNs are reported
 but do not fail the gate.
 
+``--prefix`` reads the output of a run made under that prefix
+(``grant_matching.Relations``), such as a subset's. The baselines below are
+the full run's, so on a subset the floors and ceilings say nothing and the
+hard rules are what holds.
+
 Operational guide — how to diagnose a failure and when/how to update the
 baselines below: docs/matching-regression-runbook.md.
 
@@ -42,6 +47,9 @@ from givingtuesday_datamart.grant_matching import (
     GOVERNMENT_NAME_SQL_RE,
     government_refusal,
 )
+from givingtuesday_datamart.grant_matching import Relations
+from givingtuesday_datamart.placeholder_recovery import loader as recovered_loader
+from givingtuesday_datamart.placeholder_recovery.view import FROM_RECOVERY
 
 # --- Baselines: August 4, 2026 run (dedup + corrections registry) ---------
 
@@ -136,10 +144,19 @@ class Gate:
         return 1 if self.failed else 0
 
 
-def run_checks(fast: bool) -> int:
+def run_checks(fast: bool, relations: Relations = Relations()) -> int:
     gate = Gate()
+    matched = relations.of("privategrants_w_recipients")
+    join_table = relations.of("pf_grant_matching_temp_table")
+    unioned = relations.of("unioned_grants")
     with get_session(config=_config()) as session:
         conn = session.connection()
+        # A table written before input shape 3 has no row_source: every row
+        # of it is a row of privategrants.
+        has_recovered = conn.execute(text(
+            "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' "
+            "AND table_name = :table AND column_name = 'row_source'"), {"table": matched}).scalar() > 0
+        recovered = f"row_source = '{FROM_RECOVERY}'" if has_recovered else "false"
 
         # --- Negative controls & sentinels (one pass over pgwr) ----------
         logger.info("Negative controls + sentinels ...")
@@ -152,7 +169,7 @@ def run_checks(fast: bool) -> int:
               COUNT(*) FILTER (WHERE sigocpyrbnbn1 ILIKE 'pfizer%') AS corporate_rows,
               COUNT(*) FILTER (WHERE sigocpyrbnbn1 ILIKE '%world health organi%') AS foreign_rows,
               COUNT(*) FILTER (WHERE recipeint_ein_key = filerein) AS self_matches
-            FROM privategrants_w_recipients
+            FROM {matched}
         """), conn).iloc[0]
         gate.check("person rows matched (must be 0)",
                    nc.person_rows <= PERSON_ROWS_MATCHED_CEILING, f"{nc.person_rows}")
@@ -167,19 +184,19 @@ def run_checks(fast: bool) -> int:
 
         for ein, (label, floor) in RECIPIENT_SENTINEL_FLOORS.items():
             n = conn.execute(text(
-                "SELECT COUNT(*) FROM privategrants_w_recipients WHERE recipeint_ein_key = :e"
+                f"SELECT COUNT(*) FROM {matched} WHERE recipeint_ein_key = :e"
             ), {"e": ein}).scalar()
             gate.check(f"sentinel {label} (>= {floor})", n >= floor, f"{n}")
         for ein, (label, floor) in FUNDER_SENTINEL_FLOORS.items():
             n = conn.execute(text(
-                "SELECT COUNT(*) FROM privategrants_w_recipients WHERE filerein = :e"
+                f"SELECT COUNT(*) FROM {matched} WHERE filerein = :e"
             ), {"e": ein}).scalar()
             gate.check(f"sentinel {label} (>= {floor})", n >= floor, f"{n}")
 
         # --- Breakdown by match_source -----------------------------------
         logger.info("match_source breakdown ...")
         by_source = dict(conn.execute(text(
-            "SELECT match_source, COUNT(*) FROM privategrants_w_recipients GROUP BY 1"
+            f"SELECT match_source, COUNT(*) FROM {matched} GROUP BY 1"
         )).fetchall())
         counts = ", ".join(f"{src}={by_source.get(src, 0):,}" for src in MATCH_SOURCE_ROWS_BASELINE)
         unknown = sorted(set(by_source) - set(MATCH_SOURCE_ROWS_BASELINE))
@@ -197,16 +214,16 @@ def run_checks(fast: bool) -> int:
         logger.info("Government-named recipients matched below an exact name ...")
         has_score = conn.execute(text("""
             SELECT COUNT(*) FROM information_schema.columns
-            WHERE table_schema = 'public' AND table_name = 'privategrants_w_recipients'
+            WHERE table_schema = 'public' AND table_name = :matched
               AND column_name = 'match_name_score'
-        """)).scalar() > 0
+        """), {"matched": matched}).scalar() > 0
         if has_score:
             # The non-exact wins of government-named recipients, with the
             # winning filer name and score the run carried; the guard's own
             # decision function says which of them it would have refused.
             gov = pd.read_sql_query(text(f"""
                 SELECT {FULL_NAME_SQL} AS full_name, match_name, match_name_score, COUNT(*) AS n_rows
-                FROM privategrants_w_recipients
+                FROM {matched}
                 WHERE match_name_score < {GOVERNMENT_NAME_EXACT_MIN}
                   AND {FULL_NAME_SQL} ~ '{GOVERNMENT_NAME_SQL_RE}'
                 GROUP BY 1, 2, 3
@@ -227,12 +244,12 @@ def run_checks(fast: bool) -> int:
         # --- Structural invariants ---------------------------------------
         logger.info("Join fan-out invariant ...")
         temp_exists = conn.execute(text(
-            "SELECT to_regclass('public.pf_grant_matching_temp_table') IS NOT NULL"
+            f"SELECT to_regclass('public.{join_table}') IS NOT NULL"
         )).scalar()
         if temp_exists:
-            fanout = conn.execute(text("""
+            fanout = conn.execute(text(f"""
                 SELECT COUNT(*) FROM (
-                    SELECT 1 FROM pf_grant_matching_temp_table
+                    SELECT 1 FROM {join_table}
                     GROUP BY name1_key, name2_key, address1_key, address2_key,
                              addresscity_key, addressstate_key, addresszip_key
                     HAVING COUNT(DISTINCT recipeint_ein_key) > 1
@@ -242,7 +259,7 @@ def run_checks(fast: bool) -> int:
                        fanout == 0, f"{fanout}")
         else:
             gate.check("join-table fan-out check", False,
-                       "pf_grant_matching_temp_table not found — skipped", warn_only=True)
+                       f"{join_table} not found — skipped", warn_only=True)
 
         logger.info("Per-funder-year subset invariants (matched <= itemized) ...")
         # Dollar comparison uses POSITIVE amounts only: raw filings contain
@@ -252,6 +269,9 @@ def run_checks(fast: bool) -> int:
         # uninvestigated" 41-to-42 violation class was entirely this
         # arithmetic artifact. Positive-only sums restore the strict subset
         # invariant, so both checks are hard zeros.
+        # A recovered grant is a row of privategrants_recovered, not of
+        # privategrants, where its filing holds one placeholder row: the
+        # recovered rows are held to the table they came from.
         POS = ("SUM(CASE WHEN {col} ~ '^[0-9]+(\\.[0-9]+)?$' "
                "THEN {col}::numeric ELSE 0 END)")
         inv = pd.read_sql_query(text(f"""
@@ -263,7 +283,7 @@ def run_checks(fast: bool) -> int:
             w AS (
                 SELECT filerein, taxyear, COUNT(*) AS n_rows,
                        {POS.format(col='sigocpyamoun')} AS matched_pos
-                FROM privategrants_w_recipients GROUP BY 1, 2
+                FROM {matched} WHERE NOT ({recovered}) GROUP BY 1, 2
             )
             SELECT
               COUNT(*) FILTER (WHERE w.n_rows > pg.n_rows) AS row_violations,
@@ -274,20 +294,56 @@ def run_checks(fast: bool) -> int:
                    inv.row_violations == 0, f"{inv.row_violations}")
         gate.check("funder-years with matched positive $ > itemized positive $ (must be 0)",
                    inv.dollar_violations == 0, f"{inv.dollar_violations}")
+        if has_recovered:
+            logger.info("Per-filing subset invariants, recovered grants (matched <= loaded) ...")
+            inv = pd.read_sql_query(text(f"""
+                WITH r AS (
+                    SELECT object_id, policy_version, COUNT(*) AS n_rows,
+                           SUM(GREATEST(amount, 0)) AS loaded_pos
+                    FROM {recovered_loader.TABLE} WHERE target = '{recovered_loader.PAID}' GROUP BY 1, 2
+                ),
+                w AS (
+                    SELECT recovered_object_id AS object_id, recovered_policy_version AS policy_version,
+                           COUNT(*) AS n_rows, {POS.format(col='sigocpyamoun')} AS matched_pos
+                    FROM {matched} WHERE {recovered} GROUP BY 1, 2
+                )
+                SELECT
+                  COUNT(*) FILTER (WHERE r.object_id IS NULL OR w.n_rows > r.n_rows) AS row_violations,
+                  COUNT(*) FILTER (WHERE r.object_id IS NULL OR w.matched_pos > r.loaded_pos + 1)
+                      AS dollar_violations
+                FROM w LEFT JOIN r USING (object_id, policy_version)
+            """), conn).iloc[0]
+            gate.check("filings with more matched recovered rows than loaded rows (must be 0)",
+                       inv.row_violations == 0, f"{inv.row_violations}")
+            gate.check("filings with matched recovered positive $ > loaded positive $ (must be 0)",
+                       inv.dollar_violations == 0, f"{inv.dollar_violations}")
+
+            # The person-row control above cannot see a recovered grant: the
+            # view puts every recovered name in the business-name column. A
+            # list the filer marked as grants to individuals holds people's
+            # names, and a person's name that equals a filer's whole cleaned
+            # name matches. A count to look at, not a rule: such a list
+            # also names the schools and hospitals the money went through.
+            people = conn.execute(text(f"""
+                SELECT COUNT(*), COUNT(*) FILTER (WHERE match_tier = 'name_only')
+                FROM {matched} WHERE {recovered} AND filer_marked_individual
+            """)).one()
+            gate.check("matched recovered rows of lists marked as grants to individuals (look at them)",
+                       people[0] == 0, f"{people[0]}, {people[1]} of them on the name alone", warn_only=True)
 
         # --- Labeled-pair coverage (recall floor; skippable) -------------
         if fast:
             gate.check("labeled-pair coverage", False, "skipped (--fast)", warn_only=True)
         else:
             logger.info("Labeled-pair coverage (slow) ...")
-            cov = pd.read_sql_query(text("""
+            cov = pd.read_sql_query(text(f"""
                 WITH labeled AS (
                     SELECT DISTINCT funder_ein, recip_ein, filing_type
                     FROM grantor_recipient_labeled_set
                 ),
                 ug_pairs AS (
                     SELECT DISTINCT granter_ein, grantee_ein
-                    FROM unioned_grants
+                    FROM {unioned}
                     WHERE grantee_ein IS NOT NULL AND grantee_ein <> ''
                 )
                 SELECT l.filing_type, COUNT(*) AS pairs, COUNT(u.granter_ein) AS covered
@@ -310,8 +366,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--fast", action="store_true",
                         help="Skip the slow labeled-pair coverage check")
+    parser.add_argument("--prefix", default="", help="read the output of a run made under this prefix")
     args = parser.parse_args()
-    sys.exit(run_checks(fast=args.fast))
+    sys.exit(run_checks(fast=args.fast, relations=Relations(prefix=args.prefix)))
 
 
 if __name__ == "__main__":

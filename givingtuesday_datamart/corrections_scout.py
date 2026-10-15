@@ -67,7 +67,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import re
 import sys
 from pathlib import Path
 
@@ -86,8 +85,9 @@ from givingtuesday_datamart.corrections_preflight import (
 from givingtuesday_datamart.grant_matching import (
     CHUNK_FILTER_RULES,
     FINAL_FILTER_RULES,
-    create_full_name,
     filter_match_rules,
+    join_name,
+    normalize_org_name,
 )
 from givingtuesday_datamart.ingestion import datamart_config
 from givingtuesday_datamart.matching_regression_checks import AMT, PLACEHOLDER_REGEX
@@ -160,7 +160,7 @@ _TOP_TUPLES_SQL = f"""
 """
 
 _CAND_COLS = [
-    "filerein_key", "full_name", "address1_key", "address2_key",
+    "filerein_key", "compare_name", "address1_key", "address2_key",
     "addresscity_key", "addressstate_key", "addresszip_key", "source",
 ]
 
@@ -173,7 +173,7 @@ def _best_same_state(universe: pd.DataFrame, name: str, state: str) -> tuple[flo
         return 0.0, None
     sims = [
         jellyfish.jaro_winkler_similarity(name, n)
-        for n in universe.loc[grp, "full_name"]
+        for n in universe.loc[grp, "compare_name"]
     ]
     best_pos = max(range(len(sims)), key=sims.__getitem__)
     return sims[best_pos], grp[best_pos]
@@ -218,7 +218,10 @@ def run_scout(top: int, out_path: Path) -> int:
         .set_index("private_foundations_df_index")
     )
 
-    # Exact normalized name elsewhere in the universe (cross-state geometry).
+    # The same name elsewhere in the universe (cross-state geometry): the
+    # same cleaned name, which is what the matcher takes for the same name.
+    # The near misses below are scored on the compared (normalized) name, as
+    # the matcher scores two names that are not the same.
     by_name = universe.groupby("full_name").groups
 
     # --- classify each unmatched tuple ---------------------------------
@@ -234,7 +237,7 @@ def run_scout(top: int, out_path: Path) -> int:
             cand_jw = 1.0
             status = "exact_name_cross_state"
         else:
-            key = (t["full_name"], t["addressstate_key"])
+            key = (t["compare_name"], t["addressstate_key"])
             if key not in state_scan_cache:
                 state_scan_cache[key] = _best_same_state(universe, *key)
             jw, u_idx = state_scan_cache[key]
@@ -262,7 +265,7 @@ def run_scout(top: int, out_path: Path) -> int:
                 "raw_state": t["raw_state"],
                 "raw_zip": t["raw_zip"],
                 "candidate_ein": cand["filerein_key"] if cand is not None else "",
-                "candidate_name": cand["full_name"] if cand is not None else "",
+                "candidate_name": cand["compare_name"] if cand is not None else "",
                 "candidate_address": (
                     " ".join(
                         p for p in (cand["address1_key"], cand["address2_key"]) if p
@@ -371,19 +374,19 @@ _DEFAULT_LABELED_DIGEST_OUT = (
     / "data" / "exploratory" / "corrections_labeled_digest.csv"
 )
 
-# Trailing tokens whose absence/presence alone should NOT spend a correction
-# row: per the recurrence rule these belong to a future normalize_org_name
-# change, and they dominate the high-JW band (~60% of it, ~$4.8B measured
-# 2026-07-30).
-_SUFFIX_ONLY_RE = re.compile(r"\s+(incorporated|inc|the)$")
-
-
 def _write_labeled_digest(
     report: pd.DataFrame, out_path: Path, jw_min: float = 0.95
 ) -> pd.DataFrame:
     """Distill the pair-grained labeled report into a per-recipient
     worklist: one row per recipient EIN, high-confidence tuples only
-    (name_jw >= jw_min), suffix-only variants excluded, ranked by dollars.
+    (name_jw >= jw_min), ranked by dollars.
+
+    Until input shape 3 a tuple that differed from the recipient's name
+    only by a trailing "inc" or "the" was left out, as work for the name
+    cleaner and not for a correction row (~60% of the high band, ~$4.8B
+    measured 2026-07-30). The cleaner is in the matcher now: such a pair is
+    the same name to it, and what still keeps the tuple unmatched is its
+    address, which is a correction row's work. So nothing is left out.
 
     The raw report stays on disk as the audit trail.
     """
@@ -392,15 +395,8 @@ def _write_labeled_digest(
     df["name_jw"] = df["name_jw"].astype(float)
     for col in ("name1_key", "name2_key", "recip_name"):
         df[col] = df[col].fillna("")
-    df["tuple_name"] = [
-        create_full_name({"name1_key": a, "name2_key": b})
-        for a, b in zip(df["name1_key"], df["name2_key"])
-    ]
-    suffix_only = [
-        a != b and _SUFFIX_ONLY_RE.sub("", a) == _SUFFIX_ONLY_RE.sub("", b)
-        for a, b in zip(df["tuple_name"], df["recip_name"])
-    ]
-    kept = df[(df["name_jw"] >= jw_min) & ~pd.Series(suffix_only, index=df.index)]
+    df["tuple_name"] = [normalize_org_name(join_name(a, b)) for a, b in zip(df["name1_key"], df["name2_key"])]
+    kept = df[df["name_jw"] >= jw_min]
     kept = kept.sort_values("dollars", ascending=False)
     digest = (
         kept.groupby(["recip_ein", "recip_name"], sort=False)
@@ -495,20 +491,19 @@ def run_labeled_scout(out_path: Path, jw_min: float = NEAR_MISS_JW_MIN) -> int:
         ids = ids_by_recip.get(pair.recip_ein)
         if ids is not None:
             id_rows = list(ids.itertuples())
-            recip_name = id_rows[0].full_name
+            recip_name = id_rows[0].compare_name
             evidence = "universe"
         else:
-            gm = create_full_name(
-                {"name1_key": str(pair.gm_name or "").lower(), "name2_key": ""}
-            )
+            gm = normalize_org_name(join_name(str(pair.gm_name or "").lower(), ""))
             if len(gm) < 4:
                 counts["no_tuple"] += 1
                 continue
             id_rows, recip_name, evidence = [], gm, "gm_name"
 
-        # Best JW per unique tuple name against every identity of this recip.
-        uniq_names = tf["full_name"].unique()
-        id_names = [r.full_name for r in id_rows] or [recip_name]
+        # Best JW per unique tuple name against every identity of this recip,
+        # on the compared name, which is what the matcher scores.
+        uniq_names = tf["compare_name"].unique()
+        id_names = [r.compare_name for r in id_rows] or [recip_name]
         jw = {
             n: max(jellyfish.jaro_winkler_similarity(n, idn) for idn in id_names)
             for n in uniq_names
@@ -518,14 +513,18 @@ def run_labeled_scout(out_path: Path, jw_min: float = NEAR_MISS_JW_MIN) -> int:
             counts["no_tuple"] += 1
             continue
 
-        sub = tf[tf["full_name"].isin(good_names)]
+        sub = tf[tf["compare_name"].isin(good_names)]
 
         # Reachability now: some blockable (same zip / identical name) pair
         # passes the FINAL tiers against some identity row.
         covered = False
         for t in sub.itertuples():
             for idr in id_rows:
-                name_score = jellyfish.jaro_winkler_similarity(t.full_name, idr.full_name)
+                # The matcher's name score: 1 for the same cleaned name,
+                # else the similarity of the compared names. Its blocks:
+                # the zip, or the same cleaned name.
+                name_score = 1.0 if t.full_name == idr.full_name else (
+                    jellyfish.jaro_winkler_similarity(t.compare_name, idr.compare_name))
                 blockable = (
                     t.clean_zip == idr.clean_zip or t.full_name == idr.full_name
                 )
@@ -545,14 +544,14 @@ def run_labeled_scout(out_path: Path, jw_min: float = NEAR_MISS_JW_MIN) -> int:
             continue
 
         counts["near_miss"] += 1
-        cands = sub[sub["full_name"].map(jw) >= jw_min]
+        cands = sub[sub["compare_name"].map(jw) >= jw_min]
         if cands.empty:
             # reachable-name floor met (0.70+) but below draft confidence;
             # still worth a stub row so the pair isn't silently dropped.
             cands = sub.sort_values("dollars", ascending=False).head(1)
         for t in cands.sort_values("dollars", ascending=False).head(5).itertuples():
             best_id = (
-                max(id_rows, key=lambda r: jellyfish.jaro_winkler_similarity(t.full_name, r.full_name))
+                max(id_rows, key=lambda r: jellyfish.jaro_winkler_similarity(t.compare_name, r.compare_name))
                 if id_rows else None
             )
             if best_id is None:
@@ -572,7 +571,7 @@ def run_labeled_scout(out_path: Path, jw_min: float = NEAR_MISS_JW_MIN) -> int:
                     "recip_name": recip_name,
                     "evidence": evidence,
                     "geometry": geometry,
-                    "name_jw": round(jw[t.full_name], 4),
+                    "name_jw": round(jw[t.compare_name], 4),
                     "name1_key": t.name1_key,
                     "name2_key": t.name2_key,
                     "address1_key": t.address1_key,

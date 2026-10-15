@@ -9,7 +9,7 @@ from givingtuesday_datamart.exploratory import bmf_alias_gain
 
 
 def _bmf_view_ddl() -> str:
-    return next(d for d in grant_matching._VIEW_DDL if "CREATE OR REPLACE VIEW public.eo_bmf_unique_names_view" in d)
+    return next(d for d in grant_matching._view_ddl(grant_matching.Relations()) if "CREATE OR REPLACE VIEW public.eo_bmf_unique_names_view" in d)
 
 
 def test_bmf_view_emits_name_and_sort_name_rows_with_the_shared_key_columns():
@@ -38,9 +38,7 @@ def _arm_order(sql: str) -> list[tuple[str, int | None]]:
 
 
 def test_universe_arms_are_in_lockstep_across_matcher_preflight_and_explainer():
-    import inspect
-    matcher_sql = inspect.getsource(grant_matching._do_match_records) if hasattr(grant_matching, "_do_match_records") \
-        else inspect.getsource(grant_matching)
+    matcher_sql = grant_matching.universe_sql()
     expected = [("basic_fields", 1), ("basic_fields_pf", 2), ("eo_bmf", 3), ("correction", 4)]
     assert _arm_order(corrections_preflight._UNIVERSE_SQL) == expected
     assert [src for src, _ in _arm_order(match_explainer._UNIVERSE_SQL)] == [src for src, _ in expected]
@@ -53,7 +51,7 @@ def test_bmf_ranks_below_filings_and_above_corrections():
 
 
 def test_shape_version_bumped_for_the_fourth_arm_and_its_sort_name_exclusion():
-    assert grant_matching.MATCHING_INPUT_SHAPE_VERSION == 4
+    assert grant_matching.MATCHING_INPUT_SHAPE_VERSION == 5
     assert "irs_eo_bmf" in grant_matching._MATCHING_INPUT_LOGICAL_NAMES
 
 
@@ -80,9 +78,9 @@ def test_checkpoint_prefix_carries_the_bmf_version(monkeypatch):
         "irs_990pf_grants": "2026_06_16", "irs_990_basic_fields": "2026_06_16",
         "irs_990pf_basic_fields": "2026_06_16", "irs_eo_bmf": "2026_10_13",
     })
-    prefix = grant_matching._resolve_checkpoint_prefix(conn)
+    prefix = grant_matching._resolve_checkpoint_prefix(conn, {"policy_version": "v3", "rows": 5, "digest": "1234abcd"})
     assert prefix == ("grant_matching_checkpoints/pg_2026_06_16/bf_2026_06_16/bfpf_2026_06_16/"
-                      "bmf_2026_10_13/corr_abcd1234/shape_v4")
+                      "bmf_2026_10_13/corr_abcd1234/rec_v3_1234abcd/shape_v5")
 
 
 def test_checkpoint_prefix_refuses_without_a_bmf_ingest(monkeypatch):
@@ -90,7 +88,7 @@ def test_checkpoint_prefix_refuses_without_a_bmf_ingest(monkeypatch):
     monkeypatch.setattr(grant_matching, "_corrections_content_hash", lambda: "abcd1234")
     conn = _FakeConnection({"irs_990pf_grants": "x", "irs_990_basic_fields": "x", "irs_990pf_basic_fields": "x"})
     with pytest.raises(RuntimeError, match="irs_eo_bmf"):
-        grant_matching._resolve_checkpoint_prefix(conn)
+        grant_matching._resolve_checkpoint_prefix(conn, {"policy_version": "v3", "rows": 5, "digest": "1234abcd"})
 
 
 def test_unmatched_sample_is_deterministic_and_excludes_matched_tuples():
