@@ -43,7 +43,13 @@ export function OrgHeader({ org, onDafHighlightChange }: OrgHeaderProps) {
               {formatOrgName(org.name1, org.name2)}
             </h1>
             <Badge variant={org.orgType === 'foundation' ? 'indigo' : 'green'} className="text-sm px-2.5 py-1">
-              {org.orgType === 'foundation' ? 'Private Foundation (990-PF)' : 'Nonprofit (990)'}
+              {org.nameSource === 'BMF'
+                ? org.orgType === 'foundation'
+                  ? 'Private Foundation (IRS register, no 990-PF on file)'
+                  : 'Nonprofit (IRS register, no 990 on file)'
+                : org.orgType === 'foundation'
+                  ? 'Private Foundation (990-PF)'
+                  : 'Nonprofit (990)'}
             </Badge>
             {org.isDafEver && (
               <button
@@ -68,12 +74,16 @@ export function OrgHeader({ org, onDafHighlightChange }: OrgHeaderProps) {
           </div>
           <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
             <span className="font-mono text-foreground/70">{formatEIN(org.ein)}</span>
-            <span>·</span>
-            <span>
-              {org.firstYear === org.lastYear
-                ? `${org.firstYear}`
-                : `${org.firstYear}–${org.lastYear}`}
-            </span>
+            {org.firstYear != null && org.lastYear != null && (
+              <>
+                <span>·</span>
+                <span>
+                  {org.firstYear === org.lastYear
+                    ? `${org.firstYear}`
+                    : `${org.firstYear}–${org.lastYear}`}
+                </span>
+              </>
+            )}
             {org.website && (
               <>
                 <span>·</span>

@@ -338,9 +338,14 @@ Three stacked PRs, proposed as a session on October 14, 2026:
 2. **Canonical spine.** Add BMF columns (IRS name and sort name, subsection,
    classification, foundation code, NTEE, group number, ruling year, filing
    requirement, status, latest period and amounts, an in-BMF flag) to the
-   identity tables, and identity rows for the 1.3M active orgs with no 990,
+   identity tables, and identity rows for the 1.2M active orgs with no 990,
    marked by source. Never overwrite the 990 name; keep the revoked orgs.
+   Built: `canonical/build.py` widens both tables (`name_source`,
+   `irs_name`, `in_bmf`, ...) and appends the BMF-only rows; the IRS's
+   PF_FILING_REQ_CD decides which table a BMF-only org joins.
 3. **Matcher aliases.** BMF NAME and SORT_NAME with city, state and zip as
    extra alias rows keyed by EIN, with their own source value so match
    lineage records which alias won. Prove on a subset; the full matcher
-   rerun is a separate, scheduled step.
+   rerun is a separate, scheduled step. Built: `eo_bmf_unique_names_view`
+   is the fourth arm of the filer universe (`match_source = 'eo_bmf'`),
+   and `exploratory/bmf_alias_gain.py` is the slice proof.

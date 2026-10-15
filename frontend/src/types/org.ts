@@ -57,6 +57,11 @@ export interface OrgLineage {
   builtAt: string | null;
 }
 
+// Where the canonical name came from: the latest 990 / 990-EZ / 990-PF on
+// file, or the IRS Business Master File for orgs with no return in the
+// datamart (990-N filers, churches).
+export type NameSource = '990' | '990-EZ' | '990-PF' | 'BMF';
+
 export interface OrgProfile {
   ein: string;
   name1: string;
@@ -74,9 +79,22 @@ export interface OrgProfile {
   country: string | null;
   website: string | null;
   formationYear: string | null;
+  // IRS Business Master File fields (null when the org is not in the BMF,
+  // i.e. revoked or terminated). nteeCode is the National Taxonomy of
+  // Exempt Entities code; subsection the IRS code ('03' = 501(c)(3), '92' = 4947(a)(1), ...).
+  nameSource: NameSource;
+  inBmf: boolean;
+  irsName: string | null;
+  irsSortName: string | null;
+  nteeCode: string | null;
+  subsection: string | null;
+  foundationCode: string | null;
+  rulingYear: number | null;
   totalRevenue: number | null;
-  firstYear: number;
-  lastYear: number;
+  // Filing years come from the 990 tables; null for a BMF-only org, which
+  // has no return in the datamart.
+  firstYear: number | null;
+  lastYear: number | null;
   orgType: OrgType;
   revenueByYear: { year: number; revenue: number | null }[];
   revenueDetails: RevenueDetail[];

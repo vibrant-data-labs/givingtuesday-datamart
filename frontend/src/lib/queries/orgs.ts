@@ -5,6 +5,7 @@ import { getDb } from '@/lib/db';
 import type {
   ActivitySlot,
   FoundationActivitiesYear,
+  NameSource,
   NarrativeEntry,
   OrgLineage,
   OrgNarrativeBundle,
@@ -192,6 +193,14 @@ type CanonicalIdentity = {
   addr_country: string | null;
   website: string | null;
   formation_year: string | null;
+  name_source: NameSource;
+  in_bmf: boolean;
+  irs_name: string | null;
+  irs_sort_name: string | null;
+  ntee_cd: string | null;
+  subsection: string | null;
+  foundation_code: string | null;
+  ruling_year: number | null;
   source_run_id: string;
   source_version: string;
   built_at: Date;
@@ -220,6 +229,14 @@ async function fetchCanonicalIdentity(
       addr_country,
       ${isFunder ? sql`NULL::text` : sql`website`} AS website,
       ${isFunder ? sql`NULL::text` : sql`formation_year`} AS formation_year,
+      name_source,
+      in_bmf,
+      irs_name,
+      irs_sort_name,
+      ntee_cd,
+      subsection,
+      foundation_code,
+      ruling_year,
       source_run_id,
       source_version,
       _built_at AS built_at
@@ -368,22 +385,30 @@ async function getOrgProfileUncached(ein: string): Promise<OrgProfile | null> {
   // 990 takes precedence when an EIN somehow appears in both surfaces.
   const orgType: OrgType = npAgg ? 'nonprofit' : pfAgg ? 'foundation' : npIdentity ? 'nonprofit' : pfIdentity ? 'foundation' : 'nonprofit';
   const agg = npAgg ?? pfAgg;
-  if (!agg) return null;
   const identity = orgType === 'nonprofit' ? npIdentity : pfIdentity;
+  // An org the IRS Business Master File knows but no 990 does (990-N filer,
+  // church) has a canonical row and nothing in basic_fields: render it from
+  // the identity alone. Nothing at all → 404.
+  if (!agg && !identity) return null;
+  const hasFilings = agg != null;
 
   const table = orgType === 'nonprofit' ? NONPROFIT_TABLE : FOUNDATION_TABLE;
 
-  const [revenueByYear, revenueDetails, missions, programs, scheduleO, foundationActivities, dafByYear] = await Promise.all([
-    fetchRevenueHistory(table, ein),
-    fetchRevenueDetails(table, ein),
-    // Narrative tables are 990-only — funders have no FTS surface today, so
-    // skip the round-trips entirely for foundations.
-    orgType === 'nonprofit' ? fetchMissionStatements(ein) : Promise.resolve([]),
-    orgType === 'nonprofit' ? fetchPrograms(ein) : Promise.resolve([]),
-    orgType === 'nonprofit' ? fetchScheduleO(ein) : Promise.resolve([]),
-    orgType === 'foundation' ? fetchFoundationActivities(ein) : Promise.resolve<FoundationActivitiesYear[]>([]),
-    orgType === 'nonprofit' ? fetchDafByYear(ein) : Promise.resolve<{ year: number; isDaf: boolean }[]>([]),
-  ]);
+  // Every per-year read goes to the 990 tables, which hold nothing for a
+  // BMF-only org; skip the round-trips rather than query for empty lists.
+  const [revenueByYear, revenueDetails, missions, programs, scheduleO, foundationActivities, dafByYear] = hasFilings
+    ? await Promise.all([
+        fetchRevenueHistory(table, ein),
+        fetchRevenueDetails(table, ein),
+        // Narrative tables are 990-only — funders have no FTS surface today, so
+        // skip the round-trips entirely for foundations.
+        orgType === 'nonprofit' ? fetchMissionStatements(ein) : Promise.resolve([]),
+        orgType === 'nonprofit' ? fetchPrograms(ein) : Promise.resolve([]),
+        orgType === 'nonprofit' ? fetchScheduleO(ein) : Promise.resolve([]),
+        orgType === 'foundation' ? fetchFoundationActivities(ein) : Promise.resolve<FoundationActivitiesYear[]>([]),
+        orgType === 'nonprofit' ? fetchDafByYear(ein) : Promise.resolve<{ year: number; isDaf: boolean }[]>([]),
+      ])
+    : [[], [], [], [], [], [] as FoundationActivitiesYear[], [] as { year: number; isDaf: boolean }[]];
 
   const narrative: OrgNarrativeBundle = {
     mission: missions,
@@ -400,27 +425,37 @@ async function getOrgProfileUncached(ein: string): Promise<OrgProfile | null> {
     : { sourceVersion: null, sourceRunId: null, builtAt: null };
 
   return {
-    ein: agg.ein,
-    name1: identity?.name ?? agg.filername1,
-    name2: identity?.name_secondary ?? agg.filername2,
+    ein: agg?.ein ?? ein,
+    name1: identity?.name ?? agg?.filername1 ?? '',
+    name2: identity?.name_secondary ?? agg?.filername2 ?? null,
     dba1: identity?.dba_1 ?? null,
     dba2: identity?.dba_2 ?? null,
     careOf: identity?.care_of ?? null,
-    address1: identity?.addr_line_1 ?? agg.filerus1,
-    address2: identity?.addr_line_2 ?? agg.filerus2,
-    city: identity?.city ?? agg.fileruscity,
-    state: identity?.state ?? agg.filerusstate,
-    zip: identity?.zip ?? agg.fileruszip,
+    address1: identity?.addr_line_1 ?? agg?.filerus1 ?? null,
+    address2: identity?.addr_line_2 ?? agg?.filerus2 ?? null,
+    city: identity?.city ?? agg?.fileruscity ?? null,
+    state: identity?.state ?? agg?.filerusstate ?? null,
+    zip: identity?.zip ?? agg?.fileruszip ?? null,
     country: identity?.addr_country ?? null,
     website: identity?.website ?? null,
     formationYear: identity?.formation_year ?? null,
-    totalRevenue: agg.total_revenue ? parseInt(agg.total_revenue as unknown as string, 10) : null,
-    firstYear: agg.first_year,
-    lastYear: agg.last_year,
+    // A cutover EIN with 990 rows but no canonical row yet reads as a 990
+    // org without BMF fields.
+    nameSource: identity?.name_source ?? (orgType === 'foundation' ? '990-PF' : '990'),
+    inBmf: identity?.in_bmf ?? false,
+    irsName: identity?.irs_name ?? null,
+    irsSortName: identity?.irs_sort_name ?? null,
+    nteeCode: identity?.ntee_cd ?? null,
+    subsection: identity?.subsection ?? null,
+    foundationCode: identity?.foundation_code ?? null,
+    rulingYear: identity?.ruling_year ?? null,
+    totalRevenue: agg?.total_revenue ? parseInt(agg.total_revenue as unknown as string, 10) : null,
+    firstYear: agg?.first_year ?? null,
+    lastYear: agg?.last_year ?? null,
     orgType,
     revenueByYear,
     revenueDetails,
-    isDafEver: !!agg.is_daf_ever,
+    isDafEver: !!agg?.is_daf_ever,
     dafByYear,
     narrative,
     foundationActivities,

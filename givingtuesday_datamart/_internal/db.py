@@ -35,7 +35,21 @@ def _engine_from_config(config: dict | None) -> Engine:
         port=int(pg["port"]),
         database=pg["database"],
     )
-    return create_engine(url, future=True)
+    # TCP keepalives: the shared RDS host sits behind a NAT from the machines
+    # that run multi-minute statements (canonical builds, matcher reads), and
+    # a statement that returns nothing for ~10 minutes had its idle
+    # connection dropped ("could not receive data from server: Operation
+    # timed out", 2026-10-14). A probe every 30 s keeps the mapping alive.
+    return create_engine(
+        url,
+        future=True,
+        connect_args={
+            "keepalives": 1,
+            "keepalives_idle": 30,
+            "keepalives_interval": 10,
+            "keepalives_count": 6,
+        },
+    )
 
 
 @contextmanager

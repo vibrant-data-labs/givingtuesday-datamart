@@ -180,7 +180,17 @@ Run this after a successful `refresh`. It rebuilds:
 - `public.nonprofit_canonical` — one row per EIN. Identity fields
   (name, DBAs, address) and the latest filing's identifiers, picked via
   `DISTINCT ON (filerein)` ordered by tax year desc, tax-period-end
-  desc, ingested_at desc as deterministic tiebreaks.
+  desc, ingested_at desc as deterministic tiebreaks. Every row is joined
+  to the IRS Business Master File (`public.eo_bmf`) for `irs_name`,
+  `irs_sort_name`, `subsection`, `classification`, `foundation_code`,
+  `ntee_cd`, `group_exemption`, `ruling_year`, `filing_req_cd`,
+  `bmf_status`, `bmf_tax_period`, the three `bmf_*_amt` amounts and an
+  `in_bmf` flag (false for the ~140K revoked or terminated orgs, which
+  stay because they hold historical grants). The 990 name is never
+  replaced by the BMF's: for group-exemption subordinates the BMF name is
+  the parent's. Orgs the BMF knows but no 990 does (990-N filers,
+  churches: about 1.19M) are added as rows with the BMF name and
+  `name_source = 'BMF'`; `name_source` is `990`, `990-EZ` or `BMF`.
 - `public.nonprofit_text` — one row per EIN, built from the **latest
   taxyear only** across five source fields (mission statement, Part III
   program activities 1/2/3, Schedule O Part III narrative). `DENSE_RANK`
@@ -196,7 +206,9 @@ Run this after a successful `refresh`. It rebuilds:
   are not in the FTS index. A per-EIN `n_snippets` column exposes the
   count of distinct snippets for monitoring.
 - `public.funder_canonical` — analogous to `nonprofit_canonical` but
-  built from the 990-PF universe.
+  built from the 990-PF universe, with the same BMF columns; the ~13K
+  private foundations the BMF lists with a 990-PF requirement but no
+  filing in our data are added with `name_source = 'BMF'`.
 - `public.schedule_o_part_iii` — Schedule O rows filtered to Form
   990 / 990-EZ Part III continuation narratives only, via
   case-insensitive word-boundary regex on `sidfalrdesc`.
@@ -248,16 +260,37 @@ python -m givingtuesday_datamart.grant_matching --chunk-size 50000 --resume-work
 
 Uses [`recordlinkage`](https://recordlinkage.readthedocs.io/) to compare
 private-grant recipient names + addresses against the filer universe
-(990 filers ∪ 990-PF filers ∪ the corrections registry —
+(990 filers ∪ 990-PF filers ∪ the IRS Business Master File's names ∪ the
+corrections registry —
 [`data/corrections/org_identities.csv`](data/corrections/org_identities.csv)).
-At the start of every run it reloads the corrections CSV, rebuilds all
-four filing-version-deduped `_current` relations
+The BMF arm (`eo_bmf_unique_names_view`) contributes the IRS name of
+record and, where set, the SORT_NAME line as separate alias rows at the
+BMF address, keyed by EIN: it is what makes 990-N filers and churches
+matchable at all, and it carries the IRS's spelling of every other org's
+name. Lines that carry a host rather than the org are left out: a
+SORT_NAME naming a trustee or a bank, a SORT_NAME that is a government or
+public-institution name (a chapter's campus), and a government-named NAME
+on a group subordinate's or a non-charity's record (a 4-H club filed
+under its university's group exemption, a staff union named after the
+university). Every matched row records which arm supplied the winning identity
+in `match_source` (`basic_fields` / `basic_fields_pf` / `eo_bmf` /
+`correction`), the filer name it matched (`match_name`) and the winning
+pair's two scores (`match_name_score`, `match_addr_score`). Between the
+final filter tiers and winner resolution a precision guard refuses the
+non-exact wins the universe cannot hold: a grant row naming a government
+or public institution ("city of", "county of", "university of" ...) may
+match below an exact name only when the filer row says nothing the grant
+row does not, so "university of utah" no longer resolves to the
+University of Utah Asia Campus
+([docs/matching-precision-guards.md](docs/matching-precision-guards.md)).
+At the start of every run it reloads the corrections CSV,
+rebuilds all four filing-version-deduped `_current` relations
 ([`current_grants.py`](givingtuesday_datamart/current_grants.py), issues
 #33 and #34), and recreates the matching views — no separate step needed.
 
 Candidate-pair chunks are written to S3 keyed on the full input lineage:
 the source versions of `irs_990pf_grants` / `irs_990_basic_fields` /
-`irs_990pf_basic_fields`, the corrections CSV content hash, and
+`irs_990pf_basic_fields` / `irs_eo_bmf`, the corrections CSV content hash, and
 `MATCHING_INPUT_SHAPE_VERSION` (a hand-bumped constant in
 `grant_matching.py` — bump it whenever a code change alters the input
 views' row order: dedup rules, view definitions, name normalization,
@@ -315,7 +348,8 @@ python -m givingtuesday_datamart.sources loaded
 # 4. Rebuild the canonical layer (~10 min). Checks that
 #    basic_fields[_pf]_current match staging before building identity
 #    from them, and rebuilds only if they don't — normally a no-op,
-#    since step 2 already did it.
+#    since step 2 already did it. Reads public.eo_bmf for the BMF
+#    columns, so refresh irs_eo_bmf first when the IRS has republished.
 python -m givingtuesday_datamart.sources build-canonical
 
 # 5. Corrections preflight (~10 min, any machine). Required after any
@@ -332,8 +366,9 @@ python -m givingtuesday_datamart.corrections_preflight
 python -m givingtuesday_datamart.grant_matching
 
 # 7. Regression gate — run before trusting or shipping the new match
-#    output. Compares coverage floors, sentinel filers, and precision
-#    ceilings against the last accepted baselines. On FAIL, follow
+#    output. Compares coverage floors, sentinel filers, precision
+#    ceilings, the match_source breakdown and the precision guard's own
+#    rule against the last accepted baselines. On FAIL, follow
 #    docs/matching-regression-runbook.md before touching any threshold.
 python -m givingtuesday_datamart.matching_regression_checks
 ```
@@ -637,6 +672,10 @@ givingtuesday_datamart/
   exploratory/
     bmf_assessment.py   # public.eo_bmf vs gt_datamart: NTEE fill, coverage,
                         # name agreement, matcher gain
+    bmf_alias_gain.py   # What the BMF alias arm wins, proved on a slice of
+                        # unmatched grant tuples (no full matcher run)
+    government_name_guard.py  # What the government-name guard refuses,
+                              # measured on the last run's output
 data/
   corrections/
     org_identities.csv  # Human-verified identity rows added to the filer
@@ -644,6 +683,8 @@ data/
 frontend/               # Next.js peerlo app (reads gt_datamart via pg pool)
 docs/
   backbone-plan.md      # Detailed architecture + decision history
+  matching-precision-guards.md  # The government-name guard: rule, measurements,
+                                # alternatives weighed, follow-ups
   corrections-plan.md   # Corrections-registry design + curation workflow
   bmf-assessment.md     # What the IRS Business Master File adds (NTEE,
                         # subsection, identity spine) and how to rerun it

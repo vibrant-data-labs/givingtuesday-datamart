@@ -99,6 +99,25 @@ interface NonprofitCanonicalTable {
   formation_year: string | null;
   latest_taxyear: string | null;
   latest_taxperend: string | null;
+  // IRS Business Master File columns (canonical/build.py _BMF_COLUMNS_SQL).
+  // name_source: '990' | '990-EZ' | '990-PF' | 'BMF'; in_bmf false for the
+  // revoked/terminated orgs the BMF no longer lists.
+  name_source: string;
+  irs_name: string | null;
+  irs_sort_name: string | null;
+  subsection: string | null;
+  classification: string | null;
+  foundation_code: string | null;
+  ntee_cd: string | null;
+  group_exemption: string | null;
+  ruling_year: number | null;
+  filing_req_cd: string | null;
+  bmf_status: string | null;
+  bmf_tax_period: string | null;
+  bmf_asset_amt: string | null;
+  bmf_income_amt: string | null;
+  bmf_revenue_amt: string | null;
+  in_bmf: boolean;
   source_run_id: string;
   source_version: string;
   _built_at: Date;
@@ -117,6 +136,25 @@ interface FunderCanonicalTable {
   phone: string | null;
   latest_taxyear: string | null;
   latest_taxperend: string | null;
+  // IRS Business Master File columns (canonical/build.py _BMF_COLUMNS_SQL).
+  // name_source: '990' | '990-EZ' | '990-PF' | 'BMF'; in_bmf false for the
+  // revoked/terminated orgs the BMF no longer lists.
+  name_source: string;
+  irs_name: string | null;
+  irs_sort_name: string | null;
+  subsection: string | null;
+  classification: string | null;
+  foundation_code: string | null;
+  ntee_cd: string | null;
+  group_exemption: string | null;
+  ruling_year: number | null;
+  filing_req_cd: string | null;
+  bmf_status: string | null;
+  bmf_tax_period: string | null;
+  bmf_asset_amt: string | null;
+  bmf_income_amt: string | null;
+  bmf_revenue_amt: string | null;
+  in_bmf: boolean;
   source_run_id: string;
   source_version: string;
   _built_at: Date;

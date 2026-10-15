@@ -179,3 +179,4 @@ data/exploratory/*.csv
 givingtuesday_datamart/exploratory/__marimo__/
 !data/exploratory/gt_*.csv
 data/exploratory/bmf_assessment_*
+data/exploratory/bmf_alias_gain_*
