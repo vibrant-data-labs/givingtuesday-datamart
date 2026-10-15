@@ -260,16 +260,23 @@ python -m givingtuesday_datamart.grant_matching --chunk-size 50000 --resume-work
 
 Uses [`recordlinkage`](https://recordlinkage.readthedocs.io/) to compare
 private-grant recipient names + addresses against the filer universe
-(990 filers ∪ 990-PF filers ∪ the corrections registry —
+(990 filers ∪ 990-PF filers ∪ the IRS Business Master File's names ∪ the
+corrections registry —
 [`data/corrections/org_identities.csv`](data/corrections/org_identities.csv)).
-At the start of every run it reloads the corrections CSV, rebuilds all
-four filing-version-deduped `_current` relations
+The BMF arm (`eo_bmf_unique_names_view`) contributes the IRS name of
+record and, where set, the SORT_NAME line as separate alias rows at the
+BMF address, keyed by EIN: it is what makes 990-N filers and churches
+matchable at all, and it carries the IRS's spelling of every other org's
+name. Every matched row records which arm supplied the winning identity
+in `match_source` (`basic_fields` / `basic_fields_pf` / `eo_bmf` /
+`correction`). At the start of every run it reloads the corrections CSV,
+rebuilds all four filing-version-deduped `_current` relations
 ([`current_grants.py`](givingtuesday_datamart/current_grants.py), issues
 #33 and #34), and recreates the matching views — no separate step needed.
 
 Candidate-pair chunks are written to S3 keyed on the full input lineage:
 the source versions of `irs_990pf_grants` / `irs_990_basic_fields` /
-`irs_990pf_basic_fields`, the corrections CSV content hash, and
+`irs_990pf_basic_fields` / `irs_eo_bmf`, the corrections CSV content hash, and
 `MATCHING_INPUT_SHAPE_VERSION` (a hand-bumped constant in
 `grant_matching.py` — bump it whenever a code change alters the input
 views' row order: dedup rules, view definitions, name normalization,
@@ -650,6 +657,8 @@ givingtuesday_datamart/
   exploratory/
     bmf_assessment.py   # public.eo_bmf vs gt_datamart: NTEE fill, coverage,
                         # name agreement, matcher gain
+    bmf_alias_gain.py   # What the BMF alias arm wins, proved on a slice of
+                        # unmatched grant tuples (no full matcher run)
 data/
   corrections/
     org_identities.csv  # Human-verified identity rows added to the filer

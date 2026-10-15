@@ -93,9 +93,14 @@ questions before anything else:
    recorded in `datamart_meta.canonical_builds`). A junk count that
    grew slower than the table itself usually means quality improved.
 2. **Where did the change come from?** Every matched row carries
-   `match_source` (`basic_fields` / `basic_fields_pf` / `correction`).
-   Group the failing class by it. If a corrections-registry row is
-   feeding junk, that row is wrong — fix the CSV, not the threshold.
+   `match_source` (`basic_fields` / `basic_fields_pf` / `eo_bmf` /
+   `correction`). Group the failing class by it. If a corrections-registry
+   row is feeding junk, that row is wrong — fix the CSV, not the
+   threshold. If the `eo_bmf` arm is feeding junk, look at which BMF line
+   won (`givingtuesday_datamart.exploratory.bmf_alias_gain` lists wins
+   with the alias kind): a SORT_NAME alias that names a trustee or a bank
+   is the likely shape, and the fix is the exclusion pattern in
+   `eo_bmf_unique_names_view`, not a threshold.
 3. **Look at the actual rows.** Every check's SQL is inline in the
    script. Copy it out, drop the `COUNT`, and list the offending rows.
    For any single confusing row, `match_explainer` will show you

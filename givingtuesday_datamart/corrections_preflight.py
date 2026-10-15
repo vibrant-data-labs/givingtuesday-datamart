@@ -123,7 +123,10 @@ _UNIVERSE_SQL = """
             SELECT *, 'basic_fields_pf' AS source, 2 AS source_rank
             FROM public.basic_fields_pf_unique_names_view
             UNION ALL
-            SELECT *, 'correction' AS source, 3 AS source_rank
+            SELECT *, 'eo_bmf' AS source, 3 AS source_rank
+            FROM public.eo_bmf_unique_names_view
+            UNION ALL
+            SELECT *, 'correction' AS source, 4 AS source_rank
             FROM public.corrections_unique_names_view
         ) arms
         ORDER BY filerein_key, name1_key, name2_key, address1_key,
@@ -292,7 +295,8 @@ def run_preflight() -> int:
         create_or_replace_views(conn)
         logger.info(
             "Reading filer universe: basic_fields_unique_names_view "
-            "∪ basic_fields_pf_unique_names_view ∪ corrections_unique_names_view"
+            "∪ basic_fields_pf_unique_names_view ∪ eo_bmf_unique_names_view "
+            "∪ corrections_unique_names_view"
         )
         universe = pd.read_sql_query(text(_UNIVERSE_SQL), conn)
         logger.info("Reading public.privategrants_unique_names_view")

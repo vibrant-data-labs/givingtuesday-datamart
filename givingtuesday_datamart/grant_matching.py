@@ -37,18 +37,22 @@ from givingtuesday_datamart.canonical.build import (
 # in one place. The views must exist before matching reads them; unioned_grants
 # must be rebuilt after matching writes privategrants_w_recipients.
 
-# 7 views built on top of the raw `public.privategrants`, `public.basic_fields`,
-# `public.basic_fields_pf` and `public.corrections_org_identities` tables. The
-# `_w_column_keys_view` views normalize names/addresses (lowercase, 5-digit zip)
-# into `*_key` columns the matching pipeline blocks/joins on. The
+# 8 views built on top of the raw `public.privategrants`, `public.basic_fields`,
+# `public.basic_fields_pf`, `public.eo_bmf` and `public.corrections_org_identities`
+# tables. The `_w_column_keys_view` views normalize names/addresses (lowercase,
+# 5-digit zip) into `*_key` columns the matching pipeline blocks/joins on. The
 # `_unique_names_view` views collapse to DISTINCT (key tuple) for orgs that
-# filed in 2015+.
+# filed in 2015+ (the BMF view has no year filter: the BMF lists only
+# currently recognized orgs).
 #
-# The recipient-match universe is the UNION of 990 filers (basic_fields) and
-# 990-PF filers (basic_fields_pf): PF-to-PF grants are legal and common
+# The recipient-match universe is the UNION of 990 filers (basic_fields),
+# 990-PF filers (basic_fields_pf), the IRS Business Master File's names
+# (eo_bmf) and the corrections registry. PF-to-PF grants are legal and common
 # (e.g. the Gates Trust's ~$6.8B/yr transfer to the Gates Foundation), and a
 # 990-only universe makes every PF-recipient grant structurally unmatchable —
-# ~$32B of 2020+ grant dollars carry a "PF:" recipient status alone.
+# ~$32B of 2020+ grant dollars carry a "PF:" recipient status alone. The BMF
+# arm adds the 1.2M active orgs with no 990 at all (990-N filers, churches)
+# and the IRS's spelling of every other org's name.
 _VIEW_DDL = [
     # DROP first, not CREATE OR REPLACE: this view's column set changed
     # when it moved from raw privategrants to privategrants_current
@@ -217,9 +221,81 @@ _VIEW_DDL = [
             addresszip_key
     )
     """,
+    # IRS Business Master File aliases (docs/bmf-assessment.md): the IRS name
+    # of record and, where set, the SORT_NAME line, each as its own alias row
+    # at the BMF address of record, keyed by EIN. Two rows rather than one
+    # concatenated name because the two lines are different names for the
+    # org, not two lines of one name: for group-exemption subordinates NAME
+    # is the parent ("FRATERNAL ORDER OF EAGLES") and SORT_NAME the unit
+    # ("3741 AERIE"); for DBAs SORT_NAME is the trading name. Jaro-Winkler
+    # weights the prefix, so a grant row naming the unit would never reach a
+    # concatenation that starts with the parent. SORT_NAME lines that name a
+    # trustee or a bank ("WELLS FARGO BANK NA TTEE": 3% of them) are left
+    # out — a grant row naming a bank must not resolve to a trust's EIN.
+    # No taxyear filter: every BMF row is a currently recognized org. The
+    # same key expressions as basic_fields_w_column_keys_view; the matcher's
+    # clean_zip pads and truncates on top.
+    """
+    CREATE OR REPLACE VIEW public.eo_bmf_unique_names_view AS (
+        SELECT
+            filerein_key,
+            name1_key,
+            name2_key,
+            address1_key,
+            address2_key,
+            addresscity_key,
+            addressstate_key,
+            addresszip_key
+        FROM (
+            SELECT
+                LOWER(ein) filerein_key,
+                LOWER(name) name1_key,
+                '' name2_key,
+                CASE WHEN street IS NULL THEN '' ELSE LOWER(street) END address1_key,
+                '' address2_key,
+                LOWER(city) addresscity_key,
+                LOWER(state) addressstate_key,
+                LOWER(LEFT(zip, 5)) addresszip_key
+            FROM public.eo_bmf
+            WHERE name IS NOT NULL
+            UNION ALL
+            SELECT
+                LOWER(ein),
+                LOWER(sort_name),
+                '',
+                CASE WHEN street IS NULL THEN '' ELSE LOWER(street) END,
+                '',
+                LOWER(city),
+                LOWER(state),
+                LOWER(LEFT(zip, 5))
+            FROM public.eo_bmf
+            WHERE sort_name IS NOT NULL
+              AND sort_name <> name
+              AND sort_name !~ '\\m(TTEE|TRUSTEE|TRUSTEES|BANK|N A)\\M'
+        ) keyed
+        GROUP BY
+            filerein_key,
+            name1_key,
+            name2_key,
+            address1_key,
+            address2_key,
+            addresscity_key,
+            addressstate_key,
+            addresszip_key
+        ORDER BY
+            filerein_key,
+            name1_key,
+            name2_key,
+            address1_key,
+            address2_key,
+            addresscity_key,
+            addressstate_key,
+            addresszip_key
+    )
+    """,
     # Corrections registry (docs/corrections-plan.md): human-verified identity
     # rows ("this EIN is also known by this name at this address") UNIONed into
-    # the filer universe alongside the two unique-names views above. The CSV
+    # the filer universe alongside the unique-names views above. The CSV
     # stores raw verbatim values; ALL normalization happens here, using the
     # same key expressions as basic_fields_w_column_keys_view — keep the two
     # in lockstep so curator-entered rows can't silently normalize differently
@@ -490,7 +566,7 @@ _UNIONED_GRANTS_INDEXES = [
 
 
 def create_or_replace_views(connection):
-    """Idempotently (re)create the 7 views the matching pipeline reads from.
+    """Idempotently (re)create the 8 views the matching pipeline reads from.
 
     Safe to call on every run: `CREATE OR REPLACE VIEW` updates definitions
     in place without touching dependent objects. The corrections table is
@@ -514,13 +590,14 @@ def rebuild_unioned_grants(connection):
         connection.execute(text(stmt))
 
 
-# Logical names of the three staging tables the matching pipeline reads from.
+# Logical names of the four staging tables the matching pipeline reads from.
 # These are the only data dependencies whose freshness affects checkpoint
 # validity. Schedule-I grants feed unioned_grants but not the matching itself.
 _MATCHING_INPUT_LOGICAL_NAMES = (
     "irs_990pf_grants",
     "irs_990_basic_fields",
     "irs_990pf_basic_fields",
+    "irs_eo_bmf",
 )
 
 # Version of the SHAPE of matching's inputs — bump on ANY change that can
@@ -532,7 +609,10 @@ _MATCHING_INPUT_LOGICAL_NAMES = (
 # would let a resume silently stitch features onto the wrong rows.
 #   v2 (2026-07-30): matching reads privategrants_current instead of raw
 #   privategrants (issue #33 filing-version dedup). v1 = everything prior.
-MATCHING_INPUT_SHAPE_VERSION = 2
+#   v3 (2026-10-14): the IRS BMF's names join the filer universe as a fourth
+#   arm (eo_bmf_unique_names_view), shifting every row position after the
+#   first BMF tuple.
+MATCHING_INPUT_SHAPE_VERSION = 3
 
 
 def _insert_started_build(build_id: str, started_at: datetime, source_runs: dict) -> None:
@@ -617,7 +697,7 @@ def _resolve_checkpoint_prefix(
     connection,
     base_prefix: str = "grant_matching_checkpoints",
 ) -> str:
-    """Build an S3 prefix that's keyed on the source versions of all three
+    """Build an S3 prefix that's keyed on the source versions of all four
     upstream staging tables plus the content hash of the corrections CSV.
     A new ingest of any source — or any edit to the corrections file —
     produces a fresh prefix, so old checkpoints can never silently be
@@ -655,6 +735,7 @@ def _resolve_checkpoint_prefix(
         f"pg_{versions['irs_990pf_grants']}/"
         f"bf_{versions['irs_990_basic_fields']}/"
         f"bfpf_{versions['irs_990pf_basic_fields']}/"
+        f"bmf_{versions['irs_eo_bmf']}/"
         f"corr_{_corrections_content_hash()}/"
         f"shape_v{MATCHING_INPUT_SHAPE_VERSION}"
     )
@@ -880,8 +961,8 @@ def match_records(
 
     ``s3_prefix`` defaults to a lineage-keyed path derived from the latest
     successful ingest_runs of irs_990pf_grants + irs_990_basic_fields +
-    irs_990pf_basic_fields, plus the corrections CSV content hash, e.g.
-    ``grant_matching_checkpoints/pg_2026_04_15/bf_2026_04_18/bfpf_2026_04_18/corr_1a2b3c4d``.
+    irs_990pf_basic_fields + irs_eo_bmf, plus the corrections CSV content hash, e.g.
+    ``grant_matching_checkpoints/pg_2026_04_15/bf_2026_04_18/bfpf_2026_04_18/bmf_2026_10_13/corr_1a2b3c4d``.
     This means
     checkpoints can only be resumed against the exact source versions (and
     corrections file) that produced them — re-ingesting a source or editing
@@ -992,9 +1073,10 @@ def _do_match_records(
         # chunk checkpoints reference DataFrame rows by integer position.
         # If row order shifts between runs, resumed chunks would point at
         # the wrong rows and produce silently-incorrect matches.
-        # The filer universe is 990 + 990-PF filers + correction rows, each
-        # arm tagged with a `source` column that rides through matching into
-        # privategrants_w_recipients as match_source.
+        # The filer universe is 990 + 990-PF filers + the IRS Business Master
+        # File's names + correction rows, each arm tagged with a `source`
+        # column that rides through matching into privategrants_w_recipients
+        # as match_source.
         # Tagging the arms breaks plain UNION dedup (rows identical but for
         # `source` no longer collapse), so dedup is done explicitly:
         # UNION ALL + DISTINCT ON (key tuple), with source_rank as the
@@ -1003,12 +1085,16 @@ def _do_match_records(
         # correction that duplicates a real filing collapses away, and
         # match_source='correction' only appears where the correction row
         # itself supplied the winning identity (the prunability signal:
-        # docs/corrections-plan.md). source_rank in the DISTINCT ON ORDER BY
-        # keeps the winner deterministic; the outer ORDER BY keeps row order
+        # docs/corrections-plan.md). The BMF arm ranks below the filings
+        # (a BMF alias identical to a filed tuple collapses into the filing)
+        # and above corrections (a correction the BMF now supplies is
+        # prunable). source_rank in the DISTINCT ON ORDER BY keeps the
+        # winner deterministic; the outer ORDER BY keeps row order
         # deterministic over the whole universe.
         logger.info(
             "Reading filer universe: basic_fields_unique_names_view "
-            "∪ basic_fields_pf_unique_names_view ∪ corrections_unique_names_view"
+            "∪ basic_fields_pf_unique_names_view ∪ eo_bmf_unique_names_view "
+            "∪ corrections_unique_names_view"
         )
         basic_fields_df = pd.read_sql_query(
             text(f"""
@@ -1028,7 +1114,10 @@ def _do_match_records(
                         SELECT *, 'basic_fields_pf' AS source, 2 AS source_rank
                         FROM public.basic_fields_pf_unique_names_view
                         UNION ALL
-                        SELECT *, 'correction' AS source, 3 AS source_rank
+                        SELECT *, 'eo_bmf' AS source, 3 AS source_rank
+                        FROM public.eo_bmf_unique_names_view
+                        UNION ALL
+                        SELECT *, 'correction' AS source, 4 AS source_rank
                         FROM public.corrections_unique_names_view
                     ) arms
                     ORDER BY filerein_key, name1_key, name2_key, address1_key,

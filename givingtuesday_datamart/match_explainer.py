@@ -87,6 +87,10 @@ _UNIVERSE_SQL = """
         FROM public.basic_fields_pf_unique_names_view
         WHERE filerein_key = :ein
         UNION ALL
+        SELECT *, 'eo_bmf' AS source
+        FROM public.eo_bmf_unique_names_view
+        WHERE filerein_key = :ein
+        UNION ALL
         SELECT *, 'correction' AS source
         FROM public.corrections_unique_names_view
         WHERE filerein_key = :ein
