@@ -21,11 +21,12 @@ changes nothing prints no filer-year. ``drop`` removes both copies.
 
 ``placeholders`` is what the paid copy means for placeholder recovery,
 measured and not applied: the work-list filings that hold one placeholder
-amount N times with one copy equal to line 25, the ``placeholder_paid`` each
-would have from the copy, and, for those with a readable attachment, whether
-a list among the stored readings adds up to that amount and to one copy of
-it. It is the loader's own selection on stored readings and verdicts: no
-row is written, no page is bought, and the work list is not rebuilt.
+amount N times with one copy equal to line 25, and any other whose
+placeholder rows the copy changes, the ``placeholder_paid`` each would have
+from the copy, and, for those with a readable attachment, whether a list
+among the stored readings adds up to that amount and to one copy of it. It
+is the loader's own selection on stored readings and verdicts: no row is
+written, no page is bought, and the work list is not rebuilt.
 """
 
 from __future__ import annotations
@@ -131,24 +132,30 @@ REPEATED_PLACEHOLDERS = """
 
 
 def placeholders(session, suffix: str, policy_token: str = "v2") -> list[dict]:
-    """One row per repeated-placeholder filing of the work list: its amount
-    today, from the paid scratch copy, and what the stored readings add up to."""
+    """One row per work-list filing the paid scratch copy touches: the
+    repeated-placeholder filings, and any other whose placeholder rows the
+    copy changes (a total row under a placeholder name, section 8 of the
+    doc). Its amount today, from the copy, and what the stored readings add
+    up to."""
     from givingtuesday_datamart import filing_images, page_readings
     from givingtuesday_datamart.page_verdicts import accepted_readings, load_policy
     from givingtuesday_datamart.placeholder_recovery import classifier, loader, work_list
 
     policy = load_policy(policy_token)
-    ids = [r[0] for r in session.execute(text(REPEATED_PLACEHOLDERS))]
-    filings = work_list._store(session).get(ids)
-    # the placeholder rows of the same filer-years in the scratch copy, summed as the work list sums them
+    # the placeholder rows of every work-list filer-year in the scratch copy, summed as the work list sums them
     scratch = {(r.filerein, int(r.taxyear)): (r.paid, r.n) for r in session.execute(text(f"""
         SELECT g.filerein, g.taxyear, coalesce(sum({classifier.amount_sql('g.sigocpyamoun')}), 0) AS paid, count(*) AS n
         FROM {scratch_name('paid', suffix)} g
         CROSS JOIN LATERAL (SELECT {classifier.name_sql('g')} AS name OFFSET 0) n
-        WHERE (g.filerein, g.taxyear) IN (SELECT filerein, taxyear::text FROM pf_placeholder_filings
-                                          WHERE object_id = ANY(:ids))
+        WHERE (g.filerein, g.taxyear) IN (SELECT filerein, taxyear::text FROM pf_placeholder_filings)
           AND {classifier.prefilter_sql('g')} AND {classifier.pointer_sql('n.name')}
-        GROUP BY 1, 2"""), {"ids": ids})}
+        GROUP BY 1, 2"""))}
+    ids = [r[0] for r in session.execute(text(REPEATED_PLACEHOLDERS))]
+    today = session.execute(text(
+        "SELECT object_id, filerein, taxyear, placeholder_paid, placeholder_rows FROM pf_placeholder_filings")).all()
+    ids += [r.object_id for r in today if r.object_id not in ids
+            and scratch.get((r.filerein, int(r.taxyear)), (Decimal(0), 0)) != (r.placeholder_paid, r.placeholder_rows)]
+    filings = work_list._store(session).get(ids)
     images = filing_images._store(session)
     fetched = images.get(filings)
     readable = [oid for oid in filings if page_readings._readable(fetched.get(oid)) and fetched[oid].attachment_from]

@@ -133,6 +133,36 @@ def test_sql_renders_with_the_rules_own_hashes():
     assert not [n for n, _ in m.statements(rendered.split(m._SCHED_I_MARK, 1)[0]) if n and n.startswith("sched_i")]
 
 
+def test_the_tally_counts_the_paid_blocks_by_prediction_and_fill():
+    blocks = [("yes", 2), ("yes", 14), ("reordered", 1), ("yes", 0), ("yes", 3)]
+    assert m.tally(blocks) == "paid blocks: 5; 3 yes, filled; 1 reordered, filled; 1 yes, no group filled"
+    assert m.tally([]) == "paid blocks: 0; "
+
+
+def test_the_total_row_sql_renders_and_writes_nothing_under_public():
+    path = Path("data/exploratory/pf_total_row.sql")
+    rendered = m.render_sql(path.read_text())
+    assert "__PF_HASH__" not in rendered and "__NUMERIC_RE__" not in rendered
+    found = m.statements(rendered)
+    assert [name for name, _ in found if name] == ["candidates", "rule_check", "signature", "total_row", "classes",
+                                                    "left_out", "matched", "pairs", "by_year", "filer_years"]
+    made = [body for _, body in found if body.startswith(("CREATE", "DROP", "INSERT", "UPDATE", "DELETE", "ALTER"))]
+    assert made and all(body.startswith(("CREATE TEMP TABLE t_tr_", "CREATE INDEX ON t_tr_")) for body in made)
+    # the rule's own test, column by column as the DDL has it: the rows carrying line 25 one tuple, the rest
+    # adding up to it (twice under a repeated row), and the guard that holds the block whole where the whole
+    # block is on line 25; beside it the shape of 7.8, read with the total, for the classes
+    for column in ("d", "a"):
+        assert (f"(s.line25_{column} > 0 AND s.tuples_{column} = 1 AND s.rest_{column} = s.line25_{column} * s.div) "
+                f"AS fires_{column}") in rendered
+    assert "(t.fires_d OR t.fires_a) AND t.sum_amt / t.div NOT IN (t.line25_d, t.line25_a) AS taken" in rendered
+    assert "CASE WHEN t.fires_d THEN t.line25_d WHEN t.fires_a THEN t.line25_a ELSE t.max_amt END AS total" in rendered
+    assert "(s.k_held >= 1 AND s.rest = s.total * s.div) AS shape" in rendered
+    assert "WHEN s.total IN (s.line25_d, s.line25_a) THEN 'the total'" in rendered
+    # the regression gate's name patterns, as the gate has them
+    from givingtuesday_datamart.matching_regression_checks import PLACEHOLDER_REGEX
+    assert PLACEHOLDER_REGEX in rendered and "ILIKE 'pfizer%'" in rendered and "'%world health organi%'" in rendered
+
+
 def test_the_field_fill_sql_renders_and_writes_nothing_under_public():
     path = Path("data/exploratory/pf_field_fill.sql")
     rendered = m.render_sql(path.read_text())

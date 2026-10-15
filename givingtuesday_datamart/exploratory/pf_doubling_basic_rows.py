@@ -279,13 +279,29 @@ def as_predicted(expected: list[tuple[str, int]], rows: list[tuple[str, int]]) -
     return "twice" if sorted(rows) == sorted(expected + expected) else "no"
 
 
+def tally(blocks: list[tuple[str, int]]) -> str:
+    """The paid blocks checked, counted by what they are: ``as_predicted``
+    and whether the extract filled any group. A block the fill predicts
+    with no group filled is a return whose own groups the table holds as
+    they are: a total the filer typed as a group shows there (The Colorado
+    Trust, 2019), and so does any list the signature takes by chance."""
+    counts: dict[tuple[str, bool], int] = {}
+    for predicted, filled in blocks:
+        counts[(predicted, filled > 0)] = counts.get((predicted, filled > 0), 0) + 1
+    parts = [f"{n} {predicted}, {'filled' if filled else 'no group filled'}"
+             for (predicted, filled), n in sorted(counts.items(), key=lambda item: -item[1])]
+    return f"paid blocks: {len(blocks)}; " + "; ".join(parts)
+
+
 def xml_check(session, oids: list[str], current: str = "privategrants_current",
-              future_current: str = "privategrants_future_current") -> None:
+              future_current: str = "privategrants_future_current") -> list[tuple[str, int]]:
     """One line per filing and block: the XML's groups beside the table's
-    rows. ``current`` and ``future_current`` name the relations read, so a
-    scratch copy can be checked in place of the production one."""
+    rows, and a tally of the paid blocks at the end. ``current`` and
+    ``future_current`` name the relations read, so a scratch copy can be
+    checked in place of the production one."""
     print("oid  ein  period  block  xml_real  xml_empty  xml_amounts  xml_filled  xml_sum  xml_total  line25d  "
           "line25a  raw_rows  raw_amounts  as_predicted  current_rows  current_amounts  current_rule")
+    paid_blocks: list[tuple[str, int]] = []
     for oid in oids:
         xml = _get(GT_DATALAKE.format(oid=oid))
         for block, group, total, raw, relation, amount, name in (
@@ -304,10 +320,15 @@ def xml_check(session, oids: list[str], current: str = "privategrants_current",
             rows = [(r.name, int(r.amount)) for r in session.execute(text(_RAW_ROWS.format(**names)), of)]
             # a filing with no paid group is one empty row in the paid extract
             expected = extract_rows(xml, group) or [("", 0)] * (block == "3a")
+            predicted = as_predicted(expected, rows)
+            if block == "3a":
+                paid_blocks.append((predicted, found.filled))
             print(f"{oid}  {f['ein']}  {f['period']}  {block}  {found.real}  {found.empty}  {found.amounts}  "
                   f"{found.filled}  {found.total:,}  {f[total]}  {f['line25d']}  {f['line25a']}  {row.raw_rows}  "
-                  f"{row.raw_amounts}  {as_predicted(expected, rows)}  {row.current_rows}  "
+                  f"{row.raw_amounts}  {predicted}  {row.current_rows}  "
                   f"{row.current_amounts}  {row.current_rule}")
+    print(tally(paid_blocks))
+    return paid_blocks
 
 
 def main() -> None:
