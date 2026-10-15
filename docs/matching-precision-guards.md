@@ -163,9 +163,9 @@ view as this PR leaves it:
 
 | | tuples won | through a BMF alias | rows / dollars behind them |
 |---|---|---|---|
-| PR #68 view, no guard | 591 | 590 | 1,745 / 8.6M |
+| PR #68 view, no guard | 591 | 590 | 1,745 / $28.6M |
 | this view, no guard | 583 | 582 | |
-| this view, with the guard | 576 | 575 | 1,712 / 1.2M |
+| this view, with the guard | 576 | 575 | 1,712 / $21.2M |
 
 Sixteen tuples change outcome, every one of them a government name:
 seven are guard refusals ("city of marietta" → the IAFF local, "city of
@@ -179,8 +179,8 @@ at boulder" — all to Psi Chi or pharmacists' chapters — and "university
 of washington" to the ACM chapter in Sieg Hall); one is kept and
 corrected: "university of utah" now resolves to the University of Utah
 (876000525) instead of a Society of Women Engineers chapter. The slice's
-scaled gain for the BMF arm moves from 0.3B to 2.5B, almost all of
-it one University of Pennsylvania tuple (.8M, scaled a thousandfold)
+scaled gain for the BMF arm moves from $30.3B to $22.5B, almost all of
+it one University of Pennsylvania tuple ($6.8M, scaled a thousandfold)
 that had matched the Psi Chi chapter at 1.0 — a reminder of how fragile
 the sampling estimate's dollars are, and that the Trustees of the
 University of Pennsylvania need a corrections row.
