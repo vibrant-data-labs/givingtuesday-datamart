@@ -392,6 +392,7 @@ engineering log, 2026-09-30) and the check to run on the next read.
 |---|---|
 | the work list | built: `work-list` writes `pf_placeholder_filings`, and `run` reads it in place of a frame file, by tax year and with a limit |
 | the loader and the view | built: `load` writes `privategrants_recovered` and leaves the view; `check` holds the loaded rows to nine rules |
+| where the reload stands | built 2026-10-15: `status` reads the rules the two line-item relations hold, the view's policy, the loaded rows by policy and target, the verdicts by policy, the work list and whether the matcher's output has `match_tier`; one screen, about a minute, nothing written. The check before the first step of *The next GivingTuesday drop* and after the last |
 | the future-payment source | built and loaded on 2026-09-29: `irs_990pf_grants_future`, `privategrants_future_current`, the future amount on the work list, the loader's target `future` |
 | the frame's rows, loaded | done under `v2`: paid, 399 filings, 222,105 rows, $7.07B; future, 71 filings, 3,873 rows, $0.95B |
 | the 2020-on work list's rows, loaded | first loaded on 2026-09-30, when this branch's rerun found the production read's verdicts in the tables (6,350 filings): paid 4,607 filings, 582,676 rows, $16.2B; future 173 filings, 6,531 rows, $1.27B; 24 filings add up only to the two amounts together; `check` passes on all of it. The read's own session reports it |
@@ -513,6 +514,62 @@ python -m givingtuesday_datamart.corrections_preflight --prefix scratch_matcher_
 python -m givingtuesday_datamart.proofs.matching_subset drop
 python -m givingtuesday_datamart.proofs.matching_subset drop --prefix scratch_matcher_preflight_
 ```
+
+## The next GivingTuesday drop
+
+Nothing long-running runs between drops (decided 2026-10-15): the rules
+of the sections above are in the code, and the tables hold the rows of
+the run before them until this sequence. Each step reads the one before
+it. `status` before the first step and after the last, and after any step
+in doubt: it shows which rules the relations hold, the view's policy, the
+loaded rows, the verdicts and the matcher's shape, and writes nothing.
+Before the first step, on the tables as they stood on 2026-10-15, it
+shows no line-25 rule in `privategrants_current`, the view on `v2`, the
+recovered rows under `v2` only, and no `match_tier` in the matcher's
+output.
+
+1. **The sources.** `python -m givingtuesday_datamart.sources refresh`
+   takes every source of the registry, `irs_990pf_grants_future` among
+   them, and rebuilds the basic-fields `_current` relations. It leaves the
+   grants `_current` relations alone on purpose: they cost 10 to 30
+   minutes each and only the matcher reads them.
+2. **The grants relations**, so the work list reads the new rules: steps
+   1 and 2 of *Rebuilding `privategrants_current`*, the paid relation then
+   the future one. The command reads the view's policy before the
+   rebuild and creates the matching views again for it; with no view it
+   says so first and leaves them to the matcher run. On a new batch the
+   numbers of that section's table are the batch's own; `status` says
+   which rules the relation holds, and the build's last line names any
+   filing that looks doubled without a repeated row, to check against its
+   XML before the matcher runs.
+3. **The work list.** `placeholder_recovery work-list`.
+4. **The read of the filings not yet read, under `v3`.** First
+   `placeholder_recovery run --policy v3 --tax-years 2020-2025 --keep-list
+   --dry-run --no-fetch` from the laptop, for the projection from what is
+   stored; then, on the box (*The one command*), the same without
+   `--dry-run --no-fetch`: the fetch, the cut and the read, under the cap
+   and on an explicit go, since it buys model calls. One fetcher at a time
+   against the IRS. The 2015 to 2019 filings are fetched and cut already
+   and wait on the same go ($436 projected under `v3`).
+5. **The load, the view and the checks, under `v3`.** `load --policy v3`,
+   `view --policy v3`, `check --policy v3`. The pages read before this
+   drop have their `v3` verdicts in `page_verdicts` at no cost, and the
+   load reads them with the new ones. Never load while the matcher runs:
+   a load between two starts of the run makes the second start compute
+   from scratch.
+6. **The matcher.** *The matcher rerun*, steps 2 to 4: the corrections
+   preflight (hours), the run (about eight hours on the big box; it
+   rebuilds the `_current` relations itself and reads the policy the view
+   shows), the regression gate. The gate's baselines move in the commit
+   that accepts the run (`docs/matching-regression-runbook.md`, *Updating
+   the baselines*); what the rules alone move is in the doubling doc,
+   sections 6.7, 7.7 and 8.6, on top of the batch's own changes.
+7. **The canonical build.** `python -m givingtuesday_datamart.sources
+   build-canonical`, as the README's pipeline has it.
+8. **`status` once more.** The three line-25 rules in
+   `privategrants_current`, the view on `v3`, the loaded rows under `v3`,
+   `match_tier` in the matcher's output. Then the rows of the data
+   problems doc that read "merged" read "live".
 
 ## Set up a box once
 
@@ -796,6 +853,7 @@ python -m givingtuesday_datamart.placeholder_recovery run --policy v2 --tax-year
 python -m givingtuesday_datamart.placeholder_recovery load --policy v2 [--object-id ID] [--dry-run] [--flagged leave_out]
 python -m givingtuesday_datamart.placeholder_recovery view --policy v2
 python -m givingtuesday_datamart.placeholder_recovery check --policy v2
+python -m givingtuesday_datamart.placeholder_recovery status [--json]
 
 # the matcher: the run (Zein's), its gate, the corrections preflight, a change proved on a subset
 python -m givingtuesday_datamart.grant_matching [--recovered-policy VERSION] [--no-resume]
