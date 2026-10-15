@@ -71,7 +71,10 @@ from sqlalchemy import text
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart.grant_matching import (
+    CHUNK_FILTER_RULES,
     FINAL_FILTER_RULES,
+    all_matches,
+    filter_match_rules,
     Relations,
     _load_corrections,
     _read_corrections_csv,
@@ -112,6 +115,7 @@ _KEY8 = ["filerein_key"] + _KEY7
 
 # The read of the filer universe, under production's names.
 _UNIVERSE_SQL = universe_sql()
+_GRANTS_SQL = grants_sql()
 
 
 def _clean_like_run(df: pd.DataFrame) -> pd.DataFrame:
@@ -149,6 +153,19 @@ def _score_slice(universe_slice: pd.DataFrame, grants_slice: pd.DataFrame) -> pd
     """match_records' blocking → Compare on a slice: one row per candidate
     pair with the four scores, unfiltered."""
     return score_slice(universe_slice, grants_slice, chunk_rules=False)
+
+
+def _resolve_winners(features: pd.DataFrame, universe_slice: pd.DataFrame,
+                     grants_slice: pd.DataFrame, guards: bool = True) -> pd.DataFrame:
+    """Shared run decisions over pre-scored pairs, optionally without guards
+    for the BMF gain measurement. Includes the name-only tier."""
+    features = filter_match_rules(features_df=features, **CHUNK_FILTER_RULES)
+    return all_matches(features, universe_slice, grants_slice, guards=guards)
+
+
+def _match_slice(universe_slice: pd.DataFrame, grants_slice: pd.DataFrame,
+                 guards: bool = True) -> pd.DataFrame:
+    return _resolve_winners(_score_slice(universe_slice, grants_slice), universe_slice, grants_slice, guards)
 
 
 def _rows_dollars_won(conn, tuples: pd.DataFrame, relations: Relations = Relations()) -> tuple[int, float]:
@@ -204,7 +221,8 @@ def run_preflight(relations: Relations = Relations()) -> int:
         create_or_replace_views(conn, relations)
         logger.info(
             "Reading filer universe: basic_fields_unique_names_view "
-            "∪ basic_fields_pf_unique_names_view ∪ corrections_unique_names_view"
+            "∪ basic_fields_pf_unique_names_view ∪ eo_bmf_unique_names_view "
+            "∪ corrections_unique_names_view"
         )
         universe = pd.read_sql_query(text(universe_sql(relations)), conn)
         logger.info("Reading public.privategrants_unique_names_view")

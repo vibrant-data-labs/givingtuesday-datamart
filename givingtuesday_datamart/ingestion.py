@@ -2,8 +2,9 @@
 Ingestion entrypoint for registered Datamart sources.
 
 Consumes a ``SourceSpec`` + a ``ResolvedVersion`` from the sources module,
-stamps every ingested row with lineage metadata, and records the run in
-``datamart_meta.ingest_runs``. Re-running for a ``(logical_name, source_version)``
+streams every file of that version into the staging table, stamps every
+ingested row with lineage metadata, and records the run (with a per-file
+manifest) in ``datamart_meta.ingest_runs``. Re-running for a ``(logical_name, source_version)``
 that already has a successful run is a no-op unless ``force=True``.
 """
 
@@ -11,7 +12,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -20,7 +21,11 @@ from sqlalchemy import text
 from givingtuesday_datamart._internal.config import get_configuration
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart._internal.logger import logger
-from givingtuesday_datamart.sources.resolver import ResolvedVersion, resolve_latest
+from givingtuesday_datamart.sources.resolver import (
+    ResolvedVersion,
+    SourceFile,
+    resolve_source,
+)
 from givingtuesday_datamart.sources.spec import SourceSpec
 from givingtuesday_datamart.validation import ValidationError, validate_ingest
 from givingtuesday_datamart.write_data_to_sql import stream_csv_url_to_table
@@ -103,13 +108,17 @@ def ensure_meta_schema() -> None:
             )
         )
         # Added with the validation step. JSONB (not TEXT+cast) so jsonb
-        # operators work cleanly in ad-hoc queries.
+        # operators work cleanly in ad-hoc queries. source_manifest came with
+        # the multi-file (direct HTTPS) sources: one entry per file streamed,
+        # with the server's Last-Modified and the bytes, sha256 and rows
+        # actually loaded. source_url keeps holding one URL (the first file).
         session.execute(
             text(
                 f"""
                 ALTER TABLE {INGEST_RUNS_TABLE}
                 ADD COLUMN IF NOT EXISTS column_list JSONB,
-                ADD COLUMN IF NOT EXISTS validation JSONB
+                ADD COLUMN IF NOT EXISTS validation JSONB,
+                ADD COLUMN IF NOT EXISTS source_manifest JSONB
                 """
             )
         )
@@ -155,10 +164,10 @@ def _insert_started_run(
                 f"""
                 INSERT INTO {INGEST_RUNS_TABLE} (
                     run_id, logical_name, staging_table, source_version,
-                    source_url, started_at, status
+                    source_url, started_at, status, source_manifest
                 ) VALUES (
                     :run_id, :logical_name, :staging_table, :source_version,
-                    :source_url, :started_at, 'started'
+                    :source_url, :started_at, 'started', CAST(:source_manifest AS JSONB)
                 )
                 """
             ),
@@ -169,6 +178,7 @@ def _insert_started_run(
                 "source_version": resolved.version_date,
                 "source_url": resolved.url,
                 "started_at": started_at,
+                "source_manifest": json.dumps([asdict(f) for f in _files_of(resolved)]),
             },
         )
 
@@ -182,6 +192,7 @@ def _finalize_run(
     error: str | None = None,
     column_list: list[str] | None = None,
     validation: list[dict] | None = None,
+    source_manifest: list[dict] | None = None,
 ) -> None:
     """Write the terminal state of an ingest run.
 
@@ -189,6 +200,9 @@ def _finalize_run(
     bound parameter explicitly so sqlalchemy/psycopg2 doesn't try to infer.
     Either can be None — on a COPY failure (before validation runs) both
     will be, which is the right signal that validation never got a chance.
+    ``source_manifest`` replaces the pre-download manifest written at start
+    with the per-file bytes, sha256 and rows actually streamed; None leaves
+    the start-of-run version in place.
     """
     with get_session(config=datamart_config()) as session:
         session.execute(
@@ -200,7 +214,8 @@ def _finalize_run(
                     row_count = :row_count,
                     error = :error,
                     column_list = CAST(:column_list AS JSONB),
-                    validation = CAST(:validation AS JSONB)
+                    validation = CAST(:validation AS JSONB),
+                    source_manifest = COALESCE(CAST(:source_manifest AS JSONB), source_manifest)
                 WHERE run_id = :run_id
                 """
             ),
@@ -215,6 +230,9 @@ def _finalize_run(
                 ),
                 "validation": (
                     json.dumps({"checks": validation}) if validation is not None else None
+                ),
+                "source_manifest": (
+                    json.dumps(source_manifest) if source_manifest is not None else None
                 ),
             },
         )
@@ -240,10 +258,59 @@ def _apply_post_ingest_indexes(spec: SourceSpec, db_config: dict) -> None:
         session.execute(text(f"ANALYZE {spec.staging_table_name}"))
 
 
-def _lineage_values(run_id: str, resolved: ResolvedVersion, ingested_at: datetime) -> dict[str, str]:
+def dedupe_sql(spec: SourceSpec) -> str:
+    """The DELETE that keeps one row per ``spec.dedupe.key``: first under
+    the spec's ``order_by``, then by the source file's position in the
+    ingest order (bound as ``:urls``), then by physical row id."""
+    assert spec.dedupe is not None
+    key = ", ".join(f'"{c}"' for c in spec.dedupe.key)
+    return f"""
+        DELETE FROM {spec.staging_table_name} t
+        USING (
+            SELECT ctid,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY {key}
+                       ORDER BY {spec.dedupe.order_by},
+                                array_position(CAST(:urls AS text[]), _source_url),
+                                ctid
+                   ) AS rn
+            FROM {spec.staging_table_name}
+        ) ranked
+        WHERE t.ctid = ranked.ctid AND ranked.rn > 1
+    """
+
+
+def _apply_post_ingest_dedupe(spec: SourceSpec, files: tuple[SourceFile, ...], db_config: dict) -> int | None:
+    """Collapse ``spec.staging_table_name`` to one row per ``spec.dedupe.key``.
+
+    Keeps the first row per key under the spec's ``order_by``, then the
+    source file's position in the ingest order (``_source_url`` says which
+    file each row came from), then the physical row id, so the survivor is
+    deterministic. Returns the number of rows deleted, or None when the
+    spec declares no dedupe. Runs before the indexes so a declared UNIQUE
+    index can build.
+    """
+    if spec.dedupe is None:
+        return None
+    with get_session(config=db_config) as session:
+        removed = session.execute(text(dedupe_sql(spec)), {"urls": [f.url for f in files]}).rowcount
+    logger.info(
+        "%s: removed %s duplicate rows on (%s), kept first by %s then file order",
+        spec.staging_table_name, f"{removed:,}", ", ".join(spec.dedupe.key), spec.dedupe.order_by,
+    )
+    return removed
+
+
+def _files_of(resolved: ResolvedVersion) -> tuple[SourceFile, ...]:
+    """The files to stream for this version, in order. Older resolvers
+    only set ``url``; treat that as a one-file version."""
+    return resolved.files or (SourceFile(url=resolved.url, size=resolved.size, last_modified=None),)
+
+
+def _lineage_values(run_id: str, version: str, url: str, ingested_at: datetime) -> dict[str, str]:
     return {
-        "_source_version": resolved.version_date,
-        "_source_url": resolved.url,
+        "_source_version": version,
+        "_source_url": url,
         "_ingested_at": ingested_at.isoformat(),
         "_ingest_run_id": run_id,
     }
@@ -259,9 +326,12 @@ def ingest_source(
 
     If a prior successful run exists for the same ``(logical_name, source_version)``
     and ``force`` is False, returns a ``skipped`` result without touching the DB.
-    Otherwise creates a new run record, ingests the CSV (streaming or standard
-    based on ``spec.needs_streaming``), stamps lineage columns on every row, and
-    finalizes the run record with status + row count.
+    Otherwise creates a new run record, streams every file of the version
+    into the staging table in order (the first file recreates the table, the
+    rest append), stamps lineage columns on every row (``_source_url`` is
+    the file the row came from), applies the spec's dedupe and indexes, and
+    finalizes the run record with status, row count and the per-file
+    manifest (Last-Modified, bytes, sha256, rows).
     """
     ensure_meta_schema()
     started_at = datetime.now(timezone.utc)
@@ -288,7 +358,7 @@ def ingest_source(
 
     run_id = str(uuid.uuid4())
     _insert_started_run(run_id=run_id, spec=spec, resolved=resolved, started_at=started_at)
-    lineage = _lineage_values(run_id, resolved, started_at)
+    files = _files_of(resolved)
 
     logger.info(
         "Starting ingest: logical_name=%s version=%s run_id=%s table=%s",
@@ -299,14 +369,23 @@ def ingest_source(
     )
 
     db_cfg = datamart_config()
+    manifest: list[dict] = []
+    row_count = 0
     try:
-        row_count = stream_csv_url_to_table(
-            url=resolved.url,
-            table_name=spec.staging_table_name,
-            overwrite=True,
-            extra_columns=lineage,
-            db_config=db_cfg,
-        )
+        for i, f in enumerate(files):
+            streamed = stream_csv_url_to_table(
+                url=f.url,
+                table_name=spec.staging_table_name,
+                overwrite=(i == 0),
+                extra_columns=_lineage_values(run_id, resolved.version_date, f.url, started_at),
+                db_config=db_cfg,
+                spool_to_disk=spec.spool_to_disk,
+            )
+            row_count += streamed.rows
+            manifest.append({**asdict(f), "bytes": streamed.bytes, "sha256": streamed.sha256, "rows": streamed.rows})
+        dedupe_removed = _apply_post_ingest_dedupe(spec, files, db_cfg)
+        if dedupe_removed:
+            row_count -= dedupe_removed
     except Exception as err:
         finished_at = datetime.now(timezone.utc)
         _finalize_run(
@@ -314,6 +393,7 @@ def ingest_source(
             finished_at=finished_at,
             status="failed",
             error=str(err)[:4000],
+            source_manifest=manifest or None,
         )
         logger.exception("Ingest failed for %s", spec.logical_name)
         return IngestResult(
@@ -354,6 +434,7 @@ def ingest_source(
             source_version=resolved.version_date,
             row_count=row_count,
             db_config=db_cfg,
+            dedupe_removed=dedupe_removed,
         )
     except ValidationError as verr:
         finished_at = datetime.now(timezone.utc)
@@ -365,6 +446,7 @@ def ingest_source(
             row_count=row_count,
             error=str(verr)[:4000],
             validation=[c.to_dict() for c in checks] if checks else None,
+            source_manifest=manifest,
         )
         logger.error("Validation failed for %s: %s", spec.logical_name, verr)
         return IngestResult(
@@ -388,6 +470,7 @@ def ingest_source(
         row_count=row_count,
         column_list=column_list,
         validation=[c.to_dict() for c in check_results],
+        source_manifest=manifest,
     )
     logger.info(
         "Ingest success: %s rows=%s duration=%.1fs",
@@ -409,11 +492,12 @@ def ingest_source(
 
 
 def ingest_latest(spec: SourceSpec, *, force: bool = False) -> IngestResult:
-    """Resolve the newest file for ``spec`` and ingest it.
+    """Resolve the newest version of ``spec`` (S3 listing or direct URLs)
+    and ingest it.
 
     Raises ``LookupError`` if no file in the bucket matches ``spec.filename_regex``.
     """
-    resolved = resolve_latest(spec)
+    resolved = resolve_source(spec)
     if resolved is None:
         raise LookupError(
             f"No file in s3://{spec.s3_bucket}/{spec.s3_prefix} matches "
@@ -430,6 +514,7 @@ __all__ = [
     "IngestResult",
     "Status",
     "datamart_config",
+    "dedupe_sql",
     "ensure_meta_schema",
     "find_successful_run",
     "ingest_source",

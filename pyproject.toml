@@ -61,6 +61,10 @@ exclude = [
 packages = ["givingtuesday_datamart"]
 
 [tool.pytest.ini_options]
+# `db` tests build into a scratch schema of the datamart database and need
+# the operator's config.ini; they are opt-in (`pytest -m db`). Everything
+# else runs offline.
 markers = [
-    "db: runs SQL in the datamart's Postgres, in the session's own temp tables (deselect with -m \"not db\")",
+    "db: needs the gt_datamart database; opt in with `pytest -m db`",
 ]
+addopts = "-m 'not db'"

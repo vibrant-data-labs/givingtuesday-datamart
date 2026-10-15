@@ -1,16 +1,17 @@
 # Giving Tuesday Datamart
 
 A data backbone for IRS Form 990 / 990-PF filings. It pulls Giving Tuesday's
-public Datamart CSVs from S3, lands them in PostgreSQL with full lineage,
+public Datamart CSVs from S3 and the IRS Exempt Organizations Business
+Master File from irs.gov, lands them in PostgreSQL with full lineage,
 materializes canonical entity tables and a Postgres full-text-search surface
 on top, runs grant-recipient matching, and exposes a read-only Python
 client. A Next.js explorer (`peerlo`) sits in [`frontend/`](frontend/).
 
 ```
-S3 (Giving Tuesday public bucket)
-        │
-        ▼
-   Staging tables          ── public.basic_fields, public.mission_statements, ...
+S3 (Giving Tuesday public bucket)      irs.gov (EO Business Master File)
+        │                                        │
+        ▼                                        ▼
+   Staging tables          ── public.basic_fields, public.mission_statements, ..., public.eo_bmf
    (all-TEXT, lineage-stamped)
         │
         ▼
@@ -31,14 +32,17 @@ S3 (Giving Tuesday public bucket)
 
 A dedicated Postgres database, broken into four layers:
 
-- **Staging** (`public.*`) — direct ingest of the Giving Tuesday CSVs. One
+- **Staging** (`public.*`) — direct ingest of the source CSVs. One
   table per source (e.g. `basic_fields`, `mission_statements`, `programs`,
   `schedule_o`, `grants_to_domestic_organizations`, `privategrants`,
-  `basic_fields_pf`). Every column is `TEXT` so zero-padded EINs
-  (`012345678`), ZIPs (`01234`), and phones round-trip intact; cast at
-  query time (`SUM(totrevcuryea::bigint)`). Every row carries four lineage
-  columns: `_source_version`, `_source_url`, `_ingested_at`,
-  `_ingest_run_id`.
+  `basic_fields_pf` from Giving Tuesday; `eo_bmf` from the IRS: every
+  currently recognized exempt org, one row per EIN, with the 501(c)
+  subsection, foundation code and NTEE code that no 990 carries — see
+  [`docs/bmf-assessment.md`](docs/bmf-assessment.md)). Every column is
+  `TEXT` so zero-padded EINs (`012345678`), ZIPs (`01234`), and phones
+  round-trip intact; cast at query time (`SUM(totrevcuryea::bigint)`).
+  Every row carries four lineage columns: `_source_version`,
+  `_source_url`, `_ingested_at`, `_ingest_run_id`.
 - **Canonical** (`public.*`) — typed materializations rebuilt from
   staging. One row per real entity (`nonprofit_canonical`,
   `funder_canonical`, optionally `person_canonical`); a per-EIN narrative
@@ -99,10 +103,13 @@ environment variables. They are independent — set whichever you need.
 
 ### 3. Source data
 
-Source CSVs live in the public-read S3 bucket
+Giving Tuesday's source CSVs live in the public-read S3 bucket
 `gt990datalake-analytics-and-datamarts` (no AWS credentials required).
 The pipeline lists the bucket and picks the newest matching file for
-each registered source automatically.
+each registered source automatically. The IRS Business Master File is six
+plain CSVs under `https://www.irs.gov/pub/irs-soi/` (`eo1`–`eo4`, `eo_xx`,
+`eo_pr`, about 340 MB together), republished in place roughly monthly; the
+pipeline versions them by the server's `Last-Modified`.
 
 ## Usage
 
@@ -144,11 +151,19 @@ python -m givingtuesday_datamart.sources refresh \
 # Bypass the (source, version) idempotency check — drops and recreates
 # the staging table from scratch.
 python -m givingtuesday_datamart.sources refresh --source irs_990_missions --force
+
+# The IRS Business Master File (six files into public.eo_bmf, ~5 min).
+# Its version is the newest server Last-Modified, so a month with no
+# republish is a `skipped`.
+python -m givingtuesday_datamart.sources refresh --source irs_eo_bmf
 ```
 
-Refresh streams CSVs straight from S3 to Postgres `COPY`, in batches of
-50,000 rows, stamping the four lineage columns inline. Every successful
-ingest runs a small validation pass (see
+Refresh streams CSVs straight from the source to Postgres `COPY`, in
+batches of 50,000 rows, stamping the four lineage columns inline. A
+multi-file source streams its files into the same table in order, each
+row's `_source_url` naming its file, and the run's `source_manifest`
+records every file's `Last-Modified`, bytes, sha256 and rows. Every
+successful ingest runs a small validation pass (see
 [Validation](#validation)). A failed run is recorded and does not block
 retries — just rerun the same command.
 
@@ -165,7 +180,17 @@ Run this after a successful `refresh`. It rebuilds:
 - `public.nonprofit_canonical` — one row per EIN. Identity fields
   (name, DBAs, address) and the latest filing's identifiers, picked via
   `DISTINCT ON (filerein)` ordered by tax year desc, tax-period-end
-  desc, ingested_at desc as deterministic tiebreaks.
+  desc, ingested_at desc as deterministic tiebreaks. Every row is joined
+  to the IRS Business Master File (`public.eo_bmf`) for `irs_name`,
+  `irs_sort_name`, `subsection`, `classification`, `foundation_code`,
+  `ntee_cd`, `group_exemption`, `ruling_year`, `filing_req_cd`,
+  `bmf_status`, `bmf_tax_period`, the three `bmf_*_amt` amounts and an
+  `in_bmf` flag (false for the ~140K revoked or terminated orgs, which
+  stay because they hold historical grants). The 990 name is never
+  replaced by the BMF's: for group-exemption subordinates the BMF name is
+  the parent's. Orgs the BMF knows but no 990 does (990-N filers,
+  churches: about 1.19M) are added as rows with the BMF name and
+  `name_source = 'BMF'`; `name_source` is `990`, `990-EZ` or `BMF`.
 - `public.nonprofit_text` — one row per EIN, built from the **latest
   taxyear only** across five source fields (mission statement, Part III
   program activities 1/2/3, Schedule O Part III narrative). `DENSE_RANK`
@@ -181,7 +206,9 @@ Run this after a successful `refresh`. It rebuilds:
   are not in the FTS index. A per-EIN `n_snippets` column exposes the
   count of distinct snippets for monitoring.
 - `public.funder_canonical` — analogous to `nonprofit_canonical` but
-  built from the 990-PF universe.
+  built from the 990-PF universe, with the same BMF columns; the ~13K
+  private foundations the BMF lists with a 990-PF requirement but no
+  filing in our data are added with `name_source = 'BMF'`.
 - `public.schedule_o_part_iii` — Schedule O rows filtered to Form
   990 / 990-EZ Part III continuation narratives only, via
   case-insensitive word-boundary regex on `sidfalrdesc`.
@@ -233,16 +260,37 @@ python -m givingtuesday_datamart.grant_matching --chunk-size 50000 --resume-work
 
 Uses [`recordlinkage`](https://recordlinkage.readthedocs.io/) to compare
 private-grant recipient names + addresses against the filer universe
-(990 filers ∪ 990-PF filers ∪ the corrections registry —
+(990 filers ∪ 990-PF filers ∪ the IRS Business Master File's names ∪ the
+corrections registry —
 [`data/corrections/org_identities.csv`](data/corrections/org_identities.csv)).
-At the start of every run it reloads the corrections CSV, rebuilds all
-four filing-version-deduped `_current` relations
+The BMF arm (`eo_bmf_unique_names_view`) contributes the IRS name of
+record and, where set, the SORT_NAME line as separate alias rows at the
+BMF address, keyed by EIN: it is what makes 990-N filers and churches
+matchable at all, and it carries the IRS's spelling of every other org's
+name. Lines that carry a host rather than the org are left out: a
+SORT_NAME naming a trustee or a bank, a SORT_NAME that is a government or
+public-institution name (a chapter's campus), and a government-named NAME
+on a group subordinate's or a non-charity's record (a 4-H club filed
+under its university's group exemption, a staff union named after the
+university). Every matched row records which arm supplied the winning identity
+in `match_source` (`basic_fields` / `basic_fields_pf` / `eo_bmf` /
+`correction`), the filer name it matched (`match_name`) and the winning
+pair's two scores (`match_name_score`, `match_addr_score`). Between the
+final filter tiers and winner resolution a precision guard refuses the
+non-exact wins the universe cannot hold: a grant row naming a government
+or public institution ("city of", "county of", "university of" ...) may
+match below an exact name only when the filer row says nothing the grant
+row does not, so "university of utah" no longer resolves to the
+University of Utah Asia Campus
+([docs/matching-precision-guards.md](docs/matching-precision-guards.md)).
+At the start of every run it reloads the corrections CSV,
+rebuilds all four filing-version-deduped `_current` relations
 ([`current_grants.py`](givingtuesday_datamart/current_grants.py), issues
 #33 and #34), and recreates the matching views — no separate step needed.
 
 Candidate-pair chunks are written to S3 keyed on the full input lineage:
 the source versions of `irs_990pf_grants` / `irs_990_basic_fields` /
-`irs_990pf_basic_fields`, the corrections CSV content hash, and
+`irs_990pf_basic_fields` / `irs_eo_bmf`, the corrections CSV content hash, and
 `MATCHING_INPUT_SHAPE_VERSION` (a hand-bumped constant in
 `grant_matching.py` — bump it whenever a code change alters the input
 views' row order: dedup rules, view definitions, name normalization,
@@ -332,7 +380,8 @@ python -m givingtuesday_datamart.sources loaded
 # 4. Rebuild the canonical layer (~10 min). Checks that
 #    basic_fields[_pf]_current match staging before building identity
 #    from them, and rebuilds only if they don't — normally a no-op,
-#    since step 2 already did it.
+#    since step 2 already did it. Reads public.eo_bmf for the BMF
+#    columns, so refresh irs_eo_bmf first when the IRS has republished.
 python -m givingtuesday_datamart.sources build-canonical
 
 # 5. Corrections preflight (~10 min, any machine). Required after any
@@ -349,8 +398,9 @@ python -m givingtuesday_datamart.corrections_preflight
 python -m givingtuesday_datamart.grant_matching
 
 # 7. Regression gate — run before trusting or shipping the new match
-#    output. Compares coverage floors, sentinel filers, and precision
-#    ceilings against the last accepted baselines. On FAIL, follow
+#    output. Compares coverage floors, sentinel filers, precision
+#    ceilings, the match_source breakdown and the precision guard's own
+#    rule against the last accepted baselines. On FAIL, follow
 #    docs/matching-regression-runbook.md before touching any threshold.
 python -m givingtuesday_datamart.matching_regression_checks
 ```
@@ -539,6 +589,17 @@ Two non-obvious requirements:
    by ingestion after every COPY (so they can never drift from
    declaration).
 
+A source that is plain HTTPS files republished in place (no date in the
+name) is a `SourceSpec` with `urls=` instead of `s3_bucket` +
+`filename_regex`; the IRS BMF entry is the template. Its version is the
+newest `Last-Modified` the server reports, so re-running `refresh` after a
+republish ingests and otherwise skips. All files land in one table in list
+order. If the files repeat a natural key, declare a `DedupeSpec` (which
+row to keep per key; file order and physical row break ties) and a
+`unique=True` index on it: staging then carries one row per key, the
+validation records how many source rows were dropped, and consumers can
+join on the key without doubling.
+
 Verify before running `refresh`:
 
 ```bash
@@ -560,7 +621,9 @@ classes) rather than exact.
   CSV is parsed via `csv.reader` over an `io.TextIOWrapper(newline="")`
   on a `BufferedReader` wrapping `response.iter_content()`. Quoted
   multi-line fields (mission statements, Schedule O narratives) are
-  preserved — a naive `iter_lines` split would mangle them.
+  preserved — a naive `iter_lines` split would mangle them. The bytes
+  are counted and SHA-256'd as they pass, so every ingest run records a
+  content fingerprint of exactly what it loaded (`source_manifest`).
 - **`COPY` in batches of 50,000.** Each batch is stamped with the four
   lineage columns inside the same `COPY` command — no second pass.
 - **Indexes are declarative.** `SourceSpec.indexes` is the single source
@@ -616,7 +679,8 @@ givingtuesday_datamart/
   sources/
     spec.py             # SourceSpec / ColumnSpec / IndexSpec dataclasses
     registry.py         # One SourceSpec per ingested table
-    resolver.py         # Picks the latest matching file from S3 (boto3 unsigned)
+    resolver.py         # Picks the latest matching file from S3 (boto3 unsigned),
+                        # or versions direct HTTPS files by Last-Modified
     __main__.py         # CLI: status, loaded, refresh, build-canonical
   ingestion.py          # ingest_source(); ingest_runs tracking; index rebuild
   write_data_to_sql.py  # Streaming CSV -> COPY (all-TEXT cols, lineage stamping)
@@ -638,8 +702,12 @@ givingtuesday_datamart/
   matching_regression_checks.py  # Post-matching gate: coverage floors,
                                  # sentinel filers, precision ceilings
   exploratory/
-    bmf_assessment.py   # IRS EO Business Master File vs gt_datamart: NTEE
-                        # fill, coverage, name agreement, matcher gain
+    bmf_assessment.py   # public.eo_bmf vs gt_datamart: NTEE fill, coverage,
+                        # name agreement, matcher gain
+    bmf_alias_gain.py   # What the BMF alias arm wins, proved on a slice of
+                        # unmatched grant tuples (no full matcher run)
+    government_name_guard.py  # What the government-name guard refuses,
+                              # measured on the last run's output
 data/
   corrections/
     org_identities.csv  # Human-verified identity rows added to the filer
@@ -647,6 +715,8 @@ data/
 frontend/               # Next.js peerlo app (reads gt_datamart via pg pool)
 docs/
   backbone-plan.md      # Detailed architecture + decision history
+  matching-precision-guards.md  # The government-name guard: rule, measurements,
+                                # alternatives weighed, follow-ups
   corrections-plan.md   # Corrections-registry design + curation workflow
   bmf-assessment.md     # What the IRS Business Master File adds (NTEE,
                         # subsection, identity spine) and how to rerun it

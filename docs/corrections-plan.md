@@ -21,7 +21,7 @@ correction is written only after a human verifies a specific miss.
 post-hoc match overrides.** Each correction says "this EIN is also known
 by this name at this address" and is UNIONed into the same recipient
 universe the matcher already reads (`basic_fields_unique_names_view` +
-`basic_fields_pf_unique_names_view`). It then flows through normal
+`basic_fields_pf_unique_names_view` + `eo_bmf_unique_names_view`). It then flows through normal
 blocking and scoring like a filing the IRS never received.
 
 Why this shape won (over two rejected alternatives — a generalized alias

@@ -253,7 +253,7 @@ def test_a_prefix_is_on_everything_a_run_creates():
                          "\n".join(statements))
     assert len(created) >= 17 and all("scratch_matcher_" in name for name in created)
     read = set(re.findall(r"(?:FROM|JOIN|ON) public\.(\w+)", "\n".join(statements)))
-    assert {name for name in read if not name.startswith("scratch_matcher_")} == {"basic_fields", "basic_fields_pf"}
+    assert {name for name in read if not name.startswith("scratch_matcher_")} == {"basic_fields", "basic_fields_pf", "eo_bmf"}
 
 
 @pytest.mark.parametrize("field, value", [("prefix", "scratch; DROP TABLE x"), ("grants", "public.grants"),

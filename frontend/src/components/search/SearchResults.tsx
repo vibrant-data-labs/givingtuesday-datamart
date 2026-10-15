@@ -116,7 +116,13 @@ function OrgResultRow({
       </div>
       <div className="ml-4 flex items-center gap-2 flex-shrink-0">
         <Badge variant="zinc">
-          {org.firstYear === org.lastYear ? `${org.firstYear}` : `${org.firstYear}–${org.lastYear}`}
+          {/* lastYear 0 = no 990 in the datamart: an org known only from the
+              IRS Business Master File (990-N filer, church). */}
+          {org.lastYear === 0
+            ? 'IRS register'
+            : org.firstYear === org.lastYear
+              ? `${org.firstYear}`
+              : `${org.firstYear}–${org.lastYear}`}
         </Badge>
         {isNavigating ? (
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-primary" />

@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
-from givingtuesday_datamart.sources.spec import FormType, IndexSpec, SourceSpec
+from givingtuesday_datamart.sources.spec import DedupeSpec, FormType, IndexSpec, SourceSpec
 
 
 S3_BUCKET = "gt990datalake-analytics-and-datamarts"
 S3_PREFIX = "EfileDataMarts/"
+
+# IRS Exempt Organizations Business Master File: six plain CSVs republished
+# in place roughly monthly (no version in the name; the server's
+# Last-Modified is the version). Four regions, international (eo_xx) and
+# Puerto Rico (eo_pr). eo4, "all other areas", is a few thousand rows of
+# territories and foreign addresses that eo_xx / eo_pr list again, which is
+# where the cross-file duplicate EINs come from. Order matters: it is the
+# dedupe tie-break.
+BMF_BASE_URL = "https://www.irs.gov/pub/irs-soi/"
+BMF_FILES = ("eo1", "eo2", "eo3", "eo4", "eo_xx", "eo_pr")
 
 
 def _spec(
@@ -185,6 +195,36 @@ REGISTRY: tuple[SourceSpec, ...] = (
         filename_regex=r"^(\d{4}_\d{2}_\d{2})_All_Years_990PFPart7p1-?Officers\.csv$",
         required_columns=("filerein",),
         skip_default_refresh=True,
+    ),
+    # The IRS's own register of exempt orgs: name of record and address, the
+    # 501(c) subsection and foundation code, NTEE code, group exemption,
+    # ruling date, filing requirement, and the tax period and amounts of the
+    # latest return the IRS processed. None of SUBSECTION's number,
+    # FOUNDATION, NTEE_CD or GROUP is asked for on a 990, so no e-file
+    # datamart can carry them; and 990-N filers and churches appear here and
+    # nowhere else. docs/bmf-assessment.md has the measurements.
+    #
+    # One row per EIN: 5,004 EINs repeat across files with identical rows
+    # (territories listed in eo4 and again in eo_xx / eo_pr), collapsed
+    # after COPY by latest TAX_PERIOD, then file order. The unique index is
+    # the contract every consumer joins on.
+    SourceSpec(
+        logical_name="irs_eo_bmf",
+        staging_table_name="public.eo_bmf",
+        form_type="EO-BMF",
+        description=(
+            "IRS Exempt Organizations Business Master File — every currently recognized "
+            "exempt org, one row per EIN (name, address, subsection, foundation code, "
+            "NTEE, ruling date, filing requirement, latest processed return)."
+        ),
+        urls=tuple(f"{BMF_BASE_URL}{name}.csv" for name in BMF_FILES),
+        required_columns=("ein", "name"),
+        indexes=(IndexSpec("ix_eo_bmf_ein", ("ein",), unique=True),),
+        dedupe=DedupeSpec(key=("ein",), order_by="tax_period DESC NULLS LAST"),
+        # irs.gov dropped the stream after ~15 MB while a COPY batch held
+        # the connection idle; the largest file is 166 MB, so spooling is
+        # cheap and the download runs at full speed.
+        spool_to_disk=True,
     ),
 )
 

@@ -25,6 +25,10 @@ filing-version dedup + expanded corrections registry; matched rows
 6.04M -> 7.58M). After a matcher change is *accepted* (per the
 evaluation protocol in the proposal), update the baselines here in the
 same commit — they define "no worse than the last accepted matcher."
+
+Two checks added 2026-10-15 with the precision guards (no new accepted run;
+their constants are measured on the August 4 output): the match_source
+breakdown, and government-named recipients matched below an exact name.
 """
 
 from __future__ import annotations
@@ -37,6 +41,12 @@ from sqlalchemy import text
 
 from givingtuesday_datamart._internal.db import get_configuration, get_session
 from givingtuesday_datamart._internal.logger import logger
+from givingtuesday_datamart.grant_matching import (
+    FULL_NAME_SQL,
+    GOVERNMENT_NAME_EXACT_MIN,
+    GOVERNMENT_NAME_SQL_RE,
+    government_refusal,
+)
 from givingtuesday_datamart.grant_matching import Relations
 from givingtuesday_datamart.placeholder_recovery import loader as recovered_loader
 from givingtuesday_datamart.placeholder_recovery.view import FROM_RECOVERY
@@ -73,6 +83,34 @@ FOREIGN_ROWS_MATCHED_CEILING = 2           # proxy: WORLD HEALTH ORGANI%. The
 PERSON_ROWS_MATCHED_CEILING = 0            # hard zero
 SELF_MATCH_CEILING = 3641                  # funder matched to itself; tracked,
                                            # uninvestigated — do not let it grow
+
+# Matched rows per arm of the filer universe (August 4 run; eo_bmf had not
+# joined the universe yet — its first rerun sets the number). Reported, and
+# a WARN when an arm moves more than MATCH_SOURCE_SHIFT_WARN from here, never
+# a FAIL: when an arm is added rows move between arms by design (a BMF
+# alias identical to a filed tuple collapses into the filing; a correction
+# the BMF now supplies is prunable, docs/corrections-plan.md), and the
+# recall floors above are what must hold. A shift nobody expected is still
+# the first thing to look at (runbook question 2).
+MATCH_SOURCE_ROWS_BASELINE = {
+    "basic_fields": 7478348,
+    "basic_fields_pf": 85071,
+    "eo_bmf": 0,
+    "correction": 15376,
+}
+MATCH_SOURCE_SHIFT_WARN = 0.05
+# Government-named recipients ("city of", "university of", ... —
+# grant_matching.GOVERNMENT_NAME_PREFIXES) matched below an exact name by a
+# filer row that says something the grant row does not. The matcher's
+# government-name guard refuses these pairs before winner resolution, so
+# for any run that carries match_name / match_name_score this is a hard
+# zero: a row here means the guard was bypassed. The August 4 output, made
+# before the guard, held 25,521 such rows ($2.91B — "university of utah" ->
+# the University of Utah Asia Campus, "university of chicago" -> its cancer
+# research foundation; exploratory.government_name_guard reproduces the
+# count) and has no match_name_score column, so against it the check
+# reports itself skipped. docs/matching-precision-guards.md.
+GOVERNMENT_NONEXACT_ROWS_CEILING = 0
 
 PLACEHOLDER_REGEX = (
     r"(\y(see|refer)\w*\y[\s,–-]*(attach|addition|schedul|statement|stmt|list))|^\s*see\s*$"
@@ -154,6 +192,54 @@ def run_checks(fast: bool, relations: Relations = Relations()) -> int:
                 f"SELECT COUNT(*) FROM {matched} WHERE filerein = :e"
             ), {"e": ein}).scalar()
             gate.check(f"sentinel {label} (>= {floor})", n >= floor, f"{n}")
+
+        # --- Breakdown by match_source -----------------------------------
+        logger.info("match_source breakdown ...")
+        by_source = dict(conn.execute(text(
+            f"SELECT match_source, COUNT(*) FROM {matched} GROUP BY 1"
+        )).fetchall())
+        counts = ", ".join(f"{src}={by_source.get(src, 0):,}" for src in MATCH_SOURCE_ROWS_BASELINE)
+        unknown = sorted(set(by_source) - set(MATCH_SOURCE_ROWS_BASELINE))
+        gate.check("match_source values are the known arms",
+                   not unknown, counts if not unknown else f"unknown {unknown}; {counts}")
+        shifted = [
+            f"{src} {by_source.get(src, 0):,} vs {base:,}"
+            for src, base in MATCH_SOURCE_ROWS_BASELINE.items()
+            if abs(by_source.get(src, 0) - base) > MATCH_SOURCE_SHIFT_WARN * base
+        ]
+        gate.check(f"matched rows per match_source within {MATCH_SOURCE_SHIFT_WARN:.0%} of baseline",
+                   not shifted, "; ".join(shifted) if shifted else "no arm moved", warn_only=True)
+
+        # --- Government-name guard ---------------------------------------
+        logger.info("Government-named recipients matched below an exact name ...")
+        has_score = conn.execute(text("""
+            SELECT COUNT(*) FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = :matched
+              AND column_name = 'match_name_score'
+        """), {"matched": matched}).scalar() > 0
+        if has_score:
+            # The non-exact wins of government-named recipients, with the
+            # winning filer name and score the run carried; the guard's own
+            # decision function says which of them it would have refused.
+            gov = pd.read_sql_query(text(f"""
+                SELECT {FULL_NAME_SQL} AS full_name, match_name, match_name_score, COUNT(*) AS n_rows
+                FROM {matched}
+                WHERE match_name_score < {GOVERNMENT_NAME_EXACT_MIN}
+                  AND {FULL_NAME_SQL} ~ '{GOVERNMENT_NAME_SQL_RE}'
+                GROUP BY 1, 2, 3
+            """), conn)
+            refused = [
+                government_refusal(g, u, score)
+                for g, u, score in zip(gov["full_name"], gov["match_name"].fillna(""), gov["match_name_score"])
+            ]
+            n = int(gov.loc[refused, "n_rows"].sum()) if len(gov) else 0
+            gate.check(f"government-named recipients matched against the guard's rule (<= {GOVERNMENT_NONEXACT_ROWS_CEILING})",
+                       n <= GOVERNMENT_NONEXACT_ROWS_CEILING,
+                       f"{n} rows the guard refuses, of {int(gov['n_rows'].sum()):,} non-exact government-named rows")
+        else:
+            gate.check("government-named recipients matched below an exact name", False,
+                       "skipped — output predates match_name_score (a run before the guard)",
+                       warn_only=True)
 
         # --- Structural invariants ---------------------------------------
         logger.info("Join fan-out invariant ...")

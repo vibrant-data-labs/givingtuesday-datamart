@@ -2,7 +2,8 @@
 
 *For the person running `matching_regression_checks.py` a quarter from
 now, who remembers roughly what grant matching is but none of the
-details. Last updated: August 2026.*
+details. Last updated: October 2026 (the match_source breakdown and the
+government-name check).*
 
 ## What this is, in one paragraph
 
@@ -74,9 +75,33 @@ Three kinds of checks, in plain terms:
 |---|---|---|
 | **Coverage minimums** | labeled-pair coverage, the three canary organizations | Did we lose matches we used to find? |
 | **Junk limits** | placeholder / corporate / foreign / person / self-match counts | Did a known kind of wrong match grow? |
-| **Hard rules** | one recipient mapped to two EINs; matched rows exceeding raw rows; matched positive dollars exceeding itemized positive dollars | Is the output arithmetically coherent? |
+| **Hard rules** | one recipient mapped to two EINs; matched rows exceeding raw rows; matched positive dollars exceeding itemized positive dollars; government-named recipients the guard would refuse | Is the output arithmetically coherent, and did every rule in the matcher actually run? |
+| **Breakdown** | matched rows per `match_source` | Which arm of the universe won what, and did that move? |
 
 `WARN` lines don't fail the gate but are recorded — glance at them.
+
+**The breakdown is a WARN, never a FAIL.** Rows per arm are reported
+next to the last accepted run's, and a move of more than 5% in any arm
+warns. When an arm is added (the IRS Business Master File joined the
+universe in October 2026) rows move between arms by design — a BMF
+alias identical to a filed tuple collapses into the filing, a
+correction the BMF now supplies becomes prunable — and the coverage
+floors are what must hold. A move nobody expected is the first thing
+to look at (question 2 below).
+
+**The government-name check is a hard zero with a twist.** The matcher
+refuses, before winner resolution, a non-exact win for a grant row
+named like a government or public institution ("city of", "county of",
+"university of" ...) when the filer row says something the grant row
+does not — "university of utah" to the University of Utah Asia Campus,
+"city of rock valley" to "friends of rock valley"
+([docs/matching-precision-guards.md](matching-precision-guards.md)).
+Every matched row carries the filer name and the name score it won
+with, so the gate replays the guard's own decision function over the
+non-exact government-named rows: a row it would have refused means the
+guard was bypassed, and that is a pipeline bug. Against an output older
+than the guard (no `match_name_score` column) the check reports itself
+skipped.
 
 ## When a check fails
 
@@ -93,9 +118,14 @@ questions before anything else:
    recorded in `datamart_meta.canonical_builds`). A junk count that
    grew slower than the table itself usually means quality improved.
 2. **Where did the change come from?** Every matched row carries
-   `match_source` (`basic_fields` / `basic_fields_pf` / `correction`).
-   Group the failing class by it. If a corrections-registry row is
-   feeding junk, that row is wrong — fix the CSV, not the threshold.
+   `match_source` (`basic_fields` / `basic_fields_pf` / `eo_bmf` /
+   `correction`). Group the failing class by it. If a corrections-registry
+   row is feeding junk, that row is wrong — fix the CSV, not the
+   threshold. If the `eo_bmf` arm is feeding junk, look at which BMF line
+   won (`givingtuesday_datamart.exploratory.bmf_alias_gain` lists wins
+   with the alias kind): a SORT_NAME alias that names a trustee or a bank
+   is the likely shape, and the fix is the exclusion pattern in
+   `eo_bmf_unique_names_view`, not a threshold.
 3. **Look at the actual rows.** Every check's SQL is inline in the
    script. Copy it out, drop the `COUNT`, and list the offending rows.
    For any single confusing row, `match_explainer` will show you
@@ -117,6 +147,9 @@ statement of "this is the quality we accepted":
   can't explain one, you're not done diagnosing.
 - Canary organizations get the observed count in a comment and a
   threshold at 95% of it.
+- The `match_source` breakdown gets the observed rows per arm, as they
+  are (`MATCH_SOURCE_ROWS_BASELINE`); an arm that has not run yet stays
+  at 0 and warns once, on its first run.
 - Oddities you decided to tolerate get a comment at the constant (see
   the foreign-rows limit: one of its two rows is a UN Foundation match
   the name pattern can't tell apart from a real WHO grant).
