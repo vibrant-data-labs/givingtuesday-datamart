@@ -1,3 +1,5 @@
+import { ClassificationFilters } from '@/components/search/ClassificationFilters';
+import { sanitizeClassifications } from '@/lib/ntee';
 export const revalidate = 3600; // re-render at most once per hour
 
 import Link from 'next/link';
@@ -27,6 +29,8 @@ interface HomeProps {
     signals?: string;
     mode?: string; // legacy
     daf?: string;
+    ntee?: string;
+    subsection?: string;
   };
 }
 
@@ -43,8 +47,10 @@ export default function HomePage({ searchParams }: HomeProps) {
       : legacyModeToSignals(searchParams.mode) ?? sanitizeSearchSignals(null);
   const dafOnly = sanitizeDafOnly(searchParams.daf);
 
-  const hasQuery = q.length > 0;
+  const filters = sanitizeClassifications(searchParams.ntee, searchParams.subsection);
+  const hasQuery = q.length > 0 || !!filters.ntee || !!filters.subsection;
   const signalsActive = anySignalActive(signals);
+  const canSearch = signalsActive || (!q && (!!filters.ntee || !!filters.subsection));
 
   return (
     <div className="relative">
@@ -91,7 +97,9 @@ export default function HomePage({ searchParams }: HomeProps) {
             </Suspense>
           </div>
 
-          {hasQuery && signalsActive && (
+          <Suspense fallback={null}><ClassificationFilters filters={filters} /></Suspense>
+
+          {q && signalsActive && (
             <p className="text-xs text-muted-foreground">
               Searching{' '}
               {describeSignals(signals)}
@@ -99,7 +107,7 @@ export default function HomePage({ searchParams }: HomeProps) {
             </p>
           )}
 
-          {hasQuery && !signalsActive && (
+          {hasQuery && !canSearch && (
             <p className="text-xs text-rose-600">
               Select at least one match mode below to see results.
             </p>
@@ -111,9 +119,9 @@ export default function HomePage({ searchParams }: HomeProps) {
         </div>
 
         {/* Results */}
-        {hasQuery && signalsActive && (
+        {hasQuery && canSearch && (
           <div className="mt-8">
-            <SearchResultsClient q={q} type={type} page={page} limit={limit} signals={signals} dafOnly={dafOnly} />
+            <SearchResultsClient q={q} type={type} page={page} limit={limit} signals={signals} dafOnly={dafOnly} filters={filters} />
           </div>
         )}
       </div>

@@ -371,6 +371,42 @@ async function fetchScheduleO(ein: string): Promise<NarrativeEntry[]> {
   return rows.map((r) => ({ taxyear: r.taxyear, text: r.text }));
 }
 
+// A grant-reported EIN is still a useful destination even without an IRS
+// profile. Select one coherent reported identity, never infer tax status.
+async function fetchGrantReportedProfile(ein: string): Promise<OrgProfile | null> {
+  const { rows } = await sql<{
+    name: string | null; name2: string | null; city: string | null; state: string | null;
+  }>`
+    SELECT name, name2, city, state FROM (
+      (SELECT COALESCE(NULLIF(BTRIM(grantee_organization_name1), ''), NULLIF(BTRIM(grantee_person_name), '')) AS name,
+              grantee_organization_name2 AS name2, grantee_city AS city, grantee_state AS state, taxyear
+       FROM public.unioned_grants WHERE grantee_ein = ${ein}
+       ORDER BY taxyear DESC NULLS LAST, grantee_organization_name1 ASC NULLS LAST,
+                grantee_organization_name2 ASC NULLS LAST, grantee_person_name ASC NULLS LAST,
+                grantee_city ASC NULLS LAST, grantee_state ASC NULLS LAST LIMIT 1)
+      UNION ALL
+      (SELECT granter_name AS name, granter_name2 AS name2, NULL::text AS city, NULL::text AS state, taxyear
+       FROM public.unioned_grants WHERE granter_ein = ${ein}
+       ORDER BY taxyear DESC NULLS LAST, granter_name ASC NULLS LAST, granter_name2 ASC NULLS LAST LIMIT 1)
+    ) reported
+    ORDER BY taxyear DESC NULLS LAST, name ASC NULLS LAST, name2 ASC NULLS LAST,
+             city ASC NULLS LAST, state ASC NULLS LAST LIMIT 1
+  `.execute(getDb());
+  if (!rows.length) return null;
+  const reported = rows[0];
+  return {
+    ein, name1: reported.name ?? `Entity ${ein}`, name2: reported.name2,
+    city: reported.city, state: reported.state, orgType: 'unknown', nameSource: 'grant reports',
+    dba1: null, dba2: null, careOf: null, address1: null, address2: null,
+    zip: null, country: null, website: null, formationYear: null,
+    inBmf: false, irsName: null, irsSortName: null, nteeCode: null, subsection: null,
+    foundationCode: null, rulingYear: null, totalRevenue: null, firstYear: null, lastYear: null,
+    revenueByYear: [], revenueDetails: [], isDafEver: false, dafByYear: [],
+    narrative: { mission: [], programs: [], scheduleO: [] }, foundationActivities: [],
+    lineage: { sourceVersion: null, sourceRunId: null, builtAt: null },
+  };
+}
+
 async function getOrgProfileUncached(ein: string): Promise<OrgProfile | null> {
   // Identity comes from canonical (DISTINCT-ON-latest-filing winner) — but the
   // basic_fields aggregation still seeds firstYear/lastYear/totalRevenue and
@@ -389,7 +425,7 @@ async function getOrgProfileUncached(ein: string): Promise<OrgProfile | null> {
   // An org the IRS Business Master File knows but no 990 does (990-N filer,
   // church) has a canonical row and nothing in basic_fields: render it from
   // the identity alone. Nothing at all → 404.
-  if (!agg && !identity) return null;
+  if (!agg && !identity) return fetchGrantReportedProfile(ein);
   const hasFilings = agg != null;
 
   const table = orgType === 'nonprofit' ? NONPROFIT_TABLE : FOUNDATION_TABLE;
@@ -465,7 +501,7 @@ async function getOrgProfileUncached(ein: string): Promise<OrgProfile | null> {
 
 const getCachedOrgProfile = unstable_cache(
   (ein: string) => getOrgProfileUncached(ein),
-  ['org-profile'],
+  ['org-profile-v2'],
   { revalidate: ORG_CACHE_REVALIDATE_SECONDS, tags: ['org'] }
 );
 

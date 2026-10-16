@@ -303,6 +303,26 @@ def _build_schedule_o_part_iii(session) -> int:
     return count
 
 
+def _add_classification_indexes(session, table: str) -> None:
+    """Match the frontend's BMF filters; prefix LIKE needs pattern operators.
+
+    Separate indexes support either filter alone and bitmap combination when
+    both are selective. Keep these expressions in sync with queries/search.ts.
+    Ordinary CREATE is appropriate during the transactional DROP+CREATE build.
+    Existing live tables can receive the same indexes with CREATE INDEX
+    CONCURRENTLY outside a transaction, without rebuilding canonical data.
+    """
+    name = table.rsplit(".", 1)[-1]
+    session.execute(text(
+        f"CREATE INDEX ix_{name}_ntee ON {table} "
+        "(UPPER(BTRIM(ntee_cd)) text_pattern_ops)"
+    ))
+    session.execute(text(
+        f"CREATE INDEX ix_{name}_subsection ON {table} "
+        "(LPAD(BTRIM(subsection), 2, '0'))"
+    ))
+
+
 def _build_nonprofit_canonical(session, table: str = NONPROFIT_CANONICAL_TABLE) -> int:
     """DROP + CREATE + populate public.nonprofit_canonical. Returns rowcount.
 
@@ -488,6 +508,7 @@ def _build_nonprofit_canonical(session, table: str = NONPROFIT_CANONICAL_TABLE) 
             """
         )
     )
+    _add_classification_indexes(session, table)
     count = session.execute(
         text(f"SELECT COUNT(*) FROM {table}")
     ).scalar_one()
@@ -746,6 +767,7 @@ def _build_funder_canonical(session, table: str = FUNDER_CANONICAL_TABLE) -> int
             """
         )
     )
+    _add_classification_indexes(session, table)
     count = session.execute(
         text(f"SELECT COUNT(*) FROM {table}")
     ).scalar_one()

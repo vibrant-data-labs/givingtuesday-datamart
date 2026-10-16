@@ -1,4 +1,4 @@
-export type OrgType = 'nonprofit' | 'foundation';
+export type OrgType = 'nonprofit' | 'foundation' | 'unknown';
 
 export interface OrgResult {
   ein: string;
@@ -60,7 +60,7 @@ export interface OrgLineage {
 // Where the canonical name came from: the latest 990 / 990-EZ / 990-PF on
 // file, or the IRS Business Master File for orgs with no return in the
 // datamart (990-N filers, churches).
-export type NameSource = '990' | '990-EZ' | '990-PF' | 'BMF';
+export type NameSource = '990' | '990-EZ' | '990-PF' | 'BMF' | 'grant reports';
 
 export interface OrgProfile {
   ein: string;

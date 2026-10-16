@@ -61,20 +61,27 @@ export function OrgPageClient() {
       <div className="mb-8">
         <OrgHeader org={org!} onDafHighlightChange={setDafHighlight} />
       </div>
+      {org!.nameSource === 'grant reports' && (
+        <div className="mb-6 rounded-xl border border-border bg-secondary/50 px-5 py-4 text-sm">
+          <p className="font-medium">Known from grant reports</p>
+          <p className="mt-1 text-muted-foreground">This entity appears in another organization’s grant filings. We have no IRS register entry or Form 990 profile for this EIN in our dataset. Its name and location are shown as reported by the grantmaker; its tax status and organization type are unverified.</p>
+          <p className="mt-2 text-muted-foreground">Explore the reported grants below.</p>
+        </div>
+      )}
       <div className="mb-6">
         <OrgIdentityCard org={org!} />
       </div>
-      <div className="mb-10">
+      {org!.nameSource !== 'grant reports' && <div className="mb-10">
         <OrgMetadata org={org!} dafHighlight={dafHighlight} />
-      </div>
+      </div>}
       {org!.orgType === 'foundation' && org!.foundationActivities.length > 0 && (
         <div className="mb-10">
           <FoundationActivities years={org!.foundationActivities} />
         </div>
       )}
-      <div className="mb-10">
+      {org!.nameSource !== 'grant reports' && <div className="mb-10">
         <OrgNarrative bundle={org!.narrative} />
-      </div>
+      </div>}
       <div className="space-y-10">
         {org!.orgType === 'foundation' ? (
           <>
