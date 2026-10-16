@@ -118,6 +118,8 @@ async function searchNonprofits(
         AND ${filters.subsection ? sql`LPAD(BTRIM(subsection), 2, '0') = ${filters.subsection}` : sql`TRUE`}
         AND (name ILIKE ${likeParam}
           OR name_secondary ILIKE ${likeParam}
+          OR irs_name ILIKE ${likeParam}
+          OR irs_sort_name ILIKE ${likeParam}
           OR dba_1 ILIKE ${likeParam}
           OR dba_2 ILIKE ${likeParam})
     ),
@@ -208,7 +210,9 @@ async function searchFoundations(
         -- this avoids aggregating the entire canonical universe.
         AND ${filters.ntee ? sql`UPPER(BTRIM(ntee_cd)) LIKE ${filters.ntee + '%'}` : sql`TRUE`}
         AND ${filters.subsection ? sql`LPAD(BTRIM(subsection), 2, '0') = ${filters.subsection}` : sql`TRUE`}
-        AND (name ILIKE ${likeParam} OR name_secondary ILIKE ${likeParam})
+        AND (name ILIKE ${likeParam} OR name_secondary ILIKE ${likeParam}
+          OR irs_name ILIKE ${likeParam}
+          OR irs_sort_name ILIKE ${likeParam})
     ),
     ein_hits AS (
       SELECT ein, 2000000.0::float8 AS rank
@@ -366,7 +370,7 @@ async function runSearch(
 
 const getCachedSearch = unstable_cache(
   runSearch,
-  ['search'],
+  ['search-v2-irs-names'],
   { revalidate: SEARCH_CACHE_REVALIDATE_SECONDS, tags: ['search'] },
 );
 

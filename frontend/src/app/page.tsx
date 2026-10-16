@@ -160,7 +160,7 @@ function ExampleQueryChips() {
 
 function describeSignals(s: { name: boolean; narrative: boolean; url: boolean }): string {
   const parts: string[] = [];
-  if (s.name) parts.push('organization names + DBAs');
+  if (s.name) parts.push('organization names + IRS names + DBAs');
   if (s.narrative) parts.push('Form 990 narratives');
   if (s.url) parts.push('website domains');
   if (parts.length === 0) return '';
@@ -190,7 +190,7 @@ function SearchInstructions() {
         </p>
         <ul className="list-disc pl-5 space-y-0.5">
           <li>
-            <span className="font-medium text-foreground/80">Name</span> — matches the canonical org name, secondary name, and DBAs as a plain substring (no boolean operators). Best when you know the organization.
+            <span className="font-medium text-foreground/80">Name</span> — matches the filing names, IRS names of record, and DBAs as a plain substring (no boolean operators). Best when you know the organization.
           </li>
           <li>
             <span className="font-medium text-foreground/80">Narrative</span> — full-text search over Form 990 mission, program activities, and Schedule O Part III, with English stemming. Best for &ldquo;what nonprofits do X.&rdquo; 990 nonprofits only.
