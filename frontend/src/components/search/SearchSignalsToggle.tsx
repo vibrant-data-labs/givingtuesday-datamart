@@ -15,7 +15,7 @@ const SIGNALS: SignalSpec[] = [
   {
     id: 'name',
     label: 'Name',
-    hint: 'Match canonical org name, secondary name, and DBAs (plain substring).',
+    hint: 'Match filing names, IRS names of record, and DBAs (plain substring).',
   },
   {
     id: 'narrative',

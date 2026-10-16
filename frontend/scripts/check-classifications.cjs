@@ -72,6 +72,8 @@ function load(file) {
       assert(query.parameters.includes('03'));
       assert(query.sql.indexOf('BTRIM') < query.sql.indexOf('ORDER BY m.rank'));
       assert(query.sql.includes('COUNT(*) OVER ()'));
+      assert(query.sql.includes('irs_name ILIKE'), 'IRS name participates in name matching');
+      assert(query.sql.includes('irs_sort_name ILIKE'), 'IRS alternate name participates in name matching');
       assert(query.sql.indexOf('BTRIM(ntee_cd)') < query.sql.indexOf('matched AS'), 'Classification filters precede aggregation');
     }
     queries.length = 0;
@@ -92,7 +94,9 @@ function load(file) {
     assert.equal(profile.subsection, null);
     const canonical = await getOrgProfile('922307261');
     assert(canonical && canonical.nameSource !== 'grant reports');
-    console.log('Live grant-only and canonical profiles passed');
+    const renamed = await searchOrgs('COEFFICIENT GIVING', 'all', 1, 25, signals, false, { ntee: '', subsection: '' });
+    assert(renamed.results.some(org => org.ein === '812644663'), 'IRS name finds the renamed Action Fund');
+    console.log('Live grant-only, canonical, and IRS-name search checks passed');
   } else {
     assert.equal(await getOrgProfile('000000000'), null, 'Unseen EIN still returns not found');
     grantFixture = { name: 'CLIMATE POWER ACTION', name2: null, city: 'WASHINGTON', state: 'DC' };
