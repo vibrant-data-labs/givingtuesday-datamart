@@ -167,8 +167,11 @@ class BasicFieldsRow(NamedIdentity):
 
     Sourced from the all-TEXT ``public.basic_fields`` staging table; numeric
     columns are cast at query time via ``NULLIF(col, '')::int|::bigint``.
-    ``total_cash_contributions_no_gov`` coalesces ``governgrants`` to 0
-    (TEXT staging often carries empty string instead of NULL).
+    ``government_grants`` is the raw government grants line (990 Part VIII
+    line 1e), NULL when blank. ``total_cash_contributions_no_gov`` coalesces
+    ``governgrants`` to 0 (TEXT staging often carries empty string instead
+    of NULL), so it equals ``total_cash_contributions`` when the line is
+    blank.
     """
 
     ein: str
@@ -183,6 +186,7 @@ class BasicFieldsRow(NamedIdentity):
     website: str | None
     total_revenue_current_year: int | None
     total_cash_contributions: int | None
+    government_grants: int | None
     total_cash_contributions_no_gov: int | None
 
 

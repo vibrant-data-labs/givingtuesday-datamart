@@ -418,6 +418,8 @@ hits = client.search_nonprofits(["climate", "wildfire"], limit=20)
 exact = client.search_nonprofits(["needs based"], search_mode="exact", limit=20)
 profile = client.get_nonprofit(ein="123456789")
 years = client.get_basic_fields(eins=["123456789"], min_taxyear=2018)
+# each BasicFieldsRow carries total_cash_contributions, government_grants
+# (990 Part VIII line 1e, None when blank) and total_cash_contributions_no_gov
 grants_received = client.get_grants(eins=["123456789"], role="grantee")
 grants_made = client.get_grants(eins=["123456789"], role="granter")
 ```

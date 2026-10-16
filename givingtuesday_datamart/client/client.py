@@ -1232,11 +1232,15 @@ class GtDatamartClient:
         small amount.
 
         Columns are all-TEXT, so every numeric one is cast at query time
-        via ``NULLIF(col, '')::bigint``. ``governgrants`` is COALESCEd to 0
-        when computing ``total_cash_contributions_no_gov`` because empty
-        string is much more common than NULL in the staging data, and we
-        want a missing governgrants value to subtract zero (not produce
-        NULL) so the no-gov contribution stays a real number.
+        via ``NULLIF(col, '')::bigint``. ``government_grants`` is the raw
+        Part VIII line 1e value (government grants/contributions), NULL when
+        the filing left it blank. ``governgrants`` is COALESCEd to 0 when
+        computing ``total_cash_contributions_no_gov`` because empty string
+        is much more common than NULL in the staging data, and we want a
+        missing governgrants value to subtract zero (not produce NULL) so
+        the no-gov contribution stays a real number. Consumers that need to
+        tell "no government money" from "line not reported" should read
+        ``government_grants`` directly.
         """
         if not eins:
             return []
@@ -1257,6 +1261,7 @@ class GtDatamartClient:
                 websitsiteit                            AS website,
                 NULLIF(totrevcuryea, '')::bigint        AS total_revenue_current_year,
                 NULLIF(totacashcont, '')::bigint        AS total_cash_contributions,
+                NULLIF(governgrants, '')::bigint        AS government_grants,
                 (NULLIF(totacashcont, '')::bigint
                     - COALESCE(NULLIF(governgrants, '')::bigint, 0))
                                                         AS total_cash_contributions_no_gov
