@@ -12,6 +12,7 @@ const SOURCE_BY_NAME_SOURCE: Record<NameSource, string> = {
   '990-EZ': 'irs_990ez_basic_fields',
   '990-PF': 'irs_990pf_basic_fields',
   BMF: 'irs_eo_bmf',
+  'grant reports': 'unioned_grants',
 };
 
 function formatSourceVersion(raw: string): string {

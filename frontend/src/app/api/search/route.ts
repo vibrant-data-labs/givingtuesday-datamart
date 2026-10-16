@@ -1,3 +1,4 @@
+import { sanitizeClassifications } from '@/lib/ntee';
 export const revalidate = 3600;
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -28,12 +29,13 @@ export async function GET(request: NextRequest) {
     : legacyModeToSignals(searchParams.get('mode')) ?? sanitizeSearchSignals(null);
   const dafOnly = sanitizeDafOnly(searchParams.get('daf'));
 
-  if (!q || !anySignalActive(signals)) {
+  const filters = sanitizeClassifications(searchParams.get('ntee'), searchParams.get('subsection'));
+  if ((!q && !filters.ntee && !filters.subsection) || (q && !anySignalActive(signals))) {
     return NextResponse.json({ results: [], total: 0, page: 1, limit });
   }
 
   try {
-    const { results, total } = await searchOrgs(q, type, page, limit, signals, dafOnly);
+    const { results, total } = await searchOrgs(q, type, page, limit, signals, dafOnly, filters);
     return NextResponse.json(
       { results, total, page, limit },
       { headers: { 'Cache-Control': 's-maxage=3600, stale-while-revalidate=86400' } }

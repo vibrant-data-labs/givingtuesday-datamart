@@ -43,7 +43,9 @@ export function OrgHeader({ org, onDafHighlightChange }: OrgHeaderProps) {
               {formatOrgName(org.name1, org.name2)}
             </h1>
             <Badge variant={org.orgType === 'foundation' ? 'indigo' : 'green'} className="text-sm px-2.5 py-1">
-              {org.nameSource === 'BMF'
+              {org.nameSource === 'grant reports'
+                ? 'Reported in grants · type unverified'
+                : org.nameSource === 'BMF'
                 ? org.orgType === 'foundation'
                   ? 'Private Foundation (IRS register, no 990-PF on file)'
                   : 'Nonprofit (IRS register, no 990 on file)'

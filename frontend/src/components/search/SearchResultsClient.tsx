@@ -1,4 +1,5 @@
 'use client';
+import type { ClassificationFilters } from '@/lib/ntee';
 
 import { useEffect } from 'react';
 import { useSearch } from '@/hooks/useSearch';
@@ -13,6 +14,7 @@ interface SearchResultsClientProps {
   limit: number;
   signals: SearchSignals;
   dafOnly: boolean;
+  filters: ClassificationFilters;
 }
 
 export function SearchResultsClient({
@@ -22,12 +24,13 @@ export function SearchResultsClient({
   limit,
   signals,
   dafOnly,
+  filters,
 }: SearchResultsClientProps) {
-  const { data, isLoading, isError, error } = useSearch(q, type, page, limit, signals, dafOnly);
+  const { data, isLoading, isError, error } = useSearch(q, type, page, limit, signals, dafOnly, filters);
 
   useEffect(() => {
-    if (q) sessionStorage.setItem('lastSearchUrl', window.location.pathname + window.location.search);
-  }, [q, type, page, limit, signals, dafOnly]);
+    if (q || filters.ntee || filters.subsection) sessionStorage.setItem('lastSearchUrl', window.location.pathname + window.location.search);
+  }, [q, type, page, limit, signals, dafOnly, filters]);
 
   if (isLoading) return <LoadingSpinner />;
   if (isError) {

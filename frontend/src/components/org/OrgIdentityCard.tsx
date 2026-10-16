@@ -1,3 +1,4 @@
+import { formatNtee } from '@/lib/ntee';
 import type { OrgProfile } from '@/types/org';
 import { Card } from '@/components/ui/Card';
 import { formatIrsSubsection } from '@/lib/irs-subsection';
@@ -65,7 +66,7 @@ export function OrgIdentityCard({ org }: OrgIdentityCardProps) {
             </span>
           </Field>
         )}
-        {hasNtee && <Field label="NTEE"><span className="font-mono">{org.nteeCode}</span></Field>}
+        {hasNtee && <Field label="NTEE"><span>{formatNtee(org.nteeCode!)}</span></Field>}
         {hasRulingYear && <Field label="IRS Ruling"><span>{org.rulingYear}</span></Field>}
         {irsNameDiffers && (
           <Field label="IRS Name of Record">
