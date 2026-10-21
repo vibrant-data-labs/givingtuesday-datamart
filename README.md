@@ -472,7 +472,25 @@ years = client.get_basic_fields(eins=["123456789"], min_taxyear=2018)
 # (990 Part VIII line 1e, None when blank) and total_cash_contributions_no_gov
 grants_received = client.get_grants(eins=["123456789"], role="grantee")
 grants_made = client.get_grants(eins=["123456789"], role="granter")
+funder_profiles = client.get_funder_profiles(["110303001", "23-2888152"])
 ```
+
+### Bulk funder profiles
+
+Client 0.2.1 adds `get_funder_profiles(eins)`, returning frozen `FunderProfile`
+records keyed by normalized EIN. It deduplicates and sorts inputs and queries
+at most 1,000 EINs per batch. Malformed identifiers fail before database access.
+Unknown identifiers still return a record with null metadata and both
+`has_nonprofit_record` and `has_funder_record` false.
+
+Each profile carries `businessname1`, `businessname2`, `dba_name`, website,
+city/state/country, latest tax year, optional filing text, canonical/text build
+timestamps, presence flags, and `source_ref` provenance. PF canonical names take
+precedence; PF DBA is null. Website and filing text come from the nonprofit
+surface when present. Regular 990 DBA joins its two nonblank lines. Callers own
+application IDs, description formatting, missing-source reports and publication.
+Use `dataclasses.asdict()` for plain records; timestamps retain `datetime` values
+(use `json.dumps(..., default=str)` when exporting JSON).
 
 ### `search_nonprofits` — `search_mode` semantics
 

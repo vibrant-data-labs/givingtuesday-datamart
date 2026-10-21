@@ -44,6 +44,29 @@ class FunderIdentity:
 
 
 @dataclass(frozen=True)
+class FunderProfile(FunderIdentity):
+    """Current GT funder metadata, with source timestamps and optional filing text.
+
+    PF names win over regular 990 names. PF DBA is absent; website/text
+    come from the nonprofit surface when available. Unknown EINs retain
+    their EIN with null metadata and both presence flags false.
+    """
+
+    website: str | None
+    city: str | None
+    state: str | None
+    country: str | None
+    latest_taxyear: int | None
+    source_built_at: datetime | None
+    source_form: str | None
+    filing_text: str | None
+    text_built_at: datetime | None
+    has_nonprofit_record: bool
+    has_funder_record: bool
+    source_ref: str = "givingtuesday_datamart.public.nonprofit_canonical/funder_canonical/nonprofit_text"
+
+
+@dataclass(frozen=True)
 class NonprofitHit(NamedIdentity):
     """Result of an FTS search over ``public.nonprofit_text``.
 

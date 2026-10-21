@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from givingtuesday_datamart.client.models import (
     BasicFieldsRow,
     FunderIdentity,
+    FunderProfile,
     combine_dba,
     CanonicalIdentity,
     Grant,
@@ -65,6 +66,15 @@ ENV_PORT = "GT_DATAMART_PG_PORT"
 ENV_USER = "GT_DATAMART_PG_USER"
 ENV_PASSWORD = "GT_DATAMART_PG_PASSWORD"
 ENV_DATABASE = "GT_DATAMART_PG_DATABASE"
+
+
+def _normalize_funder_eins(eins: list[str]) -> list[str]:
+    normalized = set()
+    for ein in eins:
+        if not isinstance(ein, str) or not re.fullmatch(r"\d{2}-?\d{7}", ein.strip()):
+            raise ValueError(f"Invalid funder EIN: {ein!r}")
+        normalized.add(ein.strip().replace("-", ""))
+    return sorted(normalized)
 
 
 def _engine_from_components(
@@ -186,7 +196,7 @@ class GtDatamartClient:
        for ``port`` and ``database``).
 
     The client does not commit; every method opens a short-lived session
-    against the persistent engine, runs a single SELECT, and closes it.
+    against the persistent engine, runs SELECT queries (batched where documented), and closes it.
     """
 
     def __init__(
@@ -1371,11 +1381,7 @@ class GtDatamartClient:
         EINs are nine digits (hyphenated inputs are normalized). Invalid IDs
         fail explicitly rather than silently dropping a funding relationship.
         """
-        normalized = set()
-        for ein in eins:
-            if not isinstance(ein, str) or not re.fullmatch(r"\d{2}-?\d{7}", ein.strip()):
-                raise ValueError(f"Invalid funder EIN: {ein!r}")
-            normalized.add(ein.strip().replace("-", ""))
+        normalized = _normalize_funder_eins(eins)
         if not normalized:
             return []
         sql = """
@@ -1393,6 +1399,50 @@ class GtDatamartClient:
             rows = session.execute(text(sql), {"eins": sorted(normalized)}).mappings().all()
         return [FunderIdentity(r["ein"], r["businessname1"], r["businessname2"],
                                combine_dba(r["dba_1"], r["dba_2"])) for r in rows]
+
+    def get_funder_profiles(self, eins: list[str]) -> list[FunderProfile]:
+        """Bulk current funder metadata, keyed by normalized EIN.
+
+        Returns one record per distinct EIN, sorted by EIN, including unknown
+        identities (null metadata and false presence flags). Malformed EINs
+        fail before any I/O. Queries run in batches of at most 1,000 EINs.
+        Names/DBA follow get_funder_identities; timestamps identify the source
+        canonical/text build. No tracker IDs, summaries or publication state
+        are attached by this source client.
+        """
+        identities = _normalize_funder_eins(eins)
+        if not identities:
+            return []
+        sql = """
+            SELECT ids.ein,
+                   CASE WHEN fc.ein IS NOT NULL THEN fc.name ELSE nc.name END AS businessname1,
+                   CASE WHEN fc.ein IS NOT NULL THEN fc.name_secondary ELSE nc.name_secondary END AS businessname2,
+                   CASE WHEN fc.ein IS NULL THEN nc.dba_1 END AS dba_1,
+                   CASE WHEN fc.ein IS NULL THEN nc.dba_2 END AS dba_2,
+                   nc.website, COALESCE(nc.city, fc.city) AS city,
+                   COALESCE(nc.state, fc.state) AS state,
+                   COALESCE(nc.addr_country, fc.addr_country) AS country,
+                   NULLIF((CASE WHEN fc.ein IS NOT NULL THEN fc.latest_taxyear ELSE nc.latest_taxyear END)::text, '')::int AS latest_taxyear,
+                   CASE WHEN fc.ein IS NOT NULL THEN fc._built_at ELSE nc._built_at END AS source_built_at,
+                   nc.source_form, nt.unique_text_compact AS filing_text,
+                   nt._built_at AS text_built_at,
+                   (nc.ein IS NOT NULL) AS has_nonprofit_record,
+                   (fc.ein IS NOT NULL) AS has_funder_record
+            FROM unnest(CAST(:eins AS text[])) AS ids(ein)
+            LEFT JOIN public.nonprofit_canonical nc ON nc.ein = ids.ein
+            LEFT JOIN public.funder_canonical fc ON fc.ein = ids.ein
+            LEFT JOIN public.nonprofit_text nt ON nt.ein = ids.ein
+            ORDER BY ids.ein
+        """
+        profiles = []
+        with self._session() as session:
+            for offset in range(0, len(identities), 1000):
+                rows = session.execute(text(sql), {"eins": identities[offset:offset + 1000]}).mappings().all()
+                for row in rows:
+                    record = dict(row)
+                    record["dba_name"] = combine_dba(record.pop("dba_1"), record.pop("dba_2"))
+                    profiles.append(FunderProfile(**record))
+        return profiles
 
     def get_grant_summaries(
         self,

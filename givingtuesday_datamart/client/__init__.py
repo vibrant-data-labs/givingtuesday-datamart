@@ -7,6 +7,7 @@ from givingtuesday_datamart.client.models import (
     Grant,
     GrantSummary,
     FunderIdentity,
+    FunderProfile,
     IdentityHit,
     IdentityQuery,
     Nonprofit,
@@ -24,4 +25,5 @@ __all__ = [
     "Grant",
     "GrantSummary",
     "FunderIdentity",
+    "FunderProfile",
 ]
