@@ -28,6 +28,7 @@ from givingtuesday_datamart.client.models import (
     BasicFieldsRow,
     FunderIdentity,
     FunderProfile,
+    FunderPortfolioMetrics,
     combine_dba,
     CanonicalIdentity,
     Grant,
@@ -1443,6 +1444,71 @@ class GtDatamartClient:
                     record["dba_name"] = combine_dba(record.pop("dba_1"), record.pop("dba_2"))
                     profiles.append(FunderProfile(**record))
         return profiles
+
+    def get_funder_portfolio_metrics(
+        self, eins: list[str], *, recipient_eins: list[str] | None = None,
+        min_taxyear: int | None = None, max_taxyear: int | None = None,
+    ) -> list[FunderPortfolioMetrics]:
+        """Aggregate actual GT grants by funder in one bulk query.
+
+        Portfolio counts cover recipients identified by a nine-digit EIN; total
+        dollars include all reported grants over all available years. Unknown
+        recipient rows/amounts are reported separately and excluded from scopes. Optional scoped metrics use
+        the supplied recipient EIN set and inclusive year bounds; those bounds
+        never restrict the source-wide totals. Unknown amounts remain null.
+        Inputs are normalized/deduplicated before SQL; repeated payments remain
+        distinct source rows and a recipient counts once across years.
+        """
+        identities = _normalize_funder_eins(eins)
+        recipients = _normalize_funder_eins(recipient_eins) if recipient_eins is not None else []
+        for year in (min_taxyear, max_taxyear):
+            if year is not None and (type(year) is not int or not 1900 <= year <= 2100):
+                raise ValueError(f"Invalid grant tax year: {year!r}")
+        if min_taxyear is not None and max_taxyear is not None and min_taxyear > max_taxyear:
+            raise ValueError("min_taxyear must be <= max_taxyear")
+        if not identities:
+            return []
+        sql = """
+            WITH grants AS (
+                SELECT granter_ein, grantee_ein, grant_amount, taxyear,
+                       COALESCE(grantee_ein ~ '^[0-9]{9}$', false) AS identified,
+                       COALESCE(grantee_ein = ANY(CAST(:recipients AS text[])), false)
+                         AND (:min_year IS NULL OR taxyear >= :min_year)
+                         AND (:max_year IS NULL OR taxyear <= :max_year) AS in_scope
+                FROM public.unioned_grants WHERE granter_ein = ANY(CAST(:eins AS text[]))
+            )
+            SELECT granter_ein AS ein,
+                   COUNT(DISTINCT grantee_ein) FILTER (WHERE identified) AS total_portfolio_count,
+                   SUM(grant_amount) AS total_portfolio_amount,
+                   SUM(grant_amount) FILTER (WHERE NOT identified) AS unidentified_recipient_grant_amount,
+                   COUNT(DISTINCT grantee_ein) FILTER (WHERE identified AND in_scope) AS scoped_recipient_count,
+                   SUM(grant_amount) FILTER (WHERE identified AND in_scope) AS scoped_grant_amount,
+                   COUNT(*) AS grant_count,
+                   COUNT(*) FILTER (WHERE NOT identified) AS unidentified_recipient_grant_count,
+                   MIN(taxyear) AS first_taxyear, MAX(taxyear) AS last_taxyear
+            FROM grants GROUP BY granter_ein ORDER BY granter_ein
+        """
+        with self._session() as session:
+            rows = session.execute(text(sql), {"eins": identities, "recipients": recipients,
+                                              "min_year": min_taxyear, "max_year": max_taxyear}).mappings().all()
+        indexed = {row["ein"]: row for row in rows}
+        results = []
+        for identity in identities:
+            row = indexed.get(identity)
+            def number(key):
+                return int(row[key]) if row is not None and row[key] is not None else None
+            results.append(FunderPortfolioMetrics(
+                ein=identity, total_portfolio_count=number("total_portfolio_count"),
+                total_portfolio_amount=number("total_portfolio_amount"),
+                scoped_recipient_count=number("scoped_recipient_count") if recipient_eins is not None else None,
+                scoped_grant_amount=number("scoped_grant_amount") if recipient_eins is not None else None,
+                grant_count=number("grant_count") or 0,
+                unidentified_recipient_grant_count=number("unidentified_recipient_grant_count") or 0,
+                first_taxyear=number("first_taxyear"), last_taxyear=number("last_taxyear"),
+                scope_min_taxyear=min_taxyear, scope_max_taxyear=max_taxyear,
+                unidentified_recipient_grant_amount=number("unidentified_recipient_grant_amount"),
+            ))
+        return results
 
     def get_grant_summaries(
         self,

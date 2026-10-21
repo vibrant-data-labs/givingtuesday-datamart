@@ -67,6 +67,31 @@ class FunderProfile(FunderIdentity):
 
 
 @dataclass(frozen=True)
+class FunderPortfolioMetrics:
+    """Source-wide grant dollars and identifiable recipient counts, with an optional scope.
+
+    Source-wide metrics use all available tax years. Scoped metrics can use a
+    recipient set and year bounds. Amounts are reported grant dollars from
+    unioned_grants, never a recipient's aggregate contributions. A funder
+    without source grant rows has unknown totals, rather than zero funding.
+    """
+
+    ein: str
+    total_portfolio_count: int | None
+    total_portfolio_amount: int | None
+    scoped_recipient_count: int | None
+    scoped_grant_amount: int | None
+    grant_count: int
+    unidentified_recipient_grant_count: int
+    first_taxyear: int | None
+    last_taxyear: int | None
+    scope_min_taxyear: int | None
+    scope_max_taxyear: int | None
+    unidentified_recipient_grant_amount: int | None = None
+    source_ref: str = "givingtuesday_datamart.public.unioned_grants"
+
+
+@dataclass(frozen=True)
 class NonprofitHit(NamedIdentity):
     """Result of an FTS search over ``public.nonprofit_text``.
 

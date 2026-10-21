@@ -492,6 +492,19 @@ application IDs, description formatting, missing-source reports and publication.
 Use `dataclasses.asdict()` for plain records; timestamps retain `datetime` values
 (use `json.dumps(..., default=str)` when exporting JSON).
 
+### Funder portfolio metrics
+
+`get_funder_portfolio_metrics(eins, recipient_eins=..., min_taxyear=..., max_taxyear=...)`
+returns `FunderPortfolioMetrics` in one bulk aggregate query. Source-wide counts
+and grant-dollar totals span all available years in `unioned_grants`. Optional
+recipient-set metrics use inclusive year bounds without restricting the totals.
+Counts deduplicate recipient EINs across years; dollar sums retain every source
+payment. Portfolio counts exclude unidentified recipients. Total dollars include every
+reported grant amount, including unidentified recipients; those rows and their
+amounts are reported separately and cannot contribute to a recipient scope. Missing amounts remain null; unknown funders retain null totals.
+Integer dollar amounts preserve source precision. The client owns no LFT-specific
+IDs, merged-organization counts, or UI filtering logic.
+
 ### `search_nonprofits` — `search_mode` semantics
 
 `search_mode` picks both the indexed `tsvector` and the `tsquery`
