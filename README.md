@@ -472,7 +472,38 @@ years = client.get_basic_fields(eins=["123456789"], min_taxyear=2018)
 # (990 Part VIII line 1e, None when blank) and total_cash_contributions_no_gov
 grants_received = client.get_grants(eins=["123456789"], role="grantee")
 grants_made = client.get_grants(eins=["123456789"], role="granter")
+funder_profiles = client.get_funder_profiles(["110303001", "23-2888152"])
 ```
+
+### Bulk funder profiles
+
+Client 0.2.1 adds `get_funder_profiles(eins)`, returning frozen `FunderProfile`
+records keyed by normalized EIN. It deduplicates and sorts inputs and queries
+at most 1,000 EINs per batch. Malformed identifiers fail before database access.
+Unknown identifiers still return a record with null metadata and both
+`has_nonprofit_record` and `has_funder_record` false.
+
+Each profile carries `businessname1`, `businessname2`, `dba_name`, website,
+city/state/country, latest tax year, optional filing text, canonical/text build
+timestamps, presence flags, and `source_ref` provenance. PF canonical names take
+precedence; PF DBA is null. Website and filing text come from the nonprofit
+surface when present. Regular 990 DBA joins its two nonblank lines. Callers own
+application IDs, description formatting, missing-source reports and publication.
+Use `dataclasses.asdict()` for plain records; timestamps retain `datetime` values
+(use `json.dumps(..., default=str)` when exporting JSON).
+
+### Funder portfolio metrics
+
+`get_funder_portfolio_metrics(eins, recipient_eins=..., min_taxyear=..., max_taxyear=...)`
+returns `FunderPortfolioMetrics` in one bulk aggregate query. Source-wide counts
+and grant-dollar totals span all available years in `unioned_grants`. Optional
+recipient-set metrics use inclusive year bounds without restricting the totals.
+Counts deduplicate recipient EINs across years; dollar sums retain every source
+payment. Portfolio counts exclude unidentified recipients. Total dollars include every
+reported grant amount, including unidentified recipients; those rows and their
+amounts are reported separately and cannot contribute to a recipient scope. Missing amounts remain null; unknown funders retain null totals.
+Integer dollar amounts preserve source precision. The client owns no LFT-specific
+IDs, merged-organization counts, or UI filtering logic.
 
 ### `search_nonprofits` — `search_mode` semantics
 

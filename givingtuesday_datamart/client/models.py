@@ -44,6 +44,54 @@ class FunderIdentity:
 
 
 @dataclass(frozen=True)
+class FunderProfile(FunderIdentity):
+    """Current GT funder metadata, with source timestamps and optional filing text.
+
+    PF names win over regular 990 names. PF DBA is absent; website/text
+    come from the nonprofit surface when available. Unknown EINs retain
+    their EIN with null metadata and both presence flags false.
+    """
+
+    website: str | None
+    city: str | None
+    state: str | None
+    country: str | None
+    latest_taxyear: int | None
+    source_built_at: datetime | None
+    source_form: str | None
+    filing_text: str | None
+    text_built_at: datetime | None
+    has_nonprofit_record: bool
+    has_funder_record: bool
+    source_ref: str = "givingtuesday_datamart.public.nonprofit_canonical/funder_canonical/nonprofit_text"
+
+
+@dataclass(frozen=True)
+class FunderPortfolioMetrics:
+    """Source-wide grant dollars and identifiable recipient counts, with an optional scope.
+
+    Source-wide metrics use all available tax years. Scoped metrics can use a
+    recipient set and year bounds. Amounts are reported grant dollars from
+    unioned_grants, never a recipient's aggregate contributions. A funder
+    without source grant rows has unknown totals, rather than zero funding.
+    """
+
+    ein: str
+    total_portfolio_count: int | None
+    total_portfolio_amount: int | None
+    scoped_recipient_count: int | None
+    scoped_grant_amount: int | None
+    grant_count: int
+    unidentified_recipient_grant_count: int
+    first_taxyear: int | None
+    last_taxyear: int | None
+    scope_min_taxyear: int | None
+    scope_max_taxyear: int | None
+    unidentified_recipient_grant_amount: int | None = None
+    source_ref: str = "givingtuesday_datamart.public.unioned_grants"
+
+
+@dataclass(frozen=True)
 class NonprofitHit(NamedIdentity):
     """Result of an FTS search over ``public.nonprofit_text``.
 
