@@ -47,6 +47,20 @@ function load(file) {
   assert.match(html, /aria-label="Search ntee designation"/);
   assert.match(html, /<details/);
   assert.match(html, /aria-pressed="true"/);
+  const { sanitizeLocation, cityKeys } = load('src/lib/location.ts');
+  assert.deepEqual(sanitizeLocation(' fl ', '  Ft.   Lauderdale '), { state: 'FL', city: 'Ft. Lauderdale' });
+  assert.deepEqual(sanitizeLocation('ZZ', '123'), { state: '', city: '' });
+  assert.deepEqual(cityKeys('Ft. Lauderdale'), ['FORTLAUDERDALE', 'FTLAUDERDALE']);
+  assert.deepEqual(cityKeys('Winston-Salem'), ['WINSTONSALEM']);
+  assert.deepEqual(cityKeys("Coeur d'Alene"), ['COEURDALENE']);
+  assert.deepEqual(cityKeys('Cañon City'), ['CANONCITY', 'CANONCY']);
+  assert.deepEqual(cityKeys('N Colorado Spgs'), ['NORTHCOLORADOSPRINGS', 'NORTHCOLORADOSPGS', 'NORTHCOLORADOSPRGS', 'NCOLORADOSPRINGS', 'NCOLORADOSPGS', 'NCOLORADOSPRGS']);
+  assert.equal(cityKeys('St St St St St St St').length, 64, 'Abbreviation keys are capped');
+  const { LocationFilters } = load('src/components/search/LocationFilters.tsx');
+  const locationHtml = require('react-dom/server').renderToStaticMarkup(require('react').createElement(LocationFilters, { filters: { state: 'FL', city: 'Fort Lauderdale' } }));
+  assert.match(locationHtml, /<option value="FL" selected="">Florida<\/option>/);
+  assert.match(locationHtml, /value="Fort Lauderdale"/);
+  assert.match(locationHtml, />Clear<\/button>/);
   if (live) require('@next/env').loadEnvConfig(process.cwd());
 
   const { searchOrgs } = load('src/lib/queries/search.ts');
@@ -77,6 +91,18 @@ function load(file) {
       assert(query.sql.indexOf('BTRIM(ntee_cd)') < query.sql.indexOf('matched AS'), 'Classification filters precede aggregation');
     }
     queries.length = 0;
+    const cityKeyExpr = "REGEXP_REPLACE(UPPER(city), '[^A-Z]', '', 'g')";
+    assert(fs.readFileSync('../givingtuesday_datamart/canonical/build.py', 'utf8').includes(cityKeyExpr), 'Canonical build indexes the city key the search uses');
+    await searchOrgs('', 'all', 1, 5, signals, false, { ntee: '', subsection: '', state: 'FL', city: 'Ft Lauderdale' });
+    assert.equal(queries.length, 2);
+    for (const query of queries) {
+      assert(query.parameters.includes('FL'));
+      assert(query.parameters.some(p => Array.isArray(p) && p.join() === 'FORTLAUDERDALE,FTLAUDERDALE'));
+      assert(query.sql.includes(`${cityKeyExpr} = ANY(`), 'City filter uses the indexed key');
+      assert(query.sql.indexOf(cityKeyExpr) < query.sql.indexOf('matched AS'), 'Location filters precede aggregation');
+      assert(query.sql.includes("REGEXP_REPLACE(UPPER(nc.city)") || query.sql.includes("REGEXP_REPLACE(UPPER(fc.city)"), 'Outer WHERE filters FTS/EIN/URL hits too');
+    }
+    queries.length = 0;
     await searchOrgs('school', 'all', 2, 5, signals, true, filters);
     assert.equal(queries.length, 1, 'DAF search excludes foundations');
     assert(queries[0].parameters.includes(10), 'Page two fetches ten rows before merge');
@@ -97,6 +123,24 @@ function load(file) {
     const renamed = await searchOrgs('COEFFICIENT GIVING', 'all', 1, 25, signals, false, { ntee: '', subsection: '' });
     assert(renamed.results.some(org => org.ein === '812644663'), 'IRS name finds the renamed Action Fund');
     console.log('Live grant-only, canonical, and IRS-name search checks passed');
+    // Fort Lauderdale is split between FT and FORT spellings, some glued.
+    const { sql } = require('kysely');
+    const { getDb } = load('src/lib/db.ts');
+    const where = { ntee: '', subsection: '', state: 'FL', city: 'Fort Lauderdale' };
+    const located = await searchOrgs('', 'all', 1, 25, signals, false, where);
+    const expected = await sql`
+      SELECT
+        (SELECT COUNT(*) FROM public.nonprofit_canonical WHERE state = 'FL' AND UPPER(city) IN ('FORT LAUDERDALE', 'FT LAUDERDALE', 'FTLAUDERDALE', 'FORTLAUDERDALE'))
+        + (SELECT COUNT(*) FROM public.funder_canonical WHERE state = 'FL' AND UPPER(city) IN ('FORT LAUDERDALE', 'FT LAUDERDALE', 'FTLAUDERDALE', 'FORTLAUDERDALE')) AS both,
+        (SELECT COUNT(*) FROM public.nonprofit_canonical WHERE state = 'FL' AND UPPER(city) = 'FORT LAUDERDALE')
+        + (SELECT COUNT(*) FROM public.funder_canonical WHERE state = 'FL' AND UPPER(city) = 'FORT LAUDERDALE') AS spelled_out
+    `.execute(getDb());
+    assert.equal(located.total, Number(expected.rows[0].both), 'City filter finds both spellings, nothing else');
+    assert(located.total > Number(expected.rows[0].spelled_out));
+    assert(located.results.every(org => org.state === 'FL' && /^(FORT|FT) ?LAUDERDALE$/i.test(org.city)));
+    const texans = await searchOrgs('food bank', 'all', 1, 25, { name: true, narrative: true, url: true }, false, { ntee: '', subsection: '', state: 'TX', city: '' });
+    assert(texans.total > 0 && texans.results.every(org => org.state === 'TX'), 'State filter applies to name and narrative hits');
+    console.log(`Live location checks passed: Fort Lauderdale FL ${located.total} (${expected.rows[0].spelled_out} spelled out), food bank TX ${texans.total}`);
   } else {
     assert.equal(await getOrgProfile('000000000'), null, 'Unseen EIN still returns not found');
     grantFixture = { name: 'CLIMATE POWER ACTION', name2: null, city: 'WASHINGTON', state: 'DC' };
