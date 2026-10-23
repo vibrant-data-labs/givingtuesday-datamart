@@ -1,11 +1,11 @@
 'use client';
-import type { ClassificationFilters } from '@/lib/ntee';
 
 import { useEffect } from 'react';
 import { useSearch } from '@/hooks/useSearch';
 import { SearchResults } from '@/components/search/SearchResults';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import type { OrgTypeFilter, SearchSignals } from '@/lib/utils/validation';
+import type { OrgTypeFilter, SearchFilters, SearchSignals } from '@/lib/utils/validation';
+import { hasSearchFilters } from '@/lib/utils/validation';
 
 interface SearchResultsClientProps {
   q: string;
@@ -14,7 +14,7 @@ interface SearchResultsClientProps {
   limit: number;
   signals: SearchSignals;
   dafOnly: boolean;
-  filters: ClassificationFilters;
+  filters: SearchFilters;
 }
 
 export function SearchResultsClient({
@@ -29,7 +29,7 @@ export function SearchResultsClient({
   const { data, isLoading, isError, error } = useSearch(q, type, page, limit, signals, dafOnly, filters);
 
   useEffect(() => {
-    if (q || filters.ntee || filters.subsection) sessionStorage.setItem('lastSearchUrl', window.location.pathname + window.location.search);
+    if (q || hasSearchFilters(filters)) sessionStorage.setItem('lastSearchUrl', window.location.pathname + window.location.search);
   }, [q, type, page, limit, signals, dafOnly, filters]);
 
   if (isLoading) return <LoadingSpinner />;

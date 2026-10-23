@@ -1,10 +1,9 @@
 'use client';
-import type { ClassificationFilters } from '@/lib/ntee';
 
 import { useQuery } from '@tanstack/react-query';
 import type { SearchResponse } from '@/types/org';
-import type { OrgTypeFilter, SearchSignals } from '@/lib/utils/validation';
-import { signalsToParam, anySignalActive } from '@/lib/utils/validation';
+import type { OrgTypeFilter, SearchFilters, SearchSignals } from '@/lib/utils/validation';
+import { signalsToParam, anySignalActive, hasSearchFilters } from '@/lib/utils/validation';
 
 async function fetchSearch(
   q: string,
@@ -13,7 +12,7 @@ async function fetchSearch(
   limit: number,
   signals: SearchSignals,
   dafOnly: boolean,
-  filters: ClassificationFilters,
+  filters: SearchFilters,
 ): Promise<SearchResponse> {
   const params = new URLSearchParams({
     q,
@@ -31,6 +30,8 @@ async function fetchSearch(
   if (dafOnly) params.set('daf', 'true');
   if (filters.ntee) params.set('ntee', filters.ntee);
   if (filters.subsection) params.set('subsection', filters.subsection);
+  if (filters.state) params.set('state', filters.state);
+  if (filters.city) params.set('city', filters.city);
   const res = await fetch(`/api/search?${params.toString()}`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -46,9 +47,9 @@ export function useSearch(
   limit: number,
   signals: SearchSignals,
   dafOnly: boolean,
-  filters: ClassificationFilters,
+  filters: SearchFilters,
 ) {
-  const hasQuery = q.length > 0 || !!filters.ntee || !!filters.subsection;
+  const hasQuery = q.length > 0 || hasSearchFilters(filters);
   return useQuery({
     queryKey: ['search', q, type, page, limit, signals, dafOnly, filters],
     queryFn: () => fetchSearch(q, type, page, limit, signals, dafOnly, filters),

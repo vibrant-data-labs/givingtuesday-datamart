@@ -1,11 +1,11 @@
-import type { ClassificationFilters } from '@/lib/ntee';
 import { cache } from 'react';
 import { unstable_cache } from 'next/cache';
 import { sql } from 'kysely';
 import { getDb } from '@/lib/db';
 import type { OrgResult } from '@/types/org';
+import { cityKeys } from '@/lib/location';
 import { normalizeDomainForQuery } from '@/lib/utils/validation';
-import type { OrgTypeFilter, SearchSignals } from '@/lib/utils/validation';
+import type { OrgTypeFilter, SearchFilters, SearchSignals } from '@/lib/utils/validation';
 
 const SEARCH_CACHE_REVALIDATE_SECONDS = 600; // 10 minutes
 
@@ -54,13 +54,26 @@ type RawSearchRow = {
   total_count: string | number;
 };
 
+// Structured filters, applied twice per arm: inside name_hits so filter-only
+// browsing never aggregates the whole canonical table, and in the outer WHERE
+// so FTS, EIN and URL hits obey them too. `alias` qualifies the outer query's
+// columns. Each expression matches an index from canonical/build.py
+// (_add_classification_indexes, _add_location_indexes); keep them in sync.
+function filterConditions(filters: SearchFilters, alias?: 'nc' | 'fc') {
+  const col = sql.raw(alias ? `${alias}.` : '');
+  return sql`${filters.ntee ? sql`UPPER(BTRIM(${col}ntee_cd)) LIKE ${filters.ntee + '%'}` : sql`TRUE`}
+      AND ${filters.subsection ? sql`LPAD(BTRIM(${col}subsection), 2, '0') = ${filters.subsection}` : sql`TRUE`}
+      AND ${filters.state ? sql`${col}state = ${filters.state}` : sql`TRUE`}
+      AND ${filters.city ? sql`REGEXP_REPLACE(UPPER(${col}city), '[^A-Z]', '', 'g') = ANY(${cityKeys(filters.city)})` : sql`TRUE`}`;
+}
+
 async function searchNonprofits(
   rawQuery: string,
   einDigits: string | null,
   signals: SearchSignals,
   fetchLimit: number,
   dafOnly: boolean,
-  filters: ClassificationFilters,
+  filters: SearchFilters,
 ): Promise<ArmResult> {
   const db = getDb();
   const likeParam = `%${rawQuery}%`;
@@ -112,10 +125,7 @@ async function searchNonprofits(
       SELECT ein, 1000000.0::float8 AS rank
       FROM public.nonprofit_canonical
       WHERE (${useName} OR ${rawQuery === ''})
-        -- Filter candidates before matched GROUP BY. In filter-only browsing
-        -- this avoids aggregating the entire canonical universe.
-        AND ${filters.ntee ? sql`UPPER(BTRIM(ntee_cd)) LIKE ${filters.ntee + '%'}` : sql`TRUE`}
-        AND ${filters.subsection ? sql`LPAD(BTRIM(subsection), 2, '0') = ${filters.subsection}` : sql`TRUE`}
+        AND ${filterConditions(filters)}
         AND (name ILIKE ${likeParam}
           OR name_secondary ILIKE ${likeParam}
           OR irs_name ILIKE ${likeParam}
@@ -165,8 +175,7 @@ async function searchNonprofits(
     FROM matched m
     JOIN public.nonprofit_canonical nc USING (ein)
     ${dafOnly ? sql`JOIN daf_eligible de USING (ein)` : sql``}
-    WHERE ${filters.ntee ? sql`UPPER(BTRIM(nc.ntee_cd)) LIKE ${filters.ntee + '%'}` : sql`TRUE`}
-      AND ${filters.subsection ? sql`LPAD(BTRIM(nc.subsection), 2, '0') = ${filters.subsection}` : sql`TRUE`}
+    WHERE ${filterConditions(filters, 'nc')}
     ORDER BY m.rank DESC,
              NULLIF(nc.latest_taxyear, '')::int DESC NULLS LAST,
              nc.name ASC,
@@ -192,7 +201,7 @@ async function searchFoundations(
   einDigits: string | null,
   signals: SearchSignals,
   fetchLimit: number,
-  filters: ClassificationFilters,
+  filters: SearchFilters,
 ): Promise<ArmResult> {
   // Funders have no narrative FTS or URL surface yet (nonprofit_text is
   // 990-only; funder_canonical has no website). Only the name signal
@@ -206,10 +215,7 @@ async function searchFoundations(
       SELECT ein, 1000000.0::float8 AS rank
       FROM public.funder_canonical
       WHERE (${useName} OR ${rawQuery === ''})
-        -- Filter candidates before matched GROUP BY. In filter-only browsing
-        -- this avoids aggregating the entire canonical universe.
-        AND ${filters.ntee ? sql`UPPER(BTRIM(ntee_cd)) LIKE ${filters.ntee + '%'}` : sql`TRUE`}
-        AND ${filters.subsection ? sql`LPAD(BTRIM(subsection), 2, '0') = ${filters.subsection}` : sql`TRUE`}
+        AND ${filterConditions(filters)}
         AND (name ILIKE ${likeParam} OR name_secondary ILIKE ${likeParam}
           OR irs_name ILIKE ${likeParam}
           OR irs_sort_name ILIKE ${likeParam})
@@ -239,8 +245,7 @@ async function searchFoundations(
       COUNT(*) OVER () AS total_count
     FROM matched m
     JOIN public.funder_canonical fc USING (ein)
-    WHERE ${filters.ntee ? sql`UPPER(BTRIM(fc.ntee_cd)) LIKE ${filters.ntee + '%'}` : sql`TRUE`}
-      AND ${filters.subsection ? sql`LPAD(BTRIM(fc.subsection), 2, '0') = ${filters.subsection}` : sql`TRUE`}
+    WHERE ${filterConditions(filters, 'fc')}
     ORDER BY m.rank DESC,
              NULLIF(fc.latest_taxyear, '')::int DESC NULLS LAST,
              fc.name ASC,
@@ -293,7 +298,7 @@ async function runSearch(
   limit: number,
   signals: SearchSignals,
   dafOnly: boolean,
-  filters: ClassificationFilters,
+  filters: SearchFilters,
 ): Promise<{ results: OrgResult[]; total: number }> {
   const offset = (page - 1) * limit;
   // Each arm fetches at most (offset + limit) rows so the cross-arm merge
@@ -381,7 +386,7 @@ export const searchOrgs = cache(async function searchOrgs(
   limit: number,
   signals: SearchSignals,
   dafOnly: boolean,
-  filters: ClassificationFilters,
+  filters: SearchFilters,
 ): Promise<{ results: OrgResult[]; total: number }> {
   return getCachedSearch(rawQuery, orgType, page, limit, signals, dafOnly, filters);
 });

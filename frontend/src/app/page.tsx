@@ -1,5 +1,5 @@
 import { ClassificationFilters } from '@/components/search/ClassificationFilters';
-import { sanitizeClassifications } from '@/lib/ntee';
+import { LocationFilters } from '@/components/search/LocationFilters';
 export const revalidate = 3600; // re-render at most once per hour
 
 import Link from 'next/link';
@@ -18,6 +18,8 @@ import {
   legacyModeToSignals,
   anySignalActive,
   sanitizeDafOnly,
+  sanitizeSearchFilters,
+  hasSearchFilters,
 } from '@/lib/utils/validation';
 
 interface HomeProps {
@@ -31,6 +33,8 @@ interface HomeProps {
     daf?: string;
     ntee?: string;
     subsection?: string;
+    state?: string;
+    city?: string;
   };
 }
 
@@ -47,10 +51,10 @@ export default function HomePage({ searchParams }: HomeProps) {
       : legacyModeToSignals(searchParams.mode) ?? sanitizeSearchSignals(null);
   const dafOnly = sanitizeDafOnly(searchParams.daf);
 
-  const filters = sanitizeClassifications(searchParams.ntee, searchParams.subsection);
-  const hasQuery = q.length > 0 || !!filters.ntee || !!filters.subsection;
+  const filters = sanitizeSearchFilters(searchParams);
+  const hasQuery = q.length > 0 || hasSearchFilters(filters);
   const signalsActive = anySignalActive(signals);
-  const canSearch = signalsActive || (!q && (!!filters.ntee || !!filters.subsection));
+  const canSearch = signalsActive || (!q && hasSearchFilters(filters));
 
   return (
     <div className="relative">
@@ -98,6 +102,7 @@ export default function HomePage({ searchParams }: HomeProps) {
           </div>
 
           <Suspense fallback={null}><ClassificationFilters filters={filters} /></Suspense>
+          <Suspense fallback={null}><LocationFilters filters={filters} /></Suspense>
 
           {q && signalsActive && (
             <p className="text-xs text-muted-foreground">

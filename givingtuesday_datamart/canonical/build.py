@@ -323,6 +323,23 @@ def _add_classification_indexes(session, table: str) -> None:
     ))
 
 
+def _add_location_indexes(session, table: str) -> None:
+    """Match the frontend's state and city filters (queries/search.ts).
+
+    The city key drops case, spaces and punctuation, so WINSTON-SALEM,
+    WINSTON SALEM and WINSTONSALEM share one key; the frontend turns a typed
+    city into every key its USPS abbreviations allow (FT/FORT, SPGS/SPRINGS)
+    and matches with = ANY, which this btree serves. Same build and live-table
+    notes as _add_classification_indexes.
+    """
+    name = table.rsplit(".", 1)[-1]
+    session.execute(text(f"CREATE INDEX ix_{name}_state ON {table} (state)"))
+    session.execute(text(
+        f"CREATE INDEX ix_{name}_city_key ON {table} "
+        "(REGEXP_REPLACE(UPPER(city), '[^A-Z]', '', 'g'))"
+    ))
+
+
 def _build_nonprofit_canonical(session, table: str = NONPROFIT_CANONICAL_TABLE) -> int:
     """DROP + CREATE + populate public.nonprofit_canonical. Returns rowcount.
 
@@ -509,6 +526,7 @@ def _build_nonprofit_canonical(session, table: str = NONPROFIT_CANONICAL_TABLE) 
         )
     )
     _add_classification_indexes(session, table)
+    _add_location_indexes(session, table)
     count = session.execute(
         text(f"SELECT COUNT(*) FROM {table}")
     ).scalar_one()
@@ -768,6 +786,7 @@ def _build_funder_canonical(session, table: str = FUNDER_CANONICAL_TABLE) -> int
         )
     )
     _add_classification_indexes(session, table)
+    _add_location_indexes(session, table)
     count = session.execute(
         text(f"SELECT COUNT(*) FROM {table}")
     ).scalar_one()

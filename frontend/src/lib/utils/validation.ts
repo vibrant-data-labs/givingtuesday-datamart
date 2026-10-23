@@ -1,3 +1,19 @@
+import { sanitizeClassifications, type ClassificationFilters } from '@/lib/ntee';
+import { sanitizeLocation, type LocationFilters } from '@/lib/location';
+
+// Structured filters narrow results on their own, so any one of them lets a
+// search run without a query (browse mode).
+export type SearchFilters = ClassificationFilters & LocationFilters;
+export function sanitizeSearchFilters(params: Partial<Record<keyof SearchFilters, unknown>>): SearchFilters {
+  return {
+    ...sanitizeClassifications(params.ntee, params.subsection),
+    ...sanitizeLocation(params.state, params.city),
+  };
+}
+export function hasSearchFilters(filters: SearchFilters): boolean {
+  return !!(filters.ntee || filters.subsection || filters.state || filters.city);
+}
+
 export function sanitizeSearchQuery(q: string): string {
   return q.trim().slice(0, 200);
 }
