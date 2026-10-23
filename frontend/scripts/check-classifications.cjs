@@ -21,7 +21,10 @@ function load(file) {
     if (id === 'next/navigation') return { useRouter: () => ({ push() {} }), useSearchParams: () => new URLSearchParams() };
     if (id === 'next/cache') return { unstable_cache: f => f };
     if (id === '@/lib/db' && !live) return { getDb: () => compilerDb };
-    if (id.startsWith('@/')) return load(path.join(__dirname, '../src', id.slice(2) + '.ts'));
+    if (id.startsWith('@/')) {
+      const base = path.join(__dirname, '../src', id.slice(2));
+      return load(fs.existsSync(`${base}.ts`) ? `${base}.ts` : `${base}.tsx`);
+    }
     if (id.endsWith('.json')) return require(path.resolve(path.dirname(file), id));
     return require(id);
   };
@@ -58,7 +61,12 @@ function load(file) {
   assert.equal(cityKeys('St St St St St St St').length, 64, 'Abbreviation keys are capped');
   const { LocationFilters } = load('src/components/search/LocationFilters.tsx');
   const locationHtml = require('react-dom/server').renderToStaticMarkup(require('react').createElement(LocationFilters, { filters: { state: 'FL', city: 'Fort Lauderdale' } }));
-  assert.match(locationHtml, /<option value="FL" selected="">Florida<\/option>/);
+  assert.match(locationHtml, /aria-label="Search state"/);
+  assert.match(locationHtml, /placeholder="Search states or codes…"/);
+  assert.match(locationHtml, /<span id="[^"]+-value" class="truncate">Florida<\/span>/);
+  assert.match(locationHtml, /aria-pressed="true"[^>]*>Florida<span[^>]*>FL<\/span>/);
+  assert.match(locationHtml, /<details open=""[^>]*><summary[^>]*>States and DC</, 'States and DC start expanded');
+  assert.doesNotMatch(locationHtml, /<details open=""[^>]*><summary[^>]*>Military mail</, 'Smaller groups start folded');
   assert.match(locationHtml, /value="Fort Lauderdale"/);
   assert.match(locationHtml, />Clear<\/button>/);
   if (live) require('@next/env').loadEnvConfig(process.cwd());
