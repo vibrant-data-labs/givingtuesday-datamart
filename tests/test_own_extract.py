@@ -279,3 +279,13 @@ def test_foundation_status_reads_the_2025v4_code():
     filing = parse.parse(renamed, OID, (GRANTS,))
     values = [row["sigocpyrfsta"] for row in extract.rows(filing, "privategrants", [mapping], "b")]
     assert values == [None, "I"]
+
+
+def test_schedule_i_leaves_the_filer_name_line_2_empty_as_gt_does():
+    # GT fills it beside line 1 in the 990-PF grants, never on Schedule I, whose
+    # `_current` dedup hashes it: a patch mixing the two must agree there.
+    concordance = extract.load()
+    paths = {t: next(m.paths for m in concordance[t] if m.column == "filername2")
+             for t in ("privategrants", "grants_to_domestic_organizations")}
+    assert paths == {"privategrants": ("/ReturnHeader/Filer/BusinessName/BusinessNameLine2Txt",),
+                     "grants_to_domestic_organizations": ()}

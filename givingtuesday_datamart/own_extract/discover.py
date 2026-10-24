@@ -244,11 +244,22 @@ _BY_ANALOGY.update({("basic_fields_ez", c): f"ReturnHeader/Filer/ForeignAddress/
     ("filerfor1", "AddressLine1Txt"), ("filerfor2", "AddressLine2Txt"), ("filerforcity", "CityNm"),
     ("filerforctry", "CountryCd"), ("filerforpost", "ForeignPostalCd"),
     ("filerforstate", "ProvinceOrStateNm"))})
-_BY_ANALOGY.update({(t, "filername2"): "/ReturnHeader/Filer/BusinessName/BusinessNameLine2Txt"
-                    for t in ("grants_to_domestic_organizations", "schedule_o", "privategrants",
-                              "privategrants_future", "programs_ez")})
 for _key, _path in _BY_ANALOGY.items():
     OVERRIDES[_key] = (_path, "by analogy with its sibling column (GT empty on every 01A return)")
+
+# The filer's name line 2 in the group tables, which the search proposed for
+# none of them. GT fills it beside line 1 in the grant and program tables but
+# on no Schedule I row (2024-2026 sampled): there ours stays empty too, since
+# `_current`'s dedup hashes it and the matcher reads it as the granter's name.
+for _table in ("privategrants", "privategrants_future", "programs_ez"):
+    OVERRIDES[(_table, "filername2")] = (
+        "/ReturnHeader/Filer/BusinessName/BusinessNameLine2Txt",
+        "the header's name line 2, as filername1; GT fills it (the search proposed none)")
+OVERRIDES[("schedule_o", "filername2")] = (
+    "/ReturnHeader/Filer/BusinessName/BusinessNameLine2Txt",
+    "the header's name line 2, as filername1; not compared (GT's table has no EIN index to sample by)")
+OVERRIDES[("grants_to_domestic_organizations", "filername2")] = (
+    "", "GT leaves it empty on every Schedule I row")
 
 # GT's numbered columns (``_0``, ``_1`` ...) are the n-th occurrence of one
 # element. On 01A the search took occurrence 1 for some ``_0`` columns (GT

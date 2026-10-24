@@ -197,7 +197,7 @@ programs,taxyear,ReturnHeader/TaxYr,0,7180,7180,2026_TEOS_XML_01A,
 programs,url,,0,,,2026_TEOS_XML_01A,computed from the file
 grants_to_domestic_organizations,filerein,/ReturnHeader/Filer/EIN,0,7761,7761,2026_TEOS_XML_01A,
 grants_to_domestic_organizations,filername1,/ReturnHeader/Filer/BusinessName/BusinessNameLine1Txt,0,7761,7761,2026_TEOS_XML_01A,
-grants_to_domestic_organizations,filername2,/ReturnHeader/Filer/BusinessName/BusinessNameLine2Txt,0,,,2026_TEOS_XML_01A,by analogy with its sibling column (GT empty on every 01A return)
+grants_to_domestic_organizations,filername2,,0,,,2026_TEOS_XML_01A,GT leaves it empty on every Schedule I row
 grants_to_domestic_organizations,filesha256,,0,,,2026_TEOS_XML_01A,computed from the file
 grants_to_domestic_organizations,rectabaddcit,USAddress/CityNm,0,7645,7761,2026_TEOS_XML_01A,
 grants_to_domestic_organizations,rectabaddsta,USAddress/StateAbbreviationCd,0,7645,7761,2026_TEOS_XML_01A,
@@ -225,7 +225,7 @@ grants_to_domestic_organizations,taxyear,/ReturnHeader/TaxYr,0,7761,7761,2026_TE
 grants_to_domestic_organizations,url,,0,,,2026_TEOS_XML_01A,computed from the file
 schedule_o,filerein,/ReturnHeader/Filer/EIN,0,55132,55132,2026_TEOS_XML_01A,
 schedule_o,filername1,/ReturnHeader/Filer/BusinessName/BusinessNameLine1Txt,0,55132,55132,2026_TEOS_XML_01A,
-schedule_o,filername2,/ReturnHeader/Filer/BusinessName/BusinessNameLine2Txt,0,,,2026_TEOS_XML_01A,by analogy with its sibling column (GT empty on every 01A return)
+schedule_o,filername2,/ReturnHeader/Filer/BusinessName/BusinessNameLine2Txt,0,,,2026_TEOS_XML_01A,"the header's name line 2, as filername1; not compared (GT's table has no EIN index to sample by)"
 schedule_o,filesha256,,0,,,2026_TEOS_XML_01A,computed from the file
 schedule_o,sidfalrdesc,FormAndLineReferenceDesc,0,55132,55132,2026_TEOS_XML_01A,
 schedule_o,supinfdetexp,ExplanationTxt,0,55132,55132,2026_TEOS_XML_01A,
@@ -372,7 +372,7 @@ basic_fields_pf,ttrwneotoctn,ReturnData/IRS990PF/TrnsfrTransRlnNonchrtblEOGrp/Tr
 basic_fields_pf,url,,0,,,2026_TEOS_XML_01A,computed from the file
 privategrants,filerein,/ReturnHeader/Filer/EIN,0,8661,8661,2026_TEOS_XML_01A,
 privategrants,filername1,/ReturnHeader/Filer/BusinessName/BusinessNameLine1Txt,0,8661,8661,2026_TEOS_XML_01A,
-privategrants,filername2,/ReturnHeader/Filer/BusinessName/BusinessNameLine2Txt,0,,,2026_TEOS_XML_01A,by analogy with its sibling column (GT empty on every 01A return)
+privategrants,filername2,/ReturnHeader/Filer/BusinessName/BusinessNameLine2Txt,0,,,2026_TEOS_XML_01A,"the header's name line 2, as filername1; GT fills it (the search proposed none)"
 privategrants,filesha256,,0,,,2026_TEOS_XML_01A,computed from the file
 privategrants,sigocaffrfaco,RecipientForeignAddress/CountryCd,0,,,2026_TEOS_XML_01A,by analogy with its sibling column (GT empty on every 01A return)
 privategrants,sigocpyamoun,Amt,0,8655,8661,2026_TEOS_XML_01A,
@@ -393,7 +393,7 @@ privategrants,taxyear,/ReturnHeader/TaxYr,0,8661,8661,2026_TEOS_XML_01A,
 privategrants,url,,0,,,2026_TEOS_XML_01A,computed from the file
 privategrants_future,filerein,/ReturnHeader/Filer/EIN,0,447,447,2026_TEOS_XML_01A,
 privategrants_future,filername1,/ReturnHeader/Filer/BusinessName/BusinessNameLine1Txt,0,447,447,2026_TEOS_XML_01A,
-privategrants_future,filername2,/ReturnHeader/Filer/BusinessName/BusinessNameLine2Txt,0,,,2026_TEOS_XML_01A,by analogy with its sibling column (GT empty on every 01A return)
+privategrants_future,filername2,/ReturnHeader/Filer/BusinessName/BusinessNameLine2Txt,0,,,2026_TEOS_XML_01A,"the header's name line 2, as filername1; GT fills it (the search proposed none)"
 privategrants_future,filesha256,,0,,,2026_TEOS_XML_01A,computed from the file
 privategrants_future,sigocaffamou,Amt,0,447,447,2026_TEOS_XML_01A,
 privategrants_future,sigocaffpogo,GrantOrContributionPurposeTxt,0,447,447,2026_TEOS_XML_01A,
@@ -508,7 +508,7 @@ basic_fields_ez,websitaddres,ReturnData/IRS990EZ/WebsiteAddressTxt,0,3687,3687,2
 basic_fields_ez,url,,0,,,2026_TEOS_XML_01A,computed from the file
 programs_ez,filerein,/ReturnHeader/Filer/EIN,0,5066,5066,2026_TEOS_XML_01A,
 programs_ez,filername1,/ReturnHeader/Filer/BusinessName/BusinessNameLine1Txt,0,5066,5066,2026_TEOS_XML_01A,
-programs_ez,filername2,/ReturnHeader/Filer/BusinessName/BusinessNameLine2Txt,0,,,2026_TEOS_XML_01A,by analogy with its sibling column (GT empty on every 01A return)
+programs_ez,filername2,/ReturnHeader/Filer/BusinessName/BusinessNameLine2Txt,0,,,2026_TEOS_XML_01A,"the header's name line 2, as filername1; GT fills it (the search proposed none)"
 programs_ez,filesha256,,0,,,2026_TEOS_XML_01A,computed from the file
 programs_ez,iisopiii,/ReturnData/IRS990EZ/InfoInScheduleOPartIIIInd,0,5066,5066,2026_TEOS_XML_01A,
 programs_ez,primexempurp,/ReturnData/IRS990EZ/PrimaryExemptPurposeTxt,0,5066,5066,2026_TEOS_XML_01A,
