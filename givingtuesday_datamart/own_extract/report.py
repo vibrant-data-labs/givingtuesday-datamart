@@ -55,15 +55,19 @@ def loaded_batches(session) -> pd.DataFrame:
 _FORMS = {"basic_fields": "990", "basic_fields_pf": "990-PF", "basic_fields_ez": "990-EZ"}
 
 
-def run(session, out: Path, batch_ids: list[str] | None = None) -> str:
+def run(session, out: Path, batch_ids: list[str] | None = None,
+        tables: list[str] | None = None) -> str:
     """Write the report to ``out`` a section at a time, and return it.
 
     Each section is appended as soon as it is measured, so a run that stops
     keeps what it finished (the first full run held two and a half hours of
     results in memory and lost them). The quick checks of the newest schema
     versions come first; then each table, GT's table read once (``parity``).
+    With ``tables``, only those tables and the measures that read them.
     """
     concordance = extract.load()
+    if tables:
+        concordance = {t: m for t, m in concordance.items() if t in tables}
     stamps = loaded_batches(session)
     session.commit()          # release ingest_runs before the long measures (a loader ALTERs it)
     if batch_ids:
@@ -92,7 +96,8 @@ def run(session, out: Path, batch_ids: list[str] | None = None) -> str:
          _md(stamps.sort_values("batch")[["batch", "last_modified", "zip_sha256",
                                           "concordance_sha256", "returns_990", "returns_990pf",
                                           "returns_990ez", "schema_versions"]]))
-    emit(schema_checks(session))
+    if not tables:
+        emit(schema_checks(session))
 
     cover, gaps, periods = [], [], []
     emit("## Tables\n")
@@ -128,16 +133,20 @@ def run(session, out: Path, batch_ids: list[str] | None = None) -> str:
                         _md(pd.DataFrame(compared))]
         emit(*section)
 
-    emit("## GT's blanked Schedule I rows (recipient name line 2), priced by ours\n",
-         _md(pd.DataFrame([parity.schedule_i_line2(session)])))
-    emit("## privategrants_current's repair rules, run over our paid rows\n",
-         "Production's DDL with our rows as the source and our `basic_fields_pf` as the return",
-         "table. `(none)` is a row kept as it is.\n", _md(parity.repair_rules(session)))
-    by_period = pd.concat(periods, ignore_index=True)
-    emit("## Summary: coverage\n", _md(pd.DataFrame(cover)),
-         "## Summary: what GT does not have (all loaded batches)\n", _md(pd.DataFrame(gaps)),
-         "Returns by the year the tax period ends (2019 on):\n",
-         _md(by_period[by_period["period_ends"] >= "2019"]))
+    if "grants_to_domestic_organizations" in concordance:
+        emit("## GT's blanked Schedule I rows (recipient name line 2), priced by ours\n",
+             _md(pd.DataFrame([parity.schedule_i_line2(session)])))
+    if "privategrants" in concordance:
+        emit("## privategrants_current's repair rules, run over our paid rows\n",
+             "Production's DDL with our rows as the source and our `basic_fields_pf` as the return",
+             "table. `(none)` is a row kept as it is.\n", _md(parity.repair_rules(session)))
+    summary = ["## Summary: coverage\n", _md(pd.DataFrame(cover)),
+               "## Summary: what GT does not have (all loaded batches)\n", _md(pd.DataFrame(gaps))]
+    if periods:
+        by_period = pd.concat(periods, ignore_index=True)
+        summary += ["Returns by the year the tax period ends (2019 on):\n",
+                    _md(by_period[by_period["period_ends"] >= "2019"])]
+    emit(*summary)
     return "".join(written)
 
 

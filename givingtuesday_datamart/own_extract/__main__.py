@@ -87,15 +87,16 @@ def _config(host: str | None) -> dict:
 
 
 def _parity(args) -> int:
-    # The measures read every GT staging table in full: run them against a
-    # restored copy, never the shared production instance (2026-10-23: they
-    # filled its disk with temp files and pushed it into an OOM restart).
+    # The measures read every GT staging table in full: run them on a restored
+    # copy, or on the shared instance only in a quiet window agreed beforehand
+    # (2026-10-23: they filled its disk with temp files and pushed it into an
+    # OOM restart; the settings and per-section commits since bound both).
     with get_session(config=_config(args.host)) as session:
         if args.schema_checks:
             args.report.parent.mkdir(parents=True, exist_ok=True)
             args.report.write_text(report.schema_checks(session))
         else:
-            report.run(session, args.report, args.batch or None)   # writes as it goes
+            report.run(session, args.report, args.batch or None, args.table or None)   # writes as it goes
     print(f"wrote {args.report}")
     return 0
 
@@ -138,6 +139,8 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("parity", help="measure loaded batches against GT's tables")
     p.add_argument("--batch", action="append", help="only this batch id (repeatable)")
+    p.add_argument("--table", action="append", choices=sorted(extract.TABLES),
+                   help="only this table and the measures that read it (repeatable)")
     p.add_argument("--report", type=Path,
                    default=extract.REPO_ROOT / "data" / "own_extract" / "parity_report.md")
     p.add_argument("--host", default=None,
