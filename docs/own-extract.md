@@ -16,13 +16,15 @@ exactly like GT's, and measured them against GT's tables on every return
 both hold.
 
 - **Parity.** On the returns both hold, the return tables come out of the
-  IRS XML the way GT has them: 27 of the 29 columns production reads on the
-  990 (785,185 returns), 32 of 33 on the 990-PF (273,504), 15 of 16 on the
-  990-EZ (469,853), all of missions and programs. The misses are GT rules
-  since added to the concordance, and every batch is reloaded with it. On the grants, our 990-PF rows give the
-  same total per return as production's repaired `privategrants_current` on
-  99.1% of returns, and 99.99% of `privategrants_future_current`'s rows; 99.5%
-  of GT's Schedule I rows have an identical row of ours.
+  IRS XML the way GT has them: all 29 columns production reads on the 990
+  (785,185 returns), 32 of 33 on the 990-PF (273,504; the other is a file
+  hash on 28 returns), all 16 on the 990-EZ (469,853), all of missions,
+  programs and Schedule O (every one of GT's 6,382,813 notes). On the
+  grants, our 990-PF rows give the same total per return as production's
+  repaired `privategrants_current` on 99.1% of returns, and 99.99% of
+  `privategrants_future_current`'s rows; 99.5% of GT's Schedule I rows have
+  an identical row of ours. Production's repair rules, run over our rows,
+  only choose versions (one row aside).
 - **The newest schema.** 71% of the returns GT never released are filed
   under 2025v4. On the 73,125 2025v4 returns GT does hold, the 990-PF return
   table agrees on all 33 read columns; one IRS rename (a grant recipient's
@@ -32,13 +34,15 @@ both hold.
   later; with them 753,933 private-foundation grants ($39.2B), 677,379
   Schedule I grants ($120.1B) and 11,351 grants approved for future payment
   ($4.0B).
-- **New GT defect found.** GT blanks every Schedule I grant whose recipient
-  has a second name line ("HARVARD UNIVERSITY" / "SCHOOL OF DENTAL
-  MEDICINE"): the amount, recipient EIN, address and purpose are all NULL.
-  That is 44,525 rows in `grants_to_domestic_organizations_current`, tax
-  years 2013 to 2025, every such row GT has. In the first two 2026 batches
-  alone that is 297 grants and $28.8M of cash, 259 of them with a recipient
-  EIN GT dropped.
+- **New GT defects found.** GT blanks every Schedule I grant whose
+  recipient has a second name line ("HARVARD UNIVERSITY" / "SCHOOL OF
+  DENTAL MEDICINE"): the amount, recipient EIN, address and purpose are all
+  NULL. That is 44,525 rows in `grants_to_domestic_organizations_current`,
+  tax years 2013 to 2025, every such row GT has. In the 2024-2026 batches
+  alone it is 10,998 grants and $3.84B of cash, 9,598 of them with a
+  recipient EIN GT dropped; ours has every one. And GT loses a 990-PF's
+  application address, contact and managers when the return gives only one:
+  the application address of 61,563 of the 273,504 990-PFs both hold.
 - **Recommendation.** Patch now: put our rows in for the returns GT does
   not have (the design is below), run the `_current` rebuilds and the
   matcher, and keep GT's rows wherever GT has the return until we decide
@@ -127,11 +131,12 @@ python -m givingtuesday_datamart.own_extract discover PATH.zip    # re-propose t
 ### What was loaded
 
 Every archive the IRS serves for 2024, 2025 and 2026, loaded on
-2026-10-23 and reloaded that evening with the concordance the parity run
-corrected (SHA-256 `c9b00396f60e`). The tables hold each archive once; the
-run records in `datamart_meta.ingest_runs` and the generated report's batch
-table carry each archive's Last-Modified and SHA-256, and the reload's row
-counts equal the first load's in every table of every archive:
+2026-10-23 and reloaded twice that evening as the parity runs corrected the
+concordance. The tables hold each archive once, loaded with concordance
+SHA-256 `3d9b48d6e5e7`; the run records in `datamart_meta.ingest_runs` and
+the generated report's batch table carry each archive's Last-Modified and
+SHA-256, the same in every run of it, and each reload's row counts equal
+the first load's in every table of every archive:
 
 | year | archives | Form 990 | 990-PF | 990-EZ | schema versions (share of returns) |
 |---|---|---|---|---|---|
@@ -169,12 +174,28 @@ GT rules one path does not express, all now in the file:
   the header has no foreign address, GT takes the form body's (420 to 722
   of 785,185 returns of 2024-2026).
 
-Two corrections to what the search proposed, both measured by `parity` on
-every loaded batch: 34 columns GT left empty on every return of 01A had no
-path, and take their sibling's (name line 2 beside line 1, the foreign
-address beside the US one; 11 stay unmapped, none read by production); and
-GT's numbered columns (`_0`, `_1` ...) are the n-th occurrence of one
-element, where the search had taken occurrence 1 for some `_0`s.
+Corrections to what the search proposed, each measured by `parity` on every
+loaded batch:
+
+- **Columns the search left without a path** (34, most of them empty in GT
+  on every return of 01A) take their sibling's: the foreign address beside
+  the US one, DBA line 2 beside line 1, the filer's name line 2 in the group
+  tables beside line 1. 11 stay unmapped, none read by production.
+- **The filer's name line 2 on Schedule I** stays empty. GT fills it beside
+  line 1 in the 990-PF grant, 3B and 990-EZ program tables, but on no
+  Schedule I row of 2024-2026. Production reads it there: `_current`'s
+  Schedule I dedup hashes it to tell two grants apart, and the matcher reads
+  it as the granter's name, so a patch that mixes GT's rows and ours must
+  agree on it.
+- **GT's numbered columns** (`_0`, `_1` ...) are the n-th occurrence of one
+  element, filled only when the element repeats (a GT defect, below). Ours
+  keeps a single occurrence in `_0` and equals GT wherever GT has a value.
+
+The rule behind the last two: where production reads a column and its
+logic depends on GT's convention, ours follows GT; where production does
+not read it, ours keeps what the XML holds. So the 990's program activity
+codes for lines 4b and 4c (`activicodeo2`, `activicodeo3`), which GT never
+fills, are filled in ours on the 497 and 334 returns that report one.
 
 A return header never carries an address line 2 (none of 01A's does). GT's
 990 line 2 is the one in the form's body, as ours now is; the 990-PF's and
@@ -205,10 +226,14 @@ test of the mapping on them (`parity --schema-checks`):
 
 | table | 2025v4 returns | read columns equal to GT on every return |
 |---|---|---|
-| basic_fields (990) | 22,388 | 27 of 29: DBA line 2 empty in ours on 30, foreign country on 22 |
+| basic_fields (990) | 22,388 | 29 of 29 |
 | basic_fields_pf (990-PF) | 15,215 | 33 of 33 |
-| basic_fields_ez (990-EZ) | 35,522 | 15 of 16: foreign country empty in ours on 7 |
+| basic_fields_ez (990-EZ) | 35,522 | 16 of 16 |
 | mission_statements, programs | 22,388 | all |
+
+The same run's fill-rate check, each column of 05A-09A against 01A-04A,
+flags nothing since the foundation-status rename is read (it was the one
+column it flagged before: 42.6% filled to 9.2%).
 
 Across every mapped field of the group tables, batch 07A shows one more
 shift between 2024v5 and 2025v4 with no new element beside it: Schedule I's
@@ -217,13 +242,14 @@ valuation method and non-cash description (about 80% filled to 7-10%), so
 
 ## Parity with GT
 
-Measured on 2026-10-23 by `own_extract parity` over all 38 batches as first
-loaded (concordance SHA-256 `a6523dd0969c`). The fixes this run found are in
-the file since, and every batch was reloaded with it that evening
-(`c9b00396f60e`); the numbers below are the first load's, so the misses
-those fixes address are counted in them until the next `parity` run. The
-report lands in `data/own_extract/parity_report.md` (git-ignored); the
-numbers here are its.
+Measured on 2026-10-23 by `own_extract parity` over all 38 batches, in two
+runs. The first, on the batches as first loaded (concordance SHA-256
+`a6523dd0969c`), found the corrections above. The second, after every batch
+was reloaded with them (`c9b00396f60e`), measured everything below in 1 h
+20 min; it found the Schedule I name-line-2 rule, and Schedule I alone was
+measured again after the last reload (`parity --table`, concordance
+`3d9b48d6e5e7`, which changes nothing else). The report lands in
+`data/own_extract/parity_report.md` (git-ignored); the numbers here are its.
 
 ### Return tables
 
@@ -232,50 +258,50 @@ row per url stands for the return.
 
 | table | returns both hold | read columns equal on every return | all columns |
 |---|---|---|---|
-| basic_fields (990) | 785,185 | 27 of 29 | 157 of 164 |
+| basic_fields (990) | 785,185 | 29 of 29 | 163 of 164 |
 | mission_statements | 785,185 | 3 of 3 | 9 of 9 |
-| programs | 785,185 | 5 of 5 | 23 of 23 |
-| basic_fields_pf (990-PF) | 273,504 | 32 of 33 | 111 of 137 |
-| basic_fields_ez (990-EZ) | 469,853 | 15 of 16 | 83 of 95 |
+| programs | 785,185 | 5 of 5 | 21 of 23 |
+| basic_fields_pf (990-PF) | 273,504 | 32 of 33 | 113 of 137 |
+| basic_fields_ez (990-EZ) | 469,853 | 16 of 16 | 88 of 95 |
 
-The misses, each explained:
+On the first load the 990 had 27 of 29 and the 990-EZ 15 of 16: the foreign
+address from the form body and the DBA line 2, both corrected since. What
+is left:
 
-- **990 foreign address** (`filerforctry` and its siblings, 420 to 722
-  returns): GT fills them from the form body's foreign address when the
-  header has none, the counterpart of the territory rule. In the
-  concordance now.
-- **990 DBA line 2** (`dbanbnline22`, 702 returns) and **990-EZ foreign
-  address** (170): columns GT left empty on every return of 01A, so the
-  search had nothing to find; 34 such columns now take their sibling's path
-  (11 are left unmapped, none read by production).
-- **990-PF `filesha256`** (28 returns): GT's file under that url is not the
-  bytes of the IRS archive's member. Not investigated.
-- Columns production does not read: GT's numbered columns (`_0`, `_1`) are
-  the n-th occurrence of an element and the search took the wrong one for
-  some `_0`s (fixed); a state list (`streacstfiwi`, 97%) and two rental
-  income amounts (94%) GT reads differently, left as they are.
+- **990-PF `filesha256`** (28 returns, read): GT's file under that url is
+  not the bytes of the IRS archive's member. Not investigated.
+- **Columns production does not read.** The numbered columns GT empties when
+  the element occurs once (990-PF application address, contact and phone,
+  and managers, 40,656 to 73,419 returns; the 990-EZ's other organization
+  type, 3,917) and the 990's activity codes for lines 4b and 4c (497 and
+  334), all filled in ours by the rule above. Columns whose values differ,
+  not investigated: two amounts of the 990-PF's revenue analysis (gross
+  profit and net rental income, 94%), the states a return is filed in
+  (990-PF 97%, 990-EZ 99.4%), the 990-EZ's foreign-office indicator (98%),
+  and a few columns on fewer than 400 returns.
 
 ### Group tables
 
 | table | returns GT lacks | rows GT lacks | amount GT lacks | on the returns both hold |
 |---|---|---|---|---|
-| privategrants (3a) | 53,466 | 753,933 | $39.2B | same total as `privategrants_current` on 204,583 of 206,340 returns (99.1%); GT doubled 10,328 returns' blocks (190,555 rows twice) |
+| privategrants (3a) | 53,466 | 753,933 | $39.2B | same total as `privategrants_current` on 204,583 of 206,340 returns (99.1%); 3,338,301 of our 3,863,838 rows there have an identical GT row (86.4%); GT doubled 10,328 returns' blocks (190,555 rows twice) |
 | privategrants_future (3b) | 1,111 | 11,351 | $4.0B | 108,205 of `privategrants_future_current`'s 108,219 rows identical (99.99%); same total on 99.0% of returns |
 | grants_to_domestic_organizations | 25,810 | 677,379 | $120.1B | 2,086,348 of GT's 2,097,563 rows identical (99.5%); same total on 97.7%; ours $5.1B more on the same returns |
 | programs_ez | 108,735 | 169,205 | | 96.1% of GT's rows identical once its doubles (16,472 returns) are set aside |
+| schedule_o | 283,505 | 1,488,162 | | all 6,382,813 of GT's rows identical, the same number of notes on every return |
 
-Only 67-70% of GT's 3a rows have an identical row of ours, because the
-comparison includes the filer's name line 2, which had no path in the
-first load (18.7% of our 3a rows come from a foundation with one; it fills
-since the reload);
-the doubled blocks and GT's fills account for the rest. The totals per
-return, which do not depend on the name, are the measure above.
+An identical row agrees on every column production reads. On the first load
+only 70.5% of our 3a rows had one, because the filer's name line 2 had no
+path. The other 13.6% are not broken down by column by the report; GT's
+2025v4 foundation-status hole and its filled-in rows are among them. The
+totals per return do not depend on them, and they are the measure above.
 
 ### GT defects this found
 
 | defect | where | how much |
 |---|---|---|
-| Schedule I rows blanked when the recipient has a name line 2: amount, EIN, address, purpose all NULL | every tax year 2013-2025 | 44,525 rows in `grants_to_domestic_organizations_current`; 297 rows / $28.8M in 2026 01A-02A alone |
+| Schedule I rows blanked when the recipient has a name line 2: amount, EIN, address, purpose all NULL | every tax year 2013-2025 | 44,525 rows in `grants_to_domestic_organizations_current`; in the 2024-2026 batches 10,998 rows on 3,300 returns, $3.84B of cash, 9,598 of them with a recipient EIN, every one with its grant in ours |
+| numbered columns (`_0`, `_1` ...) empty when the element occurs once: the value is lost, GT having no column without a number | every 990-PF and 990-EZ with one | of the returns both hold: 990-PF application address 61,563, contributing managers 73,419, shareholder managers 40,656; 990-EZ other organization type 3,917. None read by production; the application contact is what a grant seeker needs |
 | 990-EZ program descriptions: one description repeated on every row of a return, the others lost | about 3% of 990-EZ returns (100 of 3,194 in 01A) | |
 | the 2025v4 rename of a grant recipient's foundation status not followed: column NULL | every 2025v4 990-PF | 42 returns in 01A |
 | Schedule I rows missing | 308 returns | 2,762 grants |
@@ -284,13 +310,29 @@ return, which do not depend on the name, are the measure above.
 Known before and seen again: the doubled 990-PF blocks, GT's synthetic
 grant row from the Part XV total, the doubled 990-EZ program lists.
 
+### The `_current` repair rules over our rows
+
+`privategrants_current`'s rules (pair_collapse, forward_fill, field_fill,
+total_row, and the version choice) exist for defects of GT's extract. Run
+by production's DDL over our 4,617,771 990-PF grant rows, with our
+`basic_fields_pf` as the return table:
+
+| rule | rows | filer-years | amount |
+|---|---|---|---|
+| kept as they are | 4,185,512 | 256,371 | $295.9B |
+| version choice (an amended return's rows win) | 397,418 | 1,700 | $2.9B |
+| field_fill | 1 | 1 | $27,366 |
+
+The superseded versions' 34,840 rows ($3.0B) drop. Our rows need only the
+version choice; the rules that repair GT's defects leave them alone, one
+row aside (not looked into).
+
 ### Not measured
 
-The run was stopped on Schedule O (its temp tables were filling the shared
-instance's disk; see the next section), before three measures: Schedule O
-itself (4 columns read by production), the Schedule I name-line-2 rows
-priced over all batches, and `privategrants_current`'s repair rules run
-over our rows. All three need a copy of the database.
+The report measures every table now. Outside it: which columns make the
+13.6% of our 3a rows without an identical GT row, and Schedule O's filer
+name line 2 against GT's (its table has no index to sample by; production
+does not read the column).
 
 ### Where to run it
 
@@ -299,10 +341,21 @@ files (78 to 26 GB free) and, rerun beside a cancelled query that kept
 running, exhausted its 4 GB of memory: Postgres restarted and every client
 on the instance lost its connection for several minutes. The code now runs
 with `work_mem` at 64 MB, no parallel workers, GT's table read once per
-table and every section written as it finishes. The run that measured the
-numbers above still drove free disk from 72 to 33 GB before it was stopped.
-So `parity` (and `discover`) read every GT staging table in full and belong
-on a restored copy of the instance (`--host`), not on the shared one.
+table and every section written as it finishes. The run after that still
+drove free disk from 72 to 33 GB before it was stopped on Schedule O: the
+report ran in one transaction, and Postgres frees a dropped temp table's
+files only at commit, so every table's stayed to the end. Each section now
+commits.
+
+With that, the run on the reloaded batches took 1 h 20 min on the shared
+instance on a Friday evening, with no client sessions open: free disk went
+from 67.4 GB to a low of 53.6 GB, swap peaked at 0.24 GB, free memory stayed above
+2 GB. A watchdog read those three every minute and would have stopped it
+below 35 GB of disk, above 0.5 GB of swap or below 0.3 GB of memory. So
+`parity` (and `discover`, which also reads GT's tables in full) runs either
+on a restored copy of the instance (`--host`) or on the shared one in a
+quiet window agreed beforehand, under such a watchdog; `--table` limits a
+rerun to the tables a change touched.
 
 A copy is a point-in-time restore of the shared instance, and two things make
 it slow. It replays every change since the night's snapshot: on 2026-10-23,
