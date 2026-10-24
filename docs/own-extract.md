@@ -43,11 +43,14 @@ both hold.
   recipient EIN GT dropped; ours has every one. And GT loses a 990-PF's
   application address, contact and managers when the return gives only one:
   the application address of 61,563 of the 273,504 990-PFs both hold.
-- **Recommendation.** Patch now: put our rows in for the returns GT does
-  not have (the design is below), run the `_current` rebuilds and the
-  matcher, and keep GT's rows wherever GT has the return until we decide
-  whether ours replace them for 2024 on. Measure on a copy of the database,
-  never on the shared instance (below).
+- **The patch, ours first.** Decided on 2026-10-24: for every batch we
+  read (2024 on) our rows replace GT's in production's staging tables, and
+  GT's stay for the years before. Before deciding, the 1,760 990-PF returns
+  whose totals differ from production's were checked against each filing's
+  line 25: ours matches it, GT's does not (GT's extract writes the block's
+  total into grants, $812.8M of it on 332 returns). `own_extract patch` is
+  built and was proven on a scratch copy with production's own `_current`
+  DDL; it has not run on production.
 
 ## Why
 
@@ -113,6 +116,8 @@ changed since 2026-08-25, holds 05A but not 05B, and nothing of 08A or 09A.
 | `load` | writes a batch's rows into schema `irs_extract` (one table per GT table, same name), replacing that batch's rows in one transaction, and records the run in `datamart_meta.ingest_runs` (logical name `irs_extract`) with the archive's stamp and the concordance's SHA-256 |
 | `discover` | proposes the concordance: for each GT column, the xpath that reproduces it on the most returns both sides hold |
 | `parity`, `report` | measure `irs_extract` against GT's tables, in SQL, and write the report below |
+| `patch` | puts our rows into production's staging tables in place of GT's, ours first (*The patch, ours first*, below) |
+| `proof` | runs the patch on a scratch copy of a sample of filers and builds every `_current` relation there with production's DDL |
 
 Every row of ours carries GT's columns plus a key GT's rows never had: the
 IRS object id and, in the group tables, the group's position in the return
@@ -126,6 +131,8 @@ python -m givingtuesday_datamart.own_extract load 2026            # every 2026 a
 python -m givingtuesday_datamart.own_extract load 2026 --batch 2026_TEOS_XML_09A
 python -m givingtuesday_datamart.own_extract parity               # report of all loaded batches
 python -m givingtuesday_datamart.own_extract discover PATH.zip    # re-propose the concordance
+python -m givingtuesday_datamart.own_extract prove-patch          # the patch on a scratch copy
+python -m givingtuesday_datamart.own_extract patch                # the patch on production
 ```
 
 ### What was loaded
@@ -250,6 +257,10 @@ was reloaded with them (`c9b00396f60e`), measured everything below in 1 h
 measured again after the last reload (`parity --table`, concordance
 `3d9b48d6e5e7`, which changes nothing else). The report lands in
 `data/own_extract/parity_report.md` (git-ignored); the numbers here are its.
+Its count of returns with the same total counted, until a fix on
+2026-10-24, a return GT does not hold and ours has no amount for as the
+same; the 990-PF count below is corrected (204,583 to 204,580), the
+Schedule I and 3b ones are corrected by the next run.
 
 ### Return tables
 
@@ -284,7 +295,7 @@ is left:
 
 | table | returns GT lacks | rows GT lacks | amount GT lacks | on the returns both hold |
 |---|---|---|---|---|
-| privategrants (3a) | 53,466 | 753,933 | $39.2B | same total as `privategrants_current` on 204,583 of 206,340 returns (99.1%); 3,338,301 of our 3,863,838 rows there have an identical GT row (86.4%); GT doubled 10,328 returns' blocks (190,555 rows twice) |
+| privategrants (3a) | 53,466 | 753,933 | $39.2B | same total as `privategrants_current` on 204,580 of 206,340 returns (99.1%; the other 1,760 below); 3,338,301 of our 3,863,838 rows there have an identical GT row (86.4%); GT doubled 10,328 returns' blocks (190,555 rows twice) |
 | privategrants_future (3b) | 1,111 | 11,351 | $4.0B | 108,205 of `privategrants_future_current`'s 108,219 rows identical (99.99%); same total on 99.0% of returns |
 | grants_to_domestic_organizations | 25,810 | 677,379 | $120.1B | 2,086,348 of GT's 2,097,563 rows identical (99.5%); same total on 97.7%; ours $5.1B more on the same returns |
 | programs_ez | 108,735 | 169,205 | | 96.1% of GT's rows identical once its doubles (16,472 returns) are set aside |
@@ -296,12 +307,50 @@ path. The other 13.6% are not broken down by column by the report; GT's
 2025v4 foundation-status hole and its filled-in rows are among them. The
 totals per return do not depend on them, and they are the measure above.
 
+### The 990-PF returns whose totals differ
+
+Of the 206,340 990-PF returns GT holds, 1,760 have another grant total in
+ours than in `privategrants_current`. Line 25 of the return (contributions,
+gifts, grants paid, column (d) or (a)) is the test, the figure the
+relation's own fill rules check against. Measured on 2026-10-24;
+`parity`'s `pf_total_causes` reproduces it in the 990-PF section of the
+report:
+
+| cause | returns | ours | `_current` | ours = line 25 | `_current` = line 25 |
+|---|---|---|---|---|---|
+| the relation keeps a later version of the filer-year | 1,301 | $2,363.5M | | 1,264 | |
+| same rows, GT's amounts larger | 332 | $145.4M | $958.3M | 331 | 0 |
+| GT doubled the block, not halved | 111 | $24.3M | $48.5M | 67 | 1 |
+| GT doubled and filled, the rules undo part of it | 16 | $1.9M | $10.6M | 16 | 0 |
+
+- **Same rows, GT's amounts larger.** GT's extract writes the block's
+  total into the amount of a group it reads as having nothing beside its
+  amount (the fill `field_fill` repairs where all the copies share one
+  recipient). EIN 841384487, tax year 2023: our 24 grants add to
+  $10,975,339, line 25 says $10,975,339, and GT's 24 rows add to 16 times
+  that. Over the 332 returns GT is $812.8M above line 25 and above ours.
+- **Doubled, not halved.** GT emits the block twice and the relation finds
+  no repeated `basic_fields_pf` row to halve it by: GT's rows are exactly
+  twice ours, so ours is the XML's own count; where ours is not line 25
+  (44), the filing's line 25 is zero or not its 3a total.
+- **A later version kept.** The relation keeps one url per filer-year,
+  always a later one here. It is a return of ours with grant rows for
+  1,258, with the same total as ours on 1,211 (on the other 47 GT's is 2
+  times ours, once 11); a return of ours with no grant rows for 24, where
+  GT keeps an empty row (no recipient, $0) for an amended return whose own
+  line 25 is 0; and a return from a batch we do not read for 19, which
+  stays GT's.
+
+No return turned up where ours is wrong.
+
 ### GT defects this found
 
 | defect | where | how much |
 |---|---|---|
 | Schedule I rows blanked when the recipient has a name line 2: amount, EIN, address, purpose all NULL | every tax year 2013-2025 | 44,525 rows in `grants_to_domestic_organizations_current`; in the 2024-2026 batches 10,998 rows on 3,300 returns, $3.84B of cash, 9,598 of them with a recipient EIN, every one with its grant in ours |
 | numbered columns (`_0`, `_1` ...) empty when the element occurs once: the value is lost, GT having no column without a number | every 990-PF and 990-EZ with one | of the returns both hold: 990-PF application address 61,563, contributing managers 73,419, shareholder managers 40,656; 990-EZ other organization type 3,917. None read by production; the application contact is what a grant seeker needs |
+| 990-PF grant amounts filled with the block's total, which `privategrants_current` keeps | 332 returns of 2024-2026 | $812.8M above line 25 |
+| 990-PF blocks doubled without a repeated return row, which the relation does not halve | 111 returns, and the kept version of 47 more | $24.3M twice |
 | 990-EZ program descriptions: one description repeated on every row of a return, the others lost | about 3% of 990-EZ returns (100 of 3,194 in 01A) | |
 | the 2025v4 rename of a grant recipient's foundation status not followed: column NULL | every 2025v4 990-PF | 42 returns in 01A |
 | Schedule I rows missing | 308 returns | 2,762 grants |
@@ -365,43 +414,84 @@ the data onto four volumes, which its documentation says can take hours;
 that copy was deleted unused after 50 minutes. Restore at the same size,
 the evening before.
 
-## The patch for recent filings
+## The patch, ours first
 
-What it would add is the table "What GT does not have" above: every row
-of ours under a url GT's table lacks.
+Decided on 2026-10-24: for every batch we read (2024 on), our rows replace
+GT's in production's staging tables; GT's stay for the years before. What
+it adds is the table "What GT does not have" above. What it changes on the
+returns GT holds is the grants of about 5,700 of them (the 990-PF returns
+above, Schedule I's blanked and missing grants); the return tables,
+missions, programs and Schedule O agree on every column production reads.
 
-**How it would reach production.** Not built; this is the design. The
-`_current` builders read `public.<table>` by name and lean on `ctid` (the
-extract's order), so a view over GT's rows and ours cannot stand in for the
-staging table, and a combined copy of each staging table would need another
-50 GB on an instance with about 60 GB free once the extract is loaded. The
-patch that fits both:
+**What `own_extract patch` does.** After `sources refresh` (which recreates
+each staging table from GT's release), for each of the ten staging tables,
+in one transaction:
 
-1. after `sources refresh` (which recreates each staging table from GT's
-   release), `own_extract patch` appends to each `public.<table>` the rows
-   of `irs_extract.<table>` whose url the table lacks, in group order, with
-   the lineage columns stamped `_source_version = 'irs:<batch>'`,
-   `_source_url = <IRS archive url>` and the load's `_ingest_run_id`, so
-   every patched row says where it came from and `DELETE ... WHERE
-   _source_version LIKE 'irs:%'` undoes it;
-2. the `_current` rebuilds, the canonical build and the matcher run as in
-   *The next GivingTuesday drop*, unchanged.
+1. the patch's own earlier rows (`_source_version` `irs:%`) and GT's rows
+   under a url our table holds go;
+2. ours go in, in group order, stamped `_source_version = 'irs:<batch>'`,
+   `_source_url` the IRS archive, `_ingest_run_id` the batch's load run
+   (which records the archive's and the concordance's SHA-256) and
+   `_ingested_at` the patch's time;
+3. a run per table goes to `datamart_meta.ingest_runs` (logical name
+   `irs_extract_patch`), with GT's release it sat on and the counts.
 
-When GT's next release lands, `sources refresh` drops the patch with the
-old staging table, and the patch step adds back only what GT still lacks.
-Monthly, between GT releases, it is the same two steps after
-`own_extract load <year> --batch <new batch>`.
+Then the basic-fields `_current` relations are rebuilt, as a refresh
+rebuilds them. The patch refuses a batch loaded with another concordance
+than the file's.
+
+**Url by url within a table.** Where our table has no row for a return GT
+has rows for, GT's rows stay. On 2024-2026 that is 27,321 990-PF grant rows
+under 24,925 returns, nearly all the empty row GT writes for a return that
+lists no grant ($7,402 in all), and 11 990-EZ program rows under 8
+returns; with them the `_current` version choice reads such a filer-year as
+it does today (the 24 amended returns above keep their empty row).
+Schedule I and 3b have no such rows, and no GT row under a return of ours
+sits in another form's table, so no return is counted twice.
+
+**What the relations do with it**, on the patch run over a scratch copy of
+759 filers, every year, with production's DDL (`prove-patch`, 2026-10-24):
+no url holds both GT's rows and ours, a second run lands on the same
+tables, and the relations apply only their version choice to our rows
+(`latest_url`, and Schedule I's `amend_distinct` for amended filings). Of
+the sample's 990-PF filer-years, 990 of 1,009 have a total equal to line
+25, against 905 of 943 before; its 990-PF grants go from $1,809M to $993M
+(GT's filled and doubled amounts), its Schedule I grants from $2,205M to
+$2,503M (the blanked and missing grants). The basic-fields relations keep
+the same filing on every filer-year both sides hold but 4, where the patch
+brings an amended return GT never loaded.
+
+**Physical order.** Our rows go in in group order, but a row that fits the
+space left at the end of an earlier page lands there (22 of the sample's
+1,006 filings with groups). The relations read that order only to choose
+among copies of one row, or among rows of one recipient and one amount
+(`field_fill`, which took one of our 4.6 million 990-PF rows), so at most it
+decides which status or purpose text a kept row shows.
+
+**In what order, on production.** `parity` reads GT's release, so it runs
+before the patch: afterwards staging holds our rows under our urls.
+
+1. `own_extract parity`, in a quiet window agreed beforehand (*Where to run
+   it*);
+2. `own_extract patch`: 16,662,030 of GT's rows out, 20,109,675 of ours in,
+   about 11 GB more on disk until a vacuum makes the deleted rows' space
+   reusable;
+3. `sources build-canonical`;
+4. the grants relations and the matcher, as in *The next GivingTuesday
+   drop* (`docs/placeholder_recovery_operations.md`), steps 3 to 8: the
+   matcher run (about eight hours on the big box) rebuilds the `_current`
+   relations itself, and its regression gate shows what moved.
+
+Monthly, as the IRS posts a batch: `own_extract load <year> --batch
+<new>`, then steps 2 to 4. When GT's next release lands, `sources refresh`
+replaces the staging tables and drops the patch; step 2 puts it back.
+
+**Undo.** `sources refresh --force` of the ten sources loads GT's release
+again and rebuilds the basic-fields relations; the grants relations and the
+matcher as in step 4.
 
 It breaks one invariant on purpose: staging is no longer byte-faithful to
 GT's file. The lineage stamp keeps the two apart.
-
-**GT first or ours first.** The design above keeps GT's rows wherever GT
-has the return and adds ours only where it does not, so every number
-clients already see stays where it is and the matcher's baseline moves only
-by the new returns. The alternative, ours for every batch we read (2024 on)
-and GT's for older years, also repairs GT's defects in those years (the
-blanked Schedule I rows above), at the price of moving numbers clients
-have already seen and a larger matcher diff to review.
 
 ## What doing this ourselves would cost us
 

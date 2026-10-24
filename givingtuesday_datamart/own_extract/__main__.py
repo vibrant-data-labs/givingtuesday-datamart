@@ -25,9 +25,11 @@ import sys
 import time
 from pathlib import Path
 
+from sqlalchemy import text
+
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart.ingestion import datamart_config
-from givingtuesday_datamart.own_extract import batches, discover, extract, load, report
+from givingtuesday_datamart.own_extract import batches, discover, extract, load, parity, patch, proof, report
 
 DEFAULT_CACHE = Path.home() / ".cache" / "irs_batches"
 
@@ -123,6 +125,39 @@ def _discover(args) -> int:
     return 0
 
 
+def _patch(args) -> int:
+    # After `sources refresh`: GT's rows under our urls out, ours in, in one
+    # transaction; then the basic-fields relations the client reads, as a
+    # refresh rebuilds them. The grants relations are the matcher run's.
+    from givingtuesday_datamart.current_grants import build_basic_fields_current
+
+    with get_session(config=datamart_config()) as session:
+        parity.prepare(session)
+        session.execute(text("SET statement_timeout = 0"))
+        counts = patch.apply(session)
+    for table, c in counts.items():
+        print(f"{table}: GT's {c['gt_release']} less {c['gt_rows']:,} rows, earlier patch rows "
+              f"{c['earlier_patch_rows']:,} out, ours {c['inserted']:,} in", flush=True)
+    with get_session(config=datamart_config()) as session:
+        for table, n in build_basic_fields_current(session.connection()).items():
+            print(f"public.{table} rebuilt: {n:,} rows", flush=True)
+    return 0
+
+
+def _prove_patch(args) -> int:
+    with get_session(config=datamart_config()) as session:
+        parity.prepare(session)
+        session.execute(text("SET statement_timeout = 0"))
+        checks = proof.prove(session, args.modulus)
+        if not args.keep:
+            proof.drop(session)
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    args.report.write_text("".join(f"## {name}\n\n{report._md(frame)}\n\n"
+                                   for name, frame in checks.items()))
+    print(f"wrote {args.report}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="own_extract", description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -163,6 +198,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", type=Path,
                    default=extract.REPO_ROOT / "data" / "own_extract" / "concordance_proposed.csv")
     p.set_defaults(func=_discover)
+
+    p = sub.add_parser("patch", help="our rows into production's staging tables, ours first (after a refresh)")
+    p.set_defaults(func=_patch)
+
+    p = sub.add_parser("prove-patch", help="the patch on a scratch copy of a sample of filers, with the relations")
+    p.add_argument("--modulus", type=int, default=997, help="filers whose EIN hashes to 0 modulo this")
+    p.add_argument("--report", type=Path,
+                   default=extract.REPO_ROOT / "data" / "own_extract" / "patch_proof.md")
+    p.add_argument("--keep", action="store_true", help="leave the scratch schemas for inspection")
+    p.set_defaults(func=_prove_patch)
 
     args = parser.parse_args(argv)
     return args.func(args)

@@ -104,7 +104,7 @@ def run(session, out: Path, batch_ids: list[str] | None = None,
     # Schedule O last: GT's is 21 GB, the biggest read by far.
     order = sorted(concordance.items(), key=lambda item: item[0] == "schedule_o")
     for table, mappings in order:
-        cover.append(parity.coverage(session, table, batch_ids))
+        cover.append(parity.coverage(session, table, batch_ids, wide=True))
         gaps.append(parity.gap(session, table))
         section = [f"### {table}\n", _md(pd.DataFrame([cover[-1]])),
                    "What GT does not have:\n", _md(pd.DataFrame([gaps[-1]]))]
@@ -131,6 +131,11 @@ def run(session, out: Path, batch_ids: list[str] | None = None,
                         _md(parity.shapes(session)),
                         "Our rows with an identical row (columns production reads) under the same url:\n",
                         _md(pd.DataFrame(compared))]
+            if table == "privategrants":
+                causes, kept = parity.pf_total_causes(session)
+                section += ["Returns GT holds, by why our total and `privategrants_current`'s differ; "
+                            "line 25 is our `basic_fields_pf`'s, column (d) or (a):\n", _md(causes),
+                            "Where the relation keeps a later version, the version it keeps:\n", _md(kept)]
         emit(*section)
 
     if "grants_to_domestic_organizations" in concordance:

@@ -106,25 +106,53 @@ def _ours(session, table: str, batch_ids: list[str], version_like: str | None = 
     session.execute(text("ANALYZE o"))
 
 
-def _theirs(session, source: str) -> None:
-    """GT's rows under our urls as temp ``g``: the one read of GT's table."""
+def _theirs(session, source: str, batch_ids: list[str] | None = None) -> dict:
+    """GT's rows under our urls as temp ``g``: the one read of GT's table.
+
+    With ``batch_ids`` the read takes GT's rows under every return we hold in
+    those batches, any form, and counts those under a return our table has no
+    row for before ``g`` is narrowed to our table's urls: the rows a patch
+    that replaces GT's rows url by url within a table leaves as they are.
+    """
     session.execute(text("DROP TABLE IF EXISTS pg_temp.g"))
+    if not batch_ids:
+        session.execute(text(
+            f"""CREATE TEMP TABLE g AS
+                SELECT x.* FROM public.{source} x WHERE x.url IN (SELECT DISTINCT url FROM o)"""))
+        session.execute(text("CREATE INDEX ON g (url)"))
+        session.execute(text("ANALYZE g"))
+        return {}
+    session.execute(text("DROP TABLE IF EXISTS pg_temp.u"))
     session.execute(text(
-        f"""CREATE TEMP TABLE g AS
-            SELECT x.* FROM public.{source} x WHERE x.url IN (SELECT DISTINCT url FROM o)"""))
+        f"""CREATE TEMP TABLE u AS SELECT DISTINCT :prefix || object_id || '_public.xml' AS url
+            FROM {SCHEMA}.returns WHERE _batch_id = ANY(:b)"""),
+        {"prefix": extract.GT_URL.split("{")[0], "b": batch_ids})
+    session.execute(text("ANALYZE u"))
+    session.execute(text(
+        f"CREATE TEMP TABLE g AS SELECT x.* FROM public.{source} x WHERE x.url IN (SELECT url FROM u)"))
+    amount = AMOUNT.get(source)
+    money = f", sum(nullif(g.{amount}, '')::numeric) AS gt_only_amount" if amount else ""
+    only = session.execute(text(
+        f"""SELECT count(DISTINCT g.url) AS gt_only_returns, count(*) AS gt_only_rows {money}
+            FROM g WHERE NOT EXISTS (SELECT 1 FROM o WHERE o.url = g.url)""")).mappings().one()
+    session.execute(text("DELETE FROM g WHERE NOT EXISTS (SELECT 1 FROM o WHERE o.url = g.url)"))
     session.execute(text("CREATE INDEX ON g (url)"))
     session.execute(text("ANALYZE g"))
+    return dict(only)
 
 
-def coverage(session, table: str, batch_ids: list[str], version_like: str | None = None) -> dict:
+def coverage(session, table: str, batch_ids: list[str], version_like: str | None = None,
+             wide: bool = False) -> dict:
+    """Returns and rows per side; with ``wide``, also GT's rows under our returns
+    that our table has no row for (``_theirs``)."""
     _ours(session, table, batch_ids, version_like)
-    _theirs(session, table)
+    only = _theirs(session, table, batch_ids if wide else None)
     row = session.execute(text(
         """SELECT (SELECT count(DISTINCT url) FROM o) AS ours_returns,
                   (SELECT count(*) FROM o) AS ours_rows,
                   (SELECT count(DISTINCT url) FROM g) AS gt_returns,
                   (SELECT count(*) FROM g) AS gt_rows""")).mappings().one()
-    return {"table": table, **row}
+    return {"table": table, **row, **only}
 
 
 def columns(session, table: str, mappings: list[extract.Mapping]) -> pd.DataFrame:
@@ -181,8 +209,9 @@ def rows(session, table: str, against: str) -> dict:
     amount = AMOUNT.get(table)
     session.execute(text("DROP TABLE IF EXISTS pg_temp.a"))
     source = "g" if against == table else f"public.{against}"     # g already holds the raw rows
+    rule = "" if against == table else ", x.dedup_rule"             # for pf_total_causes; not hashed
     session.execute(text(
-        f"""CREATE TEMP TABLE a AS SELECT x.url, {tup} FROM {source} x
+        f"""CREATE TEMP TABLE a AS SELECT x.url, {tup}{rule} FROM {source} x
             WHERE x.url IN (SELECT DISTINCT url FROM o)"""))
     session.execute(text("ANALYZE a"))
     result = session.execute(text(
@@ -203,7 +232,8 @@ def rows(session, table: str, against: str) -> dict:
                            WHERE group_ordinal IS NOT NULL GROUP BY url),
                      y AS (SELECT url, sum(nullif({amount}, '')::numeric) AS v FROM a GROUP BY url)
                 SELECT sum(x.v) AS our_amount, sum(y.v) AS their_amount,
-                       count(*) FILTER (WHERE x.v IS NOT DISTINCT FROM y.v) AS returns_same_amount,
+                       count(*) FILTER (WHERE y.url IS NOT NULL AND x.v IS NOT DISTINCT FROM y.v)
+                           AS returns_same_amount,
                        count(*) AS returns
                 FROM x FULL JOIN y USING (url)""")).mappings().one()
         out.update(money)
@@ -235,6 +265,60 @@ def gap_by_period(session, form: str) -> pd.DataFrame:
             FROM o GROUP BY 1, 2 ORDER BY 2"""), session.connection())
     out["not_in_gt_pct"] = (100 * out["not_in_gt"] / out["returns"].clip(lower=1)).round(1)
     return out
+
+
+def pf_total_causes(session) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Why a 990-PF return's grant total differs from ``privategrants_current``'s.
+
+    Over the returns GT's staging holds, our total (``o``), GT's raw total
+    (``g``) and the relation's (``a``, from ``rows`` against it just before)
+    are set beside line 25 of our ``basic_fields_pf``, column (d) or (a): the
+    figure the relation's own fill rules test against. A return the relation
+    has no row of had a later version of its filer-year kept; the second
+    table says where that version comes from.
+    """
+    session.execute(text("DROP TABLE IF EXISTS pg_temp.t"))
+    session.execute(text(
+        f"""CREATE TEMP TABLE t AS
+            WITH x AS (SELECT url, max(filerein) AS filerein, max(taxyear) AS taxyear, count(*) AS n,
+                              sum(nullif(sigocpyamoun, '')::numeric) AS v
+                       FROM o WHERE group_ordinal IS NOT NULL GROUP BY url),
+                 r AS (SELECT url, count(*) AS n, sum(nullif(sigocpyamoun, '')::numeric) AS v
+                       FROM g GROUP BY url),
+                 c AS (SELECT url, count(*) AS n, sum(nullif(sigocpyamoun, '')::numeric) AS v,
+                              string_agg(DISTINCT coalesce(dedup_rule, ''), '+') AS rules
+                       FROM a GROUP BY url),
+                 l AS (SELECT url, nullif(arecgpdcprps, '')::numeric AS d,
+                              nullif(arecprexpnss, '')::numeric AS p
+                       FROM {SCHEMA}.basic_fields_pf WHERE url IN (SELECT url FROM x))
+            SELECT x.*, r.n AS raw_n, r.v AS raw_v, c.n AS cur_n, c.v AS cur_v, c.rules, l.d, l.p
+            FROM x JOIN r USING (url) LEFT JOIN c USING (url) LEFT JOIN l USING (url)"""))
+    causes = pd.read_sql(text(
+        """SELECT CASE WHEN v IS NOT DISTINCT FROM cur_v THEN 'same total'
+                       WHEN cur_n IS NULL THEN 'the relation keeps a later version'
+                       WHEN raw_n = 2 * n AND raw_v = 2 * v THEN 'GT doubled the block, not halved'
+                       WHEN raw_n = n AND rules = 'passthrough' THEN 'same rows, GT''s amounts larger'
+                       ELSE 'GT doubled and filled, the rules undo part of it' END AS cause,
+                  count(*) AS returns, sum(v) AS our_amount, sum(cur_v) AS current_amount,
+                  count(*) FILTER (WHERE abs(v - d) < 1 OR abs(v - p) < 1) AS ours_eq_line25,
+                  count(*) FILTER (WHERE abs(cur_v - d) < 1 OR abs(cur_v - p) < 1) AS current_eq_line25
+           FROM t GROUP BY 1 ORDER BY 2 DESC"""), session.connection())
+    kept = pd.read_sql(text(
+        f"""WITH k AS (SELECT t.url, c.url AS kept, sum(nullif(c.sigocpyamoun, '')::numeric) AS kept_v
+                       FROM t JOIN public.privategrants_current c
+                         ON c.filerein = t.filerein AND c.taxyear = t.taxyear AND c.url <> t.url
+                       WHERE t.cur_n IS NULL AND t.v IS DISTINCT FROM t.cur_v GROUP BY 1, 2)
+            SELECT CASE WHEN t2.url IS NOT NULL THEN 'a return of ours with grant rows'
+                        WHEN EXISTS (SELECT 1 FROM {SCHEMA}.returns r
+                                     WHERE r.object_id = substring(k.kept from '(\\d{{18}})_public'))
+                            THEN 'a return of ours with no grant rows'
+                        ELSE 'a return from a batch we do not read' END AS kept_version,
+                   count(DISTINCT k.url) AS returns,
+                   count(*) FILTER (WHERE k.kept > k.url) AS kept_url_later,
+                   count(*) FILTER (WHERE abs(t2.v - k.kept_v) < 1) AS kept_total_eq_ours,
+                   sum(k.kept_v) AS kept_amount
+            FROM k LEFT JOIN t t2 ON t2.url = k.kept GROUP BY 1 ORDER BY 2 DESC"""), session.connection())
+    return causes, kept
 
 
 def schedule_i_line2(session) -> dict:

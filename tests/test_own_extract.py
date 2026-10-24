@@ -9,7 +9,7 @@ import zipfile
 import pandas as pd
 import pytest
 
-from givingtuesday_datamart.own_extract import batches, discover, extract, load, parse
+from givingtuesday_datamart.own_extract import batches, discover, extract, load, parse, patch
 
 PF = b"""<?xml version="1.0" encoding="utf-8"?>
 <Return xmlns="http://www.irs.gov/efile" returnVersion="2024v5.2">
@@ -290,6 +290,31 @@ def test_a_claimed_batch_is_refused_to_a_second_loader_until_released(tmp_path):
     again = batches.claim(batch, tmp_path)
     assert again is not None
     again.close()
+
+
+def test_patch_inserts_in_group_order_with_each_batch_stamped():
+    sql = patch.insert_sql("privategrants", ["filerein", "url", "sigocpyamoun"])
+    assert sql.startswith("INSERT INTO public.privategrants (filerein, url, sigocpyamoun, "
+                          "_source_version, _source_url, _ingested_at, _ingest_run_id)")
+    assert "'irs:' || x._batch_id, r.source_url, :ingested_at, r.run_id" in sql
+    assert sql.rstrip().endswith("ORDER BY x.object_id, x.group_ordinal NULLS FIRST")
+
+
+def test_patch_deletes_its_earlier_rows_and_gt_rows_under_our_urls_only():
+    sql = patch.delete_sql("privategrants", source="s", target="t")
+    assert "DELETE FROM t.privategrants g" in sql
+    assert "g._source_version LIKE 'irs:%'" in sql
+    assert "g.url IN (SELECT DISTINCT url FROM s.privategrants)" in sql      # the same table's urls
+
+
+def test_patch_refuses_a_batch_loaded_with_another_concordance_or_none():
+    runs = [{"batch": "2024_TEOS_XML_01A", "concordance": "aaa"},
+            {"batch": "2024_TEOS_XML_02A", "concordance": "bbb"}]
+    assert [r["batch"] for r in patch.runs_for({"2024_TEOS_XML_01A"}, runs, "aaa")] == ["2024_TEOS_XML_01A"]
+    with pytest.raises(patch.PatchRefused, match="2024_TEOS_XML_02A"):
+        patch.runs_for({"2024_TEOS_XML_01A", "2024_TEOS_XML_02A"}, runs, "aaa")
+    with pytest.raises(patch.PatchRefused, match="no load run"):
+        patch.runs_for({"2024_TEOS_XML_03A"}, runs, "aaa")
 
 
 def test_schedule_i_leaves_the_filer_name_line_2_empty_as_gt_does():
