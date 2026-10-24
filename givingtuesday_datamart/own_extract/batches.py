@@ -22,6 +22,7 @@ Two things about them cost time to learn:
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import re
@@ -124,6 +125,23 @@ def fetch(batch: Batch, cache_dir: Path) -> Path:
     partial.replace(path)
     stamp.write_text(json.dumps({**asdict(batch), "sha256": digest.hexdigest()}, indent=2))
     return path
+
+
+def claim(batch: Batch, cache_dir: Path):
+    """An exclusive lock on the batch in ``cache_dir``, or None while another loader holds it.
+
+    Two loaders sharing a cache fetched the same archive to the same path on
+    2026-10-23; one loaded and deleted it while the other still read it.
+    The lock goes with the returned file, when it is closed.
+    """
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    handle = (cache_dir / f"{batch.batch_id}.lock").open("w")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return None
+    return handle
 
 
 def stamp_of(path: Path) -> dict:

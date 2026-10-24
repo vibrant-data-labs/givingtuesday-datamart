@@ -46,38 +46,47 @@ def _load(args) -> int:
     if args.reverse:
         found.reverse()
     for batch in found:
-        if args.returns_only:
-            path = batches.fetch(batch, args.cache)
-            with get_session(config=datamart_config()) as session:
-                n = load.load_returns(session, path)
-            print(f"{batch.batch_id}: {n} returns written to {load.SCHEMA}.{load.RETURNS}", flush=True)
-            if not args.keep_zips:
-                path.unlink()
+        claim = batches.claim(batch, args.cache)
+        if claim is None:
+            print(f"{batch.batch_id}: another loader sharing this cache has it", flush=True)
             continue
-        if not args.force:
-            with get_session(config=datamart_config()) as session:
-                if load.already_loaded(session, batch, concordance):
-                    print(f"{batch.batch_id}: loaded already (same Last-Modified, same concordance)",
-                          flush=True)
-                    continue
-        started = time.time()
+        with claim:
+            _load_one(args, batch, concordance)
+    return 0
+
+
+def _load_one(args, batch, concordance) -> None:
+    if args.returns_only:
         path = batches.fetch(batch, args.cache)
-        members, deflate64 = batches.member_count(path)
         with get_session(config=datamart_config()) as session:
-            manifest = load.load_batch(session, path, concordance)
-        rows = manifest["rows"]
-        if manifest.get("skipped"):
-            print(f"{batch.batch_id}: {manifest['skipped']}", flush=True)
-            if not args.keep_zips:
-                path.unlink()
-            continue
-        kept = batches.archive(path) if args.archive else "not archived"
-        print(f"{batch.batch_id}: {members} returns ({deflate64} Deflate64), "
-              + ", ".join(f"{t} {rows.get(t, 0)}" for t in concordance)
-              + f"  [{time.time() - started:.0f} s] -> {kept}", flush=True)
+            n = load.load_returns(session, path)
+        print(f"{batch.batch_id}: {n} returns written to {load.SCHEMA}.{load.RETURNS}", flush=True)
         if not args.keep_zips:
             path.unlink()
-    return 0
+        return
+    if not args.force:
+        with get_session(config=datamart_config()) as session:
+            if load.already_loaded(session, batch, concordance):
+                print(f"{batch.batch_id}: loaded already (same Last-Modified, same concordance)",
+                      flush=True)
+                return
+    started = time.time()
+    path = batches.fetch(batch, args.cache)
+    members, deflate64 = batches.member_count(path)
+    with get_session(config=datamart_config()) as session:
+        manifest = load.load_batch(session, path, concordance)
+    rows = manifest["rows"]
+    if manifest.get("skipped"):
+        print(f"{batch.batch_id}: {manifest['skipped']}", flush=True)
+        if not args.keep_zips:
+            path.unlink()
+        return
+    kept = batches.archive(path) if args.archive else "not archived"
+    print(f"{batch.batch_id}: {members} returns ({deflate64} Deflate64), "
+          + ", ".join(f"{t} {rows.get(t, 0)}" for t in concordance)
+          + f"  [{time.time() - started:.0f} s] -> {kept}", flush=True)
+    if not args.keep_zips:
+        path.unlink()
 
 
 def _config(host: str | None) -> dict:

@@ -281,6 +281,17 @@ def test_foundation_status_reads_the_2025v4_code():
     assert values == [None, "I"]
 
 
+def test_a_claimed_batch_is_refused_to_a_second_loader_until_released(tmp_path):
+    batch = batches.Batch("2025", "2025_TEOS_XML_08A", "u", "Thu, 01 Jan 2026 00:00:00 GMT", 1)
+    first = batches.claim(batch, tmp_path)
+    assert first is not None
+    assert batches.claim(batch, tmp_path) is None
+    first.close()
+    again = batches.claim(batch, tmp_path)
+    assert again is not None
+    again.close()
+
+
 def test_schedule_i_leaves_the_filer_name_line_2_empty_as_gt_does():
     # GT fills it beside line 1 in the 990-PF grants, never on Schedule I, whose
     # `_current` dedup hashes it: a patch mixing the two must agree there.
