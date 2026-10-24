@@ -293,14 +293,14 @@ basic_fields_pf,preparedate,ReturnHeader/PreparerPersonGrp/PreparationDt,0,1057,
 basic_fields_pf,preparename,ReturnHeader/PreparerPersonGrp/PreparerPersonNm,0,1057,1057,2026_TEOS_XML_01A,
 basic_fields_pf,propfodaofru,ReturnData/IRS990PF/PrivateOperatingFoundationsGrp/PrivateOperatingFndtnRulingDt,0,1057,1057,2026_TEOS_XML_01A,
 basic_fields_pf,returntype,ReturnHeader/ReturnTypeCd,0,1057,1057,2026_TEOS_XML_01A,
-basic_fields_pf,siasiraaline1_0,ReturnData/IRS990PF/SupplementaryInformationGrp/ApplicationSubmissionInfoGrp/RecipientUSAddress/AddressLine1Txt,0,,,2026_TEOS_XML_01A,"the n-th occurrence, as GT numbers its columns"
+basic_fields_pf,siasiraaline1_0,ReturnData/IRS990PF/SupplementaryInformationGrp/ApplicationSubmissionInfoGrp/RecipientUSAddress/AddressLine1Txt,0,,,2026_TEOS_XML_01A,the n-th occurrence; GT fills it only when the element repeats
 basic_fields_pf,siasiraaline1_1,ReturnData/IRS990PF/SupplementaryInformationGrp/ApplicationSubmissionInfoGrp/RecipientUSAddress/AddressLine1Txt,1,1057,1057,2026_TEOS_XML_01A,
 basic_fields_pf,siasiraaline2,ReturnData/IRS990PF/SupplementaryInformationGrp/ApplicationSubmissionInfoGrp/RecipientUSAddress/AddressLine2Txt,0,1057,1057,2026_TEOS_XML_01A,
-basic_fields_pf,siasiracity_0,ReturnData/IRS990PF/SupplementaryInformationGrp/ApplicationSubmissionInfoGrp/RecipientUSAddress/CityNm,0,,,2026_TEOS_XML_01A,"the n-th occurrence, as GT numbers its columns"
+basic_fields_pf,siasiracity_0,ReturnData/IRS990PF/SupplementaryInformationGrp/ApplicationSubmissionInfoGrp/RecipientUSAddress/CityNm,0,,,2026_TEOS_XML_01A,the n-th occurrence; GT fills it only when the element repeats
 basic_fields_pf,siasiracity_1,ReturnData/IRS990PF/SupplementaryInformationGrp/ApplicationSubmissionInfoGrp/RecipientUSAddress/CityNm,1,1057,1057,2026_TEOS_XML_01A,
-basic_fields_pf,siasirastate_0,ReturnData/IRS990PF/SupplementaryInformationGrp/ApplicationSubmissionInfoGrp/RecipientUSAddress/StateAbbreviationCd,0,,,2026_TEOS_XML_01A,"the n-th occurrence, as GT numbers its columns"
+basic_fields_pf,siasirastate_0,ReturnData/IRS990PF/SupplementaryInformationGrp/ApplicationSubmissionInfoGrp/RecipientUSAddress/StateAbbreviationCd,0,,,2026_TEOS_XML_01A,the n-th occurrence; GT fills it only when the element repeats
 basic_fields_pf,siasirastate_1,ReturnData/IRS990PF/SupplementaryInformationGrp/ApplicationSubmissionInfoGrp/RecipientUSAddress/StateAbbreviationCd,1,1057,1057,2026_TEOS_XML_01A,
-basic_fields_pf,siasirazipco_0,ReturnData/IRS990PF/SupplementaryInformationGrp/ApplicationSubmissionInfoGrp/RecipientUSAddress/ZIPCd,0,,,2026_TEOS_XML_01A,"the n-th occurrence, as GT numbers its columns"
+basic_fields_pf,siasirazipco_0,ReturnData/IRS990PF/SupplementaryInformationGrp/ApplicationSubmissionInfoGrp/RecipientUSAddress/ZIPCd,0,,,2026_TEOS_XML_01A,the n-th occurrence; GT fills it only when the element repeats
 basic_fields_pf,siasirazipco_1,ReturnData/IRS990PF/SupplementaryInformationGrp/ApplicationSubmissionInfoGrp/RecipientUSAddress/ZIPCd,1,1057,1057,2026_TEOS_XML_01A,
 basic_fields_pf,siasireaddre,ReturnData/IRS990PF/SupplementaryInformationGrp/ApplicationSubmissionInfoGrp/RecipientEmailAddressTxt,0,1056,1057,2026_TEOS_XML_01A,
 basic_fields_pf,siasirfaalin1,ReturnData/IRS990PF/SupplementaryInformationGrp/ApplicationSubmissionInfoGrp/RecipientForeignAddress/AddressLine1Txt,0,,,2026_TEOS_XML_01A,by analogy with its sibling column (GT empty on every 01A return)
@@ -309,9 +309,9 @@ basic_fields_pf,siasirfacity,ReturnData/IRS990PF/SupplementaryInformationGrp/App
 basic_fields_pf,siasirfacoun,ReturnData/IRS990PF/SupplementaryInformationGrp/ApplicationSubmissionInfoGrp/RecipientForeignAddress/CountryCd,0,,,2026_TEOS_XML_01A,by analogy with its sibling column (GT empty on every 01A return)
 basic_fields_pf,siasirfapcod,,0,1057,1057,2026_TEOS_XML_01A,empty on every return measured
 basic_fields_pf,siasirfapost,,0,1057,1057,2026_TEOS_XML_01A,empty on every return measured
-basic_fields_pf,siasirname_0,ReturnData/IRS990PF/SupplementaryInformationGrp/ApplicationSubmissionInfoGrp/RecipientPersonNm,0,,,2026_TEOS_XML_01A,"the n-th occurrence, as GT numbers its columns"
+basic_fields_pf,siasirname_0,ReturnData/IRS990PF/SupplementaryInformationGrp/ApplicationSubmissionInfoGrp/RecipientPersonNm,0,,,2026_TEOS_XML_01A,the n-th occurrence; GT fills it only when the element repeats
 basic_fields_pf,siasirname_1,ReturnData/IRS990PF/SupplementaryInformationGrp/ApplicationSubmissionInfoGrp/RecipientPersonNm,1,1057,1057,2026_TEOS_XML_01A,
-basic_fields_pf,siasirpnumbe_0,ReturnData/IRS990PF/SupplementaryInformationGrp/ApplicationSubmissionInfoGrp/RecipientPhoneNum,0,,,2026_TEOS_XML_01A,"the n-th occurrence, as GT numbers its columns"
+basic_fields_pf,siasirpnumbe_0,ReturnData/IRS990PF/SupplementaryInformationGrp/ApplicationSubmissionInfoGrp/RecipientPhoneNum,0,,,2026_TEOS_XML_01A,the n-th occurrence; GT fills it only when the element repeats
 basic_fields_pf,siasirpnumbe_1,ReturnData/IRS990PF/SupplementaryInformationGrp/ApplicationSubmissionInfoGrp/RecipientPhoneNum,1,1057,1057,2026_TEOS_XML_01A,
 basic_fields_pf,spriaopritot,ReturnData/IRS990PF/SumOfProgramRelatedInvstGrp/AllOtherProgramRltdInvstTotAmt,0,1057,1057,2026_TEOS_XML_01A,
 basic_fields_pf,sraaliassets,ReturnData/IRS990PF/StatementsRegardingActyGrp/AtLeast5000InAssetsInd,0,1057,1057,2026_TEOS_XML_01A,
@@ -344,13 +344,13 @@ basic_fields_pf,sudichacexxp2,ReturnData/IRS990PF/SummaryOfDirectChrtblActyGrp/E
 basic_fields_pf,sudichacexxp3,ReturnData/IRS990PF/SummaryOfDirectChrtblActyGrp/Expenses3Amt,0,1057,1057,2026_TEOS_XML_01A,
 basic_fields_pf,sudichacexxp4,ReturnData/IRS990PF/SummaryOfDirectChrtblActyGrp/Expenses4Amt,0,1057,1057,2026_TEOS_XML_01A,
 basic_fields_pf,suinoncotopr,ReturnData/IRS990PF/SupplementaryInformationGrp/OnlyContriToPreselectedInd,0,1057,1057,2026_TEOS_XML_01A,
-basic_fields_pf,supinfconman_0,ReturnData/IRS990PF/SupplementaryInformationGrp/ContributingManagerNm,0,,,2026_TEOS_XML_01A,"the n-th occurrence, as GT numbers its columns"
+basic_fields_pf,supinfconman_0,ReturnData/IRS990PF/SupplementaryInformationGrp/ContributingManagerNm,0,,,2026_TEOS_XML_01A,the n-th occurrence; GT fills it only when the element repeats
 basic_fields_pf,supinfconman_1,ReturnData/IRS990PF/SupplementaryInformationGrp/ContributingManagerNm,1,1057,1057,2026_TEOS_XML_01A,
 basic_fields_pf,supinfconman_2,ReturnData/IRS990PF/SupplementaryInformationGrp/ContributingManagerNm,2,1057,1057,2026_TEOS_XML_01A,
 basic_fields_pf,supinfconman_3,ReturnData/IRS990PF/SupplementaryInformationGrp/ContributingManagerNm,3,1057,1057,2026_TEOS_XML_01A,
 basic_fields_pf,supinfconman_4,ReturnData/IRS990PF/SupplementaryInformationGrp/ContributingManagerNm,4,1057,1057,2026_TEOS_XML_01A,
-basic_fields_pf,supinfshaman_0,ReturnData/IRS990PF/SupplementaryInformationGrp/ShareholderManagerNm,0,,,2026_TEOS_XML_01A,"the n-th occurrence, as GT numbers its columns"
-basic_fields_pf,supinfshaman_1,ReturnData/IRS990PF/SupplementaryInformationGrp/ShareholderManagerNm,1,,,2026_TEOS_XML_01A,"the n-th occurrence, as GT numbers its columns"
+basic_fields_pf,supinfshaman_0,ReturnData/IRS990PF/SupplementaryInformationGrp/ShareholderManagerNm,0,,,2026_TEOS_XML_01A,the n-th occurrence; GT fills it only when the element repeats
+basic_fields_pf,supinfshaman_1,ReturnData/IRS990PF/SupplementaryInformationGrp/ShareholderManagerNm,1,,,2026_TEOS_XML_01A,the n-th occurrence; GT fills it only when the element repeats
 basic_fields_pf,suprreinammo1,ReturnData/IRS990PF/SumOfProgramRelatedInvstGrp/Expenses1Amt,0,1057,1057,2026_TEOS_XML_01A,
 basic_fields_pf,suprreinammo2,ReturnData/IRS990PF/SumOfProgramRelatedInvstGrp/Expenses2Amt,0,1057,1057,2026_TEOS_XML_01A,
 basic_fields_pf,suprreindees1,ReturnData/IRS990PF/SumOfProgramRelatedInvstGrp/Description1Txt,0,1057,1057,2026_TEOS_XML_01A,

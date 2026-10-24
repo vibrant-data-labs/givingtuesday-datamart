@@ -262,10 +262,11 @@ OVERRIDES[("grants_to_domestic_organizations", "filername2")] = (
     "", "GT leaves it empty on every Schedule I row")
 
 # GT's numbered columns (``_0``, ``_1`` ...) are the n-th occurrence of one
-# element. On 01A the search took occurrence 1 for some ``_0`` columns (GT
-# empty nearly everywhere); every ``_1`` to ``_4`` agreed at 100% on the
-# 273,504 990-PFs of 2024-2026, and ``supinfconman_0`` matched the first
-# ContributingManagerNm on 73 of 01A's returns.
+# element, filled only when the element repeats: a 990-PF with a single
+# application address or manager has all of them empty in GT (61,563 and
+# 73,419 of the 273,504 of 2024-2026), so on 01A the search could not place
+# ``_0``. Ours keeps a single occurrence in ``_0``; where GT has a value,
+# ours equals it.
 OCCURRENCES: dict[tuple[str, str], tuple[str, int]] = {}
 _SIA = "ReturnData/IRS990PF/SupplementaryInformationGrp"
 for _n in (0, 1):
@@ -315,7 +316,7 @@ def propose(session, zip_path, rows_for=None) -> list[dict]:
                 line["agree"] = line["n"] = ""        # the search scored one path; parity measures the rule
             if (table, line["column"]) in OCCURRENCES:
                 line["paths"], line["occurrence"] = OCCURRENCES[(table, line["column"])]
-                line["note"] = "the n-th occurrence, as GT numbers its columns"
+                line["note"] = "the n-th occurrence; GT fills it only when the element repeats"
                 line["agree"] = line["n"] = ""
             lines.append(line)
     return lines
