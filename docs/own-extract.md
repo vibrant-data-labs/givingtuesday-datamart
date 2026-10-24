@@ -19,7 +19,7 @@ both hold.
   IRS XML the way GT has them: 27 of the 29 columns production reads on the
   990 (785,185 returns), 32 of 33 on the 990-PF (273,504), 15 of 16 on the
   990-EZ (469,853), all of missions and programs. The misses are GT rules
-  since added to the concordance. On the grants, our 990-PF rows give the
+  since added to the concordance, and every batch is reloaded with it. On the grants, our 990-PF rows give the
   same total per return as production's repaired `privategrants_current` on
   99.1% of returns, and 99.99% of `privategrants_future_current`'s rows; 99.5%
   of GT's Schedule I rows have an identical row of ours.
@@ -127,9 +127,11 @@ python -m givingtuesday_datamart.own_extract discover PATH.zip    # re-propose t
 ### What was loaded
 
 Every archive the IRS serves for 2024, 2025 and 2026, loaded on
-2026-10-23, each once (the run records in `datamart_meta.ingest_runs` and
-the generated report's batch table carry each archive's Last-Modified and
-SHA-256):
+2026-10-23 and reloaded that evening with the concordance the parity run
+corrected (SHA-256 `c9b00396f60e`). The tables hold each archive once; the
+run records in `datamart_meta.ingest_runs` and the generated report's batch
+table carry each archive's Last-Modified and SHA-256, and the reload's row
+counts equal the first load's in every table of every archive:
 
 | year | archives | Form 990 | 990-PF | 990-EZ | schema versions (share of returns) |
 |---|---|---|---|---|---|
@@ -138,7 +140,7 @@ SHA-256):
 | 2026 | 10 | 227,597 | 85,068 | 146,139 | 01A-04A: 2025v4 51%, 2024v5 47%, 2023v6 2%; 05A-09A: 2025v4 71%, 2024v5 26%, 2025v6 1% |
 
 2026's count is the IRS index's exactly (472,357 returns of every form,
-990-T included). In the database the extract is 11.8 GB, Schedule O 4.4 GB
+990-T included). In the database the extract is 12.4 GB, Schedule O 4.4 GB
 of it; a parse is about 0.75 ms a return, and a batch loads in one to eight
 minutes from a laptop.
 
@@ -173,6 +175,10 @@ path, and take their sibling's (name line 2 beside line 1, the foreign
 address beside the US one; 11 stay unmapped, none read by production); and
 GT's numbered columns (`_0`, `_1` ...) are the n-th occurrence of one
 element, where the search had taken occurrence 1 for some `_0`s.
+
+A return header never carries an address line 2 (none of 01A's does). GT's
+990 line 2 is the one in the form's body, as ours now is; the 990-PF's and
+990-EZ's column reads the header only and is empty on both sides.
 
 GT keeps a filer's literal text "None" as text (four websites in 01A), so
 a plain copy is right.
@@ -211,10 +217,13 @@ valuation method and non-cash description (about 80% filled to 7-10%), so
 
 ## Parity with GT
 
-Measured on 2026-10-23 by `own_extract parity` over all 38 batches (the
-concordance as loaded, SHA-256 `a6523dd0969c`; the fixes found by this run
-are in the file since and apply from the next load). The report lands in
-`data/own_extract/parity_report.md` (git-ignored); the numbers here are its.
+Measured on 2026-10-23 by `own_extract parity` over all 38 batches as first
+loaded (concordance SHA-256 `a6523dd0969c`). The fixes this run found are in
+the file since, and every batch was reloaded with it that evening
+(`c9b00396f60e`); the numbers below are the first load's, so the misses
+those fixes address are counted in them until the next `parity` run. The
+report lands in `data/own_extract/parity_report.md` (git-ignored); the
+numbers here are its.
 
 ### Return tables
 
@@ -256,8 +265,9 @@ The misses, each explained:
 | programs_ez | 108,735 | 169,205 | | 96.1% of GT's rows identical once its doubles (16,472 returns) are set aside |
 
 Only 67-70% of GT's 3a rows have an identical row of ours, because the
-comparison includes the filer's name line 2, which had no path when the
-batches were loaded (18.7% of our 3a rows come from a foundation with one);
+comparison includes the filer's name line 2, which had no path in the
+first load (18.7% of our 3a rows come from a foundation with one; it fills
+since the reload);
 the doubled blocks and GT's fills account for the rest. The totals per
 return, which do not depend on the name, are the measure above.
 
