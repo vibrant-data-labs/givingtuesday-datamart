@@ -30,6 +30,7 @@ from __future__ import annotations
 import pandas as pd
 from sqlalchemy import text
 
+from givingtuesday_datamart.irs_source import GT_DATALAKE
 from givingtuesday_datamart.own_extract import extract
 from givingtuesday_datamart.own_extract.load import SCHEMA
 
@@ -126,7 +127,7 @@ def _theirs(session, source: str, batch_ids: list[str] | None = None) -> dict:
     session.execute(text(
         f"""CREATE TEMP TABLE u AS SELECT DISTINCT :prefix || object_id || '_public.xml' AS url
             FROM {SCHEMA}.returns WHERE _batch_id = ANY(:b)"""),
-        {"prefix": extract.GT_URL.split("{")[0], "b": batch_ids})
+        {"prefix": GT_DATALAKE.split("{")[0], "b": batch_ids})
     session.execute(text("ANALYZE u"))
     session.execute(text(
         f"CREATE TEMP TABLE g AS SELECT x.* FROM public.{source} x WHERE x.url IN (SELECT url FROM u)"))

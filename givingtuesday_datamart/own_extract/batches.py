@@ -23,12 +23,11 @@ Two things about them cost time to learn:
 from __future__ import annotations
 
 import fcntl
-import hashlib
 import json
-import re
 import shutil
 import subprocess
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -37,11 +36,15 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterator
 
-from givingtuesday_datamart.irs_source import IRS_XML_BASE
+from givingtuesday_datamart.irs_source import IRS_XML_BASE, OBJECT_ID, UA
+from givingtuesday_datamart.write_data_to_sql import _ByteTally, _spool_response
 
-_UA = {"User-Agent": "vdl-givingtuesday-datamart/own_extract"}
-_OBJECT_ID = re.compile(r"(?<!\d)(\d{18})(?!\d)")
 DEFLATE64 = 9
+# A missing archive answers 302 to an error page; 404 is the other "no such
+# file". Any other error is the server's, and the walk must not read it as
+# the end of a month.
+_MISSING = (302, 404)
+_HEAD_ATTEMPTS = 3
 # A month holds A to D at most so far (2025 11A-11D).
 _LETTERS = "ABCDEFGH"
 
@@ -66,13 +69,23 @@ def batch_url(year: str, batch_id: str) -> str:
 
 
 def _head(url: str) -> Batch | None:
-    request = urllib.request.Request(url, method="HEAD", headers=_UA)
+    """The archive's stamp, or None when the server says there is no such archive."""
+    request = urllib.request.Request(url, method="HEAD", headers=UA)
     opener = urllib.request.build_opener(_NoRedirect)
-    try:
-        with opener.open(request, timeout=60) as response:
-            headers = response.headers
-    except urllib.error.HTTPError:
-        return None           # a missing archive answers 302 to an error page
+    for attempt in range(1, _HEAD_ATTEMPTS + 1):
+        try:
+            with opener.open(request, timeout=60) as response:
+                headers = response.headers
+            break
+        except urllib.error.HTTPError as err:
+            if err.code in _MISSING:
+                return None
+            if attempt == _HEAD_ATTEMPTS:
+                raise
+        except urllib.error.URLError:
+            if attempt == _HEAD_ATTEMPTS:
+                raise
+        time.sleep(2 * attempt)
     year, batch_id = url.rsplit("/", 2)[-2], url.rsplit("/", 1)[-1].removesuffix(".zip")
     return Batch(year, batch_id, url, headers.get("Last-Modified", ""),
                  int(headers.get("Content-Length") or 0))
@@ -103,27 +116,28 @@ def fetch(batch: Batch, cache_dir: Path) -> Path:
     """Download an archive once into ``cache_dir`` and stamp it.
 
     The stamp (``<batch>.json``) holds the server's Last-Modified and
-    Content-Length and the archive's SHA-256. A cached archive is reused
-    when its stamp matches the server's; otherwise it is fetched again,
-    because the IRS has replaced archives under the same name before.
+    Content-Length and the archive's SHA-256 and size. A cached archive is
+    reused when its stamp matches the server's and the file is the size the
+    stamp says; otherwise it is fetched again, because the IRS has replaced
+    archives under the same name before. The download is
+    ``write_data_to_sql``'s: a body the server cuts short raises and the
+    download starts again, so a partial file is never stamped.
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
     path = cache_dir / batch.filename
     stamp = cache_dir / f"{batch.batch_id}.json"
     if path.exists() and stamp.exists():
         held = json.loads(stamp.read_text())
-        if (held.get("last_modified"), held.get("content_length")) == (
-                batch.last_modified, batch.content_length):
+        if (held.get("last_modified"), held.get("content_length"), held.get("nbytes")) == (
+                batch.last_modified, batch.content_length, path.stat().st_size):
             return path
-    request = urllib.request.Request(batch.url, headers=_UA)
-    digest = hashlib.sha256()
+    tally = _ByteTally()
     partial = path.with_suffix(".zip.part")
-    with urllib.request.urlopen(request, timeout=600) as response, partial.open("wb") as out:
-        while chunk := response.read(1 << 20):
-            digest.update(chunk)
-            out.write(chunk)
+    with _spool_response(batch.url, tally) as spool, partial.open("wb") as out:
+        shutil.copyfileobj(spool, out, 1 << 20)
     partial.replace(path)
-    stamp.write_text(json.dumps({**asdict(batch), "sha256": digest.hexdigest()}, indent=2))
+    stamp.write_text(json.dumps(
+        {**asdict(batch), "sha256": tally.digest.hexdigest(), "nbytes": tally.nbytes}, indent=2))
     return path
 
 
@@ -151,7 +165,7 @@ def stamp_of(path: Path) -> dict:
 
 
 def object_id_of(member_name: str) -> str | None:
-    match = _OBJECT_ID.search(member_name.rsplit("/", 1)[-1])
+    match = OBJECT_ID.search(member_name.rsplit("/", 1)[-1])
     return match.group(1) if match else None
 
 

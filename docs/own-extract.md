@@ -114,7 +114,7 @@ changed since 2026-08-25, holds 05A but not 05B, and nothing of 08A or 09A.
 | `parse` | flattens a return to `path -> [values]` (namespaces dropped, document order) and reads the repeating groups (a grant, a Schedule O note) one dict per occurrence |
 | `extract` | turns a parsed return into rows of GT's ten staging tables, GT's column names and order, from `data/own_extract/concordance.csv` |
 | `load` | writes a batch's rows into schema `irs_extract` (one table per GT table, same name), replacing that batch's rows in one transaction, and records the run in `datamart_meta.ingest_runs` (logical name `irs_extract`) with the archive's stamp and the concordance's SHA-256 |
-| `discover` | proposes the concordance: for each GT column, the xpath that reproduces it on the most returns both sides hold |
+| `discover` | proposes the concordance: for each GT column, the xpath that reproduces it on the most returns both sides hold (at most 8,000 returns of each form, so memory stays bounded) |
 | `parity`, `report` | measure `irs_extract` against GT's tables, in SQL, and write the report below |
 | `patch` | puts our rows into production's staging tables in place of GT's, ours first (*The patch, ours first*, below) |
 | `proof` | runs the patch on a scratch copy of a sample of filers and builds every `_current` relation there with production's DDL |

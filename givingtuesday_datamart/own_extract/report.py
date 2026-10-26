@@ -71,6 +71,9 @@ def run(session, out: Path, batch_ids: list[str] | None = None,
     stamps = loaded_batches(session)
     session.commit()          # release ingest_runs before the long measures (a loader ALTERs it)
     if batch_ids:
+        unloaded = sorted(set(batch_ids) - set(stamps["batch"]))
+        if unloaded:
+            raise ValueError(f"not loaded, nothing to measure: {', '.join(unloaded)}")
         stamps = stamps[stamps["batch"].isin(batch_ids)]
     batch_ids = sorted(stamps["batch"])
     parity.prepare(session)

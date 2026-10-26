@@ -22,15 +22,16 @@ import io
 from dataclasses import dataclass
 from pathlib import Path
 
+from givingtuesday_datamart.irs_source import GT_DATALAKE
 from givingtuesday_datamart.own_extract.parse import Filing
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONCORDANCE = REPO_ROOT / "data" / "own_extract" / "concordance.csv"
 
-# GT's own pattern for a filing's XML, which every table's url carries.
-# Downstream code reads the object id out of it and orders versions by it
-# (``MAX(url)`` in ``current_grants``), so our rows carry the same string.
-GT_URL = "https://gt990datalake-rawdata.s3.amazonaws.com/EfileData/XmlFiles/{oid}_public.xml"
+# Every table's url is GT's own pattern for a filing's XML
+# (``irs_source.GT_DATALAKE``): downstream code reads the object id out of
+# it and orders versions by it (``MAX(url)`` in ``current_grants``), so our
+# rows carry the same string.
 
 # The repeating group each group table has one row per occurrence of.
 GROUPS: dict[str, str] = {
@@ -92,8 +93,10 @@ def load(path: Path = CONCORDANCE) -> Concordance:
     return by_table
 
 
-def group_paths_for(return_type: str) -> tuple[str, ...]:
-    return tuple(GROUPS[t] for t, types in TABLES.items() if return_type in types and t in GROUPS)
+# Every return is parsed for every group: a form has no element of another
+# form's groups, and reading the form first (a byte scan of the header)
+# could disagree with the parser and drop a return's groups unseen.
+GROUP_PATHS: tuple[str, ...] = tuple(GROUPS.values())
 
 
 def _value(filing: Filing, group: dict[str, list[str]] | None, mapping: Mapping) -> str | None:
@@ -118,7 +121,7 @@ def rows(filing: Filing, table: str, mappings: list[Mapping], batch_id: str) -> 
     if filing.return_type not in TABLES[table]:
         return []
     base = {
-        "url": GT_URL.format(oid=filing.object_id),
+        "url": GT_DATALAKE.format(oid=filing.object_id),
         "filesha256": filing.sha256,
         "object_id": filing.object_id,
         "_batch_id": batch_id,

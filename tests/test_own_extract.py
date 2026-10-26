@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import io
+import json
+import urllib.error
 import zipfile
 
 import pandas as pd
@@ -300,11 +303,116 @@ def test_patch_inserts_in_group_order_with_each_batch_stamped():
     assert sql.rstrip().endswith("ORDER BY x.object_id, x.group_ordinal NULLS FIRST")
 
 
-def test_patch_deletes_its_earlier_rows_and_gt_rows_under_our_urls_only():
-    sql = patch.delete_sql("privategrants", source="s", target="t")
-    assert "DELETE FROM t.privategrants g" in sql
-    assert "g._source_version LIKE 'irs:%'" in sql
-    assert "g.url IN (SELECT DISTINCT url FROM s.privategrants)" in sql      # the same table's urls
+def test_patch_deletes_its_earlier_rows_then_gt_rows_under_our_urls_by_a_join():
+    earlier, gt_rows = patch.delete_sql("privategrants", source="s", target="t")
+    assert earlier == "DELETE FROM t.privategrants WHERE _source_version LIKE 'irs:%'"
+    # a join on the same table's urls, never an IN list under an OR (a plan that stops hashing)
+    assert gt_rows == ("DELETE FROM t.privategrants g USING (SELECT DISTINCT url FROM s.privategrants) u "
+                       "WHERE g.url = u.url")
+
+
+def test_patch_runs_name_their_source_for_the_not_null_column():
+    assert patch.ARCHIVES == "s3://givingtuesday-datamart/irs/xml_batches/"
+
+
+def _zip(tmp_path, members: dict[str, bytes]):
+    archive = tmp_path / "2026_TEOS_XML_01A.zip"
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, xml in members.items():
+            z.writestr(name, xml)
+    return archive
+
+
+PERSONS = {"privategrants": [extract.Mapping("privategrants", "sigocpyrpnam", ("RecipientPersonNm",))]}
+
+
+def test_extract_batch_reads_the_groups_wherever_the_return_type_sits(tmp_path):
+    # A byte scan of the first 8,000 bytes chose the groups once; past it, none were read.
+    padded = PF.replace(b"<ReturnTypeCd>", b"<!--" + b"x" * 9000 + b"--><ReturnTypeCd>")
+    out = tmp_path / "rows"
+    out.mkdir()
+    _, counts = load.extract_batch(_zip(tmp_path, {f"{OID}_public.xml": padded}), "b", PERSONS, out)
+    assert counts["privategrants"] == 2 and counts["returns_990PF"] == 1
+
+
+def test_a_return_that_does_not_parse_is_named(tmp_path):
+    out = tmp_path / "rows"
+    out.mkdir()
+    with pytest.raises(ValueError, match=f"b: return {OID} does not parse"):
+        load.extract_batch(_zip(tmp_path, {f"{OID}_public.xml": PF[:300]}), "b", PERSONS, out)
+
+
+def _batch():
+    return batches.Batch("2026", "2026_TEOS_XML_01A", "https://x/2026_TEOS_XML_01A.zip",
+                         "Thu, 01 Jan 2026 00:00:00 GMT", 7)
+
+
+def test_fetch_stamps_the_size_and_fetches_again_a_cached_archive_cut_short(monkeypatch, tmp_path):
+    calls = []
+
+    def spool(url, tally):
+        calls.append(url)
+        for _ in tally.wrap([b"archive"]):
+            pass
+        return io.BytesIO(b"archive")
+
+    monkeypatch.setattr(batches, "_spool_response", spool)
+    path = batches.fetch(_batch(), tmp_path)
+    stamp = json.loads((tmp_path / "2026_TEOS_XML_01A.json").read_text())
+    assert path.read_bytes() == b"archive" and stamp["nbytes"] == 7
+    assert stamp["sha256"] == hashlib.sha256(b"archive").hexdigest()
+    batches.fetch(_batch(), tmp_path)
+    assert len(calls) == 1                         # whole, as stamped: reused
+    path.write_bytes(b"arch")                      # a file cut short under its stamp
+    batches.fetch(_batch(), tmp_path)
+    assert len(calls) == 2 and path.read_bytes() == b"archive"
+
+
+class _Opener:
+    def __init__(self, answers):
+        self.answers = list(answers)
+
+    def open(self, request, timeout):
+        answer = self.answers.pop(0)
+        if isinstance(answer, int):
+            raise urllib.error.HTTPError(request.full_url, answer, "x", {}, None)
+        return answer
+
+
+class _Head:
+    headers = {"Last-Modified": "Thu, 01 Jan 2026 00:00:00 GMT", "Content-Length": "7"}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+def test_only_302_and_404_mean_no_archive(monkeypatch):
+    monkeypatch.setattr(batches.time, "sleep", lambda seconds: None)
+    url = batches.batch_url("2026", "2026_TEOS_XML_05B")
+    for answers, expected in (([404], None), ([302], None), ([503, _Head()], "2026_TEOS_XML_05B")):
+        monkeypatch.setattr(batches.urllib.request, "build_opener", lambda *a, answers=answers: _Opener(answers))
+        found = batches._head(url)
+        assert (found.batch_id if found else None) == expected
+    monkeypatch.setattr(batches.urllib.request, "build_opener", lambda *a: _Opener([503, 503, 503]))
+    with pytest.raises(urllib.error.HTTPError):
+        batches._head(url)                          # never read as the end of the month
+
+
+def test_load_refuses_a_batch_id_the_server_does_not_hold(monkeypatch, capsys):
+    from givingtuesday_datamart.own_extract import __main__ as cli
+
+    monkeypatch.setattr(cli.batches, "discover", lambda year: [_batch()])
+    monkeypatch.setattr(cli.extract, "load", lambda: {})
+    assert cli.main(["load", "2026", "--batch", "2026_TEOS_XML_1OA"]) == 2
+    assert "2026_TEOS_XML_1OA" in capsys.readouterr().err
+
+
+def test_discover_keeps_at_most_per_form_returns_of_a_form(tmp_path):
+    members = {f"20260013934910105{i}_public.xml": PF for i in range(3)}
+    assert len(discover.read_filings(_zip(tmp_path, members), per_form=2)) == 2
 
 
 def test_patch_refuses_a_batch_loaded_with_another_concordance_or_none():

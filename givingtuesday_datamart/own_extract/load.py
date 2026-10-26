@@ -18,7 +18,9 @@ import csv
 import json
 import tempfile
 import uuid
+import xml.etree.ElementTree as ET
 from collections import Counter
+from contextlib import ExitStack
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -74,34 +76,25 @@ def extract_batch(path: Path, batch_id: str, concordance: dict[str, list[extract
     """
     tables = [*concordance, RETURNS]
     files = {t: out_dir / f"{t}.csv" for t in tables}
-    handles = {t: files[t].open("w", newline="") for t in tables}
-    writers = {t: csv.writer(handles[t]) for t in tables}
     counts: Counter = Counter()
-    for object_id, xml in batches.iter_members(path):
-        return_type = _return_type(xml)
-        filing = parse.parse(xml, object_id, extract.group_paths_for(return_type))
-        counts[f"returns_{filing.return_type or 'unknown'}"] += 1
-        counts[f"version_{filing.version or 'unknown'}"] += 1     # a new IRS schema shows up here
-        writers[RETURNS].writerow([_csv(v) for v in (
-            object_id, batch_id, filing.return_type, filing.version, filing.sha256,
-            filing.first("ReturnHeader/Filer/EIN"), filing.first("ReturnHeader/TaxPeriodEndDt"))])
-        for table, mappings in concordance.items():
-            order = columns_of(table, mappings)
-            for row in extract.rows(filing, table, mappings, batch_id):
-                writers[table].writerow([_csv(row.get(c)) for c in order])
-                counts[table] += 1
-    for handle in handles.values():
-        handle.close()
+    with ExitStack() as stack:
+        writers = {t: csv.writer(stack.enter_context(files[t].open("w", newline=""))) for t in tables}
+        for object_id, xml in batches.iter_members(path):
+            try:
+                filing = parse.parse(xml, object_id, extract.GROUP_PATHS)
+            except ET.ParseError as err:
+                raise ValueError(f"{batch_id}: return {object_id} does not parse: {err}") from err
+            counts[f"returns_{filing.return_type or 'unknown'}"] += 1
+            counts[f"version_{filing.version or 'unknown'}"] += 1     # a new IRS schema shows up here
+            writers[RETURNS].writerow([_csv(v) for v in (
+                object_id, batch_id, filing.return_type, filing.version, filing.sha256,
+                filing.first("ReturnHeader/Filer/EIN"), filing.first("ReturnHeader/TaxPeriodEndDt"))])
+            for table, mappings in concordance.items():
+                order = columns_of(table, mappings)
+                for row in extract.rows(filing, table, mappings, batch_id):
+                    writers[table].writerow([_csv(row.get(c)) for c in order])
+                    counts[table] += 1
     return files, counts
-
-
-def _return_type(xml: bytes) -> str:
-    head = xml[:8000]
-    start = head.find(b"<ReturnTypeCd>")
-    if start < 0:
-        return ""
-    end = head.find(b"<", start + 14)
-    return head[start + 14:end].decode("ascii", "replace").strip()
 
 
 def _csv(value) -> str:

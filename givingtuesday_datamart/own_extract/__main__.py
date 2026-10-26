@@ -44,6 +44,10 @@ def _load(args) -> int:
     concordance = extract.load()
     found = batches.discover(args.year)
     if args.batch:
+        unknown = sorted(set(args.batch) - {b.batch_id for b in found})
+        if unknown:
+            print(f"no such archive for {args.year}: {', '.join(unknown)}", file=sys.stderr)
+            return 2
         found = [b for b in found if b.batch_id in set(args.batch)]
     if args.reverse:
         found.reverse()
@@ -115,7 +119,7 @@ def _parity(args) -> int:
 def _discover(args) -> int:
     lines = []
     with get_session(config=datamart_config()) as session:
-        lines = discover.propose(session, args.zip)
+        lines = discover.propose(session, args.zip, per_form=args.per_form)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=discover.CONCORDANCE_FIELDS)
@@ -197,6 +201,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("zip", type=Path)
     p.add_argument("--out", type=Path,
                    default=extract.REPO_ROOT / "data" / "own_extract" / "concordance_proposed.csv")
+    p.add_argument("--per-form", type=int, default=discover.PER_FORM,
+                   help="returns of each form searched at most (memory grows with it)")
     p.set_defaults(func=_discover)
 
     p = sub.add_parser("patch", help="our rows into production's staging tables, ours first (after a refresh)")

@@ -22,6 +22,11 @@ import pandas as pd
 
 from givingtuesday_datamart.own_extract.parse import Filing
 
+# Returns of one form searched at most: a parsed return holds its whole
+# tree, so an 84,000-return archive read whole is on the order of 10 GB.
+# Batch 01A, which the concordance was found on, holds 7,180 990s.
+PER_FORM = 8_000
+
 _HEADER = {"object_id", "ctid_order", "url"}
 _CANDIDATES = 25
 
@@ -282,21 +287,36 @@ for _n in range(5):
     OCCURRENCES[("basic_fields_pf", f"supinfconman_{_n}")] = (f"{_SIA}/ContributingManagerNm", _n)
 
 
-def propose(session, zip_path, rows_for=None) -> list[dict]:
-    """Concordance lines for every table, searched on one archive's returns.
+def read_filings(zip_path, per_form: int = PER_FORM) -> dict[str, Filing]:
+    """The first ``per_form`` returns of each form a table reads, parsed; the
+    rest are dropped as they are read, so memory does not grow with the archive."""
+    from pathlib import Path
+
+    from givingtuesday_datamart.own_extract import batches, extract, parse
+
+    forms = {form for types in extract.TABLES.values() for form in types}
+    kept: Counter = Counter()
+    filings: dict[str, Filing] = {}
+    for object_id, xml in batches.iter_members(Path(zip_path)):
+        filing = parse.parse(xml, object_id, extract.GROUP_PATHS)
+        if filing.return_type in forms and kept[filing.return_type] < per_form:
+            filings[object_id] = filing
+            kept[filing.return_type] += 1
+    return filings
+
+
+def propose(session, zip_path, rows_for=None, per_form: int = PER_FORM) -> list[dict]:
+    """Concordance lines for every table, searched on one archive's returns
+    (``read_filings``: at most ``per_form`` of each form).
 
     ``rows_for(session, table, eins, object_ids)`` reads GT's rows
     (``gt.rows_for`` unless given, e.g. a cache of them).
     """
     from pathlib import Path
 
-    from givingtuesday_datamart.own_extract import batches, extract, gt, parse
+    from givingtuesday_datamart.own_extract import extract, gt
 
-    filings: dict[str, Filing] = {}
-    for object_id, xml in batches.iter_members(Path(zip_path)):
-        head = xml[:8000].decode("utf-8", "replace")
-        return_type = head.split("<ReturnTypeCd>", 1)[-1].split("<", 1)[0] if "<ReturnTypeCd>" in head else ""
-        filings[object_id] = parse.parse(xml, object_id, extract.group_paths_for(return_type))
+    filings = read_filings(zip_path, per_form)
     measured_on = Path(zip_path).stem
     lines: list[dict] = []
     for table, types in extract.TABLES.items():

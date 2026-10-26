@@ -3,10 +3,11 @@
 For a sample of filers, every year: GT's staging rows go to schema
 ``scratch_patch`` (in GT's order) and ours to ``scratch_patch_src``; the
 patch runs twice over the copy (the second run must land on the same
-tables); every ``_current`` relation is then built there by production's own
-DDL, and set beside production's relations for the same filers. Schedule O
-is left out: no ``_current`` relation reads it, and its staging table has
-no index to sample by.
+tables; the first records its runs in ``ingest_runs`` as on production,
+and the proof deletes them); every ``_current`` relation is then built
+there by production's own DDL, and set beside production's relations for
+the same filers. Schedule O is left out: no ``_current`` relation reads
+it, and its staging table has no index to sample by.
 
 The sample: filers whose EIN hashes to 0 modulo ``modulus`` (about one in a
 thousand of every form), and the filers of the cases ``pf_total_causes``
@@ -75,7 +76,12 @@ def prove(session, modulus: int = 997) -> dict[str, pd.DataFrame]:
         {"m": modulus}).all()} | set(CASES))
     _copy(session, eins)
     before = {t: session.execute(text(f"SELECT count(*) FROM {SCRATCH}.{t}")).scalar() for t in TABLES}
-    first = patch.apply(session, source=SOURCE, target=SCRATCH, tables=TABLES, record=False)
+    # The first run records its runs, as on production, so the INSERT into
+    # ingest_runs is proven too; the proof takes them out again.
+    first = patch.apply(session, source=SOURCE, target=SCRATCH, tables=TABLES, record=True)
+    recorded = session.execute(text(
+        "DELETE FROM datamart_meta.ingest_runs WHERE logical_name = :n AND staging_table LIKE :t"),
+        {"n": patch.PATCH, "t": f"{SCRATCH}.%"}).rowcount
     second = patch.apply(session, source=SOURCE, target=SCRATCH, tables=TABLES, record=False)
     checks: dict[str, pd.DataFrame] = {}
     rows = []
@@ -154,7 +160,8 @@ def prove(session, modulus: int = 997) -> dict[str, pd.DataFrame]:
             FROM {SCRATCH}.before_{current} b FULL JOIN {SCRATCH}.{current} a
               ON a.filerein = b.filerein AND a.taxyear IS NOT DISTINCT FROM b.taxyear"""))
     checks["versions"] = pd.concat(versions, ignore_index=True)
-    checks["sample"] = pd.DataFrame([{"filers": len(eins), "modulus": modulus, "named_cases": len(CASES)}])
+    checks["sample"] = pd.DataFrame([{"filers": len(eins), "modulus": modulus, "named_cases": len(CASES),
+                                      "runs_recorded": recorded}])
     return checks
 
 

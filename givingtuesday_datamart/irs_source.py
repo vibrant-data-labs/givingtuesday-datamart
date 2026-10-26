@@ -63,11 +63,11 @@ GT_DATALAKE = "https://gt990datalake-rawdata.s3.amazonaws.com/EfileData/XmlFiles
 # 18 digits: 4-digit processing year + 14 more. Also the GT object name.
 # Bounded by digit lookaround, not \b — the id is followed by "_public.xml"
 # in every URL that carries it, and "_" is a word character.
-_OBJECT_ID = re.compile(r"(?<!\d)(\d{18})(?!\d)")
+OBJECT_ID = re.compile(r"(?<!\d)(\d{18})(?!\d)")
 # {ein}_{taxperiod}_{returntype}_{YYYYMMDD}{return_id}.pdf
 _PDF_TOKEN = re.compile(r"_(\d{8})(\d+)\.pdf$")
 
-_UA = {"User-Agent": "vdl-givingtuesday-datamart/irs_source"}
+UA = {"User-Agent": "vdl-givingtuesday-datamart/irs_source"}
 
 # Image widths, in pixels at 300 DPI, of the pages the IRS renders from the
 # XML, by renderer. Page 1 of an image is the IRS's form page 1 and its
@@ -133,14 +133,14 @@ class Image(NamedTuple):
 
 def parse_object_id(token: str) -> str:
     """Pull the 18-digit OBJECT_ID out of a bare id or any URL carrying one."""
-    match = _OBJECT_ID.search(token)
+    match = OBJECT_ID.search(token)
     if not match:
         raise ValueError(f"no 18-digit IRS OBJECT_ID found in {token!r}")
     return match.group(1)
 
 
 def _get(url: str, headers: dict[str, str] | None = None) -> bytes:
-    request = urllib.request.Request(url, headers={**_UA, **(headers or {})})
+    request = urllib.request.Request(url, headers={**UA, **(headers or {})})
     with urllib.request.urlopen(request) as response:
         return response.read()
 

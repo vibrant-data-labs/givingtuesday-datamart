@@ -43,11 +43,14 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 
 from givingtuesday_datamart.ingestion import LINEAGE_COLUMN_NAMES
-from givingtuesday_datamart.own_extract import extract
+from givingtuesday_datamart.own_extract import batches, extract
 from givingtuesday_datamart.own_extract.load import LOGICAL_NAME, SCHEMA
 
 PATCH = "irs_extract_patch"
 STAMP = "irs:"
+# A patch run's source (``ingest_runs.source_url``, NOT NULL): our copies of
+# the IRS archives its rows come from; each row names its own archive.
+ARCHIVES = f"s3://{batches.ARCHIVE_BUCKET}/{batches.ARCHIVE_PREFIX}/"
 
 
 class PatchRefused(RuntimeError):
@@ -110,16 +113,18 @@ def insert_sql(table: str, columns: list[str], source: str = SCHEMA, target: str
         f"ORDER BY x.object_id, x.group_ordinal NULLS FIRST")
 
 
-def delete_sql(table: str, source: str = SCHEMA, target: str = "public") -> str:
-    """The patch's earlier rows and GT's rows under a url our table holds; counts each."""
-    return (
-        f"WITH d AS (DELETE FROM {target}.{table} g\n"
-        f"           WHERE g._source_version LIKE '{STAMP}%'\n"
-        f"              OR g.url IN (SELECT DISTINCT url FROM {source}.{table})\n"
-        f"           RETURNING g._source_version LIKE '{STAMP}%' AS earlier)\n"
-        f"SELECT count(*) FILTER (WHERE earlier) AS earlier_patch_rows,\n"
-        f"       count(*) FILTER (WHERE NOT earlier) AS gt_rows\n"
-        f"FROM d")
+def delete_sql(table: str, source: str = SCHEMA, target: str = "public") -> tuple[str, str]:
+    """The patch's earlier rows, then GT's rows under a url our table holds.
+
+    Two statements, not one with an ``OR``: an ``IN (subquery)`` under an
+    ``OR`` cannot be a semi-join, and the planner hashes its url list only
+    while it fits the hash budget (``basic_fields``'s 967,617 urls already
+    take 116 of 128 MB at 64 MB ``work_mem``); past it every GT row would
+    scan the list. ``USING`` is a hash join that spills to disk.
+    """
+    return (f"DELETE FROM {target}.{table} WHERE _source_version LIKE '{STAMP}%'",
+            f"DELETE FROM {target}.{table} g USING (SELECT DISTINCT url FROM {source}.{table}) u "
+            f"WHERE g.url = u.url")
 
 
 def apply(session, *, source: str = SCHEMA, target: str = "public",
@@ -142,10 +147,11 @@ def apply(session, *, source: str = SCHEMA, target: str = "public",
         release = session.execute(text(
             f"SELECT _source_version FROM {target}.{table} WHERE _source_version NOT LIKE '{STAMP}%' LIMIT 1")
         ).scalar()
-        deleted = session.execute(text(delete_sql(table, source, target))).mappings().one()
+        earlier, gt_rows = (session.execute(text(sql)).rowcount for sql in delete_sql(table, source, target))
         inserted = session.execute(text(insert_sql(table, columns, source, target)),
                                    {"ingested_at": started.isoformat()}).rowcount
-        out[table] = {"gt_release": release, **deleted, "inserted": inserted}
+        out[table] = {"gt_release": release, "earlier_patch_rows": earlier, "gt_rows": gt_rows,
+                      "inserted": inserted}
     if record:
         manifest = {"concordance_sha256": concordance.sha256, "batches": [r["batch"] for r in runs]}
         finished = datetime.now(timezone.utc)
@@ -154,10 +160,10 @@ def apply(session, *, source: str = SCHEMA, target: str = "public",
                 """INSERT INTO datamart_meta.ingest_runs
                        (run_id, logical_name, staging_table, source_version, source_url,
                         started_at, finished_at, status, row_count, source_manifest)
-                   VALUES (:id, :name, :table, :version, NULL, :started, :finished, 'success',
+                   VALUES (:id, :name, :table, :version, :url, :started, :finished, 'success',
                            :rows, CAST(:manifest AS JSONB))"""),
                 {"id": str(uuid.uuid4()), "name": PATCH, "table": f"{target}.{table}",
-                 "version": f"{SCHEMA}@{concordance.sha256[:12]}", "started": started,
+                 "version": f"{SCHEMA}@{concordance.sha256[:12]}", "url": ARCHIVES, "started": started,
                  "finished": finished, "rows": counts["inserted"],
                  "manifest": json.dumps({**manifest, **counts})})
     return out
