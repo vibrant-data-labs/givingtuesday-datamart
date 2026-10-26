@@ -477,10 +477,19 @@ before the patch: afterwards staging holds our rows under our urls.
    about 11 GB more on disk until a vacuum makes the deleted rows' space
    reusable;
 3. `sources build-canonical`;
-4. the grants relations and the matcher, as in *The next GivingTuesday
-   drop* (`docs/placeholder_recovery_operations.md`), steps 3 to 8: the
-   matcher run (about eight hours on the big box) rebuilds the `_current`
-   relations itself, and its regression gate shows what moved.
+4. the rest of *The next GivingTuesday drop*
+   (`docs/placeholder_recovery_operations.md`), steps 3 to 8: the grants
+   `_current` relations, so the work list reads the patched rows; the work
+   list, which gains the placeholder filings of the returns GT never had;
+   the read of the filings not yet read, under `v3`, on the box and on an
+   explicit go, since it buys model calls; the load, the view and the
+   checks; the matcher (about eight hours on the big box) and its
+   regression gate.
+
+The placeholder lists already loaded keep their place: the view puts a
+loaded list in place of the placeholder row of the url
+`privategrants_current` holds, and the patch keeps every url, and for
+every loaded list in our batches our rows hold the placeholder row.
 
 Monthly, as the IRS posts a batch: `own_extract load <year> --batch
 <new>`, then steps 2 to 4. When GT's next release lands, `sources refresh`
