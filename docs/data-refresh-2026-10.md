@@ -49,26 +49,35 @@ tables as they are.
 
 ### 0. Preflight (the box, evening, about 20 minutes)
 
-- [ ] The box is up and reachable, nothing else running on it. (On the
-      evening of 2026-10-26 it did not answer at its last address.)
-- [ ] The clone on `main` at `cb6a004` or later:
+- [x] The box is up and reachable, nothing else running on it. (On
+      2026-10-26 it did not answer at its last address: the address changed
+      with its restart of 2026-10-20. Reachable at the new one.)
+- [x] The clone on `main` at `cb6a004` or later:
       `git fetch origin && git checkout main && git pull --ff-only`
-- [ ] The environment reinstalled: `pip install -e '.[ingest]'`;
+      (done 2026-10-26: the session4 clone, at `cb6a004`)
+- [x] The environment reinstalled: `pip install -e '.[ingest]'`;
       `python -c 'import urllib3; print(urllib3.__version__)'` prints 2.x
       (the archive download relies on it raising on a body cut short).
-- [ ] `source ~/frame.env`, then
+      (done: urllib3 2.8.0, requests 2.34.2; the package imports from the
+      session4 clone)
+- [x] `source ~/frame.env`, then
       `python -m givingtuesday_datamart.sources status` shows nothing newer
       than `2026_06_16` / `2026_06_25`. If it does: `sources refresh`
       first; the patch then goes on top of the new release.
-- [ ] `python -m givingtuesday_datamart.own_extract batches 2026` ends at
+      (done 2026-10-26 21:40 UTC: nothing newer; the BMF `2026_10_13`)
+- [x] `python -m givingtuesday_datamart.own_extract batches 2026` ends at
       `09A`. If not: `own_extract load 2026 --batch <new>` first.
+      (done: ends at `09A`, posted 2026-10-21)
 - [ ] A manual snapshot of the shared instance, status *available*.
-- [ ] Free storage at least 60 GB (CloudWatch `FreeStorageSpace`); no
-      orphaned backends.
-- [ ] `python -m givingtuesday_datamart.placeholder_recovery status`
+      (requested 2026-10-26 21:40 UTC; creating)
+- [x] Free storage at least 60 GB (CloudWatch `FreeStorageSpace`); no
+      orphaned backends. (done: 70.1 GB at 21:40 UTC; no backend running,
+      six idle client connections from pgAdmin and a JDBC client)
+- [x] `python -m givingtuesday_datamart.placeholder_recovery status`
       (holds a share lock on `privategrants_current` for about a minute):
       no line-25 rule, view on `v2`, recovered rows under `v2`, no
-      `match_tier`. Paste the screen into the log.
+      `match_tier`. Paste the screen into the log. (done: as expected; the
+      screen is in the log)
 
 ### 1. The patch (the box, quiet window, about an hour, then the vacuum)
 
@@ -218,3 +227,26 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   out (see the table above). `sources status` and `own_extract batches
   2026` run from the laptop: nothing new on either side. The box did not
   answer at its last address that evening; step 0 starts with it.
+- **2026-10-26, 21:40 UTC (14:40 PDT), step 0.** From the box: the session4
+  clone on `main` at `cb6a004`, the package reinstalled (urllib3 2.8.0,
+  requests 2.34.2), `sources status` nothing newer than the June release,
+  `own_extract batches 2026` ending at `09A`. From the laptop: no backend
+  running on the shared instance (six idle client connections), free
+  storage 70.1 GB, the manual snapshot requested at 21:40 UTC. The status
+  screen before anything ran:
+
+  ```
+  privategrants_current: 16,651,426 rows by rule
+    passthrough 15,797,603; latest_url 664,328; pair_collapse 188,149;
+    latest_url+pair_collapse 1,346; line-25 rules in the table: none
+  privategrants_future_current: 441,358 rows
+  view privategrants_current_w_recovered: shows policy v2
+  privategrants_recovered: v2 paid 582,676 rows, 4,607 filings, $16,205.0M;
+    v2 future 6,531 rows, 173 filings, $1,268.7M
+  page_verdicts v3: agreed 15,611, escalated 8,983, flagged 5,699, not_a_list 8,541
+  pf_placeholder_filings: 24,518 filings, $48,493.2M, 112 over both columns of line 25
+  matcher output: privategrants_w_recipients about 7,583,106 rows,
+    unioned_grants about 16,010,358; no match_tier column
+  ```
+
+  Step 1 waits for the snapshot to be available and for the evening.
