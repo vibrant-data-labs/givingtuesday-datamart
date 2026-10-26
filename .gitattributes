@@ -17,3 +17,9 @@ data/placeholder_recovery/exclusions.csv !filter !diff !merge text
 data/placeholder_recovery/fetch_test_pre2020.csv !filter !diff !merge text
 data/placeholder_recovery/renderer_widths.csv !filter !diff !merge text
 data/placeholder_recovery/renderer_widths_sample.csv !filter !diff !merge text
+
+# own_extract: the GT column -> xpath mapping. Reviewed by hand, so its diffs
+# are the audit trail: not an LFS pointer. Its bytes are kept as written
+# (csv's CRLF, no end-of-line conversion) because every load records the
+# file's SHA-256 as lineage and reloads a batch when it changes.
+data/own_extract/concordance.csv !filter !diff !merge -text
