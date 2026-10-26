@@ -961,6 +961,12 @@ def _build_one(connection, table: str, ddl: str) -> int:
     # time, so a larger per-operation budget is safe on the 4GB instance.
     # SET (not SET LOCAL): session-scoped, so it survives the
     # per-statement execute() calls below and dies with the connection.
+    # No parallel workers: each worker gets the whole per-operation budget
+    # (and a hash twice it, hash_mem_multiplier being 2), so on 2026-10-26
+    # the basic_fields_current build with the default two workers pushed
+    # the 4 GB instance a gigabyte into swap in three minutes and was
+    # cancelled. One process keeps the 256 MB a budget, not a multiple.
+    connection.execute(text("SET max_parallel_workers_per_gather = 0"))
     connection.execute(text("SET work_mem = '256MB'"))
     connection.execute(text("SET maintenance_work_mem = '512MB'"))
     for stmt in [s for s in ddl.split(";") if s.strip()]:

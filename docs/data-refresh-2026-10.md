@@ -68,8 +68,9 @@ tables as they are.
 - [x] `python -m givingtuesday_datamart.own_extract batches 2026` ends at
       `09A`. If not: `own_extract load 2026 --batch <new>` first.
       (done: ends at `09A`, posted 2026-10-21)
-- [ ] A manual snapshot of the shared instance, status *available*.
-      (requested 2026-10-26 21:40 UTC; creating)
+- [x] A manual snapshot of the shared instance, status *available*.
+      (requested 2026-10-26 21:40 UTC; available at 100% as of 21:40:07 UTC,
+      before the patch's first write)
 - [x] Free storage at least 60 GB (CloudWatch `FreeStorageSpace`); no
       orphaned backends. (done: 70.1 GB at 21:40 UTC; no backend running,
       six idle client connections from pgAdmin and a JDBC client)
@@ -81,18 +82,40 @@ tables as they are.
 
 ### 1. The patch (the box, quiet window, about an hour, then the vacuum)
 
-- [ ] `tmux -L refresh new -s patch 'python -m givingtuesday_datamart.own_extract patch 2>&1 | tee ~/logs/refresh/patch.log'`
-- [ ] Per table, GT's rows out and ours in: expect about 16,662,030 out and
-      20,109,675 in over the ten tables, earlier patch rows 0; the three
-      basic-fields `_current` relations rebuilt (the command prints them).
+- [x] `tmux -L refresh new -s patch 'python -m givingtuesday_datamart.own_extract patch 2>&1 | tee ~/logs/refresh/patch.log'`
+      (started 2026-10-26 21:45 UTC from the box, on Zein's word, in the
+      afternoon rather than the evening window; the snapshot was available
+      before the first write)
+- [x] Per table, GT's rows out and ours in: expect about 16,662,030 out and
+      20,109,675 in over the ten tables, earlier patch rows 0.
+      (done: exactly 16,662,030 out and 20,109,675 in, earlier rows 0 on
+      every table; the one transaction committed at 22:23:49 UTC; the log)
+- [ ] The three basic-fields `_current` relations rebuilt (the command
+      does it after the patch). NOT done: the watchdog cancelled the
+      `basic_fields_current` build at 22:27 UTC when swap passed 0.5 GB
+      (0.99 GB at the peak; freeable memory 0.70 GB). The builder sets a
+      256 MB `work_mem` and left the instance's two parallel workers on,
+      so each memory node could take the budget three times over. The
+      `DROP` rolled back with the cancelled `CREATE`, so the three
+      relations stand as before the patch (3,812,025, 1,158,524 and
+      2,151,017 rows) and read the old staging. Rerun after the vacuum
+      with the builder's parallel workers off (this branch's change to
+      `current_grants._build_one`):
+      `python -m givingtuesday_datamart.current_grants --only basic_fields_current --only basic_fields_pf_current --only basic_fields_ez_current`
 - [ ] `VACUUM (ANALYZE)` on the ten staging tables (appendix): the deleted
-      rows' space becomes reusable (the files do not shrink).
-- [ ] Checks: ten `irs_extract_patch` rows in `datamart_meta.ingest_runs`
-      dated today; no url holds both GT's rows and ours, on
-      `basic_fields_pf` and `privategrants` (appendix);
-      `basic_fields_pf_current` holds filer-years with a tax period ending
-      in 2025 that GT never had.
-- [ ] Free storage after, expected about 11 GB less.
+      rows' space becomes reusable (the files do not shrink). (started
+      22:31 UTC from the box, `~/logs/refresh/vacuum.log`; also the planner's
+      statistics, which the builds read, since the tables gained a quarter
+      of their rows)
+- [x] Check: ten `irs_extract_patch` rows in `datamart_meta.ingest_runs`
+      dated today. (done: ten rows, finished 22:23:49 UTC)
+- [ ] Checks: no url holds both GT's rows and ours, on `basic_fields_pf`
+      and `privategrants` (appendix); `basic_fields_pf_current` holds
+      filer-years with a tax period ending in 2025 that GT never had
+      (after the rebuild).
+- [ ] Free storage after, expected about 11 GB less. (70.75 GB at 22:15
+      UTC during the patch, 67.1 GB at 22:23 when it committed, 62.1 GB at
+      the cancelled build's peak)
 
 ### 2. The canonical build (the box, about 25 minutes)
 
@@ -250,3 +273,32 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   ```
 
   Step 1 waits for the snapshot to be available and for the evening.
+- **2026-10-26, 21:45 to 22:27 UTC, step 1.** Zein: "do it now", so the
+  patch ran in the afternoon. The snapshot was available at 21:40:07 UTC.
+  The ten-table transaction took 38 minutes and committed at 22:23:49 UTC
+  with the proof's exact totals, 16,662,030 of GT's rows out and 20,109,675
+  of ours in:
+
+  | table | GT's rows out | ours in |
+  |---|---|---|
+  | basic_fields | 827,667 | 967,617 |
+  | mission_statements | 827,667 | 967,617 |
+  | programs | 827,667 | 967,617 |
+  | grants_to_domestic_organizations | 2,097,563 | 2,777,704 |
+  | schedule_o | 6,382,813 | 7,870,975 |
+  | basic_fields_pf | 289,363 | 342,397 |
+  | privategrants | 4,054,393 | 4,617,771 |
+  | privategrants_future | 113,959 | 120,663 |
+  | basic_fields_ez | 486,325 | 578,596 |
+  | programs_ez | 754,613 | 898,718 |
+
+  During the patch, free storage 70.8 to 67.1 GB, swap 0.03 GB, freeable
+  memory 1.8 GB. Then the command's second phase, the basic-fields
+  `_current` rebuild in a new session, drove swap from 0.03 to 0.99 GB in
+  three minutes (freeable memory 0.70 GB) and the laptop watchdog cancelled
+  it at 22:27 UTC, as the rules say; swap was back to 0.21 GB a minute
+  later. The three relations stand as they were (the `DROP` rolled back).
+  Cause: `current_grants._build_one` sets `work_mem` to 256 MB and leaves
+  the instance's two parallel workers on. Fix on this branch: the builder
+  sets `max_parallel_workers_per_gather = 0`. The vacuum of the ten tables
+  started at 22:31 UTC from the box; the rebuild follows it.
