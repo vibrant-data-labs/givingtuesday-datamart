@@ -587,6 +587,28 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   database: the `v3` check first (every rule ok at 13:15:35), the
   corrections preflight, the matcher, the gate, the check again. The
   laptop watchdog runs for ten hours, patient through the compute phases.
+- **2026-10-27, 16:05 to 21:37 UTC, the first start and its stop.** The
+  preflight took 2 h 50 min (the ASPCA's family alone 90 million candidate
+  pairs). The matcher started 16:05:30 as build `f018b948`, rebuilt the
+  five `_current` relations by 16:44 on the enlarged database (basic
+  fields 3 minutes, Schedule I 6, the paid relation 28), created the views
+  for `v3`, read the two universes, cleaned them, and went into its index
+  at 16:55. The index's last step, pandas' `MultiIndex.union` of the zip
+  block and the name block, deduplicates about a billion pairs as Python
+  tuples on one core: a `py-spy` stack at 20:12 and again at 21:31 showed
+  it inside `drop_duplicates` / `is_unique`, 78 GB resident, CPU pinned,
+  no end in sight, 4 h 40 min in. Zein, 21:20: restart without the
+  rebuild, to see whether a faster index helps. Done as `49b7c60`:
+  `candidate_pairs` packs each pair into one int64 and deduplicates with
+  `numpy.unique`, which returns the same pairs in the same order as the
+  union did (sorted by the pair; `resolve_matches` breaks score ties by
+  that order), held to recordlinkage's result by `tests/test_candidate_pairs.py`;
+  and `--skip-rebuild`, since nothing had written to the relations since
+  16:44 (no load; the fork's read wrote page tables only). Stopped the
+  first start at 21:37:00 (its tmux session killed; the process gone, no
+  chunk written, nothing in the output tables touched) and started build
+  `b97ac25d` at 21:37:05 with `--skip-rebuild`, in `tmux -L refresh -s
+  matcher2`, log `matcher2.log`; the preflight of 13:15 holds.
 - **2026-10-27, 14:09 UTC, step 5 started: the read, beside the matcher.**
   What the 403 was. Zein asked TEOS for a filer's return list from his
   laptop with Python's urllib and no headers of his own and got the JSON;
