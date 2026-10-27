@@ -199,7 +199,11 @@ tables as they are.
       (started 14:09:05 UTC as `~/logs/refresh/run-read.sh`, session
       `read` of `tmux -L frame`, with `--cap 300`, on `81e020b`, beside
       the matcher; the log entry of 14:09 says why it could start)
-- [ ] Spend logged: the difference in the `$` column before and after.
+- [x] Spend logged: the difference in the `$` column before and after.
+      (about $3.94 for the run of 14:09 to 17:07 UTC: Gemini Flash Lite
+      $1.77 and Qwen $0.44 on the 530 new pages, then $1.73 in the
+      transcribe for 314 pages, of which 3.8 Flash 119 and Sonnet 55; 74
+      pages are without a verdict, see the log entry of 17:07)
 - [ ] Tax years 2015-2019 ($436 projected) are not part of this refresh
       unless decided separately.
 
@@ -615,3 +619,24 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   fifteen a second, many of the newest (periods 202512 and 202602)
   `no_teos_image`, images the IRS has not generated yet. The load, step 6
   again, waits for the gate: never while the matcher runs.
+- **2026-10-27, 17:07 UTC, the read ended with 74 pages unverdicted; the
+  Qwen provider was down.** The fetch (75 s) and the cost gate (530 new
+  pages to buy, $5 projected) were fine. Gemini Flash Lite read all 530
+  pages by 14:12 UTC, $1.77, no errors. Qwen's provider, behind the
+  gateway, answered "temporarily unavailable" or timed out on most calls
+  from eight seconds after the start (Vercel's status page: no incident,
+  so the model's side); Qwen's pass ended at 15:16 UTC with 140 of the 530
+  pages at two errors of three, $0.44. The verdicts under v3 over all
+  39,158 pages: agreed 15,744, escalated 9,038, flagged 5,616, not a list
+  8,686, 74 without a verdict (Qwen failed on them this run); 456 verdict
+  rows written; the transcribe bought 314 pages for $1.73 (Qwen 140, 3.8
+  Flash 119, Sonnet 55). The run's own second pass on the 74 began at
+  16:18 UTC and its circuit breaker stopped it at 17:06 UTC: the first 50
+  results were all errors, so it wrote nothing and every page kept its
+  attempts. Exit 1 at 17:06:56 UTC; spend about $3.94 of the $300 cap.
+  The 74 pages (and their filings' lists) wait for Qwen's provider to be
+  available again; the same command resumes and reads only what is
+  missing. Everything else from the read is stored and loads with step 6
+  after the gate. The matcher, meanwhile: its preflight ran until about
+  16:10 UTC, then `grant_matching` rebuilt the `_current` relations on the
+  database (16:10 to about 16:55) and began its matching slices.
