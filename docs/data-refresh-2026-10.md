@@ -185,7 +185,10 @@ tables as they are.
 
 The BMF arm doubles the pairs (PR #68), so the read box does not do.
 
-- [ ] The big box set up as *Set up a box once* in the operations doc, on `main`.
+- [ ] The big box set up as *Set up a box once* in the operations doc, on
+      `main` (tonight: the playground resized to 256 GB, on this branch,
+      whose builder keeps the shared instance out of swap; resized back
+      after the gate).
 - [ ] `python -m givingtuesday_datamart.placeholder_recovery check --policy v3`
 - [ ] `python -m givingtuesday_datamart.corrections_preflight` (hours on a laptop, minutes on a box)
 - [ ] `python -m givingtuesday_datamart.grant_matching` (about eight hours;
@@ -385,3 +388,40 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   extract, and 412,224 carry a tax period ending in 2025 or later, none of
   them from GT's rows. Latest tax year 2025 on 231,253 organizations,
   2024 on 354,882. Step 3 waits on Zein.
+- **2026-10-27, 03:02 to 03:24 UTC, step 3, two false starts.** Zein's go
+  at 20:00 PDT. The paid build from the box (branch at `31663a9`) was
+  cancelled by the watchdog at 03:11 UTC, eight minutes in, at 0.87 GB of
+  swap: the builder's 256 MB `work_mem` is a budget per operation, and the
+  `privategrants_current` query runs many window and hash nodes at once in
+  one process, so the sum passed the limit with no parallel worker
+  involved. The incident rule of 2026-10-23 says 64 MB on this instance,
+  and the builder now defaults to it (256 MB of `maintenance_work_mem`,
+  overridable through `GT_BUILD_WORK_MEM` and
+  `GT_BUILD_MAINTENANCE_WORK_MEM` for a larger database instance only;
+  `ddb47c7`). The transaction rolled back; the relation and the view
+  stood. The second start at 03:19 UTC was cancelled within a minute by
+  the watchdog itself: CloudWatch still reported the 0.87 GB the first
+  attempt had swapped out (pages stay in swap until touched) while 3 GB of
+  memory was free, and the absolute rule fired on a backend fourteen
+  seconds old. The watchdog now measures swap from its own start: a rise
+  of more than 0.5 GB is the breach. Third start 03:23:38 UTC from
+  `ddb47c7`. Also fixed on the branch, found while preparing step 7: the
+  matcher and the gate, run as modules, attached no log handler either
+  (`f300d08`).
+- **2026-10-27, 03:30 UTC, Zein's decisions for the night** (he is asleep
+  from here; the aim is through the matcher): the read's cap is $300; the
+  box's disk is free to use tonight; the view goes to `v3`; the matcher
+  box is the playground resized with his `ec2resize` sequence (stop,
+  change type, start), not a new instance; the latest start for the
+  matcher is 09:00 UTC (2 AM Pacific); if the doubling watch names
+  unhalved filings, proceed when 20 or fewer and list them, stop when
+  more; baselines move only on `GATE: PASS`, in a commit on this branch
+  for his review; the redeploy and the data-problems doc wait for the
+  morning. Consequence: the read of about 1,150 filings takes most of a
+  night and cannot end before the latest start, and two writers at once
+  break the rules above, so tonight the matcher runs on today's recovered
+  rows under `v3` from the stored verdicts, the read's projection is
+  logged, and the read itself waits for tomorrow under the $300 cap. The
+  big box runs this branch, not `main`: the builder's limits above are what
+  keep the matcher's own `_current` rebuilds off the shared instance's
+  swap.
