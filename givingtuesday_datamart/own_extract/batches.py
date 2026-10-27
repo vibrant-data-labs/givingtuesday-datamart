@@ -36,7 +36,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterator
 
-from givingtuesday_datamart.irs_source import IRS_XML_BASE, OBJECT_ID, UA
+from givingtuesday_datamart.irs_source import IRS_XML_BASE, OBJECT_ID
 from givingtuesday_datamart.write_data_to_sql import _ByteTally, _spool_response
 
 DEFLATE64 = 9
@@ -70,7 +70,7 @@ def batch_url(year: str, batch_id: str) -> str:
 
 def _head(url: str) -> Batch | None:
     """The archive's stamp, or None when the server says there is no such archive."""
-    request = urllib.request.Request(url, method="HEAD", headers=UA)
+    request = urllib.request.Request(url, method="HEAD")    # urllib's own identity: irs_source._get
     opener = urllib.request.build_opener(_NoRedirect)
     for attempt in range(1, _HEAD_ATTEMPTS + 1):
         try:

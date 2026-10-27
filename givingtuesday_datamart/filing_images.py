@@ -33,7 +33,11 @@ every one seen so far is an image the IRS generated in 2022), ``not_a_pdf``
 ``teos_failed:<exception>`` (the listing request itself),
 ``widths_failed:<exception>`` (poppler failed rather than refused) and
 ``upload_failed:<exception>`` (S3, credentials or disk after a good
-download). Every failure keeps ``attempts`` and ``last_error``.
+download). Every failure keeps ``attempts`` and ``last_error``. A 403 is
+not a filing's failure but the IRS edge refusing the client
+(``irs_source._get``), so the first one stops the fetch: the filings still
+queued are left untried with their attempts intact, and the run reads what
+was fetched.
 ``no_teos_image`` is permanent: TEOS's own listing said so, and an image
 that appears months later is fetched with ``refetch``, not by retrying.
 Every other failure is re-tried until it has three attempts, then left
@@ -495,6 +499,17 @@ def _retryable(row: FilingImage | None) -> bool:
     return row is None or (not row.fetched and row.status not in PERMANENT and row.attempts < MAX_ATTEMPTS)
 
 
+def _refused(row: FilingImage) -> bool:
+    """Did the IRS edge answer this attempt with HTTP 403? That is the
+    client being refused, not the filing (2026-10-27: every request with an
+    unrecognised User-Agent), so ``fetch_filings`` stops on it. The listing
+    failure keeps the exception's name in its status and the code in the
+    message; the PDF failure keeps the code in its status."""
+    if row.status == "pdf_unavailable:403":
+        return True
+    return row.status == "teos_failed:HTTPError" and (row.last_error or "").startswith("HTTP Error 403")
+
+
 def _warm_index(cache_dir: Path) -> None:
     """Download any missing ``index_<year>.csv`` before the pool starts, so
     eight workers do not race to write the same 75 MB file."""
@@ -546,6 +561,12 @@ def fetch_filings(session, object_ids: Iterable[str | Filing], *, bucket: str = 
 
     ``session`` is a SQLAlchemy session (``_internal.db.get_session``) or a
     ``FilingImageStore``; ``s3`` is a boto3 client, built when not given.
+
+    A 403 from the IRS edge (``_refused``) stops the fetch at the first one:
+    the jobs not yet started are cancelled and come back as
+    ``unfetched:teos_refused`` (no row written, no attempt charged), the
+    jobs in flight are recorded as usual, and the caller goes on with what
+    was fetched.
     """
     _require_pdfimages()
     store = _store(session)
@@ -565,10 +586,12 @@ def fetch_filings(session, object_ids: Iterable[str | Filing], *, bucket: str = 
     logger.info("fetch_filings: %d of %d filings found in the IRS index", len(index), len(todo))
     s3 = s3 if s3 is not None else _s3_client(workers)
     done = 0
+    refused = None
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(_fetch_one, f, prior.get(f.object_id), cache_dir=cache_dir,
                                bucket=bucket, prefix=prefix, s3=s3, index=index) for f in todo]
-        for row in upsert_as_done(store, futures, CHUNK):
+        results = upsert_as_done(store, futures, CHUNK)
+        for row in results:
             done += 1
             statuses[row.object_id] = row.status
             if row.last_error:
@@ -580,6 +603,23 @@ def fetch_filings(session, object_ids: Iterable[str | Filing], *, bucket: str = 
             else:
                 logger.info("[%d/%d] %s %s: %d pages, %d attached, %.1f MB", done, len(todo),
                             row.object_id, row.status, row.pages, row.attachment_pages, row.bytes / 1e6)
+            if _refused(row):
+                # Closing the loop cancels the jobs not yet started, waits
+                # for the ones in flight and writes their rows (upsert_as_done).
+                refused = row
+                results.close()
+                break
+    if refused is not None:
+        rest = [f.object_id for f in todo if f.object_id not in statuses]
+        written = store.get(rest)
+        for oid in rest:
+            row, before = written.get(oid), prior.get(oid)
+            tried = row is not None and (before is None or row.attempts > before.attempts)
+            statuses[oid] = row.status if tried else "unfetched:teos_refused"
+        untried = sum(statuses[oid] == "unfetched:teos_refused" for oid in rest)
+        logger.error("TEOS refused a request (%s %s: %s): the fetch stops here; %d of %d filings "
+                     "were not tried and keep their attempts", refused.object_id, refused.status,
+                     refused.last_error, untried, len(todo))
     return statuses
 
 

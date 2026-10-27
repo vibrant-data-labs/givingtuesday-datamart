@@ -270,6 +270,35 @@ def test_each_failure_keeps_its_status_and_last_error(teos, tmp_path):
     assert store.rows["201000000000000004"].filerein == ""     # nothing anywhere said who filed it
 
 
+def test_a_403_from_the_irs_edge_stops_the_fetch(teos, tmp_path, caplog):
+    # 2026-10-27: the edge refused every request carrying a User-Agent it did
+    # not recognise. One refusal says the client is refused, not the filing,
+    # so the fetch stops: the filings still queued are not tried (no row, no
+    # attempt charged) and the ones in flight are recorded like any failure.
+    ids = [f"20100000000000000{i}" for i in range(1, 5)]
+    for oid in ids:
+        teos.add(oid)
+        teos.listing[oid] = urllib.error.HTTPError("https://apps.irs.gov/teos", 403, "Forbidden", {}, None)
+    store, s3 = fi.MemoryStore(), _S3()
+    with caplog.at_level(logging.ERROR):
+        statuses = fi.fetch_filings(store, ids, bucket="b", cache_dir=tmp_path, s3=s3, workers=1)
+    tried = [oid for oid in ids if oid in store.rows]
+    assert 1 <= len(tried) <= 2 and len(teos.listings) == len(tried)    # the refusal, at most one in flight
+    assert all(store.rows[oid].status == "teos_failed:HTTPError" and store.rows[oid].attempts == 1
+               and "403" in store.rows[oid].last_error for oid in tried)
+    assert {statuses[oid] for oid in ids if oid not in tried} == {"unfetched:teos_refused"}
+    assert set(statuses) == set(ids) and s3.puts == []
+    assert "TEOS refused a request" in caplog.text
+
+
+def test_a_403_on_the_pdf_is_the_same_refusal(teos, tmp_path):
+    teos.add(OID, [("20221026", 403)])
+    store, s3 = fi.MemoryStore(), _S3()
+    assert _fetch(store, [OID], tmp_path, s3) == {OID: "pdf_unavailable:403"}
+    assert store.rows[OID].attempts == 1 and fi._refused(store.rows[OID])
+    assert not fi._refused(replace(store.rows[OID], status="pdf_unavailable:404"))
+
+
 def test_three_failed_attempts_and_the_filing_is_left_alone_unless_refetch(teos, tmp_path):
     row = teos.add(OID, [("20221026", 404)])
     store, s3 = fi.MemoryStore(), _S3()
