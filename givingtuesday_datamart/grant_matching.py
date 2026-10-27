@@ -2198,6 +2198,11 @@ def _do_match_records(
 
 if __name__ == "__main__":
     import argparse
+    import logging
+
+    # The package logger has no handler of its own: without this an
+    # eight-hour run shows nothing but warnings on the console.
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
 
     parser = argparse.ArgumentParser(
         description="Run the grant matching pipeline against gt_datamart."

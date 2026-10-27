@@ -34,6 +34,7 @@ breakdown, and government-named recipients matched below an exact name.
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 
 import pandas as pd
@@ -372,4 +373,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # The package logger has no handler of its own; the checks' lines
+    # are what the operator reads.
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
     main()

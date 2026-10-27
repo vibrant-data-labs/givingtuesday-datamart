@@ -966,8 +966,10 @@ def _build_one(connection, table: str, ddl: str) -> int:
     # privategrants_current build at 256 MB reached 0.87 GB of swap on
     # 2026-10-27 and was cancelled. So the budget is overridable and its
     # default suits the 4 GB shared instance (the RDS incident's
-    # work_mem <= 64 MB rule, no parallel workers); a larger box exports
-    # GT_BUILD_WORK_MEM / GT_BUILD_MAINTENANCE_WORK_MEM to spill less. The
+    # work_mem <= 64 MB rule, no parallel workers). They are the database
+    # server's memory, so only a larger database instance, never a larger
+    # client box, exports GT_BUILD_WORK_MEM / GT_BUILD_MAINTENANCE_WORK_MEM
+    # to spill less. The
     # RDS default (4 MB) would spill the 9-17M-row passes to thousands of
     # temp-file batches (sustained IO:BufFileRead on the db.t4g.medium).
     work_mem = os.environ.get("GT_BUILD_WORK_MEM", "64MB")
