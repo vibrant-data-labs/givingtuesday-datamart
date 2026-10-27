@@ -363,6 +363,7 @@ or of the ones named:
 from __future__ import annotations
 
 import argparse
+import logging
 from typing import Iterable
 
 from sqlalchemy import text
@@ -1074,6 +1075,12 @@ if __name__ == "__main__":
     # a later step must not roll an earlier table back.
     from givingtuesday_datamart.grant_matching import create_or_replace_views
     from givingtuesday_datamart.placeholder_recovery.view import VIEW, shown_policy
+
+    # The package logger has no handler of its own, so without this only
+    # warnings reach the console (Python's last-resort handler): the row
+    # counts and the doubling watch at the end of a paid build were silent
+    # when the basic-fields relations were rebuilt on 2026-10-26.
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
 
     _parser = argparse.ArgumentParser(prog="python -m givingtuesday_datamart.current_grants")
     _parser.add_argument("--only", action="append", choices=[t for t, _ in _TABLES], default=None,

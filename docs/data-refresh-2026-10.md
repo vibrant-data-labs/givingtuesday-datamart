@@ -90,8 +90,8 @@ tables as they are.
       20,109,675 in over the ten tables, earlier patch rows 0.
       (done: exactly 16,662,030 out and 20,109,675 in, earlier rows 0 on
       every table; the one transaction committed at 22:23:49 UTC; the log)
-- [ ] The three basic-fields `_current` relations rebuilt (the command
-      does it after the patch). NOT done: the watchdog cancelled the
+- [x] The three basic-fields `_current` relations rebuilt (the command
+      does it after the patch). First attempt NOT done: the watchdog cancelled the
       `basic_fields_current` build at 22:27 UTC when swap passed 0.5 GB
       (0.99 GB at the peak; freeable memory 0.70 GB). The builder sets a
       256 MB `work_mem` and left the instance's two parallel workers on,
@@ -102,20 +102,30 @@ tables as they are.
       with the builder's parallel workers off (this branch's change to
       `current_grants._build_one`):
       `python -m givingtuesday_datamart.current_grants --only basic_fields_current --only basic_fields_pf_current --only basic_fields_ez_current`
-- [ ] `VACUUM (ANALYZE)` on the ten staging tables (appendix): the deleted
-      rows' space becomes reusable (the files do not shrink). (started
-      22:31 UTC from the box, `~/logs/refresh/vacuum.log`; also the planner's
-      statistics, which the builds read, since the tables gained a quarter
-      of their rows)
+      (done: 22:48:55 to 23:35:25 UTC from the box, on this branch at
+      `8ac4bcb`, exit 0; swap between 0.04 and 0.37 GB throughout,
+      freeable memory never under 1.86 GB; the three relations now hold
+      3,992,135, 1,226,420 and 2,257,600 filer-years; the log)
+- [x] `VACUUM (ANALYZE)` on the ten staging tables (appendix): the deleted
+      rows' space becomes reusable (the files do not shrink). (done 22:31 to
+      22:45 UTC from the box, 14 minutes, every table at zero dead tuples
+      after; `schedule_o` 26 GB in 279 s, `privategrants` 12 GB in 260 s,
+      the rest under 100 s each; also the planner's statistics, which the
+      builds read, since the tables gained a quarter of their rows)
 - [x] Check: ten `irs_extract_patch` rows in `datamart_meta.ingest_runs`
       dated today. (done: ten rows, finished 22:23:49 UTC)
-- [ ] Checks: no url holds both GT's rows and ours, on `basic_fields_pf`
+- [x] Checks: no url holds both GT's rows and ours, on `basic_fields_pf`
       and `privategrants` (appendix); `basic_fields_pf_current` holds
       filer-years with a tax period ending in 2025 that GT never had
-      (after the rebuild).
-- [ ] Free storage after, expected about 11 GB less. (70.75 GB at 22:15
+      (after the rebuild). (done from the box, started 23:38 UTC: 0 urls
+      with both on either table; `basic_fields_pf_current` holds 94,024
+      filer-years with a tax period ending in 2025 or later, all ours and
+      none GT's; the log)
+- [x] Free storage after, expected about 11 GB less. (70.75 GB at 22:15
       UTC during the patch, 67.1 GB at 22:23 when it committed, 62.1 GB at
-      the cancelled build's peak)
+      the cancelled build's peak; 67.5 GB after the vacuum and the rebuild,
+      3.3 GB less than before the patch: the estimate of 11 GB was too
+      high)
 
 ### 2. The canonical build (the box, about 25 minutes)
 
@@ -127,7 +137,9 @@ tables as they are.
 
 - [ ] `python -m givingtuesday_datamart.current_grants --only privategrants_current`
       (it reads the view's policy before the rebuild and creates the views
-      again for it; 25 to 40 minutes)
+      again for it; 25 to 40 minutes; from this branch, whose builder
+      keeps the parallel workers off and shows its lines on the console,
+      so `tee` the output into `~/logs/refresh/`)
 - [ ] `python -m givingtuesday_datamart.current_grants --only privategrants_future_current`
       (about 2 minutes)
 - [ ] The paid build's last line reads `0 filer-years look doubled without
@@ -302,3 +314,41 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   the instance's two parallel workers on. Fix on this branch: the builder
   sets `max_parallel_workers_per_gather = 0`. The vacuum of the ten tables
   started at 22:31 UTC from the box; the rebuild follows it.
+- **2026-10-26, 22:31 UTC on, step 1 finished.** The vacuum ran
+  22:31 to 22:45 UTC: every table at zero dead tuples after, `schedule_o`
+  (26 GB) in 279 s, `privategrants` (12 GB) in 260 s, the rest under 100 s
+  each. The box checked out this branch at `8ac4bcb` and reran the three
+  basic-fields builds, 22:48:55 to 23:35:25 UTC, exit 0. The builds took
+  about 13, 11 and 11 minutes (each relation's ANALYZE at 23:02, 23:13 and
+  23:24 UTC) and the builder's closing summary, rows by rule over five
+  `_current` relations whatever `--only` says, the last eleven. With the
+  parallel workers off, swap stayed between 0.04 and 0.37 GB and freeable
+  memory above 1.86 GB; the peak came in that summary query, not in the
+  builds. The builder's own lines (each relation's row count, the rows by
+  rule) did not reach `rebuild.log`: run as a module, `current_grants`
+  attached no log handler, unlike the package's other entry points, so
+  only warnings reached the console. Fixed on this branch: its `__main__`
+  block configures logging at INFO like the others. Step 3's check reads
+  that output, so it needs the branch. The laptop watchdog lost its connection to the
+  instance once, at 23:09 UTC, and reconnected (the instance did not
+  restart: its postmaster has been up since 2026-10-23). The checks from
+  the box, 23:38 to 23:59 UTC (the two full reads of `privategrants` take
+  most of the time):
+
+  | relation | filer-years | before | ours | tax period 2025+, ours / GT's | rules |
+  |---|---|---|---|---|---|
+  | basic_fields_current | 3,992,135 | 3,812,025 | 952,414 | 261,728 / 0 | passthrough 3,907,339; latest_filing 84,796 |
+  | basic_fields_pf_current | 1,226,420 | 1,158,524 | 339,705 | 94,024 / 0 | passthrough 1,212,915; latest_filing 13,505 |
+  | basic_fields_ez_current | 2,257,600 | 2,151,017 | 572,657 | 174,267 / 0 | passthrough 2,231,230; latest_filing 26,369; duplicate_row 1 |
+
+  The three relations gained 354,589 filer-years together, against the
+  360,068 returns the parity report counted as missing from GT (the rest
+  are further versions of a filer-year the rules collapse). No url holds
+  both GT's rows and ours on `basic_fields_pf` or `privategrants`. Rows by
+  source on the staging tables, ours / GT's: `basic_fields` 967,617 /
+  3,112,106; `basic_fields_pf` 342,397 / 897,805; `basic_fields_ez`
+  578,596 / 1,706,101; `privategrants` 4,617,771 / 13,093,868;
+  `grants_to_domestic_organizations` 2,777,704 / 6,893,450;
+  `privategrants_future` 120,663 / 345,907. The planner's estimates for
+  the three relations (3,988,316, 1,226,152 and 2,258,007) sit within 0.1%
+  of the counts. Free storage 67.5 GB. Step 2 waits on Zein.
