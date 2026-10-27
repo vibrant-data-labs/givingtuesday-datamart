@@ -141,16 +141,23 @@ tables as they are.
 
 ### 3. The grants relations (the box, about 40 minutes)
 
-- [ ] `python -m givingtuesday_datamart.current_grants --only privategrants_current`
+- [x] `python -m givingtuesday_datamart.current_grants --only privategrants_current`
       (it reads the view's policy before the rebuild and creates the views
       again for it; 25 to 40 minutes; from this branch, whose builder
       keeps the parallel workers off and shows its lines on the console,
-      so `tee` the output into `~/logs/refresh/`)
-- [ ] `python -m givingtuesday_datamart.current_grants --only privategrants_future_current`
-      (about 2 minutes)
-- [ ] The paid build's last line reads `0 filer-years look doubled without
+      so `tee` the output into `~/logs/refresh/`) (done at the third
+      start, 03:23:38 to 03:54:46 UTC, 31 minutes, exit 0, from `ddb47c7`
+      at 64 MB: 17,392,341 rows, was 16,651,426; swap rose 0.07 GB over
+      its 0.87 GB baseline; the sorts spilled to 35.03 GB free at the
+      lowest, 30 MB above the floor; the log)
+- [x] `python -m givingtuesday_datamart.current_grants --only privategrants_future_current`
+      (about 2 minutes) (done 03:54:46 to 03:58:20 UTC, exit 0, the build
+      itself two minutes and the closing summary the rest: 452,460 rows,
+      was 441,358)
+- [x] The paid build's last line reads `0 filer-years look doubled without
       a repeated basic row`; otherwise the filings it names are checked
-      against their XML before step 7.
+      against their XML before step 7. (done: it reads exactly that, at
+      03:52:18 UTC; nothing to check)
 - [ ] `status` shows the three line-25 rules; the rows by rule logged.
 
 ### 4. The work list (the box, minutes)
@@ -417,11 +424,53 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   unhalved filings, proceed when 20 or fewer and list them, stop when
   more; baselines move only on `GATE: PASS`, in a commit on this branch
   for his review; the redeploy and the data-problems doc wait for the
-  morning. Consequence: the read of about 1,150 filings takes most of a
-  night and cannot end before the latest start, and two writers at once
-  break the rules above, so tonight the matcher runs on today's recovered
-  rows under `v3` from the stored verdicts, the read's projection is
-  logged, and the read itself waits for tomorrow under the $300 cap. The
-  big box runs this branch, not `main`: the builder's limits above are what
-  keep the matcher's own `_current` rebuilds off the shared instance's
-  swap.
+  morning. I first planned the matcher tonight on today's recovered rows
+  with the new filings' lists left to the next refresh's run, reading the
+  09:00 UTC mark and the one-writer rule as binding; Zein, awake again at
+  03:45 UTC: no second matcher run, the read goes first and the matcher
+  once, after it, and nothing reads the database for the next fifteen
+  hours, so the matcher may start whenever the load is done, into the
+  day if need be. The read is shorter than I had said: the work list's
+  filings average about five attachment pages, so about 1,150 filings is
+  roughly 6,000 pages, about three hours at the frame's rate, not a night
+  (the projection after step 4 gives the count). Order for the night:
+  step 3, the work list and the projection, the read, the load and the
+  view on `v3`, the resize, the preflight, one matcher run, the gate. The
+  big box runs this branch, not `main`: the builder's limits above are
+  what keep the matcher's own `_current` rebuilds off the shared
+  instance's swap.
+- **2026-10-27, 03:55 UTC, the database instance grows for the night.**
+  The paid build's sorts at 64 MB spilled about 34 GB of temp files and
+  came within 30 MB of the watchdog's 35 GB floor, and the matcher's own
+  rebuild would do the same. Zein: change the class. Nothing reads the
+  database for fifteen hours, so after step 3's run ends the shared
+  instance goes from db.t4g.medium (4 GB, about 43 MB/s of disk) to
+  db.r6g.xlarge (32 GB, about 150 MB/s) with an immediate apply, one
+  restart of five to ten minutes, about $5 for the night; it goes back in
+  the morning, another restart. Single-AZ, the default parameter group
+  (`shared_buffers` follows the class), nothing pending. While it is
+  large, the run scripts source `~/logs/refresh/bigdb.env` on the box:
+  `GT_BUILD_WORK_MEM=1GB`, `GT_BUILD_MAINTENANCE_WORK_MEM=2GB`,
+  `GT_BUILD_PARALLEL_WORKERS=2` (the third knob added in `ec52c45`). The
+  file is deleted when the class goes back; the defaults are the medium's
+  rule.
+- **2026-10-27, 03:23 to 03:58 UTC, step 3 built.** From the box on
+  `ddb47c7`, at 64 MB with no parallel workers, under the corrected
+  watchdog. The paid relation 03:23:38 to 03:54:46 UTC, 31 minutes, exit
+  0: the CREATE TABLE AS itself 03:25 to 03:48, its sorts spilling until
+  free storage read 35.03 GB at 03:48, thirty megabytes above the
+  watchdog's floor, then the ANALYZE and the doubling watch (03:50 to
+  03:52), then the row count and the closing summary. Swap rose 0.07 GB
+  over its 0.87 GB baseline and freeable memory never fell under 2.69 GB.
+  `privategrants_current` 17,392,341 rows (16,651,426 before). The
+  doubling watch: 0 filer-years look doubled without a repeated basic row.
+  Rows by rule: passthrough 16,702,141; latest_url 672,530; total_row
+  16,806; latest_url+total_row 519; forward_fill 152; field_fill 103;
+  pair_collapse 88; latest_url+forward_fill 1; latest_url+field_fill 1.
+  pair_collapse was 188,149 rows on the 26th: GT's doubled 2024+ blocks
+  were the rows the patch replaced, and the IRS's own files do not carry
+  the doubling. The future relation 03:54:46 to 03:58:20 UTC, exit 0,
+  452,460 rows (441,358 before); its rules before the rebuild read
+  passthrough 423,690, latest_url 13,023, pair_collapse 4,644. After the
+  run, free storage 67.5 GB and swap back to 0.03 GB. The step's `status`
+  and counts follow once the instance is back as the larger class.
