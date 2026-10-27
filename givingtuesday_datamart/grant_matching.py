@@ -10,6 +10,7 @@ from pathlib import Path
 
 import boto3
 import botocore.config
+import numpy as np
 import pandas as pd
 import jellyfish
 import pyarrow.parquet as pq
@@ -1617,10 +1618,41 @@ def candidate_pairs(universe_df: pd.DataFrame, grants_df: pd.DataFrame) -> pd.Mu
         # Missing where there is no address: a block leaves a missing key out.
         df['block_zip'] = df['clean_zip'].where(df['compare_addr'] != "")
 
-    indexer = recordlinkage.Index()
-    indexer.block(left_on=['block_zip'], right_on=['block_zip'])
-    indexer.block(left_on=['full_name'], right_on=['full_name'])
-    return indexer.index(universe_df, grants_df)
+    # The same two blocks recordlinkage.Index().block(...) makes, with the
+    # same result: the union of the two, deduplicated, sorted by the pair
+    # (pandas' MultiIndex.union sorts, and the stable tie-break in
+    # resolve_matches depends on that order). In integers rather than
+    # tuples: on 2026-10-27 the union of about a billion pairs ran more
+    # than five hours inside MultiIndex.drop_duplicates on one core of an
+    # r6i.8xlarge; packed as one int64 a pair, numpy.unique sorts and
+    # deduplicates the same pairs in minutes.
+    return _blocked_pairs(universe_df, grants_df, ["block_zip", "full_name"])
+
+
+def _block_positions(left_key: pd.Series, right_key: pd.Series) -> tuple[np.ndarray, np.ndarray]:
+    """Row positions of every (left, right) whose keys are equal and not
+    missing: the pairs one recordlinkage block makes."""
+    codes, _ = pd.factorize(pd.concat([left_key, right_key], ignore_index=True), use_na_sentinel=True)
+    n_left = len(left_key)
+    left = pd.DataFrame({"code": codes[:n_left], "l": np.arange(n_left, dtype=np.int64)})
+    right = pd.DataFrame({"code": codes[n_left:], "r": np.arange(len(right_key), dtype=np.int64)})
+    pairs = left[left["code"] >= 0].merge(right[right["code"] >= 0], on="code")
+    return pairs["l"].to_numpy(), pairs["r"].to_numpy()
+
+
+def _blocked_pairs(universe_df: pd.DataFrame, grants_df: pd.DataFrame, keys: list[str]) -> pd.MultiIndex:
+    """The union of the blocks on ``keys`` as a MultiIndex of the two frames'
+    index labels, deduplicated and sorted by (left, right)."""
+    n_right = len(grants_df)
+    packed = [
+        left.astype(np.int64) * n_right + right.astype(np.int64)
+        for left, right in (_block_positions(universe_df[k], grants_df[k]) for k in keys)
+    ]
+    uniq = np.unique(np.concatenate(packed)) if packed else np.empty(0, dtype=np.int64)
+    left_labels = universe_df.index.to_numpy()[uniq // n_right]
+    right_labels = grants_df.index.to_numpy()[uniq % n_right]
+    return pd.MultiIndex.from_arrays([left_labels, right_labels],
+                                     names=[universe_df.index.name, grants_df.index.name])
 
 
 def pair_scores(pairs: pd.MultiIndex, universe_df: pd.DataFrame, grants_df: pd.DataFrame) -> pd.DataFrame:
@@ -1939,6 +1971,7 @@ def match_records(
     resume_workers: int = 32,
     limit: int | None = None,
     recovered_policy: str | None = None,
+    skip_rebuild: bool = False,
 ):
     """Run the recordlinkage grant-matching pipeline against gt_datamart.
 
@@ -2003,6 +2036,7 @@ def match_records(
             limit=limit,
             recovered_policy=recovered_policy,
             build_id=build_id,
+            skip_rebuild=skip_rebuild,
         )
     except BaseException as err:
         _finalize_build_failed(build_id, err)
@@ -2028,6 +2062,7 @@ def _do_match_records(
     limit: int | None = None,
     recovered_policy: str | None = None,
     build_id: str | None = None,
+    skip_rebuild: bool = False,
 ):
     """Inner pipeline body. Returns ``(full_data_df, pg_rows, ug_rows)``.
 
@@ -2049,7 +2084,12 @@ def _do_match_records(
         # current and recovered grants and the dependent matching views
         # with it, and create_or_replace_views restores them, in that
         # order.
-        build_current_relations(connection)
+        if skip_rebuild:
+            # A restart minutes after a run that rebuilt them, with nothing
+            # loaded since: the relations are what that run made.
+            logger.info("--skip-rebuild: the _current relations are taken as they stand")
+        else:
+            build_current_relations(connection)
         create_or_replace_views(connection, recovered_policy=recovered_policy)
         # The recovered grants the run takes, read once: the build's
         # source_runs and the checkpoint prefix name the same rows.
@@ -2260,6 +2300,15 @@ if __name__ == "__main__":
             "view is absent; the run stops when the view shows another."
         ),
     )
+    parser.add_argument(
+        "--skip-rebuild",
+        action="store_true",
+        help=(
+            "Take the _current relations as they stand instead of rebuilding "
+            "them first. Only for a restart minutes after a run that rebuilt "
+            "them, with no load or ingest since; the views are still created."
+        ),
+    )
     args = parser.parse_args()
 
     match_records(
@@ -2268,4 +2317,5 @@ if __name__ == "__main__":
         chunk_size=args.chunk_size,
         resume_workers=args.resume_workers,
         recovered_policy=args.recovered_policy,
+        skip_rebuild=args.skip_rebuild,
     )
