@@ -548,4 +548,8 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   the project's request runs once every ten minutes for an hour. Nothing
   bought. The matcher waits on Zein's word: on today's recovered rows (the
   new filings' lists then wait for a later run), or after a read, when the
-  IRS allows one.
+  IRS allows one. The 403 is served by the IRS's CDN edge ("Access Denied",
+  an edgesuite reference number), so it is a rule at their edge, not an
+  outage. Seven probes, 04:52 to 05:52 UTC, every ten minutes: 403 each
+  time. A slower probe, every thirty minutes, runs on through the night;
+  if TEOS answers, the read starts under the cap as planned.
