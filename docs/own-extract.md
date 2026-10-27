@@ -550,7 +550,15 @@ hits).
 database grows by about 6 KB per return (69 MB for 01A's 12,245 returns).
 Info-ZIP `unzip` must be on the machine for the Deflate64 archives. Every
 archive is copied to our bucket, because the IRS has replaced archives
-under the same name and GT's mirror is neither complete nor current.
+under the same name and GT's mirror is neither complete nor current. One
+filing's XML comes out of the same archives:
+`python -m givingtuesday_datamart.irs_source <object_id> --xml f.xml` reads
+the member from the archive the index names (our copy first, else the
+IRS's), tries the rest of the month when that one lacks it, and before
+2024, where the index names no archive, reads the year's archives in turn
+under `--scan` (2017-2020's are `download990xml_<year>_<n>.zip`, which
+`batches.discover` walks too; 2021-2023's are named like 2024's and run to
+3.7 GB); it never reads GT's mirror.
 
 **History.** We read 2024 to 2026 only. Before 2013 the element names are
 different throughout (the concordance would need a second set of paths),

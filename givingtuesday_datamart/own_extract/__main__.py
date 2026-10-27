@@ -31,7 +31,7 @@ from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart.ingestion import datamart_config
 from givingtuesday_datamart.own_extract import batches, discover, extract, load, parity, patch, proof, report
 
-DEFAULT_CACHE = Path.home() / ".cache" / "irs_batches"
+DEFAULT_CACHE = batches.CACHE
 
 
 def _batches(args) -> int:

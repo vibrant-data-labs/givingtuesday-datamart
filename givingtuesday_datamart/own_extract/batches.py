@@ -3,7 +3,8 @@
 The IRS publishes the 990-family XML only inside batch ZIPs,
 ``apps.irs.gov/pub/epostcard/990/xml/<year>/<year>_TEOS_XML_<MM><L>.zip``,
 about one a month (the third Wednesday, usually), with ``index_<year>.csv``
-beside them listing every return.
+beside them listing every return. The 2017-2020 directories hold
+``download990xml_<year>_<n>.zip`` instead, numbered from 1.
 
 Two things about them cost time to learn:
 
@@ -23,6 +24,7 @@ Two things about them cost time to learn:
 from __future__ import annotations
 
 import fcntl
+import functools
 import json
 import shutil
 import subprocess
@@ -68,6 +70,16 @@ def batch_url(year: str, batch_id: str) -> str:
     return f"{IRS_XML_BASE}/{year}/{batch_id}.zip"
 
 
+# Where archives are fetched to unless told otherwise: ``own_extract load``
+# and ``irs_source --xml`` share it, so an archive one keeps the other reads.
+CACHE = Path.home() / ".cache" / "irs_batches"
+
+
+def described(year: str, batch_id: str) -> Batch | None:
+    """One archive's stamp from the server, or None when it serves no such archive."""
+    return _head(batch_url(year, batch_id))
+
+
 def _head(url: str) -> Batch | None:
     """The archive's stamp, or None when the server says there is no such archive."""
     request = urllib.request.Request(url, method="HEAD", headers=UA)
@@ -96,11 +108,19 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+# The 2017-2020 archives are ``download990xml_<year>_<n>.zip``, n from 1
+# (2020 has 8); 2021 on, ``<year>_TEOS_XML_<MM><L>.zip`` (checked by HEAD,
+# 2026-10-27). A year holds one kind, and both are walked.
+_NUMBERED = "download990xml_{year}_{n}"
+_NUMBERED_AT_MOST = 50
+
+
 def discover(year: str) -> list[Batch]:
     """Every archive the server holds for ``year``, in order.
 
     Walks months 01-12 and letters A-H, stopping a month at its first
-    missing letter. About 30 HEAD requests for a full year.
+    missing letter, then the numbered names from 1, stopping at the first
+    missing number. About 30 HEAD requests for a full year.
     """
     found: list[Batch] = []
     for month in range(1, 13):
@@ -109,6 +129,11 @@ def discover(year: str) -> list[Batch]:
             if batch is None:
                 break
             found.append(batch)
+    for n in range(1, _NUMBERED_AT_MOST + 1):
+        batch = _head(batch_url(year, _NUMBERED.format(year=year, n=n)))
+        if batch is None:
+            break
+        found.append(batch)
     return found
 
 
@@ -164,6 +189,41 @@ def stamp_of(path: Path) -> dict:
     return json.loads(stamp.read_text()) if stamp.exists() else {}
 
 
+def cached(batch_id: str, cache_dir: Path) -> Path | None:
+    """An archive already whole in ``cache_dir``.
+
+    Whole is the size its stamp records or, for one put there by hand (no
+    stamp), a ZIP whose end-of-central-directory record is in place, which
+    a download cut short has not.
+    """
+    path = cache_dir / f"{batch_id}.zip"
+    if not path.exists():
+        return None
+    stamp = stamp_of(path)
+    if stamp:
+        return path if path.stat().st_size == stamp.get("nbytes") else None
+    return path if zipfile.is_zipfile(path) else None
+
+
+def read_member(path: Path, object_id: str) -> bytes | None:
+    """One return's XML out of an archive, or None when the archive does not hold it.
+
+    A Deflate64 member is unpacked alone by Info-ZIP (``unzip -p``):
+    ``iter_members`` unpacks the whole archive, right for a load and 6 GB
+    of temporary files for one return.
+    """
+    with zipfile.ZipFile(path) as archive:
+        info = next((i for i in archive.infolist()
+                     if not i.is_dir() and object_id_of(i.filename) == object_id), None)
+        if info is None:
+            return None
+        if info.compress_type != DEFLATE64:
+            return archive.read(info)
+    done = subprocess.run([_info_zip(path), "-p", str(path), info.filename], capture_output=True)
+    status = f"unzip exit {done.returncode}: {done.stderr.decode(errors='replace').strip()[-300:]}"
+    return _checked(done.stdout, info, path, status)
+
+
 def object_id_of(member_name: str) -> str | None:
     match = OBJECT_ID.search(member_name.rsplit("/", 1)[-1])
     return match.group(1) if match else None
@@ -202,21 +262,30 @@ def _unzip_all(path: Path, into: Path) -> str:
     exit 3 having written every member correctly. Each member is checked
     against the central directory instead (``_verified``).
     """
+    done = subprocess.run([_info_zip(path), "-q", "-o", str(path), "-d", str(into)],
+                          capture_output=True, text=True)
+    return f"unzip exit {done.returncode}: {done.stderr.strip()[-300:]}"
+
+
+def _info_zip(path: Path) -> str:
+    """Info-ZIP's ``unzip``, the one reader of Deflate64 on hand."""
     unzip = shutil.which("unzip")
     if unzip is None:
         raise RuntimeError(
             f"{path.name} holds Deflate64 members, which zipfile cannot read; "
             "install Info-ZIP unzip (bsdtar is not a substitute: it writes zeros)")
-    done = subprocess.run([unzip, "-q", "-o", str(path), "-d", str(into)],
-                          capture_output=True, text=True)
-    return f"unzip exit {done.returncode}: {done.stderr.strip()[-300:]}"
+    return unzip
 
 
 def _verified(member: Path, info: zipfile.ZipInfo, archive: Path, status: str) -> bytes:
     """A member Info-ZIP wrote, held to the size and CRC-32 the archive records."""
     if not member.exists():
         raise RuntimeError(f"{archive.name}: {info.filename} was not unpacked ({status})")
-    data = member.read_bytes()
+    return _checked(member.read_bytes(), info, archive, status)
+
+
+def _checked(data: bytes, info: zipfile.ZipInfo, archive: Path, status: str) -> bytes:
+    """Bytes Info-ZIP produced, held to the size and CRC-32 the archive records."""
     if len(data) != info.file_size or zlib.crc32(data) & 0xFFFFFFFF != info.CRC:
         raise RuntimeError(f"{archive.name}: {info.filename} fails its size or CRC ({status})")
     return data
@@ -243,9 +312,7 @@ def archive(path: Path, s3=None, bucket: str = ARCHIVE_BUCKET) -> str:
     """
     stamp = stamp_of(path)
     key = f"{ARCHIVE_PREFIX}/{stamp.get('year') or path.stem[:4]}/{path.name}"
-    if s3 is None:
-        import boto3                                          # the ``ingest`` extra
-        s3 = boto3.client("s3")
+    s3 = s3 or _s3()
     try:
         held = s3.head_object(Bucket=bucket, Key=key).get("Metadata", {})
         if held.get("sha256") == stamp.get("sha256"):
@@ -258,3 +325,67 @@ def archive(path: Path, s3=None, bucket: str = ARCHIVE_BUCKET) -> str:
                      "irs-last-modified": stamp.get("last_modified", ""),
                      "irs-url": stamp.get("url", "")}})
     return f"s3://{bucket}/{key}"
+
+
+@functools.cache
+def _s3():
+    import boto3                                              # the ``ingest`` extra
+    return boto3.client("s3")
+
+
+def copy_key(year: str, batch_id: str) -> str:
+    return f"{ARCHIVE_PREFIX}/{year}/{batch_id}.zip"
+
+
+_ABSENT = {"404", "NoSuchKey", "NotFound"}
+
+
+def copy_of(year: str, batch_id: str, s3=None, bucket: str = ARCHIVE_BUCKET) -> Batch | None:
+    """Our copy of an archive as the bucket describes it, or None when we keep none.
+
+    The ``url`` is the object's; ``last_modified`` is the IRS's, from the
+    metadata ``archive`` wrote. A copy is read with ``fetch_copy``. Only an
+    absent object is None: a refusal (403, stale credentials) is raised,
+    so the caller can say the copy was refused rather than read it as none.
+    """
+    key = copy_key(year, batch_id)
+    s3 = s3 or _s3()
+    try:
+        head = s3.head_object(Bucket=bucket, Key=key)
+    except s3.exceptions.ClientError as err:
+        if str(getattr(err, "response", {}).get("Error", {}).get("Code", "")) in _ABSENT:
+            return None
+        raise
+    return Batch(year, batch_id, f"s3://{bucket}/{key}",
+                 head.get("Metadata", {}).get("irs-last-modified", ""), int(head["ContentLength"]))
+
+
+def fetch_copy(copy: Batch, cache_dir: Path, s3=None, bucket: str = ARCHIVE_BUCKET) -> Path:
+    """Download our copy (``copy_of``) into ``cache_dir``, stamped as ``fetch`` stamps.
+
+    The stamp's ``url`` is the IRS's, so ``load`` and ``fetch`` read the
+    file as one fetched from the IRS; the object's SHA-256 was taken from
+    the IRS stream when the copy was made, and the download is held to it.
+    """
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    path = cache_dir / copy.filename
+    partial = path.with_suffix(".zip.part")
+    key = copy_key(copy.year, copy.batch_id)
+    s3 = s3 or _s3()
+    held = s3.head_object(Bucket=bucket, Key=key).get("Metadata", {})
+    s3.download_file(bucket, key, str(partial))
+    tally = _ByteTally()
+    with partial.open("rb") as handle:
+        for _ in tally.wrap(iter(lambda: handle.read(1 << 20), b"")):
+            pass
+    digest = tally.digest.hexdigest()
+    if held.get("sha256") and held["sha256"] != digest:
+        partial.unlink()
+        raise RuntimeError(f"{copy.url}: the download's SHA-256 is not the object's ({digest})")
+    partial.replace(path)
+    (cache_dir / f"{copy.batch_id}.json").write_text(json.dumps(
+        {"year": copy.year, "batch_id": copy.batch_id,
+         "url": held.get("irs-url") or batch_url(copy.year, copy.batch_id),
+         "last_modified": copy.last_modified, "content_length": copy.content_length,
+         "sha256": digest, "nbytes": tally.nbytes}, indent=2))
+    return path

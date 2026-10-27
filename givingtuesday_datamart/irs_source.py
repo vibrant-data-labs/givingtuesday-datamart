@@ -1,11 +1,13 @@
 """Resolve a filing to its IRS PDF image and its raw XML.
 
-Grant rows cite filings by a ``url`` into GT's data lake, whose object name
-is the IRS OBJECT_ID. This turns that id into the two things worth having:
-the PDF the IRS serves to the public, and the XML.
+Grant rows cite filings by a ``url`` whose object name is the IRS
+OBJECT_ID (``GT_DATALAKE``, GT's pattern, kept as the identifier). This
+turns that id into the two things worth having: the PDF the IRS serves to
+the public, and the XML, both from the IRS.
 
     python -m givingtuesday_datamart.irs_source <object_id | any url>
     python -m givingtuesday_datamart.irs_source 202533119349102158 --pdf f.pdf
+    python -m givingtuesday_datamart.irs_source 202533119349102158 --xml f.xml
 
 **PDF** — from TEOS (``/teos/details/returnsSearch/<ein>``), which keys on
 (EIN, TAX_PERIOD, RETURN_TYPE). That key is coarser than a filing: an
@@ -17,17 +19,28 @@ image. Fidelity's FY2022 is the worked case — two 990 images, and RETURN_ID
 uneven (all of 2022 and 2024, ~97% of 2023, ~56% of 2025); without it every
 image for the period is listed and ``--pdf`` waits for ``--image N``.
 
-**XML** — fetched from the GT mirror, deliberately. The IRS retired
-per-file access: filings now ship only inside 250MB+ batch ZIPs, so pulling
-one from the IRS directly means reading ZIP central directories over range
-requests, and the archives are inconsistent about it (members nested under
-the batch directory, and some batches — 2025_TEOS_XML_11B, all 80,283 of
-them — are Deflate64, which zlib cannot read at all). None of that is worth
-carrying, because the mirror has been verified byte-identical to the IRS
-original by SHA-256 on filings spanning 43KB to 51MB and both compression
-types. The IRS batch URL is still printed, so the archive is citable even
-though we don't crack it open. If a filing ever has to be proved against the
-IRS copy directly, unzip that archive by hand.
+**XML** — read out of the IRS's own batch archive. The IRS publishes the
+XML only inside monthly ZIPs (``<year>/<year>_TEOS_XML_<MM><L>.zip``; for
+2017-2020, ``download990xml_<year>_<n>.zip``), 57 MB to 1.2 GB for 2024 on
+and up to 3.7 GB before (2021_TEOS_XML_01A), one ``<object_id>_public.xml``
+per return, and from the 2024 index on names each return's batch. The
+``xml`` line is that archive and member; ``--xml`` reads the member through
+``own_extract.batches`` (which also handles the Deflate64 archives), from
+``--batch-cache`` when the archive is there whole, else from our copy in
+``s3://givingtuesday-datamart/irs/xml_batches/`` (every batch we have
+loaded), else from the IRS, and says which before it fetches. Until
+2026-10 the XML came from GivingTuesday's raw-XML mirror instead, because
+it was byte-identical to the IRS's and a single GET; that mirror has not
+changed since 2026-08-25, lacks whole batches (2026's 05B, 08A, 09A), and is
+a third party, which the project no longer reads from (docs/own-extract.md).
+Nothing here fetches from it any more.
+
+The index's label is not always the archive: June 2026 is two archives,
+05A and 05B, and the index names 05A for all 168,344 of their returns. So
+after the named archive the others of its month are tried, and ``--scan``
+goes on through the year. Before 2024 the index names no archive at all;
+``--xml --scan`` then reads the year's archives in turn, which is several
+GB, and without ``--scan`` the archive is reported unknown.
 
 **Where the attachments start** — every TEOS image is two documents
 stapled together: the IRS's own rendering of the XML, then whatever the
@@ -51,6 +64,7 @@ import json
 import re
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Iterator, NamedTuple, Sequence
@@ -58,6 +72,9 @@ from typing import Iterator, NamedTuple, Sequence
 IRS_XML_BASE = "https://apps.irs.gov/pub/epostcard/990/xml"
 IRS_PDF_BASE = "https://apps.irs.gov"
 TEOS_RETURNS = "https://apps.irs.gov/teos/details/returnsSearch/{ein}"
+# The ``url`` every staging table carries for a filing: GT's pattern, which
+# our own extract writes for its rows too and ``current_grants`` orders
+# versions by (``MAX(url)``). An identifier, not a place to fetch from.
 GT_DATALAKE = "https://gt990datalake-rawdata.s3.amazonaws.com/EfileData/XmlFiles/{oid}_public.xml"
 
 # 18 digits: 4-digit processing year + 14 more. Also the GT object name.
@@ -112,15 +129,34 @@ class IndexRow(NamedTuple):
     index_year: str = ""    # which index_<year>.csv listed it; see ``lookup``
 
     @property
-    def xml_url(self) -> str:
-        """The GT mirror — one GET, and byte-identical to the IRS copy."""
-        return GT_DATALAKE.format(oid=self.object_id)
+    def member(self) -> str:
+        """The filing's name inside its archive."""
+        return f"{self.object_id}_public.xml"
+
+    @property
+    def year(self) -> str:
+        """The year directory whose archives hold the filing.
+
+        The batch's year where the index names one: 15,894 returns in the
+        2024-2026 indexes sit in a batch of the year after their id's (all
+        of Caterpillar's kind, see ``lookup``). Otherwise the index's.
+        """
+        return self.batch_id[:4] if self.batch_id else (self.index_year or self.object_id[:4])
 
     @property
     def batch_url(self) -> str | None:
-        """The IRS archive holding this filing, when the index names it (2024+)."""
-        year = self.object_id[:4]
-        return f"{IRS_XML_BASE}/{year}/{self.batch_id}.zip" if self.batch_id else None
+        """The IRS archive the index names for this filing (2024+ indexes only)."""
+        return f"{IRS_XML_BASE}/{self.year}/{self.batch_id}.zip" if self.batch_id else None
+
+    @property
+    def xml_url(self) -> str | None:
+        """Where the IRS serves the XML: the archive, with the member after ``#``.
+
+        None before 2024, when the index names no archive (``fetch_xml``
+        finds one). The label is the index's, and June 2026's is one archive
+        short (05A for 05B's returns too).
+        """
+        return f"{self.batch_url}#{self.member}" if self.batch_id else None
 
 
 class Image(NamedTuple):
@@ -169,7 +205,9 @@ def index_rows(year: str, cache_dir: Path | None = None) -> Iterator[IndexRow]:
                 taxpayer_name=(row.get("TAXPAYER_NAME") or "").strip(),
                 return_type=(row.get("RETURN_TYPE") or "").strip(),
                 object_id=(row.get("OBJECT_ID") or "").strip(),
-                batch_id=(row.get("XML_BATCH_ID") or "").strip(),
+                # index_2024.csv spells three batches 04a, 05a and 06a; the
+                # server, and our copies, have them as 04A, 05A and 06A.
+                batch_id=(row.get("XML_BATCH_ID") or "").strip().upper(),
                 return_id=(row.get("RETURN_ID") or "").strip(),
                 index_year=year,
             )
@@ -194,6 +232,110 @@ def lookup(object_id: str, cache_dir: Path | None = None) -> IndexRow:
             if row.object_id == object_id:
                 return row
     raise LookupError(f"{object_id} not in index_{year}.csv or any other year")
+
+
+# <year>_TEOS_XML_<MM><L>: group 1 is the month, the key the archives of a
+# release share (2026_TEOS_XML_05A and 05B).
+_BATCH_ID = re.compile(r"^(\d{4}_TEOS_XML_\d{2})([A-Z])$")
+
+
+def archive_order(row: IndexRow, found: Sequence, scan: bool = False) -> list:
+    """The year's archives that may hold ``row``, after the one the index names.
+
+    ``found`` is ``batches.discover``'s list. First the rest of the named
+    archive's month, in order (the index labels a month's archives with the
+    first one's id); then, under ``scan`` only, the rest of the year, in
+    order. Before 2024 nothing is named, so without ``scan`` this is empty.
+    """
+    named = _BATCH_ID.match(row.batch_id or "")
+    month = named.group(1) if named else None
+    rest = [b for b in found if b.batch_id != row.batch_id]
+    # a stable sort on the month alone keeps discover's (the server's) order within each part
+    rest.sort(key=lambda b: not (month and b.batch_id.startswith(month)))
+    if not scan:
+        rest = [b for b in rest if month and b.batch_id.startswith(month)]
+    return rest
+
+
+def _say_nothing(line: str) -> None:
+    pass
+
+
+def fetch_xml(row: IndexRow, cache_dir: Path | None = None, scan: bool = False,
+              keep: bool = False, say=_say_nothing) -> tuple[bytes, str]:
+    """A filing's XML out of its IRS archive, and the id of the archive that held it.
+
+    The archives are tried in ``archive_order`` after the index's own, each
+    read from ``cache_dir`` when it is there whole, else fetched from our
+    copy in the bucket, else from the IRS (``say`` is told what is fetched
+    and how big it is first). An archive fetched here is deleted after the
+    read unless ``keep``, as ``own_extract load`` does: a year of them is
+    4-5 GB. Raises LookupError when no tried archive holds the filing, and
+    before 2024 without ``scan``, since the index names no archive then.
+    Nothing is fetched from GivingTuesday's mirror.
+    """
+    from givingtuesday_datamart.own_extract import batches           # needs the ``ingest`` extra
+
+    cache_dir = cache_dir or batches.CACHE
+    tried: list[str] = []
+    if row.batch_id:
+        xml = _read(batches, row, row.batch_id, None, cache_dir, keep, say)
+        if xml is not None:
+            return xml, row.batch_id
+        tried.append(row.batch_id)
+    found = batches.discover(row.year)
+    for batch in archive_order(row, found, scan):
+        xml = _read(batches, row, batch.batch_id, batch, cache_dir, keep, say)
+        if xml is not None:
+            return xml, batch.batch_id
+        tried.append(batch.batch_id)
+    if not row.batch_id and not scan:
+        total = sum(b.content_length for b in found) / 1e9
+        raise LookupError(
+            f"the index names no archive for {row.object_id} (none before 2024); --scan reads "
+            f"{row.year}'s {len(found)} archives ({total:.1f} GB) in turn until one holds it")
+    raise LookupError(f"{row.member} is in none of {', '.join(tried)}"
+                      + ("" if scan else f"; --scan tries the rest of {row.year}"))
+
+
+def _read(batches, row: IndexRow, batch_id: str, batch, cache_dir: Path, keep: bool, say) -> bytes | None:
+    """The filing's XML from one archive, or None when nobody serves the
+    archive or it does not hold the filing."""
+    path = batches.cached(batch_id, cache_dir)
+    fetched = path is None
+    if fetched:
+        path = _fetch_archive(batches, batch_id[:4], batch_id, batch, cache_dir, say)
+        if path is None:
+            say(f"  {batch_id}: no copy of ours, and the IRS does not serve it")
+            return None
+    xml = batches.read_member(path, row.object_id)
+    stamp = batches.stamp_of(path)
+    if fetched and not keep:
+        path.unlink()
+    if xml is None:
+        say(f"  {batch_id}: does not hold {row.member}")
+    elif stamp.get("sha256"):
+        # which release of the archive: the IRS has replaced archives under the same name
+        say(f"  {batch_id}.zip: SHA-256 {stamp['sha256']}, "
+            f"IRS Last-Modified {stamp.get('last_modified') or 'unknown'}")
+    return xml
+
+
+def _fetch_archive(batches, year: str, batch_id: str, batch, cache_dir: Path, say) -> Path | None:
+    """Fetch an archive into ``cache_dir``: our copy when we keep one, else the IRS's."""
+    try:
+        copy = batches.copy_of(year, batch_id)
+    except Exception as err:                 # no boto3, no credentials: the IRS still serves it
+        say(f"  our copy of {batch_id} is out of reach ({type(err).__name__}: {err})")
+        copy = None
+    if copy is not None:
+        say(f"  fetching our copy {copy.url} ({copy.content_length / 1e6:.0f} MB) into {cache_dir}")
+        return batches.fetch_copy(copy, cache_dir)
+    batch = batch or batches.described(year, batch_id)
+    if batch is None:
+        return None
+    say(f"  downloading {batch.url} ({batch.content_length / 1e6:.0f} MB) from the IRS into {cache_dir}")
+    return batches.fetch(batch, cache_dir)
 
 
 def images(row: IndexRow) -> list[Image]:
@@ -253,13 +395,23 @@ def attachment_start(widths: Sequence[int]) -> int | None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("filing", help="18-digit OBJECT_ID, or any URL containing one")
-    parser.add_argument("--xml", type=Path, default=None, help="save the filing XML here")
+    parser.add_argument("--xml", type=Path, default=None,
+                        help="save the filing XML here, read out of its IRS archive")
     parser.add_argument("--pdf", type=Path, default=None, help="save the TEOS image here")
     parser.add_argument("--image", type=int, default=None, metavar="N",
                         help="which listed image --pdf should save, when the tax period has "
                              "more than one and no RETURN_ID pins it (1-based)")
     parser.add_argument("--cache", type=Path, default=None,
                         help="directory to cache index_<year>.csv in")
+    parser.add_argument("--batch-cache", type=Path, default=None, metavar="DIR",
+                        help="where --xml fetches archives to (default ~/.cache/irs_batches, "
+                             "shared with own_extract load); one already there whole is read in place")
+    parser.add_argument("--keep-zips", action="store_true",
+                        help="keep an archive --xml fetched, for the next lookup (57 MB to 3.7 GB each)")
+    parser.add_argument("--scan", action="store_true",
+                        help="with --xml: read the year's other archives in turn when the index names "
+                             "none (before 2024) or the named month's do not hold the filing; "
+                             "several GB")
     args = parser.parse_args()
 
     row = lookup(parse_object_id(args.filing), args.cache)
@@ -267,12 +419,24 @@ def main() -> None:
     print(f"{row.taxpayer_name}  (EIN {row.ein})")
     print(f"  object id   {row.object_id}")
     print(f"  return      {row.return_type}, tax period {row.tax_period}")
-    print(f"  xml         {row.xml_url}")
-    print(f"  irs archive {row.batch_url or 'not named in the index before 2024'}")
+    if row.xml_url:
+        print(f"  xml         {row.xml_url}")
+    else:
+        print(f"  xml         member {row.member} of an archive the index does not name (none before "
+              f"2024): one of {IRS_XML_BASE}/{row.year}/ (own_extract batches {row.year}); "
+              f"--xml --scan reads them in turn")
 
-    found = images(row)
-    if not found:
-        print("  pdf         none listed in TEOS")
+    try:
+        found = images(row)
+    except (OSError, ValueError) as err:
+        # TEOS down or refusing (403 for a night, 2026-10-26; URLError is an OSError), a reset
+        # while reading, or an HTML block page where JSON was expected (ValueError)
+        found = []
+        print(f"  pdf         TEOS could not be read "
+              f"({getattr(err, 'code', None) or getattr(err, 'reason', None) or err})")
+    else:
+        if not found:
+            print("  pdf         none listed in TEOS")
     for n, image in enumerate(found, 1):
         if image.exact:
             note = "  [exact]"
@@ -283,8 +447,18 @@ def main() -> None:
         print(f"  pdf         {image.url}{note}")
 
     if args.xml:
-        args.xml.write_bytes(_get(row.xml_url))
-        print(f"\nwrote {args.xml}")
+        print()
+        try:
+            xml, held_by = fetch_xml(row, args.batch_cache, scan=args.scan, keep=args.keep_zips,
+                                     say=print)
+        except ImportError as err:
+            sys.exit(f"--xml reads the archive through own_extract.batches, which needs the "
+                     f"ingest extra: {err}")
+        except LookupError as err:
+            sys.exit(str(err))
+        args.xml.write_bytes(xml)
+        label = "" if held_by == row.batch_id else f"; the index names {row.batch_id or 'none'}"
+        print(f"wrote {args.xml}  ({row.member} from {held_by}.zip{label})")
 
     if args.pdf:
         if not found:
