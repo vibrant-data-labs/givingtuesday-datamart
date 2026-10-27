@@ -553,3 +553,16 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   outage. Seven probes, 04:52 to 05:52 UTC, every ten minutes: 403 each
   time. A slower probe, every thirty minutes, runs on through the night;
   if TEOS answers, the read starts under the cap as planned.
+- **2026-10-27, 05:55 UTC, Zein: if TEOS does not look like answering
+  today, start the matcher.** It does not: an edge-level denial, from two
+  hosts, unchanged across an hour, and a read that could not feed a
+  matcher due to finish in the morning anyway. So step 7 runs now on
+  today's recovered rows under `v3`; the 1,106 unread filings' lists wait
+  for a later read and run. The playground resizes to r6i.8xlarge (256 GB,
+  32 vCPU, x86 like the t3 so the venv holds; offered in its zone,
+  us-east-1c) with the stop, change, start sequence of Zein's `ec2resize`;
+  its public address changes, the private one does not. The box runs this
+  branch; the matcher's own `_current` rebuilds read `bigdb.env` for the
+  enlarged database. If the probe finds TEOS answering while the matcher
+  runs, the read may run (it writes page tables only), the load may not,
+  until the matcher has ended.
