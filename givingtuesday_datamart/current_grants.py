@@ -364,6 +364,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from typing import Iterable
 
 from sqlalchemy import text
@@ -956,20 +957,24 @@ def _build_one(connection, table: str, ddl: str) -> int:
     logger.info(
         "Building public.%s (filing-version dedup, issues #33/#34)", table
     )
-    # RDS-default work_mem (4MB) makes the 9-17M-row hash/window passes
-    # spill to thousands of temp-file batches (observed as sustained
-    # IO:BufFileRead waits on the db.t4g.medium). One build runs at a
-    # time, so a larger per-operation budget is safe on the 4GB instance.
-    # SET (not SET LOCAL): session-scoped, so it survives the
-    # per-statement execute() calls below and dies with the connection.
-    # No parallel workers: each worker gets the whole per-operation budget
-    # (and a hash twice it, hash_mem_multiplier being 2), so on 2026-10-26
-    # the basic_fields_current build with the default two workers pushed
-    # the 4 GB instance a gigabyte into swap in three minutes and was
-    # cancelled. One process keeps the 256 MB a budget, not a multiple.
+    # Memory for the build, SET (not SET LOCAL) so it is session-scoped,
+    # survives the per-statement execute()s below and dies with the
+    # connection. No parallel workers: a worker gets the whole budget and a
+    # hash twice it (hash_mem_multiplier is 2), so the default two workers
+    # pushed the 4 GB shared instance a gigabyte into swap on 2026-10-26.
+    # Even one process has many concurrent window/hash nodes here: the
+    # privategrants_current build at 256 MB reached 0.87 GB of swap on
+    # 2026-10-27 and was cancelled. So the budget is overridable and its
+    # default suits the 4 GB shared instance (the RDS incident's
+    # work_mem <= 64 MB rule, no parallel workers); a larger box exports
+    # GT_BUILD_WORK_MEM / GT_BUILD_MAINTENANCE_WORK_MEM to spill less. The
+    # RDS default (4 MB) would spill the 9-17M-row passes to thousands of
+    # temp-file batches (sustained IO:BufFileRead on the db.t4g.medium).
+    work_mem = os.environ.get("GT_BUILD_WORK_MEM", "64MB")
+    maintenance_work_mem = os.environ.get("GT_BUILD_MAINTENANCE_WORK_MEM", "256MB")
     connection.execute(text("SET max_parallel_workers_per_gather = 0"))
-    connection.execute(text("SET work_mem = '256MB'"))
-    connection.execute(text("SET maintenance_work_mem = '512MB'"))
+    connection.execute(text("SET work_mem = '%s'" % work_mem))
+    connection.execute(text("SET maintenance_work_mem = '%s'" % maintenance_work_mem))
     for stmt in [s for s in ddl.split(";") if s.strip()]:
         connection.execute(text(stmt))
     for stmt in _INDEX_DDL[table]:
