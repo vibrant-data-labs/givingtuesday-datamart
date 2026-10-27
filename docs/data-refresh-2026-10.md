@@ -129,9 +129,15 @@ tables as they are.
 
 ### 2. The canonical build (the box, about 25 minutes)
 
-- [ ] `python -m givingtuesday_datamart.sources build-canonical`
-- [ ] A `success` row in `datamart_meta.canonical_builds` dated today;
-      `nonprofit_canonical` rows logged (was 1,981,967).
+- [x] `python -m givingtuesday_datamart.sources build-canonical`
+      (done 2026-10-27 02:41:55 to 02:55:15 UTC from the box, 800 s, exit
+      0, build `9339c70e`; swap no higher than 0.11 GB, free storage down
+      to 56.3 GB while `nonprofit_text` was built and back to 68.9 GB
+      after)
+- [x] A `success` row in `datamart_meta.canonical_builds` dated today;
+      `nonprofit_canonical` rows logged (was 1,981,967). (done: the row
+      reads success, 1,983,340 rows; its lineage names the
+      `irs_extract_patch` run; the log)
 
 ### 3. The grants relations (the box, about 40 minutes)
 
@@ -352,3 +358,30 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   `privategrants_future` 120,663 / 345,907. The planner's estimates for
   the three relations (3,988,316, 1,226,152 and 2,258,007) sit within 0.1%
   of the counts. Free storage 67.5 GB. Step 2 waits on Zein.
+- **2026-10-27, 02:42 to 03:00 UTC, step 2.** Zein's go at 19:30 PDT. The
+  box pulled this branch (`2271708`); the instance was quiet (69.8 GB free,
+  swap 0.03 GB, no active backend, two idle connections). The canonical
+  build ran 02:41:55 to 02:55:15 UTC, 800 s, exit 0, without the people
+  tables like the build of 2026-10-15 it replaces. Swap stayed at or under
+  0.11 GB and freeable memory at or over 2.07 GB; free storage fell to
+  56.3 GB during the seven minutes of `nonprofit_text` (its four parallel
+  workers at the server's 4 MB `work_mem`, spilling to temp files) and
+  stood at 68.9 GB after. The build's lineage names the
+  `irs_extract_patch` run beside GT's June runs and the BMF of
+  2026-10-13. The checks from the box, 02:58 to 03:00 UTC:
+
+  | table | rows | 2026-10-15 build |
+  |---|---|---|
+  | nonprofit_canonical | 1,983,340 | 1,981,967 |
+  | nonprofit_text | 811,436 | 793,105 |
+  | schedule_o_part_iii | 1,149,200 | 1,101,550 |
+  | funder_canonical | 174,809 | 174,308 |
+
+  The canonical table grew by 1,373 organizations only, because most
+  filers of the 354,589 new filer-years were already rows (older returns
+  or BMF-only). The patch shows in the latest return instead: of the
+  811,438 organizations with a return (990: 441,604; 990-EZ: 369,834;
+  BMF-only rows 1,171,902), 628,622 now take their latest return from our
+  extract, and 412,224 carry a tax period ending in 2025 or later, none of
+  them from GT's rows. Latest tax year 2025 on 231,253 organizations,
+  2024 on 354,882. Step 3 waits on Zein.
