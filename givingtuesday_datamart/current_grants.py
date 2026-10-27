@@ -969,12 +969,15 @@ def _build_one(connection, table: str, ddl: str) -> int:
     # work_mem <= 64 MB rule, no parallel workers). They are the database
     # server's memory, so only a larger database instance, never a larger
     # client box, exports GT_BUILD_WORK_MEM / GT_BUILD_MAINTENANCE_WORK_MEM
-    # to spill less. The
-    # RDS default (4 MB) would spill the 9-17M-row passes to thousands of
-    # temp-file batches (sustained IO:BufFileRead on the db.t4g.medium).
+    # to spill less, and GT_BUILD_PARALLEL_WORKERS to put the workers back
+    # (each one multiplies the budget). The RDS default (4 MB) would spill
+    # the 9-17M-row passes to thousands of temp-file batches (sustained
+    # IO:BufFileRead on the db.t4g.medium); at 64 MB they spill about
+    # 34 GB of temp files, 30 MB short of the 35 GB floor on 2026-10-27.
     work_mem = os.environ.get("GT_BUILD_WORK_MEM", "64MB")
     maintenance_work_mem = os.environ.get("GT_BUILD_MAINTENANCE_WORK_MEM", "256MB")
-    connection.execute(text("SET max_parallel_workers_per_gather = 0"))
+    parallel_workers = int(os.environ.get("GT_BUILD_PARALLEL_WORKERS", "0"))
+    connection.execute(text("SET max_parallel_workers_per_gather = %d" % parallel_workers))
     connection.execute(text("SET work_mem = '%s'" % work_mem))
     connection.execute(text("SET maintenance_work_mem = '%s'" % maintenance_work_mem))
     for stmt in [s for s in ddl.split(";") if s.strip()]:
