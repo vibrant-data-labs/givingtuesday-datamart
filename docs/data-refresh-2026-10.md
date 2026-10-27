@@ -158,22 +158,40 @@ tables as they are.
       a repeated basic row`; otherwise the filings it names are checked
       against their XML before step 7. (done: it reads exactly that, at
       03:52:18 UTC; nothing to check)
-- [ ] `status` shows the three line-25 rules; the rows by rule logged.
+- [x] `status` shows the three line-25 rules; the rows by rule logged.
+      (done 04:08 UTC on the enlarged instance: "line-25 rules in the
+      table: forward_fill, field_fill, total_row"; the rows by rule are in
+      the log entry of 03:23 to 03:58)
 
 ### 4. The work list (the box, minutes)
 
-- [ ] `python -m givingtuesday_datamart.placeholder_recovery work-list`
-- [ ] Counts by tax year and band logged. Expect about 1,150 filings to
+- [x] `python -m givingtuesday_datamart.placeholder_recovery work-list`
+      (done 04:13:58 to 04:14:55 UTC from the box on the enlarged
+      instance)
+- [x] Counts by tax year and band logged. Expect about 1,150 filings to
       join (measured 2026-10-26 on `irs_extract`: $3.05B of placeholders,
       1,109 of them returns GT never had) and every loaded list to keep
-      its place.
+      its place. (done: 25,612 filings on the list, 24,518 before, so
+      1,094 joined; 5,320 filers, $51.27B declared, $51.23B on rows; 23
+      filings of the 6 excluded filers left out; tax years 2020 on:
+      13,918 filings, $34.93B; before 2020: 11,694, $16.34B; 854 marked
+      individual, 64 over line 25, 1,144 with a future amount; by band,
+      2020 on: A 31, B 597, C 3,262, D 10,028; the log)
 
 ### 5. The read of the new filings under v3 (the box, Zein's go)
 
-- [ ] The projection, from what is stored:
+- [x] The projection, from what is stored:
       `python -m givingtuesday_datamart.placeholder_recovery run --policy v3 --tax-years 2020-2025 --keep-list --dry-run --no-fetch`
       (pages and dollars logged; the rough figure is $200 to $250)
-- [ ] Zein's go on that figure. The cap stays $800 a run.
+      (done 04:14:55 to 04:16:01 UTC: 6,340 fetched filings hold 38,628
+      attachment pages under v3, every reading stored, nothing to buy
+      there; 1,106 filings never fetched, priced by band at the frame's
+      cost per filing: A 2 ($2.70), B 44 ($25.96), C 245 ($16.17), D 815
+      ($16.30); projection $61.14, far under the rough figure because the
+      new filings are small ones; about 5,672 pages flagged, 15%)
+- [x] Zein's go on that figure. The cap stays $800 a run. (Zein, 03:30
+      UTC, before the figure: the cap is $300; the run script passes
+      `--cap 300`)
 - [ ] `tmux -L frame new -s frame 'python -m givingtuesday_datamart.placeholder_recovery run --policy v3 --tax-years 2020-2025 --keep-list --cache /data/irs_index'`
       One fetcher at a time against the IRS. Follow it with
       `page_readings status`; Ctrl-C in the pane is safe and the same
@@ -184,9 +202,20 @@ tables as they are.
 
 ### 6. The load, the view and the checks under v3 (the box, minutes; never while the matcher runs)
 
-- [ ] `python -m givingtuesday_datamart.placeholder_recovery load --policy v3`
-- [ ] `python -m givingtuesday_datamart.placeholder_recovery view --policy v3`
-- [ ] `python -m givingtuesday_datamart.placeholder_recovery check --policy v3` passes; rows and dollars by target logged.
+- [x] `python -m givingtuesday_datamart.placeholder_recovery load --policy v3`
+      (first pass done 04:16:01 to 04:48:03 UTC, 1,920 s, from the box:
+      9,029 fetched filings through the selector, 4,653 written, 0
+      unchanged, 0 taken out; paid 4,611 filings, 582,471 rows,
+      $16,210.9M; future 173 filings, 6,531 rows, $1,268.7M; the v2 rows
+      stay beside them, 4,607 filings, $16,205.0M; a second pass follows
+      the read)
+- [x] `python -m givingtuesday_datamart.placeholder_recovery view --policy v3`
+      (done 04:48:04 UTC: "created for policy v3")
+- [x] `python -m givingtuesday_datamart.placeholder_recovery check --policy v3` passes; rows and dollars by target logged.
+      (done 04:48:04 to 04:48:38 UTC, exit 0: loaded paid 582,471 rows of
+      4,611 filings, the same in the view; future 6,531 rows of 173
+      filings; "same rows ok 0"; `status` shows the view on `v3`; run
+      again after the second load)
 
 ### 7. The matcher (a box with 256 GB of memory, Zein)
 
@@ -474,3 +503,49 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   passthrough 423,690, latest_url 13,023, pair_collapse 4,644. After the
   run, free storage 67.5 GB and swap back to 0.03 GB. The step's `status`
   and counts follow once the instance is back as the larger class.
+- **2026-10-27, 04:05 UTC, the box's disk.** For the read (about 15 GB per
+  1,000 filings of PDFs and page images) the box had 14 GB free: the pip
+  cache went (4.3 GB) and the root volume grew from 100 to 150 GB (gp3,
+  online, `growpart` then `xfs_growfs`, about $4 a month more), 68 GB
+  free after. Zein's other checkouts on the box were not touched.
+- **2026-10-27, 04:01 to 04:07 UTC, the instance's class changed.**
+  Requested 04:01:47 UTC with an immediate apply, once the box's backends
+  were gone; `modifying` until 04:05, the postmaster back at 04:05:15,
+  `available` as db.r6g.xlarge at 04:07:08: five and a half minutes. After
+  the restart the server reads `shared_buffers` 8 GB, `effective_cache_size`
+  16 GB, `maintenance_work_mem` 516 MB, `work_mem` 4 MB and two parallel
+  workers by default, all from the class; the builder's session settings
+  come from the box's `bigdb.env` (1 GB, 2 GB, two workers). The step 3
+  checks and steps 4 to 6 started from the box at 04:07:51 UTC under the
+  watchdog.
+- **2026-10-27, 04:08 to 04:49 UTC, step 3's counts, step 4, the
+  projection, step 6's first pass.** On the enlarged instance. The counts
+  (04:08 to 04:13): `privategrants_current` 17,392,341 rows, 4,582,046 of
+  them ours, 1,060,113 filings (258,026 ours); `privategrants_future_current`
+  452,460 rows, 119,322 ours, 26,893 filings (7,043 ours), rules
+  passthrough 439,192, latest_url 13,267, pair_collapse 1; the recovered
+  view 17,969,776 rows. The work list (04:13:58 to 04:14:55): 25,612
+  filings, 1,094 more than the 24,518 of the 26th; the numbers are on the
+  step 4 boxes. The projection (04:14:55 to 04:16:01): every reading the
+  policy needs is stored for the 6,340 fetched filings' 38,628 pages;
+  1,106 filings never fetched, $61.14 by band; the warnings it prints are
+  the known ones (2,862 filings with no TEOS image, 1,548 PDFs the IRS
+  does not serve, 30 TEOS failures, 8,504 filings without an attachment).
+  The first load under `v3` (04:16:01 to 04:48:03, 1,920 s on one core of
+  the box), the view to `v3`, the check passing: the numbers are on the
+  step 6 boxes. The laptop watchdog saw no breach and left early on a gap
+  between the short queries; swap 0.00 GB and 23 GB of memory free
+  throughout.
+- **2026-10-27, 04:39 UTC, the read STOPPED at its prerequisites: TEOS
+  answers 403 Forbidden.** The run's own check makes the fetch's GET for
+  one filer's return list from the box and got `HTTP Error 403:
+  Forbidden`; the same request from the laptop, with the project's user
+  agent `vdl-givingtuesday-datamart/irs_source`, gets 403 too. The fetch
+  worked from the box on 2026-09-29 and from a laptop before that. So the
+  IRS is refusing our fetcher as such, from any host, and that is not
+  something to route around: no other user agent, no other address. The
+  1,106 new filings cannot be read until TEOS answers again; a probe with
+  the project's request runs once every ten minutes for an hour. Nothing
+  bought. The matcher waits on Zein's word: on today's recovered rows (the
+  new filings' lists then wait for a later run), or after a read, when the
+  IRS allows one.
