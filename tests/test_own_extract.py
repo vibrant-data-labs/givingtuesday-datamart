@@ -8,6 +8,7 @@ import io
 import json
 import urllib.error
 import zipfile
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -433,3 +434,70 @@ def test_schedule_i_leaves_the_filer_name_line_2_empty_as_gt_does():
              for t in ("privategrants", "grants_to_domestic_organizations")}
     assert paths == {"privategrants": ("/ReturnHeader/Filer/BusinessName/BusinessNameLine2Txt",),
                      "grants_to_domestic_organizations": ()}
+
+
+def test_read_member_is_one_return_or_none(tmp_path):
+    archive = _zip(tmp_path, {f"2026_TEOS_XML_01A/{OID}_public.xml": PF})
+    assert batches.read_member(archive, OID) == PF
+    assert batches.read_member(archive, "202600139349101051") is None
+
+
+def test_cached_is_an_archive_whole_at_its_stamped_size(tmp_path):
+    assert batches.cached("2026_TEOS_XML_01A", tmp_path) is None
+    archive = _zip(tmp_path, {f"{OID}_public.xml": PF})
+    assert batches.cached("2026_TEOS_XML_01A", tmp_path) is None          # no stamp: fetched by hand
+    (tmp_path / "2026_TEOS_XML_01A.json").write_text(json.dumps({"nbytes": archive.stat().st_size + 1}))
+    assert batches.cached("2026_TEOS_XML_01A", tmp_path) is None          # cut short
+    (tmp_path / "2026_TEOS_XML_01A.json").write_text(json.dumps({"nbytes": archive.stat().st_size}))
+    assert batches.cached("2026_TEOS_XML_01A", tmp_path) == archive
+
+
+class _CopyS3(_FakeS3):
+    """Our bucket holding one archive, with the metadata ``archive`` writes."""
+
+    def __init__(self, data: bytes, sha256: str):
+        super().__init__(held={"sha256": sha256, "irs-last-modified": "Wed, 17 Jun 2026 13:00:00 GMT",
+                               "irs-url": "https://apps.irs.gov/pub/epostcard/990/xml/2026/2026_TEOS_XML_05A.zip"})
+        self.data, self.downloads = data, []
+
+    def head_object(self, Bucket, Key):
+        if Key != "irs/xml_batches/2026/2026_TEOS_XML_05A.zip":
+            raise self.exceptions.ClientError("404")
+        return {"Metadata": self.held, "ContentLength": len(self.data)}
+
+    def download_file(self, bucket, key, path):
+        self.downloads.append(key)
+        Path(path).write_bytes(self.data)
+
+
+def test_copy_of_describes_our_copy_or_none():
+    s3 = _CopyS3(b"zip", hashlib.sha256(b"zip").hexdigest())
+    copy = batches.copy_of("2026", "2026_TEOS_XML_05A", s3=s3)
+    assert copy == batches.Batch("2026", "2026_TEOS_XML_05A",
+                                 "s3://givingtuesday-datamart/irs/xml_batches/2026/2026_TEOS_XML_05A.zip",
+                                 "Wed, 17 Jun 2026 13:00:00 GMT", 3)
+    assert batches.copy_of("2026", "2026_TEOS_XML_05B", s3=s3) is None
+
+
+def test_fetch_copy_stamps_the_file_as_the_irs_fetch_would_and_holds_it_to_the_sha(tmp_path):
+    s3 = _CopyS3(b"zip", hashlib.sha256(b"zip").hexdigest())
+    copy = batches.copy_of("2026", "2026_TEOS_XML_05A", s3=s3)
+    path = batches.fetch_copy(copy, tmp_path, s3=s3)
+    assert path == tmp_path / "2026_TEOS_XML_05A.zip" and path.read_bytes() == b"zip"
+    stamp = json.loads((tmp_path / "2026_TEOS_XML_05A.json").read_text())
+    assert stamp == {"year": "2026", "batch_id": "2026_TEOS_XML_05A",
+                     "url": "https://apps.irs.gov/pub/epostcard/990/xml/2026/2026_TEOS_XML_05A.zip",
+                     "last_modified": "Wed, 17 Jun 2026 13:00:00 GMT", "content_length": 3,
+                     "sha256": hashlib.sha256(b"zip").hexdigest(), "nbytes": 3}
+    assert batches.cached("2026_TEOS_XML_05A", tmp_path) == path
+    corrupt = _CopyS3(b"zap", hashlib.sha256(b"zip").hexdigest())
+    with pytest.raises(RuntimeError, match="SHA-256"):
+        batches.fetch_copy(copy, tmp_path / "again", s3=corrupt)
+    assert list((tmp_path / "again").iterdir()) == []
+
+
+def test_described_is_one_head(monkeypatch):
+    monkeypatch.setattr(batches.urllib.request, "build_opener", lambda *a: _Opener([_Head()]))
+    found = batches.described("2026", "2026_TEOS_XML_05B")
+    assert (found.batch_id, found.url, found.content_length) == (
+        "2026_TEOS_XML_05B", batches.batch_url("2026", "2026_TEOS_XML_05B"), 7)

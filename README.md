@@ -320,7 +320,9 @@ placeholder cases in
 and the amended filings in
 [docs/gt-duplication-report.md](docs/gt-duplication-report.md).
 
-Stdlib only, no database. The PDF comes from TEOS, which keys on
+No database. The lookup and the PDF are stdlib only; `--xml` goes through
+`own_extract.batches` (the `ingest` extra, and Info-ZIP `unzip` for the
+Deflate64 archives). The PDF comes from TEOS, which keys on
 (EIN, tax period, return type) — coarser than a filing, since an original and
 its amendment share a tax period. Where the IRS index carries a `RETURN_ID`
 that resolves to exactly one image; where it doesn't, every image for the
@@ -328,11 +330,20 @@ period is listed and `--pdf` waits for `--image N` rather than guessing.
 Images are the whole return, so they run large for big filers (Fidelity's
 FY2022 990 is 347 MB / 32,829 pages).
 
-The XML is fetched from GT's mirror, which has been verified byte-identical
-to the IRS original by SHA-256 across filings from 43 KB to 51 MB. Pulling it
-from the IRS instead would mean cracking open a 250MB+ batch ZIP, and some
-batches are Deflate64, which zlib cannot read — not worth carrying for a file
-we can prove is the same. The IRS archive URL is printed either way.
+The XML is read out of the IRS's own batch archive, the only place the IRS
+serves it: the `xml` line names the archive and the member
+(`<year>_TEOS_XML_<MM><L>.zip#<object_id>_public.xml`), and `--xml` reads
+that member from `--batch-cache` when the archive is already there whole,
+else from our copy in `s3://givingtuesday-datamart/irs/xml_batches/` (every
+batch we have loaded, 2024 on), else from the IRS, saying which before it
+fetches — an archive is 100 MB to 1.2 GB, deleted after the read unless
+`--keep-zips`. The index labels a month's archives with the first one's id
+(June 2026's 05B returns are listed under 05A), so the rest of the month is
+tried after the named archive; `--scan` goes on through the year. Before
+2024 the index names no archive at all, so the archive is reported unknown
+and `--xml --scan` reads the year's archives in turn. Nothing is fetched from
+GivingTuesday's raw-XML mirror, which has been stale since 2026-08-25 and is
+a third party ([docs/own-extract.md](docs/own-extract.md)).
 
 ### Recommended first run
 

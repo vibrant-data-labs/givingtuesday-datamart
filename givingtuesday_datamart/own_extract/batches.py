@@ -68,6 +68,16 @@ def batch_url(year: str, batch_id: str) -> str:
     return f"{IRS_XML_BASE}/{year}/{batch_id}.zip"
 
 
+# Where archives are fetched to unless told otherwise: ``own_extract load``
+# and ``irs_source --xml`` share it, so an archive one keeps the other reads.
+CACHE = Path.home() / ".cache" / "irs_batches"
+
+
+def described(year: str, batch_id: str) -> Batch | None:
+    """One archive's stamp from the server, or None when it serves no such archive."""
+    return _head(batch_url(year, batch_id))
+
+
 def _head(url: str) -> Batch | None:
     """The archive's stamp, or None when the server says there is no such archive."""
     request = urllib.request.Request(url, method="HEAD", headers=UA)
@@ -164,6 +174,21 @@ def stamp_of(path: Path) -> dict:
     return json.loads(stamp.read_text()) if stamp.exists() else {}
 
 
+def cached(batch_id: str, cache_dir: Path) -> Path | None:
+    """An archive already whole in ``cache_dir``: the file is the size its stamp records."""
+    path = cache_dir / f"{batch_id}.zip"
+    if path.exists() and path.stat().st_size == stamp_of(path).get("nbytes"):
+        return path
+    return None
+
+
+def read_member(path: Path, object_id: str) -> bytes | None:
+    """One return's XML out of an archive, or None when the archive does not hold it."""
+    for _, xml in iter_members(path, wanted={object_id}):
+        return xml
+    return None
+
+
 def object_id_of(member_name: str) -> str | None:
     match = OBJECT_ID.search(member_name.rsplit("/", 1)[-1])
     return match.group(1) if match else None
@@ -258,3 +283,58 @@ def archive(path: Path, s3=None, bucket: str = ARCHIVE_BUCKET) -> str:
                      "irs-last-modified": stamp.get("last_modified", ""),
                      "irs-url": stamp.get("url", "")}})
     return f"s3://{bucket}/{key}"
+
+
+def copy_key(year: str, batch_id: str) -> str:
+    return f"{ARCHIVE_PREFIX}/{year}/{batch_id}.zip"
+
+
+def copy_of(year: str, batch_id: str, s3=None, bucket: str = ARCHIVE_BUCKET) -> Batch | None:
+    """Our copy of an archive as the bucket describes it, or None when we keep none.
+
+    The ``url`` is the object's; ``last_modified`` is the IRS's, from the
+    metadata ``archive`` wrote. A copy is read with ``fetch_copy``.
+    """
+    key = copy_key(year, batch_id)
+    if s3 is None:
+        import boto3                                          # the ``ingest`` extra
+        s3 = boto3.client("s3")
+    try:
+        head = s3.head_object(Bucket=bucket, Key=key)
+    except s3.exceptions.ClientError:                         # no such object, or no right to it
+        return None
+    return Batch(year, batch_id, f"s3://{bucket}/{key}",
+                 head.get("Metadata", {}).get("irs-last-modified", ""), int(head["ContentLength"]))
+
+
+def fetch_copy(copy: Batch, cache_dir: Path, s3=None, bucket: str = ARCHIVE_BUCKET) -> Path:
+    """Download our copy (``copy_of``) into ``cache_dir``, stamped as ``fetch`` stamps.
+
+    The stamp's ``url`` is the IRS's, so ``load`` and ``fetch`` read the
+    file as one fetched from the IRS; the object's SHA-256 was taken from
+    the IRS stream when the copy was made, and the download is held to it.
+    """
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    path = cache_dir / copy.filename
+    partial = path.with_suffix(".zip.part")
+    key = copy_key(copy.year, copy.batch_id)
+    if s3 is None:
+        import boto3                                          # the ``ingest`` extra
+        s3 = boto3.client("s3")
+    held = s3.head_object(Bucket=bucket, Key=key).get("Metadata", {})
+    s3.download_file(bucket, key, str(partial))
+    tally = _ByteTally()
+    with partial.open("rb") as handle:
+        for _ in tally.wrap(iter(lambda: handle.read(1 << 20), b"")):
+            pass
+    digest = tally.digest.hexdigest()
+    if held.get("sha256") and held["sha256"] != digest:
+        partial.unlink()
+        raise RuntimeError(f"{copy.url}: the download's SHA-256 is not the object's ({digest})")
+    partial.replace(path)
+    (cache_dir / f"{copy.batch_id}.json").write_text(json.dumps(
+        {"year": copy.year, "batch_id": copy.batch_id,
+         "url": held.get("irs-url") or batch_url(copy.year, copy.batch_id),
+         "last_modified": copy.last_modified, "content_length": copy.content_length,
+         "sha256": digest, "nbytes": tally.nbytes}, indent=2))
+    return path

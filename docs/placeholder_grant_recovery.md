@@ -279,8 +279,9 @@ Code: `givingtuesday_datamart/irs_source.py` and `filing_images.py`.
   PDF is stored once in `s3://givingtuesday-datamart/irs/pdf/` with its
   hash on the `filing_images` row, and every reading is keyed on that
   hash.
-- XML: from GivingTuesday's mirror, verified byte-identical to the IRS
-  copy.
+- XML: at the time, from GivingTuesday's mirror, verified byte-identical
+  to the IRS copy. Since October 2026 `irs_source` reads it out of the
+  IRS's own batch archive instead ([own-extract.md](own-extract.md)).
 
 Every PDF is a scanned image with no text layer. It is two documents in
 one: the IRS rendering of the XML first, then the filer's attachments.
