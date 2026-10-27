@@ -146,8 +146,9 @@ def _get(url: str, headers: dict[str, str] | None = None) -> bytes:
     urllib's default and to browsers (measured 2026-10-27: same library,
     same host, minutes apart; ``docs/data-refresh-2026-10.md``). So nothing
     is set here: no project string, no browser string, no rotation. A 403
-    is the IRS's answer, and ``filing_images.fetch_filings`` stops on the
-    first one instead of retrying through the list.
+    is the IRS's answer: ``filing_images.fetch_filings`` stops on five in a
+    row instead of retrying through the list (one alone is a filing the IRS
+    will not serve, which happens).
     """
     request = urllib.request.Request(url, headers=headers or {})
     with urllib.request.urlopen(request) as response:

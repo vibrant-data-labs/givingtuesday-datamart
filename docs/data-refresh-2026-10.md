@@ -597,9 +597,13 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   `irs_source._get` sets no headers at all, urllib's own identity and
   never a browser string or a rotation; the returns listing no longer
   asks for JSON it gets anyway; own_extract's HEAD on the archives
-  identifies the same way; and `fetch_filings` stops on the first 403
-  instead of charging three attempts to every filing in the list (the
-  filings still queued come back `unfetched:teos_refused`, untried). The
+  identifies the same way; and `fetch_filings` stops on five 403s in a
+  row instead of charging three attempts to every filing in the list (the
+  filings still queued come back `unfetched:teos_refused`, untried). Five,
+  not one: `81e020b` stopped on the first, and the fetch's own counts then
+  showed 26 rows of 2021-2022 images standing at three attempts with a
+  403 each, their neighbours fetched, so a lone 403 is a filing the IRS
+  will not serve and only a run of them is the client being refused. The
   fetch keeps its eight workers, September's rate, which drew no reaction:
   today's refusal is instant and keyed on the string, not on volume. The
   box pulled `81e020b`; the run script started 14:09:05 UTC in

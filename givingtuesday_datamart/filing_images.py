@@ -33,11 +33,13 @@ every one seen so far is an image the IRS generated in 2022), ``not_a_pdf``
 ``teos_failed:<exception>`` (the listing request itself),
 ``widths_failed:<exception>`` (poppler failed rather than refused) and
 ``upload_failed:<exception>`` (S3, credentials or disk after a good
-download). Every failure keeps ``attempts`` and ``last_error``. A 403 is
-not a filing's failure but the IRS edge refusing the client
-(``irs_source._get``), so the first one stops the fetch: the filings still
-queued are left untried with their attempts intact, and the run reads what
-was fetched.
+download). Every failure keeps ``attempts`` and ``last_error``. One 403 is
+a filing the IRS will not serve (26 rows of 2021-2022 images stand at
+three attempts, their neighbours fetched); five in a row is the IRS edge
+refusing the client (2026-10-27: every request under a User-Agent it did
+not recognise, ``irs_source._get``), and that stops the fetch: the filings
+still queued are left untried with their attempts intact, and the run
+reads what was fetched.
 ``no_teos_image`` is permanent: TEOS's own listing said so, and an image
 that appears months later is fetched with ``refetch``, not by retrying.
 Every other failure is re-tried until it has three attempts, then left
@@ -100,6 +102,10 @@ FETCHED = ("fetched", "no_attachment")
 # image, and one that appears months later is a refetch, not a retry. A 404
 # keeps its attempts because the 2022 batch may come back (Zein, 2026-09-22).
 PERMANENT = ("no_teos_image",)
+# 403s in a row that mean the IRS is refusing the client, not a filing
+# (``_refused``): the refusal of 2026-10-27 was every request; the lone 403s
+# on record (26 rows, 2021-2022 images) sit among fetched neighbours.
+REFUSALS_TO_STOP = 5
 
 
 DDL = (
@@ -500,11 +506,12 @@ def _retryable(row: FilingImage | None) -> bool:
 
 
 def _refused(row: FilingImage) -> bool:
-    """Did the IRS edge answer this attempt with HTTP 403? That is the
-    client being refused, not the filing (2026-10-27: every request with an
-    unrecognised User-Agent), so ``fetch_filings`` stops on it. The listing
-    failure keeps the exception's name in its status and the code in the
-    message; the PDF failure keeps the code in its status."""
+    """Did the IRS answer this attempt with HTTP 403? Alone, a filing it
+    will not serve; ``REFUSALS_TO_STOP`` in a row, the client being refused
+    (2026-10-27: every request under an unrecognised User-Agent), which
+    stops ``fetch_filings``. The listing failure keeps the exception's name
+    in its status and the code in the message; the PDF failure keeps the
+    code in its status."""
     if row.status == "pdf_unavailable:403":
         return True
     return row.status == "teos_failed:HTTPError" and (row.last_error or "").startswith("HTTP Error 403")
@@ -562,11 +569,12 @@ def fetch_filings(session, object_ids: Iterable[str | Filing], *, bucket: str = 
     ``session`` is a SQLAlchemy session (``_internal.db.get_session``) or a
     ``FilingImageStore``; ``s3`` is a boto3 client, built when not given.
 
-    A 403 from the IRS edge (``_refused``) stops the fetch at the first one:
-    the jobs not yet started are cancelled and come back as
-    ``unfetched:teos_refused`` (no row written, no attempt charged), the
-    jobs in flight are recorded as usual, and the caller goes on with what
-    was fetched.
+    ``REFUSALS_TO_STOP`` 403s in a row (``_refused``) are the IRS refusing
+    the client, and stop the fetch: the jobs not yet started are cancelled
+    and come back as ``unfetched:teos_refused`` (no row written, no attempt
+    charged), the jobs in flight are recorded as usual, and the caller goes
+    on with what was fetched. A lone 403 is a filing the IRS will not serve
+    and counts as any other failure.
     """
     _require_pdfimages()
     store = _store(session)
@@ -585,7 +593,7 @@ def fetch_filings(session, object_ids: Iterable[str | Filing], *, bucket: str = 
     index = _index_frame((f.object_id for f in todo), cache_dir)
     logger.info("fetch_filings: %d of %d filings found in the IRS index", len(index), len(todo))
     s3 = s3 if s3 is not None else _s3_client(workers)
-    done = 0
+    done = streak = 0
     refused = None
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(_fetch_one, f, prior.get(f.object_id), cache_dir=cache_dir,
@@ -603,7 +611,8 @@ def fetch_filings(session, object_ids: Iterable[str | Filing], *, bucket: str = 
             else:
                 logger.info("[%d/%d] %s %s: %d pages, %d attached, %.1f MB", done, len(todo),
                             row.object_id, row.status, row.pages, row.attachment_pages, row.bytes / 1e6)
-            if _refused(row):
+            streak = streak + 1 if _refused(row) else 0
+            if streak >= REFUSALS_TO_STOP:
                 # Closing the loop cancels the jobs not yet started, waits
                 # for the ones in flight and writes their rows (upsert_as_done).
                 refused = row
@@ -617,9 +626,9 @@ def fetch_filings(session, object_ids: Iterable[str | Filing], *, bucket: str = 
             tried = row is not None and (before is None or row.attempts > before.attempts)
             statuses[oid] = row.status if tried else "unfetched:teos_refused"
         untried = sum(statuses[oid] == "unfetched:teos_refused" for oid in rest)
-        logger.error("TEOS refused a request (%s %s: %s): the fetch stops here; %d of %d filings "
-                     "were not tried and keep their attempts", refused.object_id, refused.status,
-                     refused.last_error, untried, len(todo))
+        logger.error("TEOS refused %d requests in a row (last %s %s: %s): the client, not the filings, "
+                     "so the fetch stops here; %d of %d filings were not tried and keep their attempts",
+                     REFUSALS_TO_STOP, refused.object_id, refused.status, refused.last_error, untried, len(todo))
     return statuses
 
 
