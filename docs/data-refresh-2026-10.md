@@ -221,11 +221,14 @@ tables as they are.
 
 The BMF arm doubles the pairs (PR #68), so the read box does not do.
 
-- [ ] The big box set up as *Set up a box once* in the operations doc, on
+- [x] The big box set up as *Set up a box once* in the operations doc, on
       `main` (tonight: the playground resized to 256 GB, on this branch,
       whose builder keeps the shared instance out of swap; resized back
-      after the gate).
-- [ ] `python -m givingtuesday_datamart.placeholder_recovery check --policy v3`
+      after the gate). (done: r6i.8xlarge, 32 cores, 247 GB free, at a new
+      public address, the branch at `083a5a0`, `bigdb.env` in place)
+- [x] `python -m givingtuesday_datamart.placeholder_recovery check --policy v3`
+      (done 13:15:01 to 13:15:35 UTC: every rule ok, paid 582,471 rows of
+      4,611 filings in the table and in the view, future 6,531 of 173)
 - [ ] `python -m givingtuesday_datamart.corrections_preflight` (hours on a laptop, minutes on a box)
 - [ ] `python -m givingtuesday_datamart.grant_matching` (about eight hours;
       it rebuilds the `_current` relations itself and reads the policy the
@@ -566,3 +569,14 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   enlarged database. If the probe finds TEOS answering while the matcher
   runs, the read may run (it writes page tables only), the load may not,
   until the matcher has ended.
+- **2026-10-27, 13:15 UTC, step 7 started.** The resize's report reached
+  the laptop at 13:13 UTC, seven hours after the request; the laptop had
+  not slept (the TEOS probe logged a 403 every half hour from 05:53 to
+  12:53 UTC, fifteen in a row), so the delay was in the report's delivery,
+  not the box. The box came back as r6i.8xlarge (32 cores, 247 GB free) at
+  a new public address, the private one unchanged, the branch pulled to
+  `083a5a0`. The matcher script started at 13:15:01 UTC in `tmux -L refresh`,
+  06:15 Pacific, so the run reaches into the working day on the enlarged
+  database: the `v3` check first (every rule ok at 13:15:35), the
+  corrections preflight, the matcher, the gate, the check again. The
+  laptop watchdog runs for ten hours, patient through the compute phases.
