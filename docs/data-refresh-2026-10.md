@@ -192,10 +192,13 @@ tables as they are.
 - [x] Zein's go on that figure. The cap stays $800 a run. (Zein, 03:30
       UTC, before the figure: the cap is $300; the run script passes
       `--cap 300`)
-- [ ] `tmux -L frame new -s frame 'python -m givingtuesday_datamart.placeholder_recovery run --policy v3 --tax-years 2020-2025 --keep-list --cache /data/irs_index'`
+- [x] `tmux -L frame new -s frame 'python -m givingtuesday_datamart.placeholder_recovery run --policy v3 --tax-years 2020-2025 --keep-list --cache /data/irs_index'`
       One fetcher at a time against the IRS. Follow it with
       `page_readings status`; Ctrl-C in the pane is safe and the same
       command resumes.
+      (started 14:09:05 UTC as `~/logs/refresh/run-read.sh`, session
+      `read` of `tmux -L frame`, with `--cap 300`, on `81e020b`, beside
+      the matcher; the log entry of 14:09 says why it could start)
 - [ ] Spend logged: the difference in the `$` column before and after.
 - [ ] Tax years 2015-2019 ($436 projected) are not part of this refresh
       unless decided separately.
@@ -580,3 +583,31 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   database: the `v3` check first (every rule ok at 13:15:35), the
   corrections preflight, the matcher, the gate, the check again. The
   laptop watchdog runs for ten hours, patient through the compute phases.
+- **2026-10-27, 14:09 UTC, step 5 started: the read, beside the matcher.**
+  What the 403 was. Zein asked TEOS for a filer's return list from his
+  laptop with Python's urllib and no headers of his own and got the JSON;
+  the same request with `User-Agent: zein` got 403, as the project's own
+  name had all night, from the laptop and the box alike. So the edge in
+  front of apps.irs.gov refuses any User-Agent value it does not
+  recognise and accepts urllib's default and browsers; nothing about it
+  is aimed at this client (an arbitrary word is refused too), and it is
+  new since September's fetch of 8,800 filings under the project's name.
+  apps.irs.gov publishes no robots.txt; www.irs.gov's governs only that
+  host and says nothing of these downloads. Commit `81e020b`:
+  `irs_source._get` sets no headers at all, urllib's own identity and
+  never a browser string or a rotation; the returns listing no longer
+  asks for JSON it gets anyway; own_extract's HEAD on the archives
+  identifies the same way; and `fetch_filings` stops on the first 403
+  instead of charging three attempts to every filing in the list (the
+  filings still queued come back `unfetched:teos_refused`, untried). The
+  fetch keeps its eight workers, September's rate, which drew no reaction:
+  today's refusal is instant and keyed on the string, not on volume. The
+  box pulled `81e020b`; the run script started 14:09:05 UTC in
+  `tmux -L frame`, session `read`, cap $300, while the matcher computes
+  in `tmux -L refresh` (load average 1 on 32 cores, 68 GB free).
+  Prerequisites met at once: TEOS answered the preflight's listing from
+  the box in 0.2 s. The fetch: 1,106 of the 13,918 filings on the work
+  list to fetch, 12,812 stored already; 929 done after one minute, about
+  fifteen a second, many of the newest (periods 202512 and 202602)
+  `no_teos_image`, images the IRS has not generated yet. The load, step 6
+  again, waits for the gate: never while the matcher runs.
