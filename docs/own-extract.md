@@ -556,7 +556,9 @@ filing's XML comes out of the same archives:
 the member from the archive the index names (our copy first, else the
 IRS's), tries the rest of the month when that one lacks it, and before
 2024, where the index names no archive, reads the year's archives in turn
-under `--scan`; it never reads GT's mirror.
+under `--scan` (2017-2020's are `download990xml_<year>_<n>.zip`, which
+`batches.discover` walks too; 2021-2023's are named like 2024's and run to
+3.7 GB); it never reads GT's mirror.
 
 **History.** We read 2024 to 2026 only. Before 2013 the element names are
 different throughout (the concordance would need a second set of paths),

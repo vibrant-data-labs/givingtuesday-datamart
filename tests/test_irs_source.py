@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io
 import json
 import zipfile
 
@@ -40,12 +39,14 @@ def _cache(tmp_path, batch_id, members):
 
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
-    """Nothing in these tests may fetch: not the index, not TEOS, not the mirror."""
-    def refuse(url, headers=None):
-        raise AssertionError(f"fetched {url}")
+    """Nothing in these tests may fetch: not the index, TEOS or the mirror
+    (urllib), not an archive from the IRS (requests) or our bucket (boto3)."""
+    def refuse(*args, **kwargs):
+        raise AssertionError(f"network call refused: {args[:1]}")
     monkeypatch.setattr(irs_source, "_get", refuse)
-    monkeypatch.setattr(batches.urllib.request, "build_opener", lambda *a: (_ for _ in ()).throw(
-        AssertionError("HEAD on the IRS")))
+    monkeypatch.setattr(batches.urllib.request, "build_opener", refuse)    # _head, discover
+    monkeypatch.setattr(batches, "_spool_response", refuse)                # fetch
+    monkeypatch.setattr(batches, "_s3", refuse)                            # copy_of, fetch_copy
 
 
 def test_xml_url_names_the_irs_archive_member_not_the_mirror():
@@ -96,14 +97,26 @@ def test_archive_order_rest_of_the_month_then_under_scan_the_year():
     old = _row(oid="202343149349101129", batch_id="", index_year="2023")
     assert irs_source.archive_order(old, found) == []
     assert ids(irs_source.archive_order(old, found, scan=True)) == ids(found)
+    # the server's order is kept, not the ids' string order (_10 would sort before _2)
+    numbered = [_batch(f"download990xml_2020_{n}") for n in (1, 2, 10)]
+    older = _row(oid="202043149349101129", batch_id="", index_year="2020")
+    assert ids(irs_source.archive_order(older, numbered, scan=True)) == ids(numbered)
 
 
-def test_fetch_xml_reads_a_cached_archive_in_place_and_keeps_it(tmp_path, monkeypatch):
+def test_fetch_xml_reads_a_cached_archive_in_place_and_keeps_it(tmp_path):
     path = _cache(tmp_path, "2026_TEOS_XML_05A", {f"2026_TEOS_XML_05A/{OID}_public.xml": XML})
-    monkeypatch.setattr(batches, "copy_of", lambda *a, **k: pytest.fail("looked for a copy"))
     said = []
     assert irs_source.fetch_xml(_row(), tmp_path, say=said.append) == (XML, "2026_TEOS_XML_05A")
     assert said == [] and path.exists()
+
+
+def test_fetch_xml_names_the_release_of_the_archive_it_read(tmp_path):
+    path = _cache(tmp_path, "2026_TEOS_XML_05A", {f"{OID}_public.xml": XML})
+    (tmp_path / "2026_TEOS_XML_05A.json").write_text(json.dumps(
+        {"nbytes": path.stat().st_size, "sha256": "abc123", "last_modified": "Wed, 17 Jun 2026 13:00:00 GMT"}))
+    said = []
+    assert irs_source.fetch_xml(_row(), tmp_path, say=said.append)[0] == XML
+    assert said == ["  2026_TEOS_XML_05A.zip: SHA-256 abc123, IRS Last-Modified Wed, 17 Jun 2026 13:00:00 GMT"]
 
 
 def test_fetch_xml_fetches_our_copy_first_says_so_and_deletes_it_after(tmp_path, monkeypatch):
@@ -160,7 +173,6 @@ def test_fetch_xml_before_2024_names_the_cost_and_reads_nothing_without_scan(tmp
     old = _row(oid="202343149349101129", batch_id="", index_year="2023")
     found = [_batch("2023_TEOS_XML_01A", 300_000_000), _batch("2023_TEOS_XML_02A", 400_000_000)]
     monkeypatch.setattr(batches, "discover", lambda year: found)
-    monkeypatch.setattr(batches, "copy_of", lambda *a: pytest.fail("looked for a copy"))
     with pytest.raises(LookupError, match=r"none before 2024.*2023's 2 archives \(0\.7 GB\)"):
         irs_source.fetch_xml(old, tmp_path)
     # under --scan the year's archives are read in turn
@@ -193,7 +205,7 @@ def test_fetch_xml_names_an_archive_nobody_serves(tmp_path, monkeypatch):
     assert said == ["  2026_TEOS_XML_05A: no copy of ours, and the IRS does not serve it"]
 
 
-def test_cli_prints_the_archive_member_and_no_mirror(monkeypatch, capsys, tmp_path):
+def test_cli_prints_the_archive_member_and_no_mirror(monkeypatch, capsys):
     monkeypatch.setattr(irs_source, "lookup", lambda object_id, cache_dir: _row())
     monkeypatch.setattr(irs_source, "images", lambda row: [])
     monkeypatch.setattr(irs_source.sys, "argv", ["irs_source", OID])
@@ -231,6 +243,12 @@ def test_cli_reads_the_xml_while_teos_is_down(monkeypatch, capsys, tmp_path):
     assert "  pdf         TEOS could not be read (403)\n" in out
     assert out_file.read_bytes() == XML
     assert out.endswith(f"wrote {out_file}  ({OID}_public.xml from 2026_TEOS_XML_05A.zip)\n")
+    # an HTML block page served with 200 is a ValueError out of json.loads, not a URLError
+    monkeypatch.setattr(irs_source, "images", lambda row: (_ for _ in ()).throw(
+        ValueError("Expecting value: line 1 column 1 (char 0)")))
+    irs_source.main()
+    assert "  pdf         TEOS could not be read (Expecting value: line 1 column 1 (char 0))\n" \
+        in capsys.readouterr().out
 
 
 def test_cli_xml_writes_the_member_and_names_the_archive_that_held_it(monkeypatch, capsys, tmp_path):

@@ -336,12 +336,16 @@ serves it: the `xml` line names the archive and the member
 that member from `--batch-cache` when the archive is already there whole,
 else from our copy in `s3://givingtuesday-datamart/irs/xml_batches/` (every
 batch we have loaded, 2024 on), else from the IRS, saying which before it
-fetches — an archive is 100 MB to 1.2 GB, deleted after the read unless
-`--keep-zips`. The index labels a month's archives with the first one's id
+fetches — an archive is 57 MB to 1.2 GB for 2024 on and up to 3.7 GB before,
+deleted after the read unless `--keep-zips`; the read names the archive's
+SHA-256 and IRS Last-Modified, since the IRS has replaced archives under the
+same name. The index labels a month's archives with the first one's id
 (June 2026's 05B returns are listed under 05A), so the rest of the month is
 tried after the named archive; `--scan` goes on through the year. Before
 2024 the index names no archive at all, so the archive is reported unknown
-and `--xml --scan` reads the year's archives in turn. Nothing is fetched from
+and `--xml --scan` reads the year's archives in turn (2017-2020's are named
+`download990xml_<year>_<n>.zip`; `own_extract batches <year>` lists both
+kinds). Nothing is fetched from
 GivingTuesday's raw-XML mirror, which has been stale since 2026-08-25 and is
 a third party ([docs/own-extract.md](docs/own-extract.md)).
 

@@ -6,6 +6,8 @@ import csv
 import hashlib
 import io
 import json
+import shutil
+import subprocess
 import urllib.error
 import zipfile
 from pathlib import Path
@@ -442,12 +444,45 @@ def test_read_member_is_one_return_or_none(tmp_path):
     assert batches.read_member(archive, "202600139349101051") is None
 
 
-def test_cached_is_an_archive_whole_at_its_stamped_size(tmp_path):
+def test_read_member_unpacks_one_deflate64_member_alone(monkeypatch, tmp_path):
+    archive = _zip(tmp_path, {f"2026_TEOS_XML_05A/{OID}_public.xml": PF,
+                              "2026_TEOS_XML_05A/202600139349101051_public.xml": PF})
+    real = zipfile.ZipFile.infolist
+
+    def as_deflate64(self):
+        infos = real(self)
+        for info in infos:
+            info.compress_type = batches.DEFLATE64
+        return infos
+
+    calls = []
+
+    def one_member(args, capture_output):             # stands in for Info-ZIP's `unzip -p`
+        calls.append(args)
+        with zipfile.ZipFile(args[2]) as z:
+            return subprocess.CompletedProcess(args, 0, stdout=z.read(args[3]), stderr=b"")
+
+    monkeypatch.setattr(zipfile.ZipFile, "infolist", as_deflate64)
+    monkeypatch.setattr(batches.subprocess, "run", one_member)
+    monkeypatch.setattr(batches, "_unzip_all", lambda *a: pytest.fail("unpacked the whole archive"))
+    assert batches.read_member(archive, OID) == PF
+    assert calls == [[shutil.which("unzip"), "-p", str(archive), f"2026_TEOS_XML_05A/{OID}_public.xml"]]
+    assert [p.name for p in tmp_path.iterdir()] == [archive.name]     # nothing unpacked beside it
+    monkeypatch.setattr(batches.subprocess, "run", lambda args, capture_output: subprocess.CompletedProcess(
+        args, 0, stdout=b"\0" * len(PF), stderr=b""))                 # what bsdtar would give
+    with pytest.raises(RuntimeError, match="CRC"):
+        batches.read_member(archive, OID)
+
+
+def test_cached_is_an_archive_whole_at_its_stamped_size_or_a_hand_placed_zip(tmp_path):
     assert batches.cached("2026_TEOS_XML_01A", tmp_path) is None
     archive = _zip(tmp_path, {f"{OID}_public.xml": PF})
-    assert batches.cached("2026_TEOS_XML_01A", tmp_path) is None          # no stamp: fetched by hand
+    assert batches.cached("2026_TEOS_XML_01A", tmp_path) == archive      # no stamp, put there by hand: whole
+    archive.write_bytes(archive.read_bytes()[:-10])
+    assert batches.cached("2026_TEOS_XML_01A", tmp_path) is None          # by hand and cut short
+    archive = _zip(tmp_path, {f"{OID}_public.xml": PF})
     (tmp_path / "2026_TEOS_XML_01A.json").write_text(json.dumps({"nbytes": archive.stat().st_size + 1}))
-    assert batches.cached("2026_TEOS_XML_01A", tmp_path) is None          # cut short
+    assert batches.cached("2026_TEOS_XML_01A", tmp_path) is None          # stamped, cut short
     (tmp_path / "2026_TEOS_XML_01A.json").write_text(json.dumps({"nbytes": archive.stat().st_size}))
     assert batches.cached("2026_TEOS_XML_01A", tmp_path) == archive
 
@@ -455,14 +490,16 @@ def test_cached_is_an_archive_whole_at_its_stamped_size(tmp_path):
 class _CopyS3(_FakeS3):
     """Our bucket holding one archive, with the metadata ``archive`` writes."""
 
-    def __init__(self, data: bytes, sha256: str):
+    def __init__(self, data: bytes, sha256: str, refuse: bool = False):
         super().__init__(held={"sha256": sha256, "irs-last-modified": "Wed, 17 Jun 2026 13:00:00 GMT",
                                "irs-url": "https://apps.irs.gov/pub/epostcard/990/xml/2026/2026_TEOS_XML_05A.zip"})
-        self.data, self.downloads = data, []
+        self.data, self.downloads, self.refuse = data, [], refuse
 
     def head_object(self, Bucket, Key):
-        if Key != "irs/xml_batches/2026/2026_TEOS_XML_05A.zip":
-            raise self.exceptions.ClientError("404")
+        if self.refuse or Key != "irs/xml_batches/2026/2026_TEOS_XML_05A.zip":
+            err = self.exceptions.ClientError("refused" if self.refuse else "404")
+            err.response = {"Error": {"Code": "403" if self.refuse else "404"}}
+            raise err
         return {"Metadata": self.held, "ContentLength": len(self.data)}
 
     def download_file(self, bucket, key, path):
@@ -470,13 +507,29 @@ class _CopyS3(_FakeS3):
         Path(path).write_bytes(self.data)
 
 
-def test_copy_of_describes_our_copy_or_none():
+def test_copy_of_describes_our_copy_none_when_absent_and_raises_when_refused():
     s3 = _CopyS3(b"zip", hashlib.sha256(b"zip").hexdigest())
     copy = batches.copy_of("2026", "2026_TEOS_XML_05A", s3=s3)
     assert copy == batches.Batch("2026", "2026_TEOS_XML_05A",
                                  "s3://givingtuesday-datamart/irs/xml_batches/2026/2026_TEOS_XML_05A.zip",
                                  "Wed, 17 Jun 2026 13:00:00 GMT", 3)
     assert batches.copy_of("2026", "2026_TEOS_XML_05B", s3=s3) is None
+    with pytest.raises(_FakeS3.exceptions.ClientError, match="refused"):   # a 403 is not "no copy"
+        batches.copy_of("2026", "2026_TEOS_XML_05A", s3=_CopyS3(b"zip", "x", refuse=True))
+
+
+def test_discover_walks_the_numbered_names_of_2017_2020(monkeypatch):
+    served = {batches.batch_url("2020", f"download990xml_2020_{n}") for n in (1, 2, 3)} | {
+        batches.batch_url("2026", "2026_TEOS_XML_01A")}
+
+    def head(url):
+        return batches.Batch(url.rsplit("/", 2)[-2], url.rsplit("/", 1)[-1][:-4], url, "lm", 1) \
+            if url in served else None
+
+    monkeypatch.setattr(batches, "_head", head)
+    assert [b.batch_id for b in batches.discover("2020")] == [
+        "download990xml_2020_1", "download990xml_2020_2", "download990xml_2020_3"]
+    assert [b.batch_id for b in batches.discover("2026")] == ["2026_TEOS_XML_01A"]
 
 
 def test_fetch_copy_stamps_the_file_as_the_irs_fetch_would_and_holds_it_to_the_sha(tmp_path):

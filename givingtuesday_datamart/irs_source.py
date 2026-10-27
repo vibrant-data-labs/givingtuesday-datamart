@@ -20,8 +20,9 @@ uneven (all of 2022 and 2024, ~97% of 2023, ~56% of 2025); without it every
 image for the period is listed and ``--pdf`` waits for ``--image N``.
 
 **XML** — read out of the IRS's own batch archive. The IRS publishes the
-XML only inside monthly ZIPs of 100 MB to 1.2 GB
-(``<year>/<year>_TEOS_XML_<MM><L>.zip``), one ``<object_id>_public.xml``
+XML only inside monthly ZIPs (``<year>/<year>_TEOS_XML_<MM><L>.zip``; for
+2017-2020, ``download990xml_<year>_<n>.zip``), 57 MB to 1.2 GB for 2024 on
+and up to 3.7 GB before (2021_TEOS_XML_01A), one ``<object_id>_public.xml``
 per return, and from the 2024 index on names each return's batch. The
 ``xml`` line is that archive and member; ``--xml`` reads the member through
 ``own_extract.batches`` (which also handles the Deflate64 archives), from
@@ -249,7 +250,8 @@ def archive_order(row: IndexRow, found: Sequence, scan: bool = False) -> list:
     named = _BATCH_ID.match(row.batch_id or "")
     month = named.group(1) if named else None
     rest = [b for b in found if b.batch_id != row.batch_id]
-    rest.sort(key=lambda b: (not (month and b.batch_id.startswith(month)), b.batch_id))
+    # a stable sort on the month alone keeps discover's (the server's) order within each part
+    rest.sort(key=lambda b: not (month and b.batch_id.startswith(month)))
     if not scan:
         rest = [b for b in rest if month and b.batch_id.startswith(month)]
     return rest
@@ -307,10 +309,15 @@ def _read(batches, row: IndexRow, batch_id: str, batch, cache_dir: Path, keep: b
             say(f"  {batch_id}: no copy of ours, and the IRS does not serve it")
             return None
     xml = batches.read_member(path, row.object_id)
+    stamp = batches.stamp_of(path)
     if fetched and not keep:
         path.unlink()
     if xml is None:
         say(f"  {batch_id}: does not hold {row.member}")
+    elif stamp.get("sha256"):
+        # which release of the archive: the IRS has replaced archives under the same name
+        say(f"  {batch_id}.zip: SHA-256 {stamp['sha256']}, "
+            f"IRS Last-Modified {stamp.get('last_modified') or 'unknown'}")
     return xml
 
 
@@ -400,7 +407,7 @@ def main() -> None:
                         help="where --xml fetches archives to (default ~/.cache/irs_batches, "
                              "shared with own_extract load); one already there whole is read in place")
     parser.add_argument("--keep-zips", action="store_true",
-                        help="keep an archive --xml fetched, for the next lookup (100 MB to 1.2 GB each)")
+                        help="keep an archive --xml fetched, for the next lookup (57 MB to 3.7 GB each)")
     parser.add_argument("--scan", action="store_true",
                         help="with --xml: read the year's other archives in turn when the index names "
                              "none (before 2024) or the named month's do not hold the filing; "
@@ -421,9 +428,12 @@ def main() -> None:
 
     try:
         found = images(row)
-    except urllib.error.URLError as err:       # TEOS is down or refusing (403 for a night, 2026-10-26)
+    except (OSError, ValueError) as err:
+        # TEOS down or refusing (403 for a night, 2026-10-26; URLError is an OSError), a reset
+        # while reading, or an HTML block page where JSON was expected (ValueError)
         found = []
-        print(f"  pdf         TEOS could not be read ({getattr(err, 'code', None) or err.reason})")
+        print(f"  pdf         TEOS could not be read "
+              f"({getattr(err, 'code', None) or getattr(err, 'reason', None) or err})")
     else:
         if not found:
             print("  pdf         none listed in TEOS")
