@@ -16,6 +16,7 @@ go the batch's unread elements (``audit``) in ``irs_extract.unread_paths``.
 from __future__ import annotations
 
 import csv
+import io
 import json
 import tempfile
 import uuid
@@ -130,15 +131,18 @@ def _replace(session, files: dict[str, Path], batch_id: str, columns: dict[str, 
 
 
 def _write_unread(session, batch_id: str, unread: dict, zip_sha256: str, concordance_sha256: str) -> None:
-    """Replace the batch's rows of ``unread_paths`` (inside the caller's transaction)."""
-    session.execute(text(f"DELETE FROM {SCHEMA}.{UNREAD} WHERE _batch_id = :b"), {"b": batch_id})
-    rows = [dict(zip(UNREAD_COLUMNS, (batch_id, form, version, scope, path, n_returns, n_occurrences,
-                                      zip_sha256, concordance_sha256)))
-            for (form, version, scope, path), (n_returns, n_occurrences) in sorted(unread.items())]
-    if rows:
-        session.execute(text(
-            f"INSERT INTO {SCHEMA}.{UNREAD} ({', '.join(UNREAD_COLUMNS)}) "
-            f"VALUES ({', '.join(':' + c for c in UNREAD_COLUMNS)})"), rows)
+    """Replace the batch's rows of ``unread_paths`` (inside the caller's transaction), by COPY."""
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    for (form, version, scope, path), (n_returns, n_occurrences) in sorted(unread.items()):
+        writer.writerow([_csv(v) for v in (batch_id, form, version, scope, path, n_returns, n_occurrences,
+                                           zip_sha256, concordance_sha256)])
+    buffer.seek(0)
+    raw = session.connection().connection
+    with raw.cursor() as cursor:
+        cursor.execute(f"DELETE FROM {SCHEMA}.{UNREAD} WHERE _batch_id = %s", (batch_id,))
+        cursor.copy_expert(
+            f"COPY {SCHEMA}.{UNREAD} ({', '.join(UNREAD_COLUMNS)}) FROM STDIN WITH (FORMAT csv)", buffer)
 
 
 def audit_batch(session, path: Path, batch_id: str, concordance: dict[str, list[extract.Mapping]],

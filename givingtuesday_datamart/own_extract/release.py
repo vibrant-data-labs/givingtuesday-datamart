@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import concurrent.futures as cf
 import logging
+import socket
 import uuid
 from datetime import datetime, timezone
 
@@ -71,9 +72,19 @@ def files(version: str, listing: BucketListing | None = None) -> dict[str, str]:
     return out
 
 
+def _addresses(host: str) -> set[str]:
+    try:
+        return {info[4][0] for info in socket.getaddrinfo(host, None)}
+    except socket.gaierror:
+        return set()
+
+
 def refuse_shared(config: dict) -> None:
-    """Stop unless ``config`` points somewhere other than the shared instance."""
-    if config["postgres"]["host"] == datamart_config()["postgres"]["host"]:
+    """Stop unless ``config`` points somewhere other than the shared instance:
+    by name in any case, and by address, so its IP or another name for it fails too."""
+    host = config["postgres"]["host"].strip().lower()
+    shared = datamart_config()["postgres"]["host"].strip().lower()
+    if host == shared or _addresses(host) & _addresses(shared):
         raise SystemExit("gt-release replaces public.<table>: give --host, a scratch instance, "
                          "never the shared one")
 

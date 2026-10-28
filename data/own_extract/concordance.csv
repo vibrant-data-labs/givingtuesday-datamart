@@ -379,11 +379,11 @@ privategrants,sigocpyamoun,Amt,0,8655,8661,2026_TEOS_XML_01A,
 privategrants,sigocpypogoc,GrantOrContributionPurposeTxt,0,8655,8661,2026_TEOS_XML_01A,
 privategrants,sigocpyrbnbn1,RecipientBusinessName/BusinessNameLine1Txt,0,8655,8661,2026_TEOS_XML_01A,
 privategrants,sigocpyrbnbn2,RecipientBusinessName/BusinessNameLine2Txt,0,8660,8661,2026_TEOS_XML_01A,
-privategrants,sigocpyrfaal1,RecipientUSAddress/AddressLine1Txt | RecipientForeignAddress/AddressLine1Txt,0,8612,8661,2026_TEOS_XML_01A,GT fills it from the foreign address when there is none in the US (2026-10-28: 56,104 3a and 8,487 3b foreign grants)
-privategrants,sigocpyrfaal2,RecipientUSAddress/AddressLine2Txt | RecipientForeignAddress/AddressLine2Txt,0,8658,8661,2026_TEOS_XML_01A,GT fills it from the foreign address when there is none in the US (2026-10-28: 56,104 3a and 8,487 3b foreign grants)
-privategrants,sigocpyrfaci,RecipientUSAddress/CityNm | RecipientForeignAddress/CityNm,0,8613,8661,2026_TEOS_XML_01A,GT fills it from the foreign address when there is none in the US (2026-10-28: 56,104 3a and 8,487 3b foreign grants)
-privategrants,sigocpyrfapc,RecipientUSAddress/ZIPCd | RecipientForeignAddress/ForeignPostalCd,0,8638,8661,2026_TEOS_XML_01A,GT fills it from the foreign address when there is none in the US (2026-10-28: 56,104 3a and 8,487 3b foreign grants)
-privategrants,sigocpyrfapo,RecipientUSAddress/StateAbbreviationCd | RecipientForeignAddress/ProvinceOrStateNm,0,8637,8661,2026_TEOS_XML_01A,GT fills it from the foreign address when there is none in the US (2026-10-28: 56,104 3a and 8,487 3b foreign grants)
+privategrants,sigocpyrfaal1,RecipientUSAddress/AddressLine1Txt | RecipientForeignAddress/AddressLine1Txt,0,8612,8661,2026_TEOS_XML_01A,"GT fills it from the foreign address when there is none in the US (2026-10-28: 56,104 3a and 8,487 3b foreign grants)"
+privategrants,sigocpyrfaal2,RecipientUSAddress/AddressLine2Txt | RecipientForeignAddress/AddressLine2Txt,0,8658,8661,2026_TEOS_XML_01A,"GT fills it from the foreign address when there is none in the US (2026-10-28: 56,104 3a and 8,487 3b foreign grants)"
+privategrants,sigocpyrfaci,RecipientUSAddress/CityNm | RecipientForeignAddress/CityNm,0,8613,8661,2026_TEOS_XML_01A,"GT fills it from the foreign address when there is none in the US (2026-10-28: 56,104 3a and 8,487 3b foreign grants)"
+privategrants,sigocpyrfapc,RecipientUSAddress/ZIPCd | RecipientForeignAddress/ForeignPostalCd,0,8638,8661,2026_TEOS_XML_01A,"GT fills it from the foreign address when there is none in the US (2026-10-28: 56,104 3a and 8,487 3b foreign grants)"
+privategrants,sigocpyrfapo,RecipientUSAddress/StateAbbreviationCd | RecipientForeignAddress/ProvinceOrStateNm,0,8637,8661,2026_TEOS_XML_01A,"GT fills it from the foreign address when there is none in the US (2026-10-28: 56,104 3a and 8,487 3b foreign grants)"
 privategrants,sigocpyrfsta,RecipientFoundationStatusTxt | RecipientFoundationStatusCd,0,,,2026_TEOS_XML_01A,IRS renamed it in 2025v4 (Txt to Cd); GT's extract has it NULL there
 privategrants,sigocpyrpnam,RecipientPersonNm,0,8657,8661,2026_TEOS_XML_01A,
 privategrants,sigocpyrrela,RecipientRelationshipTxt,0,8657,8661,2026_TEOS_XML_01A,
@@ -399,12 +399,12 @@ privategrants_future,sigocaffamou,Amt,0,447,447,2026_TEOS_XML_01A,
 privategrants_future,sigocaffpogo,GrantOrContributionPurposeTxt,0,447,447,2026_TEOS_XML_01A,
 privategrants_future,sigocaffrbnb1,RecipientPersonNm | RecipientBusinessName/BusinessNameLine1Txt,0,,,2026_TEOS_XML_01A,"GT rule: the person's name, else business name line 1"
 privategrants_future,sigocaffrbnb2,RecipientBusinessName/BusinessNameLine2Txt,0,447,447,2026_TEOS_XML_01A,
-privategrants_future,sigocaffrfaa1,RecipientUSAddress/AddressLine1Txt | RecipientForeignAddress/AddressLine1Txt,0,446,447,2026_TEOS_XML_01A,GT fills it from the foreign address when there is none in the US (2026-10-28: 56,104 3a and 8,487 3b foreign grants)
-privategrants_future,sigocaffrfaa2,RecipientUSAddress/AddressLine2Txt | RecipientForeignAddress/AddressLine2Txt,0,447,447,2026_TEOS_XML_01A,GT fills it from the foreign address when there is none in the US (2026-10-28: 56,104 3a and 8,487 3b foreign grants)
-privategrants_future,sigocaffrfaci,RecipientUSAddress/CityNm | RecipientForeignAddress/CityNm,0,446,447,2026_TEOS_XML_01A,GT fills it from the foreign address when there is none in the US (2026-10-28: 56,104 3a and 8,487 3b foreign grants)
+privategrants_future,sigocaffrfaa1,RecipientUSAddress/AddressLine1Txt | RecipientForeignAddress/AddressLine1Txt,0,446,447,2026_TEOS_XML_01A,"GT fills it from the foreign address when there is none in the US (2026-10-28: 56,104 3a and 8,487 3b foreign grants)"
+privategrants_future,sigocaffrfaa2,RecipientUSAddress/AddressLine2Txt | RecipientForeignAddress/AddressLine2Txt,0,447,447,2026_TEOS_XML_01A,"GT fills it from the foreign address when there is none in the US (2026-10-28: 56,104 3a and 8,487 3b foreign grants)"
+privategrants_future,sigocaffrfaci,RecipientUSAddress/CityNm | RecipientForeignAddress/CityNm,0,446,447,2026_TEOS_XML_01A,"GT fills it from the foreign address when there is none in the US (2026-10-28: 56,104 3a and 8,487 3b foreign grants)"
 privategrants_future,sigocaffrfaco,RecipientForeignAddress/CountryCd,0,447,447,2026_TEOS_XML_01A,
-privategrants_future,sigocaffrfapc,RecipientUSAddress/ZIPCd | RecipientForeignAddress/ForeignPostalCd,0,446,447,2026_TEOS_XML_01A,GT fills it from the foreign address when there is none in the US (2026-10-28: 56,104 3a and 8,487 3b foreign grants)
-privategrants_future,sigocaffrfaps,RecipientUSAddress/StateAbbreviationCd | RecipientForeignAddress/ProvinceOrStateNm,0,447,447,2026_TEOS_XML_01A,GT fills it from the foreign address when there is none in the US (2026-10-28: 56,104 3a and 8,487 3b foreign grants)
+privategrants_future,sigocaffrfapc,RecipientUSAddress/ZIPCd | RecipientForeignAddress/ForeignPostalCd,0,446,447,2026_TEOS_XML_01A,"GT fills it from the foreign address when there is none in the US (2026-10-28: 56,104 3a and 8,487 3b foreign grants)"
+privategrants_future,sigocaffrfaps,RecipientUSAddress/StateAbbreviationCd | RecipientForeignAddress/ProvinceOrStateNm,0,447,447,2026_TEOS_XML_01A,"GT fills it from the foreign address when there is none in the US (2026-10-28: 56,104 3a and 8,487 3b foreign grants)"
 privategrants_future,sigocaffrfstat,RecipientFoundationStatusTxt | RecipientFoundationStatusCd,0,,,2026_TEOS_XML_01A,IRS renamed it in 2025v4 (Txt to Cd); GT's extract has it NULL there
 privategrants_future,sigocaffrrel,RecipientRelationshipTxt,0,447,447,2026_TEOS_XML_01A,
 privategrants_future,taxperbegin,/ReturnHeader/TaxPeriodBeginDt,0,447,447,2026_TEOS_XML_01A,

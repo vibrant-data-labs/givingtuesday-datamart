@@ -369,18 +369,22 @@ def schedule_i_line2(session) -> dict:
     name lines (k-th with k-th, so repeated names pair once each), in the
     repaired ``_current`` relation production reads. Every loaded batch.
 
-    No nested loop: the planner takes the three tests of a blanked row as
-    independent, and on GT's 2026_10_25 release estimated 10 rows for
-    11,913, then scanned our 2.8M rows once per row (cancelled at 25 min).
+    GT's blanked rows go to a temp table first: the planner takes their three
+    tests as independent, and on GT's 2026_10_25 release estimated 10 rows for
+    11,913 and scanned our 2.8M rows once per row (cancelled at 25 minutes);
+    counted, the join is a hash join.
     """
-    session.execute(text("SET LOCAL enable_nestloop = off"))     # until the section's commit
+    session.execute(text("DROP TABLE IF EXISTS pg_temp.b"))
+    session.execute(text(
+        """CREATE TEMP TABLE b AS
+           SELECT url, rtrnbbnline11 AS n1, rtrnbbnline22 AS n2,
+                  row_number() OVER (PARTITION BY url, rtrnbbnline11, rtrnbbnline22) AS k
+           FROM public.grants_to_domestic_organizations_current
+           WHERE rtrnbbnline22 IS NOT NULL AND retaamofcagr IS NULL AND rteinorecipi IS NULL"""))
+    session.execute(text("ANALYZE b"))
     return session.execute(text(
-        f"""WITH g AS (SELECT url, rtrnbbnline11 AS n1, rtrnbbnline22 AS n2,
-                              row_number() OVER (PARTITION BY url, rtrnbbnline11, rtrnbbnline22) AS k
-                       FROM public.grants_to_domestic_organizations_current
-                       WHERE rtrnbbnline22 IS NOT NULL AND retaamofcagr IS NULL
-                         AND rteinorecipi IS NULL
-                         AND url IN (SELECT DISTINCT url FROM {SCHEMA}.grants_to_domestic_organizations)),
+        f"""WITH g AS (SELECT * FROM b
+                       WHERE url IN (SELECT DISTINCT url FROM {SCHEMA}.grants_to_domestic_organizations)),
                  o AS (SELECT url, rtrnbbnline11 AS n1, rtrnbbnline22 AS n2, retaamofcagr, rteinorecipi,
                               row_number() OVER (PARTITION BY url, rtrnbbnline11, rtrnbbnline22
                                                  ORDER BY group_ordinal) AS k

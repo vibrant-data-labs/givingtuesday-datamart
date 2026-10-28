@@ -474,6 +474,12 @@ def test_gt_release_refuses_the_shared_instance(monkeypatch):
     with pytest.raises(SystemExit):
         release.refuse_shared(shared)
     release.refuse_shared({"postgres": {"host": "localhost", "database": "gt_datamart"}})
+    resolves = {"shared.example": "10.0.0.5", "10.0.0.5": "10.0.0.5", "localhost": "127.0.0.1"}
+    monkeypatch.setattr(release.socket, "getaddrinfo",
+                        lambda host, port: [(None, None, None, "", (resolves[host.lower()], 0))])
+    for alias in ("10.0.0.5", "SHARED.example"):                       # its address, another case
+        with pytest.raises(SystemExit):
+            release.refuse_shared({"postgres": {"host": alias, "database": "gt_datamart"}})
 
 
 # Checks that need no GT: the filings' own totals, the unread elements.
@@ -496,6 +502,7 @@ def test_a_990pf_is_classified_against_line_25():
     assert checks.pf_status(3, 5000, 5250, 5250) == "rows below line 25"
     assert checks.pf_status(3, 6000, 5250, None) == "rows above line 25"
     assert checks.pf_status(2, 0, None, None) == "equal"              # empty groups, nothing stated
+    assert checks.pf_status(3, 0, None, 1_000_000) == "rows below line 25"   # an empty (d) is not $0
 
 
 def test_schedule_i_counts_cash_and_non_cash_against_part_ix_line_1():
@@ -599,3 +606,54 @@ def test_a_foreign_recipient_s_address_fills_the_address_columns_as_gt_does():
             foreign["sigocpyrfapc"], foreign["sigocaffrfaco"]) == (
         "P O BOX 8271", "ARUSHA", "ARUSHA REGION", "255", "TZ")
     assert us["sigocaffrfaco"] is None
+
+
+def _cli_stubs(monkeypatch, frame):
+    import contextlib
+
+    from givingtuesday_datamart.own_extract import __main__ as cli
+
+    monkeypatch.setattr(cli, "get_session", lambda config=None: contextlib.nullcontext(object()))
+    monkeypatch.setattr(cli, "_config", lambda host: {"postgres": {"host": host}})
+    monkeypatch.setattr(cli.checks, "loaded", lambda session, batch_ids: frame)
+    monkeypatch.setattr(cli.checks, "batch_line", lambda session, batch_id: "rates")
+    return cli
+
+
+STAMP = {"year": "2026", "batch_id": "2026_TEOS_XML_01A", "url": "https://x/2026_TEOS_XML_01A.zip",
+         "last_modified": "Thu, 19 Feb 2026 18:32:24 GMT", "content_length": 3, "sha256": "ab" * 32}
+
+
+def test_reload_reports_a_failing_batch_and_goes_on(monkeypatch, tmp_path, capsys):
+    frame = pd.DataFrame({"batch": ["2025_TEOS_XML_01A", "2026_TEOS_XML_01A"], "stamp": [{}, STAMP]})
+    cli = _cli_stubs(monkeypatch, frame)
+    monkeypatch.setattr(cli.load, "_loaded", lambda session, version, conc: version.startswith("2026"))
+    args = cli.argparse.Namespace(host="localhost", batch=None, cache=tmp_path, keep_zips=False, jobs=1)
+    assert cli._reload(args) == 1
+    out = capsys.readouterr().out
+    assert "2025_TEOS_XML_01A: FAILED: 2025_TEOS_XML_01A: its load stamped no archive SHA-256" in out
+    assert "2026_TEOS_XML_01A: loaded already under this concordance" in out
+    assert "1 of 2 batches failed: 2025_TEOS_XML_01A" in out
+
+
+@pytest.mark.parametrize("cached", [True, False])
+def test_reload_records_the_stamp_and_deletes_only_an_archive_it_downloaded(monkeypatch, tmp_path, cached):
+    cli = _cli_stubs(monkeypatch, pd.DataFrame({"batch": [STAMP["batch_id"]], "stamp": [STAMP]}))
+    archive = tmp_path / f"{STAMP['batch_id']}.zip"
+    if cached:
+        archive.write_bytes(b"zip")
+    monkeypatch.setattr(cli.load, "_loaded", lambda session, version, conc: False)
+
+    def fetched(batch_id, sha256, cache):
+        archive.write_bytes(b"zip")
+        return archive
+
+    def loaded(session, path, concordance):
+        assert batches.stamp_of(path) == STAMP              # the load records the first load's stamp
+        return {"rows": {"privategrants": 2}}
+
+    monkeypatch.setattr(cli.batches, "fetch_archived", fetched)
+    monkeypatch.setattr(cli.load, "load_batch", loaded)
+    line = cli._reload_one({}, STAMP["batch_id"], STAMP, tmp_path, keep=False)
+    assert "privategrants 2" in line and line.endswith("checks: rates")
+    assert archive.exists() == cached

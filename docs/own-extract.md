@@ -57,7 +57,7 @@ both hold.
   Is fit within Part IX line 1. And the XML elements no concordance path
   reads, per schema version: it found the foreign addresses of 990-PF
   grant recipients we did not read (read since concordance
-  `036d62ea8f4a`), and would have caught the 2025v4 rename without GT.
+  `ce054c032e56`), and would have caught the 2025v4 rename without GT.
 
 ## Why
 
@@ -193,7 +193,7 @@ GT rules one path does not express, all now in the file:
   city, `ProvinceOrStateNm` as the state and `ForeignPostalCd` as the ZIP
   (measured on 56,104 3a and 8,487 3b foreign grants, 2026-10-28). The
   country stays in `sigocaffrfaco`, which GT leaves empty in 3a. Followed
-  since concordance `036d62ea8f4a`: production reads these columns.
+  since concordance `ce054c032e56`: production reads these columns.
 
 Corrections to what the search proposed, each measured by `parity` on every
 loaded batch:
@@ -584,8 +584,9 @@ from 0.5% of a form's returns: elements inside a group, elements with the
 same name as a read one beside them but for the type suffix (`...Txt` to
 `...Cd`: a rename), and elements first seen in a later schema version.
 
-First run, 2026-10-28, on the scratch copy of the extract (all 38 batches;
-the audit 8.5 minutes, the report 11 seconds; 126,309 rows, 687 paths):
+First run, 2026-10-28, on the scratch copy of the extract (all 38 batches,
+concordance `3d9b48d6e5e7`; the audit 8.5 minutes, the report 11 seconds;
+126,309 rows, 687 paths):
 
 | check | returns it applies to | passing | lowest version, batch |
 |---|---|---|---|
@@ -595,7 +596,9 @@ the audit 8.5 minutes, the report 11 seconds; 126,309 rows, 687 paths):
 No batch is 2 points below the others. The rates are the same where GT
 holds the return and where it does not (990-PF 96.9% and 97.1%), so ours
 do not lean on GT's. Of the 990-PFs that fail, 3,928 state a line 25 and
-list no grant: the largest state $2.0B, $1.8B and $1.4B.
+list no grant: the largest state $2.0B, $1.8B and $1.4B. Under concordance
+`ce054c032e56`, after the reload below: 255,649 of 263,734 and 134,075 of
+137,301, the one return more in each being an `irs:` return now read.
 
 The audit lists, inside the 990-PF grant groups, the recipient's foreign
 address (line 1 on 61,612 grants of 12,025 returns, city, postal code,

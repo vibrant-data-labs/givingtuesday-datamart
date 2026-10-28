@@ -32,8 +32,8 @@ from pathlib import Path
 import pandas as pd
 from sqlalchemy import text
 
-from givingtuesday_datamart.own_extract import audit, extract, parity
-from givingtuesday_datamart.own_extract.load import LOGICAL_NAME, SCHEMA, UNREAD
+from givingtuesday_datamart.own_extract import audit, extract, parity, report
+from givingtuesday_datamart.own_extract.load import SCHEMA, UNREAD
 from givingtuesday_datamart.own_extract.report import _md
 
 PF_LINE25 = "990-PF grants against line 25"
@@ -73,13 +73,16 @@ def _num(value) -> float:
 
 
 def pf_status(grant_rows: int, ours, col_d, col_a) -> str:
-    """A 990-PF's grant rows against its line 25, column (d) or (a)."""
-    d, a, v = _num(col_d), _num(col_a), _num(ours)
+    """A 990-PF's grant rows against its line 25, column (d) or (a): against the
+    columns the return states, and $0 only when it states neither (an empty
+    column is not a $0 one: rows with no amounts would pass beside it)."""
+    stated = [_num(x) for x in (col_d, col_a) if x is not None and not pd.isna(x)]
+    v = _num(ours)
     if not grant_rows:
-        return "line 25, no grant rows" if max(d, a) > 0 else NOT_APPLICABLE
-    if abs(v - d) < 1 or abs(v - a) < 1:
+        return "line 25, no grant rows" if any(x > 0 for x in stated) else NOT_APPLICABLE
+    if any(abs(v - x) < 1 for x in stated or [0.0]):
         return "equal"
-    return "rows below line 25" if v < max(d, a) else "rows above line 25"
+    return "rows below line 25" if v < max(stated or [0.0]) else "rows above line 25"
 
 
 def schedule_i_status(cash, noncash, line1) -> str:
@@ -88,17 +91,11 @@ def schedule_i_status(cash, noncash, line1) -> str:
 
 
 def loaded(session, batch_ids: list[str] | None = None) -> pd.DataFrame:
-    """The latest successful load of each batch: its archive's SHA-256, the concordance's,
-    and the archive's whole fetch stamp (``batches.fetch``)."""
-    frame = pd.read_sql(text(
-        f"""SELECT DISTINCT ON (source_url) split_part(source_version, '@', 1) AS batch,
-                   source_manifest->'batch'->>'sha256' AS zip_sha256,
-                   source_manifest->>'concordance_sha256' AS concordance_sha256,
-                   source_manifest->'batch' AS stamp
-            FROM datamart_meta.ingest_runs
-            WHERE logical_name = '{LOGICAL_NAME}' AND status = 'success'
-            ORDER BY source_url, finished_at DESC"""), session.connection())
+    """The latest successful load of each batch (``report.loaded_batches``), with
+    its whole fetch stamp (``batches.fetch``; ``{}`` for an archive fetched by hand)."""
+    frame = report.loaded_batches(session)
     session.commit()          # release ingest_runs: a loader ALTERs it
+    frame["stamp"] = [s if isinstance(s, dict) else {} for s in frame["stamp"]]
     if batch_ids:
         unknown = sorted(set(batch_ids) - set(frame["batch"]))
         if unknown:
@@ -177,17 +174,23 @@ def largest_gaps(frame: pd.DataFrame, n: int = 15) -> pd.DataFrame:
         ["check", "batch", "object_id", "version", "status", "ours", "stated", "gap"]]
 
 
-def unread_candidates(session, concordance) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """From ``unread_paths``, the elements on ``LISTED_SHARE`` of their returns or
-    more: inside a group (all versions), renamed beside a read one, and new in
-    a later schema version (by form and major version, ``2025v4``)."""
+def unread_candidates(session, concordance, batch_ids: list[str]) -> tuple[pd.DataFrame, ...]:
+    """From ``unread_paths`` of ``batch_ids``, the elements on ``LISTED_SHARE`` of
+    their returns or more: inside a group (all versions), renamed beside a read
+    one, and new in a later schema version (by form and major version, ``2025v4``).
+    The shares count the returns of the batches audited only: a batch loaded
+    before ``load`` counted them has no rows until ``audit`` reads it."""
     unread = pd.read_sql(text(
         f"""SELECT return_type AS form, left(return_version, 6) AS version, scope, path,
                    sum(returns) AS returns
-            FROM {SCHEMA}.{UNREAD} GROUP BY 1, 2, 3, 4"""), session.connection())
+            FROM {SCHEMA}.{UNREAD} WHERE _batch_id = ANY(:b) GROUP BY 1, 2, 3, 4"""),
+        session.connection(), params={"b": batch_ids})
     per_version = pd.read_sql(text(
         f"""SELECT return_type AS form, left(return_version, 6) AS version, count(*) AS form_returns
-            FROM {SCHEMA}.returns GROUP BY 1, 2"""), session.connection())
+            FROM {SCHEMA}.returns
+            WHERE _batch_id = ANY(:b)
+              AND _batch_id IN (SELECT DISTINCT _batch_id FROM {SCHEMA}.{UNREAD})
+            GROUP BY 1, 2"""), session.connection(), params={"b": batch_ids})
     session.commit()
     if unread.empty:
         empty = pd.DataFrame()
@@ -205,13 +208,20 @@ def unread_candidates(session, concordance) -> tuple[pd.DataFrame, pd.DataFrame,
     unread["share_pct"] = (100 * unread["returns"] / unread["form_returns"]).round(2)
     common = unread["share_pct"] >= 100 * LISTED_SHARE
 
-    def read_beside(row) -> set[str]:
-        if row["scope"] == audit.RETURN_SCOPE:
-            return cov.return_read.get(row["form"], set())
-        return {f"{extract.GROUPS[row['scope']]}/{p}" for p in cov.group_read.get(row["scope"], set())}
+    beside: dict[tuple[str, str], dict[str, set[str]]] = {}     # (form, scope) -> parent -> read paths
 
-    unread["read_sibling"] = [audit.renamed_sibling(r["path"], read_beside(r))
-                              for _, r in unread.iterrows()]
+    def read_beside(form: str, scope: str, path: str) -> set[str]:
+        if (form, scope) not in beside:
+            read = (cov.return_read.get(form, set()) if scope == audit.RETURN_SCOPE else
+                    {f"{extract.GROUPS[scope]}/{p}" for p in cov.group_read.get(scope, set())})
+            index: dict[str, set[str]] = {}
+            for p in read:
+                index.setdefault(p.rpartition("/")[0], set()).add(p)
+            beside[(form, scope)] = index
+        return beside[(form, scope)].get(path.rpartition("/")[0], set())
+
+    unread["read_sibling"] = [audit.renamed_sibling(p, read_beside(f, sc, p))
+                              for f, sc, p in zip(unread["form"], unread["scope"], unread["path"])]
     # A code beside its amount (ExclusionCd, ExclusionAmt) shares a stem too, on a few
     # returns; a rename takes the element's place on most returns of the version.
     renamed = unread[unread["read_sibling"].notna() & common].sort_values(["form", "path", "version"])
@@ -243,7 +253,7 @@ def run(session, out: Path, batch_ids: list[str] | None = None) -> str:
     frame = totals(session, list(stamps["batch"]))
     by_batch = rates(frame, "batch")
     by_version = rates(frame.assign(version=frame["version"].str[:6]), "version")   # 2025v4.0 -> 2025v4
-    inside, renamed, new = unread_candidates(session, extract.load())
+    inside, renamed, new = unread_candidates(session, extract.load(), list(stamps["batch"]))
 
     def per_check(by: pd.DataFrame) -> list[str]:
         out = []

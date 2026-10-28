@@ -46,6 +46,7 @@ def loaded_batches(session) -> pd.DataFrame:
                    (SELECT string_agg(substr(k, 9) || ' ' || v, ', ' ORDER BY k)
                     FROM jsonb_each_text(source_manifest->'rows') AS e(k, v)
                     WHERE k LIKE 'version_%') AS schema_versions,
+                   source_manifest->'batch' AS stamp,
                    finished_at
             FROM datamart_meta.ingest_runs
             WHERE logical_name = '{LOGICAL_NAME}' AND status = 'success'
@@ -205,6 +206,7 @@ def schema_checks(session) -> str:
         out.append(f"{int((read['agree_pct'] == 100).sum())} of {len(read)} read columns agree on "
                    f"every one of {int(cols['n'].max()):,} returns.\n")
         out.append(_md(read[read["agree_pct"] < 100][_COLUMN_FIELDS]))
+        out += _column_sets(cols, parity.gt_only_columns(session, mappings))
     out.append("### Columns filled in 2026 01A-04A and much less in 05A-09A\n")
     out.append("Older = 01A-04A, newer = 05A-09A. Listed when the older batches fill the column "
                "on at least 2% of rows and the newer on less than a quarter as many.\n")

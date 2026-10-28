@@ -276,14 +276,16 @@ def fetch_archived(batch_id: str, sha256: str, cache_dir: Path, s3=None,
     not whatever the IRS serves under that name today."""
     cache_dir.mkdir(parents=True, exist_ok=True)
     path = cache_dir / f"{batch_id}.zip"
-    if not path.exists() or sha256_of(path) != sha256:
-        if s3 is None:
-            import boto3                                          # the ``ingest`` extra
-            s3 = boto3.client("s3")
-        partial = path.with_suffix(".zip.part")
-        s3.download_file(bucket, f"{ARCHIVE_PREFIX}/{batch_id[:4]}/{batch_id}.zip", str(partial))
-        partial.replace(path)
-        if sha256_of(path) != sha256:
-            raise ValueError(f"{batch_id}: our copy is not the archive that was loaded "
-                             f"(SHA-256 {sha256_of(path)[:12]}, loaded {sha256[:12]})")
+    if path.exists() and sha256_of(path) == sha256:
+        return path
+    if s3 is None:
+        import boto3                                          # the ``ingest`` extra
+        s3 = boto3.client("s3")
+    partial = path.with_suffix(".zip.part")
+    s3.download_file(bucket, f"{ARCHIVE_PREFIX}/{batch_id[:4]}/{batch_id}.zip", str(partial))
+    partial.replace(path)
+    held = sha256_of(path)
+    if held != sha256:
+        raise ValueError(f"{batch_id}: our copy is not the archive that was loaded "
+                         f"(SHA-256 {held[:12]}, loaded {sha256[:12]})")
     return path

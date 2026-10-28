@@ -140,9 +140,7 @@ def _gt_release(args) -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
                         datefmt="%H:%M:%S")
-    config = _config(args.host)
-    release.refuse_shared(config)
-    for summary in release.load(config, args.version, args.table or None, args.jobs):
+    for summary in release.load(_config(args.host), args.version, args.table or None, args.jobs):
         print(f"{summary['table']}: {summary['kept']:,} of GT's {summary['gt_rows']:,} rows kept "
               f"({summary['file']}, {summary['bytes'] / 1e9:.2f} GB, sha256 {summary['sha256'][:12]})",
               flush=True)
@@ -157,61 +155,105 @@ def _checks(args) -> int:
     return 0
 
 
-def _audit_one(config: dict, batch_id: str, zip_sha256: str, cache: Path, keep: bool) -> str:
-    path = batches.fetch_archived(batch_id, zip_sha256, cache)
-    with get_session(config=config) as session:
-        n = load.audit_batch(session, path, batch_id, extract.load(), zip_sha256)
-    if not keep:
-        path.unlink()
+def _archived(stamp: dict, batch_id: str, cache: Path):
+    """``(lock, path, downloaded)``: our copy of a loaded batch's archive, claimed
+    in ``cache`` the way ``load`` claims one (``batches.claim``; close the lock
+    when done), or None while another loader holds it. Raises for a batch whose
+    load stamped no SHA-256."""
+    if not stamp.get("sha256"):
+        raise ValueError(f"{batch_id}: its load stamped no archive SHA-256 (fetched by hand?); "
+                         f"load it with `load` instead")
+    lock = batches.claim(batches.Batch(stamp.get("year") or batch_id[:4], batch_id, stamp.get("url", ""),
+                                       stamp.get("last_modified", ""), stamp.get("content_length", 0)),
+                         cache)
+    if lock is None:
+        return None
+    downloaded = not (cache / f"{batch_id}.zip").exists()
+    try:
+        return lock, batches.fetch_archived(batch_id, stamp["sha256"], cache), downloaded
+    except Exception:
+        lock.close()
+        raise
+
+
+def _audit_one(config: dict, batch_id: str, stamp: dict, cache: Path, keep: bool) -> str:
+    held = _archived(stamp, batch_id, cache)
+    if held is None:
+        return f"{batch_id}: another loader sharing this cache has it"
+    lock, path, downloaded = held
+    with lock:
+        with get_session(config=config) as session:
+            n = load.audit_batch(session, path, batch_id, extract.load(), stamp["sha256"])
+        if downloaded and not keep:
+            path.unlink()
     return f"{batch_id}: {n:,} unread paths"
+
+
+def _reload_one(config: dict, batch_id: str, stamp: dict, cache: Path, keep: bool) -> str:
+    concordance = extract.load()
+    with get_session(config=config) as session:
+        if load._loaded(session, f"{batch_id}@{stamp.get('last_modified', '')}", concordance):
+            return f"{batch_id}: loaded already under this concordance"
+    held = _archived(stamp, batch_id, cache)
+    if held is None:
+        return f"{batch_id}: another loader sharing this cache has it"
+    lock, path, downloaded = held
+    with lock:
+        path.with_name(f"{batch_id}.json").write_text(json.dumps(stamp, indent=2))   # the load records it
+        with get_session(config=config) as session:
+            manifest = load.load_batch(session, path, concordance)
+        if downloaded and not keep:
+            path.unlink()
+    with get_session(config=config) as session:
+        line = checks.batch_line(session, batch_id)
+    rows = manifest["rows"]
+    loaded = manifest.get("skipped") or ", ".join(f"{t} {rows.get(t, 0)}" for t in concordance)
+    return f"{batch_id}: {loaded}; checks: {line}"
+
+
+def _each_batch(args, job) -> int:
+    """``job(config, batch_id, stamp, cache, keep)`` for each loaded batch, ``--jobs``
+    at a time (in this process for one); a batch that fails is reported and the
+    others go on. 1 if any failed."""
+    config = _config(args.host)
+    with get_session(config=config) as session:
+        stamps = checks.loaded(session, args.batch or None)
+    work = [(b, (config, b, stamp, args.cache, args.keep_zips))
+            for b, stamp in zip(stamps["batch"], stamps["stamp"])]
+    failed = []
+
+    def report(batch_id: str, outcome) -> None:
+        try:
+            print(outcome(), flush=True)
+        except Exception as err:  # noqa: BLE001 - one batch's failure is reported, the rest go on
+            failed.append(batch_id)
+            print(f"{batch_id}: FAILED: {err}", flush=True)
+
+    if args.jobs <= 1:
+        for batch_id, params in work:
+            report(batch_id, lambda params=params: job(*params))
+    else:
+        with cf.ProcessPoolExecutor(max_workers=args.jobs) as pool:
+            futures = {pool.submit(job, *params): batch_id for batch_id, params in work}
+            for done in cf.as_completed(futures):
+                report(futures[done], done.result)
+    if failed:
+        print(f"{len(failed)} of {len(work)} batches failed: {', '.join(sorted(failed))}", flush=True)
+    return 1 if failed else 0
 
 
 def _audit(args) -> int:
     # Re-reads each loaded batch from our copy of its archive, checked against
     # the SHA-256 its load stamped; a load from now on counts them itself.
-    config = _config(args.host)
-    with get_session(config=config) as session:
-        stamps = checks.loaded(session, args.batch or None)
-    with cf.ProcessPoolExecutor(max_workers=args.jobs) as pool:
-        jobs = [pool.submit(_audit_one, config, b, sha, args.cache, args.keep_zips)
-                for b, sha in zip(stamps["batch"], stamps["zip_sha256"])]
-        for job in cf.as_completed(jobs):
-            print(job.result(), flush=True)
-    return 0
-
-
-def _reload_one(config: dict, stamp: dict, cache: Path, keep: bool) -> str:
-    batch_id = stamp["batch_id"]
-    concordance = extract.load()
-    with get_session(config=config) as session:
-        if load._loaded(session, f"{batch_id}@{stamp.get('last_modified', '')}", concordance):
-            return f"{batch_id}: loaded already under this concordance"
-    path = batches.fetch_archived(batch_id, stamp["sha256"], cache)
-    path.with_name(f"{batch_id}.json").write_text(json.dumps(stamp, indent=2))   # the load records it
-    with get_session(config=config) as session:
-        manifest = load.load_batch(session, path, concordance)
-    with get_session(config=config) as session:
-        line = checks.batch_line(session, batch_id)
-    if not keep:
-        path.unlink()
-    rows = manifest["rows"]
-    loaded = manifest.get("skipped") or ", ".join(f"{t} {rows.get(t, 0)}" for t in concordance)
-    return f"{batch_id}: {loaded}; checks: {line}"
+    return _each_batch(args, _audit_one)
 
 
 def _reload(args) -> int:
     # A concordance change gives every batch a new stamp, and `patch` refuses
     # batches loaded under different ones: reload them all, from the bytes
     # first loaded rather than whatever the IRS serves under the name today.
-    config = _config(args.host)
-    with get_session(config=config) as session:
-        stamps = checks.loaded(session, args.batch or None)
-    with cf.ProcessPoolExecutor(max_workers=args.jobs) as pool:
-        jobs = [pool.submit(_reload_one, config, dict(stamp), args.cache, args.keep_zips)
-                for stamp in stamps["stamp"]]
-        for job in cf.as_completed(jobs):
-            print(job.result(), flush=True)
-    return 0
+    # Run `patch` only once every batch reports.
+    return _each_batch(args, _reload_one)
 
 
 def _discover(args) -> int:
