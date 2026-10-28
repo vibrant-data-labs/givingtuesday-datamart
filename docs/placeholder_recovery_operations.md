@@ -506,6 +506,12 @@ preflight read a prefix too. Nothing of production's is written. A read
 of every grant holds a lock a load of recovered grants waits for, so the
 subset takes a copy of the recovered rows first and reads that.
 
+For the BMF identity-policy decision after the October refresh, use the
+[current-policy comparison](bmf-policy-subset-2026-10-28.md). It freezes
+read-only inputs and compares today's policy with explicit alternatives;
+the historical `matching_subset` before/after below compares older matcher
+behavior with the current code instead.
+
 ```bash
 python -m givingtuesday_datamart.proofs.matching_subset build --workers 4     # ~40 min on a laptop
 python -m givingtuesday_datamart.proofs.matching_subset report

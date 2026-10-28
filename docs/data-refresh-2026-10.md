@@ -748,3 +748,36 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   after the gate. The matcher, meanwhile: its preflight ran until about
   16:10 UTC, then `grant_matching` rebuilt the `_current` relations on the
   database (16:10 to about 16:55) and began its matching slices.
+- **2026-10-28, 17:35 to 18:02 UTC, the BMF policy subset proof.** Zein
+  asked to compare the proposed matching policies before a full rerun.
+  We froze read-only inputs on the existing box, selected 67,037 recipient
+  tuples and kept the entire 3,356,738-row universe in competition.
+  47,801,750 pairs scored; today's rules reproduced every production EIN
+  on the subset (zero differences). We corrected a row-counting trap:
+  identities are eligible from 2015+, but production attaches their EIN
+  to older rows sharing the same keys too. The all-year recount holds
+  the same tuples and decisions and counts 246,282 grant rows; placeholder
+  matches reconcile at 415, all excluded by the proposed policies.
+  [The proof and tradeoffs](bmf-policy-subset-2026-10-28.md) show that the
+  conservative BMF filter improves Duke and many JHU assignments, but
+  still assigns 1,163 rows / $821.905M explicitly naming Johns Hopkins
+  University to the club. No BMF gives the same residual error. Dropping
+  all SORT_NAME lines also loses useful Bates College and WETA aliases.
+  We should test narrower alias eligibility and the remaining fuzzy
+  winner problem before a full run. No production relation, baseline,
+  matcher rule, infrastructure class, or paid reading changed. The
+  focused matcher tests passed 95 (two DB tests deselected).
+- **2026-10-28, draft PR preparation.** We completed the
+  [expanded ranking proof](rank-policy-subset-2026-10-28.md), the focused
+  geographic audit, and a [geography-aware test](geo-policy-test-2026-10-28.md)
+  on the regression pool and 38,983 fresh recipient tuples. Geography
+  before source preference restores the PAWS relationship, retains the
+  Hopkins correction, and moves labeled relationship coverage from
+  464 to 469 of 647 (five gained, none lost). Fresh validation still
+  finds a state-typo failure: Americus IL / ZIP 31709 is routed to an
+  Illinois identity despite stronger Georgia street/city/ZIP evidence.
+  The proposed ranking is not accepted or connected to production.
+  The production gate's original failure and step 8 remain open; no
+  baseline moved. The complete offline suite passed 698 tests, with
+  130 DB tests deselected. The draft PR includes the operational changes,
+  rerunnable proofs, archived small reports and these remaining limits.
