@@ -55,6 +55,21 @@ def loaded_batches(session) -> pd.DataFrame:
 _FORMS = {"basic_fields": "990", "basic_fields_pf": "990-PF", "basic_fields_ez": "990-EZ"}
 
 
+def _column_sets(cols: pd.DataFrame, gt_only: list[str]) -> list[str]:
+    """Where our columns and GT's table do not line up name for name."""
+    out = []
+    renamed = cols[cols["gt_column"].notna() & (cols["gt_column"] != cols["column"])]
+    if not renamed.empty:
+        out += ["Measured against GT's unnumbered column (its release numbers the element no more):\n",
+                _md(renamed[["column", "gt_column", "agree_pct"]])]
+    missing = cols[cols["gt_column"].isna()]
+    if not missing.empty:
+        out.append(f"Our columns GT's table does not have: {', '.join(missing['column'])}.\n")
+    if gt_only:
+        out.append(f"GT's columns none of ours is measured against: {', '.join(gt_only)}.\n")
+    return out
+
+
 def run(session, out: Path, batch_ids: list[str] | None = None,
         tables: list[str] | None = None) -> str:
     """Write the report to ``out`` a section at a time, and return it.
@@ -126,6 +141,7 @@ def run(session, out: Path, batch_ids: list[str] | None = None,
             if not rest.empty:
                 section += ["Columns production does not read, below 100%:\n",
                             _md(rest[_COLUMN_FIELDS])]
+            section += _column_sets(cols, parity.gt_only_columns(session, mappings))
         else:
             compared = [parity.rows(session, table, table)]
             if table in parity.CURRENT:

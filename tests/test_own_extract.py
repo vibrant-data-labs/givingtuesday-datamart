@@ -433,3 +433,44 @@ def test_schedule_i_leaves_the_filer_name_line_2_empty_as_gt_does():
              for t in ("privategrants", "grants_to_domestic_organizations")}
     assert paths == {"privategrants": ("/ReturnHeader/Filer/BusinessName/BusinessNameLine2Txt",),
                      "grants_to_domestic_organizations": ()}
+
+
+def test_a_first_occurrence_is_measured_against_gt_unnumbered_column():
+    from givingtuesday_datamart.own_extract import parity
+
+    theirs = {"siasiraaline1", "supinfconman_0", "filerein"}
+    assert parity.gt_column("filerein", theirs) == "filerein"
+    assert parity.gt_column("siasiraaline1_0", theirs) == "siasiraaline1"     # 2026_10_25 dropped the number
+    assert parity.gt_column("supinfconman_0", theirs) == "supinfconman_0"     # still numbered there
+    assert parity.gt_column("siasiraaline1_1", theirs) is None
+    assert parity.gt_column("supinfconman_2", theirs) is None
+
+
+def test_release_files_pick_each_table_of_one_release():
+    from givingtuesday_datamart.own_extract import release
+    from givingtuesday_datamart.sources.resolver import BucketListing, BucketObject
+
+    names = {spec.filename_regex for spec in release.specs().values()}
+    assert len(names) == len(extract.TABLES)
+    stems = ["990StandardFields", "990PFStandardFields", "990EZStandardFields", "990Part1Missions",
+             "990Part3Programs", "990EZPart3Programs", "ScheduleO", "ScheduleIPart2Grants",
+             "990PFPart14Grants3A", "990PFPart14Grants3B"]
+    objects = tuple(BucketObject(key=f"EfileDataMarts/{v}_All_Years_{s}.csv", size=1, last_modified="")
+                    for v in ("2026_06_16", "2026_10_25") for s in stems)
+    listing = BucketListing(bucket="b", prefix="EfileDataMarts/", objects=objects)
+    urls = release.files("2026_10_25", listing)
+    assert sorted(urls) == sorted(extract.TABLES)
+    assert all("/2026_10_25_All_Years_" in u for u in urls.values())
+    assert urls["schedule_o"].endswith("2026_10_25_All_Years_ScheduleO.csv")
+    with pytest.raises(LookupError):
+        release.files("2026_09_01", listing)
+
+
+def test_gt_release_refuses_the_shared_instance(monkeypatch):
+    from givingtuesday_datamart.own_extract import release
+
+    shared = {"postgres": {"host": "shared.example", "database": "gt_datamart"}}
+    monkeypatch.setattr(release, "datamart_config", lambda: shared)
+    with pytest.raises(SystemExit):
+        release.refuse_shared(shared)
+    release.refuse_shared({"postgres": {"host": "localhost", "database": "gt_datamart"}})

@@ -2,7 +2,8 @@
 
     python -m givingtuesday_datamart.own_extract batches 2026
     python -m givingtuesday_datamart.own_extract load 2026 [--batch 2026_TEOS_XML_09A ...] [--keep-zips]
-    python -m givingtuesday_datamart.own_extract parity [--batch ...] [--report PATH]
+    python -m givingtuesday_datamart.own_extract parity [--batch ...] [--report PATH] [--host HOST]
+    python -m givingtuesday_datamart.own_extract gt-release 2026_10_25 --host HOST [--jobs N]
     python -m givingtuesday_datamart.own_extract discover ZIP [--out PATH]
 
 ``batches`` lists the archives the IRS serves for a year (it asks the
@@ -12,7 +13,9 @@ replaces its rows in ``irs_extract``, copies the archive to our bucket
 (``batches.archive``) and, unless ``--keep-zips``, deletes the local copy:
 a year of archives is 4-5 GB. ``parity`` measures
 the loaded batches against GT's tables and writes a markdown report.
-``discover`` proposes the concordance from an archive GT has released
+``gt-release`` loads a GT release into a scratch host holding a copy of our
+extract, under our batches' returns only, for ``parity --host`` there
+(``release``). ``discover`` proposes the concordance from an archive GT has released
 (GT's rows for its returns, read by EIN, about 10 minutes for a 12,000-return
 archive); review the proposal against ``data/own_extract/concordance.csv``.
 """
@@ -29,7 +32,8 @@ from sqlalchemy import text
 
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart.ingestion import datamart_config
-from givingtuesday_datamart.own_extract import batches, discover, extract, load, parity, patch, proof, report
+from givingtuesday_datamart.own_extract import (batches, discover, extract, load, parity, patch, proof,
+                                                release, report)
 
 DEFAULT_CACHE = Path.home() / ".cache" / "irs_batches"
 
@@ -116,6 +120,22 @@ def _parity(args) -> int:
     return 0
 
 
+def _gt_release(args) -> int:
+    # GT's release into a scratch host's public.<table>, for `parity --host`:
+    # production's staging holds our rows since the patch.
+    import logging
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
+                        datefmt="%H:%M:%S")
+    config = _config(args.host)
+    release.refuse_shared(config)
+    for summary in release.load(config, args.version, args.table or None, args.jobs):
+        print(f"{summary['table']}: {summary['kept']:,} of GT's {summary['gt_rows']:,} rows kept "
+              f"({summary['file']}, {summary['bytes'] / 1e9:.2f} GB, sha256 {summary['sha256'][:12]})",
+              flush=True)
+    return 0
+
+
 def _discover(args) -> int:
     lines = []
     with get_session(config=datamart_config()) as session:
@@ -196,6 +216,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--schema-checks", action="store_true",
                    help="only the checks for the newest schema versions (minutes, not an hour)")
     p.set_defaults(func=_parity)
+
+    p = sub.add_parser("gt-release", help="a GT release beside our extract on a scratch host, for parity --host")
+    p.add_argument("version", help="the release's date, as in its file names (2026_10_25)")
+    p.add_argument("--host", required=True, help="the scratch instance; never the shared one")
+    p.add_argument("--table", action="append", choices=sorted(extract.TABLES),
+                   help="only this table (repeatable); the _current relations are rebuilt either way")
+    p.add_argument("--jobs", type=int, default=1, help="tables loaded at once")
+    p.set_defaults(func=_gt_release)
 
     p = sub.add_parser("discover", help="propose the concordance from an archive GT has released")
     p.add_argument("zip", type=Path)
