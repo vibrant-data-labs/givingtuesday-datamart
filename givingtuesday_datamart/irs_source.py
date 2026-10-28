@@ -67,8 +67,6 @@ OBJECT_ID = re.compile(r"(?<!\d)(\d{18})(?!\d)")
 # {ein}_{taxperiod}_{returntype}_{YYYYMMDD}{return_id}.pdf
 _PDF_TOKEN = re.compile(r"_(\d{8})(\d+)\.pdf$")
 
-UA = {"User-Agent": "vdl-givingtuesday-datamart/irs_source"}
-
 # Image widths, in pixels at 300 DPI, of the pages the IRS renders from the
 # XML, by renderer. Page 1 of an image is the IRS's form page 1 and its
 # width names the renderer; a page at a width not in that renderer's set is
@@ -140,7 +138,19 @@ def parse_object_id(token: str) -> str:
 
 
 def _get(url: str, headers: dict[str, str] | None = None) -> bytes:
-    request = urllib.request.Request(url, headers={**UA, **(headers or {})})
+    """One GET, identified as what it is: urllib's own ``User-Agent``.
+
+    The edge in front of apps.irs.gov answers 403 to any User-Agent value
+    it does not recognise — this project's name, which fetched 8,800
+    filings in September 2026, and an arbitrary word alike — and 200 to
+    urllib's default and to browsers (measured 2026-10-27: same library,
+    same host, minutes apart; ``docs/data-refresh-2026-10.md``). So nothing
+    is set here: no project string, no browser string, no rotation. A 403
+    is the IRS's answer: ``filing_images.fetch_filings`` stops on five in a
+    row instead of retrying through the list (one alone is a filing the IRS
+    will not serve, which happens).
+    """
+    request = urllib.request.Request(url, headers=headers or {})
     with urllib.request.urlopen(request) as response:
         return response.read()
 
@@ -203,7 +213,7 @@ def images(row: IndexRow) -> list[Image]:
     carries a RETURN_ID; otherwise returns every image for the tax period,
     since nothing available distinguishes them.
     """
-    payload = json.loads(_get(TEOS_RETURNS.format(ein=row.ein), {"Accept": "application/json"}))
+    payload = json.loads(_get(TEOS_RETURNS.format(ein=row.ein)))    # JSON without asking for it
     found: list[Image] = []
     for item in payload.get("items", []):
         path = item.get("STATICFILEPATH")

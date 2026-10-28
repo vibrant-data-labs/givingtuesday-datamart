@@ -2,6 +2,7 @@ import concurrent.futures as cf
 import hashlib
 import io
 import json
+import multiprocessing
 import re
 import uuid
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ from pathlib import Path
 
 import boto3
 import botocore.config
+import numpy as np
 import pandas as pd
 import jellyfish
 import pyarrow.parquet as pq
@@ -22,7 +24,7 @@ from givingtuesday_datamart._internal.address_cleaning import create_clean_addre
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart._internal.parquet_cache import _decode_json as _pqc_decode_json
-from givingtuesday_datamart.current_grants import build_current_relations
+from givingtuesday_datamart.current_grants import _TABLES as _CURRENT_TABLES, build_current_relations
 from givingtuesday_datamart.ingestion import datamart_config
 from givingtuesday_datamart.canonical.build import (
     CANONICAL_BUILDS_TABLE,
@@ -1001,6 +1003,27 @@ def _resolve_checkpoint_prefix(
     logical_name from datamart_meta.ingest_runs. Raises if any source has
     no successful run on record.
     """
+    versions = _source_versions(connection)
+    # Nested rather than flat (`pg_X__bf_Y`) so the prefix is browseable
+    # with `aws s3 ls`: each level narrows scope, and a single source
+    # version's chunks can be `aws s3 rm --recursive`'d in one shot.
+    return (
+        f"{base_prefix}/"
+        f"pg_{versions['irs_990pf_grants']}/"
+        f"bf_{versions['irs_990_basic_fields']}/"
+        f"bfpf_{versions['irs_990pf_basic_fields']}/"
+        f"bmf_{versions['irs_eo_bmf']}/"
+        f"corr_{_corrections_content_hash()}/"
+        f"rec_{recovered['policy_version']}_{recovered['digest']}/"
+        f"shape_v{MATCHING_INPUT_SHAPE_VERSION}"
+    )
+
+
+def _source_versions(connection) -> dict[str, str]:
+    """The source_version of the latest successful ingest_run of each
+    matching input (``_MATCHING_INPUT_LOGICAL_NAMES``): what the checkpoint
+    prefix is keyed on and what a rebuild stamps on the ``_current``
+    relations. Raises if any source has no successful run on record."""
     rows = connection.execute(
         text("""
             SELECT DISTINCT ON (logical_name) logical_name, source_version
@@ -1018,19 +1041,50 @@ def _resolve_checkpoint_prefix(
             f"No successful ingest run on record for: {sorted(missing)}. "
             "Run `python -m givingtuesday_datamart.sources refresh` first."
         )
-    # Nested rather than flat (`pg_X__bf_Y`) so the prefix is browseable
-    # with `aws s3 ls`: each level narrows scope, and a single source
-    # version's chunks can be `aws s3 rm --recursive`'d in one shot.
-    return (
-        f"{base_prefix}/"
-        f"pg_{versions['irs_990pf_grants']}/"
-        f"bf_{versions['irs_990_basic_fields']}/"
-        f"bfpf_{versions['irs_990pf_basic_fields']}/"
-        f"bmf_{versions['irs_eo_bmf']}/"
-        f"corr_{_corrections_content_hash()}/"
-        f"rec_{recovered['policy_version']}_{recovered['digest']}/"
-        f"shape_v{MATCHING_INPUT_SHAPE_VERSION}"
-    )
+    return versions
+
+
+# A run that rebuilds the ``_current`` relations writes on each of them
+# (COMMENT ON TABLE) the source versions the checkpoint prefix is keyed on.
+# ``--skip-rebuild`` takes the relations only when every one carries the
+# versions the prefix names now: without that, chunks computed on
+# relations built from an older drop would be written under a newer
+# drop's prefix, and a later run would resume them against shifted rows.
+# A relation rebuilt anywhere else (``sources refresh``, the current_grants
+# CLI) is a new table without the stamp, so the next run rebuilds it. A
+# stamp is a catalog read, where comparing the relations with staging
+# (``stale_basic_fields_current``) scans every row of both.
+def _current_stamp(versions: dict[str, str], build_id: str | None) -> str:
+    return json.dumps({"source_versions": versions, "build_id": build_id}, sort_keys=True)
+
+
+def _stamped_versions(comment: str | None) -> dict | None:
+    """The source versions a relation's comment records, or None when it
+    has no stamp (never stamped, or a comment of another kind)."""
+    try:
+        stamp = json.loads(comment) if comment else None
+    except ValueError:
+        return None
+    return stamp.get("source_versions") if isinstance(stamp, dict) else None
+
+
+def _stamp_current_relations(connection, versions: dict[str, str], build_id: str | None) -> None:
+    stamp = _current_stamp(versions, build_id)
+    for table, _ddl in _CURRENT_TABLES:
+        connection.execute(text(f"COMMENT ON TABLE public.{table} IS :stamp"), {"stamp": stamp})
+
+
+def _unstamped_current_relations(connection, versions: dict[str, str]) -> list[str]:
+    """The ``_current`` relations that do not carry ``versions``: missing,
+    rebuilt outside a matcher run, or built from another drop."""
+    stale = []
+    for table, _ddl in _CURRENT_TABLES:
+        comment = connection.execute(
+            text("SELECT obj_description(to_regclass(:name), 'pg_class')"), {"name": f"public.{table}"}
+        ).scalar_one()
+        if _stamped_versions(comment) != versions:
+            stale.append(table)
+    return stale
 
 
 # Filenames the chunk loop writes/reads. Used by the resume listing to
@@ -1617,10 +1671,41 @@ def candidate_pairs(universe_df: pd.DataFrame, grants_df: pd.DataFrame) -> pd.Mu
         # Missing where there is no address: a block leaves a missing key out.
         df['block_zip'] = df['clean_zip'].where(df['compare_addr'] != "")
 
-    indexer = recordlinkage.Index()
-    indexer.block(left_on=['block_zip'], right_on=['block_zip'])
-    indexer.block(left_on=['full_name'], right_on=['full_name'])
-    return indexer.index(universe_df, grants_df)
+    # The same two blocks recordlinkage.Index().block(...) makes, with the
+    # same result: the union of the two, deduplicated, sorted by the pair
+    # (pandas' MultiIndex.union sorts, and the stable tie-break in
+    # resolve_matches depends on that order). In integers rather than
+    # tuples: on 2026-10-27 the union of about a billion pairs ran more
+    # than five hours inside MultiIndex.drop_duplicates on one core of an
+    # r6i.8xlarge; packed as one int64 a pair, numpy.unique sorts and
+    # deduplicates the same pairs in minutes.
+    return _blocked_pairs(universe_df, grants_df, ["block_zip", "full_name"])
+
+
+def _block_positions(left_key: pd.Series, right_key: pd.Series) -> tuple[np.ndarray, np.ndarray]:
+    """Row positions of every (left, right) whose keys are equal and not
+    missing: the pairs one recordlinkage block makes."""
+    codes, _ = pd.factorize(pd.concat([left_key, right_key], ignore_index=True), use_na_sentinel=True)
+    n_left = len(left_key)
+    left = pd.DataFrame({"code": codes[:n_left], "l": np.arange(n_left, dtype=np.int64)})
+    right = pd.DataFrame({"code": codes[n_left:], "r": np.arange(len(right_key), dtype=np.int64)})
+    pairs = left[left["code"] >= 0].merge(right[right["code"] >= 0], on="code")
+    return pairs["l"].to_numpy(), pairs["r"].to_numpy()
+
+
+def _blocked_pairs(universe_df: pd.DataFrame, grants_df: pd.DataFrame, keys: list[str]) -> pd.MultiIndex:
+    """The union of the blocks on ``keys`` as a MultiIndex of the two frames'
+    index labels, deduplicated and sorted by (left, right)."""
+    n_right = len(grants_df)
+    packed = [
+        left.astype(np.int64) * n_right + right.astype(np.int64)
+        for left, right in (_block_positions(universe_df[k], grants_df[k]) for k in keys)
+    ]
+    uniq = np.unique(np.concatenate(packed)) if packed else np.empty(0, dtype=np.int64)
+    left_labels = universe_df.index.to_numpy()[uniq // n_right]
+    right_labels = grants_df.index.to_numpy()[uniq % n_right]
+    return pd.MultiIndex.from_arrays([left_labels, right_labels],
+                                     names=[universe_df.index.name, grants_df.index.name])
 
 
 def pair_scores(pairs: pd.MultiIndex, universe_df: pd.DataFrame, grants_df: pd.DataFrame) -> pd.DataFrame:
@@ -1939,6 +2024,8 @@ def match_records(
     resume_workers: int = 32,
     limit: int | None = None,
     recovered_policy: str | None = None,
+    skip_rebuild: bool = False,
+    workers: int = 1,
 ):
     """Run the recordlinkage grant-matching pipeline against gt_datamart.
 
@@ -2003,6 +2090,8 @@ def match_records(
             limit=limit,
             recovered_policy=recovered_policy,
             build_id=build_id,
+            skip_rebuild=skip_rebuild,
+            workers=workers,
         )
     except BaseException as err:
         _finalize_build_failed(build_id, err)
@@ -2019,6 +2108,25 @@ def match_records(
     return full_data_df
 
 
+# What a chunk worker needs, set by the parent right before the pool forks
+# so the workers inherit it (copy-on-write): no pickling of the two frames
+# and the pair index per task.
+_POOL_STATE: dict = {}
+
+
+def _chunk_job(chunk_idx: int) -> tuple[int, pd.DataFrame]:
+    """One chunk in a worker: score it, write its checkpoint, return the rows.
+    The same three statements as the serial loop, so a chunk is written only
+    when fully computed and filtered, whichever path computed it."""
+    st = _POOL_STATE
+    start_idx = chunk_idx * st["chunk_size"]
+    end_idx = min(start_idx + st["chunk_size"], st["total_pairs"])
+    chunk = st["candidate_links"][start_idx:end_idx]
+    features = score_pairs(chunk, st["universe_df"], st["grants_df"])
+    pqc.write_dataframe(features, f"{st['uri_base']}/chunk_{chunk_idx:05d}.parquet")
+    return chunk_idx, features
+
+
 def _do_match_records(
     chunk_size: int,
     s3_bucket: str,
@@ -2028,6 +2136,8 @@ def _do_match_records(
     limit: int | None = None,
     recovered_policy: str | None = None,
     build_id: str | None = None,
+    skip_rebuild: bool = False,
+    workers: int = 1,
 ):
     """Inner pipeline body. Returns ``(full_data_df, pg_rows, ug_rows)``.
 
@@ -2049,7 +2159,22 @@ def _do_match_records(
         # current and recovered grants and the dependent matching views
         # with it, and create_or_replace_views restores them, in that
         # order.
-        build_current_relations(connection)
+        if skip_rebuild:
+            # A restart minutes after a run that rebuilt them, with nothing
+            # loaded since: the relations must carry that run's stamp of the
+            # versions the checkpoint prefix is keyed on (_current_stamp).
+            stale = _unstamped_current_relations(connection, _source_versions(connection))
+            if stale:
+                raise RuntimeError(
+                    f"--skip-rebuild: {', '.join('public.' + t for t in stale)} do not carry the source "
+                    "versions the checkpoints are keyed on (rebuilt elsewhere, or from an older drop); "
+                    "run without --skip-rebuild"
+                )
+            logger.info("--skip-rebuild: the _current relations carry the current source versions; "
+                        "taken as they stand")
+        else:
+            build_current_relations(connection)
+            _stamp_current_relations(connection, _source_versions(connection), build_id)
         create_or_replace_views(connection, recovered_policy=recovered_policy)
         # The recovered grants the run takes, read once: the build's
         # source_runs and the checkpoint prefix name the same rows.
@@ -2144,22 +2269,41 @@ def _do_match_records(
     results: dict[int, pd.DataFrame] = dict(resumed)
     to_compute = [idx for idx in range(total_chunks) if idx not in results]
 
-    # --- Compute path: serial (recordlinkage compute() is single-threaded
-    # internally; parallelizing chunks here would compete for memory without
-    # buying speed). Keeping it serial also keeps the post-crash resume story
-    # simple — every written chunk is fully computed and filtered.
+    # --- Compute path. recordlinkage's compute() is single-threaded, so the
+    # chunks are the unit of parallelism: ``workers`` processes forked from
+    # here (the frames and the pair index inherited copy-on-write), each
+    # scoring whole chunks and writing each one's checkpoint itself, so
+    # every written chunk is fully computed and filtered whichever path made
+    # it, and a resume reads them back the same way. Serial by default (one
+    # worker): a laptop's memory. On 2026-10-27 the serial loop ran 45,855
+    # chunks at 1.6 s each, eighteen hours, on one of an r6i.8xlarge's 32
+    # cores; each worker gradually copies the pages of the string objects
+    # it touches, a few GB each, so size ``workers`` to the box's memory.
     if to_compute:
-        logger.info(f"Computing {len(to_compute)} new chunks...")
-    for chunk_idx in tqdm(to_compute, desc="Computing"):
-        start_idx = chunk_idx * chunk_size
-        end_idx = min(start_idx + chunk_size, total_pairs)
-        chunk = candidate_links[start_idx:end_idx]
-        # The (basic_fields_idx, privategrants_idx) MultiIndex comes back
-        # as regular columns so it survives the parquet round-trip.
-        features = score_pairs(chunk, basic_fields_df, private_foundations_df)
+        logger.info(f"Computing {len(to_compute)} new chunks with {workers} worker(s)...")
+    if workers > 1 and to_compute:
+        _POOL_STATE.update(chunk_size=chunk_size, total_pairs=total_pairs, candidate_links=candidate_links,
+                           universe_df=basic_fields_df, grants_df=private_foundations_df,
+                           uri_base=checkpoint_uri_base)
+        try:
+            with cf.ProcessPoolExecutor(max_workers=workers,
+                                        mp_context=multiprocessing.get_context("fork")) as pool:
+                for chunk_idx, features in tqdm(pool.map(_chunk_job, to_compute, chunksize=4),
+                                                total=len(to_compute), desc="Computing"):
+                    results[chunk_idx] = features
+        finally:
+            _POOL_STATE.clear()
+    else:
+        for chunk_idx in tqdm(to_compute, desc="Computing"):
+            start_idx = chunk_idx * chunk_size
+            end_idx = min(start_idx + chunk_size, total_pairs)
+            chunk = candidate_links[start_idx:end_idx]
+            # The (basic_fields_idx, privategrants_idx) MultiIndex comes back
+            # as regular columns so it survives the parquet round-trip.
+            features = score_pairs(chunk, basic_fields_df, private_foundations_df)
 
-        pqc.write_dataframe(features, f"{checkpoint_uri_base}/chunk_{chunk_idx:05d}.parquet")
-        results[chunk_idx] = features
+            pqc.write_dataframe(features, f"{checkpoint_uri_base}/chunk_{chunk_idx:05d}.parquet")
+            results[chunk_idx] = features
 
     logger.info(
         f"Chunk processing complete: loaded {len(resumed)} from checkpoints, "
@@ -2198,6 +2342,11 @@ def _do_match_records(
 
 if __name__ == "__main__":
     import argparse
+    import logging
+
+    # The package logger has no handler of its own: without this an
+    # eight-hour run shows nothing but warnings on the console.
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
 
     parser = argparse.ArgumentParser(
         description="Run the grant matching pipeline against gt_datamart."
@@ -2255,6 +2404,28 @@ if __name__ == "__main__":
             "view is absent; the run stops when the view shows another."
         ),
     )
+    parser.add_argument(
+        "--skip-rebuild",
+        action="store_true",
+        help=(
+            "Take the _current relations as they stand instead of rebuilding "
+            "them first. Only for a restart minutes after a run that rebuilt "
+            "them, with no load or ingest since; the views are still created. "
+            "The run refuses when a relation lacks the stamp of the source "
+            "versions the checkpoints are keyed on."
+        ),
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help=(
+            "Processes computing chunks (default 1, the serial loop). Forked "
+            "from the run, so the frames are shared; each worker still copies "
+            "the pages of the strings it touches, a few GB. Size it to the "
+            "box's memory: 12 on an r6i.8xlarge."
+        ),
+    )
     args = parser.parse_args()
 
     match_records(
@@ -2263,4 +2434,6 @@ if __name__ == "__main__":
         chunk_size=args.chunk_size,
         resume_workers=args.resume_workers,
         recovered_policy=args.recovered_policy,
+        skip_rebuild=args.skip_rebuild,
+        workers=args.workers,
     )

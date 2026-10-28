@@ -363,6 +363,8 @@ or of the ones named:
 from __future__ import annotations
 
 import argparse
+import logging
+import os
 from typing import Iterable
 
 from sqlalchemy import text
@@ -951,18 +953,76 @@ _TABLES = _BASIC_FIELDS_TABLES + _GRANTS_TABLES
 _MATCHING_VIEW_TABLES = ("grants_to_domestic_organizations_current", "privategrants_current")
 
 
+_MiB, _GiB = 1024 ** 2, 1024 ** 3
+# The build's memory defaults, what the 4 GB shared instance takes:
+# work_mem, maintenance_work_mem, parallel workers (``_build_one``).
+_BUILD_DEFAULTS = (64 * _MiB, 256 * _MiB, 0)
+# RDS's default parameter group gives shared_buffers a quarter of the
+# instance's memory: 0.9 GB on the 4 GB db.t4g.medium, 7.7 GB on the 32 GB
+# db.r6g.xlarge (read 2026-10-28). A budget past the defaults needs an
+# instance of at least this much memory.
+_LARGER_INSTANCE = 6 * _GiB
+# The settings the build runs with, as the server parsed them, and its
+# shared_buffers.
+_BUILD_MEMORY_SQL = """
+    SELECT pg_size_bytes(current_setting('work_mem')),
+           pg_size_bytes(current_setting('maintenance_work_mem')),
+           current_setting('max_parallel_workers_per_gather')::int,
+           pg_size_bytes(current_setting('shared_buffers'))
+"""
+
+
+def _check_build_memory(work_mem: int, maintenance_work_mem: int, parallel_workers: int,
+                        shared_buffers: int) -> None:
+    """Refuse a budget past the defaults on a server the size of the shared
+    4 GB instance: the GT_BUILD_* variables live in the client's
+    environment (``bigdb.env`` on the box), and can outlast the larger
+    instance they were set for."""
+    beyond = (work_mem > _BUILD_DEFAULTS[0] or maintenance_work_mem > _BUILD_DEFAULTS[1]
+              or parallel_workers > _BUILD_DEFAULTS[2])
+    if beyond and 4 * shared_buffers < _LARGER_INSTANCE:
+        raise RuntimeError(
+            f"GT_BUILD_* asks for work_mem {work_mem // _MiB} MB, maintenance_work_mem "
+            f"{maintenance_work_mem // _MiB} MB and {parallel_workers} parallel workers, but the database "
+            f"server has shared_buffers {shared_buffers // _MiB} MB, about {4 * shared_buffers / _GiB:.1f} GB "
+            "of memory: the shared instance's size. Unset GT_BUILD_WORK_MEM, GT_BUILD_MAINTENANCE_WORK_MEM "
+            "and GT_BUILD_PARALLEL_WORKERS (bigdb.env), or enlarge the instance first."
+        )
+
+
 def _build_one(connection, table: str, ddl: str) -> int:
     logger.info(
         "Building public.%s (filing-version dedup, issues #33/#34)", table
     )
-    # RDS-default work_mem (4MB) makes the 9-17M-row hash/window passes
-    # spill to thousands of temp-file batches (observed as sustained
-    # IO:BufFileRead waits on the db.t4g.medium). One build runs at a
-    # time, so a larger per-operation budget is safe on the 4GB instance.
-    # SET (not SET LOCAL): session-scoped, so it survives the
-    # per-statement execute() calls below and dies with the connection.
-    connection.execute(text("SET work_mem = '256MB'"))
-    connection.execute(text("SET maintenance_work_mem = '512MB'"))
+    # Memory for the build, set_config(..., false), i.e. SET, not SET LOCAL,
+    # so it is session-scoped, survives the per-statement execute()s below
+    # and dies with the connection. No parallel workers: a worker gets the
+    # whole budget and a hash twice it (hash_mem_multiplier is 2), so the
+    # default two workers pushed the 4 GB shared instance a gigabyte into
+    # swap on 2026-10-26.
+    # Even one process has many concurrent window/hash nodes here: the
+    # privategrants_current build at 256 MB reached 0.87 GB of swap on
+    # 2026-10-27 and was cancelled. So the budget is overridable and its
+    # default suits the 4 GB shared instance (the RDS incident's
+    # work_mem <= 64 MB rule, no parallel workers). They are the database
+    # server's memory, so only a larger database instance, never a larger
+    # client box, exports GT_BUILD_WORK_MEM / GT_BUILD_MAINTENANCE_WORK_MEM
+    # to spill less, and GT_BUILD_PARALLEL_WORKERS to put the workers back
+    # (each one multiplies the budget). The RDS default (4 MB) would spill
+    # the 9-17M-row passes to thousands of temp-file batches (sustained
+    # IO:BufFileRead on the db.t4g.medium); at 64 MB they spill about
+    # 34 GB of temp files, 30 MB short of the 35 GB floor on 2026-10-27.
+    # The values are bound, never spliced into the statement, and read back
+    # as the server parsed them: past the defaults, the server must be a
+    # larger instance (_check_build_memory), before any DDL runs.
+    settings = {
+        "work_mem": os.environ.get("GT_BUILD_WORK_MEM", "64MB"),
+        "maintenance_work_mem": os.environ.get("GT_BUILD_MAINTENANCE_WORK_MEM", "256MB"),
+        "max_parallel_workers_per_gather": os.environ.get("GT_BUILD_PARALLEL_WORKERS", "0"),
+    }
+    for name, value in settings.items():
+        connection.execute(text("SELECT set_config(:name, :value, false)"), {"name": name, "value": value})
+    _check_build_memory(*connection.execute(text(_BUILD_MEMORY_SQL)).one())
     for stmt in [s for s in ddl.split(";") if s.strip()]:
         connection.execute(text(stmt))
     for stmt in _INDEX_DDL[table]:
@@ -1068,6 +1128,12 @@ if __name__ == "__main__":
     # a later step must not roll an earlier table back.
     from givingtuesday_datamart.grant_matching import create_or_replace_views
     from givingtuesday_datamart.placeholder_recovery.view import VIEW, shown_policy
+
+    # The package logger has no handler of its own, so without this only
+    # warnings reach the console (Python's last-resort handler): the row
+    # counts and the doubling watch at the end of a paid build were silent
+    # when the basic-fields relations were rebuilt on 2026-10-26.
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
 
     _parser = argparse.ArgumentParser(prog="python -m givingtuesday_datamart.current_grants")
     _parser.add_argument("--only", action="append", choices=[t for t, _ in _TABLES], default=None,
