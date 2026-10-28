@@ -30,6 +30,7 @@ from __future__ import annotations
 import pandas as pd
 from sqlalchemy import text
 
+from givingtuesday_datamart.ingestion import LINEAGE_COLUMN_NAMES
 from givingtuesday_datamart.irs_source import GT_DATALAKE
 from givingtuesday_datamart.own_extract import extract
 from givingtuesday_datamart.own_extract.load import SCHEMA
@@ -145,40 +146,77 @@ def _theirs(session, source: str, batch_ids: list[str] | None = None) -> dict:
 def coverage(session, table: str, batch_ids: list[str], version_like: str | None = None,
              wide: bool = False) -> dict:
     """Returns and rows per side; with ``wide``, also GT's rows under our returns
-    that our table has no row for (``_theirs``)."""
+    that our table has no row for (``_theirs``). ``gt_release`` is the lineage
+    version of GT's rows measured (a patched row's is ``irs:<batch>``)."""
     _ours(session, table, batch_ids, version_like)
     only = _theirs(session, table, batch_ids if wide else None)
     row = session.execute(text(
         """SELECT (SELECT count(DISTINCT url) FROM o) AS ours_returns,
                   (SELECT count(*) FROM o) AS ours_rows,
                   (SELECT count(DISTINCT url) FROM g) AS gt_returns,
-                  (SELECT count(*) FROM g) AS gt_rows""")).mappings().one()
+                  (SELECT count(*) FROM g) AS gt_rows,
+                  (SELECT string_agg(DISTINCT CASE WHEN _source_version LIKE 'irs:%' THEN 'irs:*'
+                                                   ELSE _source_version END, ', ')
+                   FROM g) AS gt_release""")).mappings().one()
     return {"table": table, **row, **only}
 
 
+def gt_column(column: str, theirs: set[str]) -> str | None:
+    """GT's column to set beside our ``column``: the same name, or for a first
+    occurrence (``x_0``) GT's unnumbered ``x``, or None when GT's table has neither.
+
+    GT's 2026_10_25 release stopped numbering 990-PF elements that occur once
+    or twice (the application address and contact, the shareholder managers:
+    ``siasiraaline1_0`` and ``_1`` became ``siasiraaline1``), after we told it
+    a lone occurrence was lost; the concordance keeps the numbered names of
+    the releases production loaded.
+    """
+    if column in theirs:
+        return column
+    if column.endswith("_0") and column[:-2] in theirs:
+        return column[:-2]
+    return None
+
+
+_MEASURES = ("equal", "gt_only", "ours_only", "differ", "differ_case_space")
+
+
 def columns(session, table: str, mappings: list[extract.Mapping]) -> pd.DataFrame:
-    """Per-column agreement of a one-row table; ``o`` and ``g`` must be loaded."""
-    cols = [m.column for m in mappings]
+    """Per-column agreement of a one-row table; ``o`` and ``g`` must be loaded.
+
+    ``gt_column`` names GT's column each of ours is measured against
+    (:func:`gt_column`); a column GT's table does not have gets no counts.
+    """
+    theirs = set(session.execute(text("SELECT * FROM g LIMIT 0")).keys())
+    pairs = [(m.column, gt_column(m.column, theirs)) for m in mappings]
     parts = []
-    for c in cols:
+    for c, gc in pairs:
+        if gc is None:
+            continue
         parts += [
-            f"sum((o.{c} IS NOT DISTINCT FROM g.{c})::int) AS {c}__equal",
-            f"sum((o.{c} IS NULL AND g.{c} IS NOT NULL)::int) AS {c}__gt_only",
-            f"sum((o.{c} IS NOT NULL AND g.{c} IS NULL)::int) AS {c}__ours_only",
-            f"sum((o.{c} <> g.{c})::int) AS {c}__differ",
-            f"sum((o.{c} <> g.{c} AND upper(regexp_replace(o.{c}, '\\s+', ' ', 'g'))"
-            f" = upper(regexp_replace(g.{c}, '\\s+', ' ', 'g')))::int) AS {c}__differ_case_space",
+            f"sum((o.{c} IS NOT DISTINCT FROM g.{gc})::int) AS {c}__equal",
+            f"sum((o.{c} IS NULL AND g.{gc} IS NOT NULL)::int) AS {c}__gt_only",
+            f"sum((o.{c} IS NOT NULL AND g.{gc} IS NULL)::int) AS {c}__ours_only",
+            f"sum((o.{c} <> g.{gc})::int) AS {c}__differ",
+            f"sum((o.{c} <> g.{gc} AND upper(regexp_replace(o.{c}, '\\s+', ' ', 'g'))"
+            f" = upper(regexp_replace(g.{gc}, '\\s+', ' ', 'g')))::int) AS {c}__differ_case_space",
         ]
     row = session.execute(text(
         f"""SELECT count(*) AS n, {', '.join(parts)}
             FROM o JOIN (SELECT DISTINCT ON (url) * FROM g ORDER BY url) g   -- GT's doubles are identical
             USING (url)""")).mappings().one()
     out = []
-    for c in cols:
-        out.append({"column": c, "read": c in READ.get(table, ()), "n": row["n"],
-                    **{k: row[f"{c}__{k}"] for k in
-                       ("equal", "gt_only", "ours_only", "differ", "differ_case_space")}})
+    for c, gc in pairs:
+        out.append({"column": c, "gt_column": gc, "read": c in READ.get(table, ()), "n": row["n"],
+                    **{k: (row[f"{c}__{k}"] if gc else None) for k in _MEASURES}})
     return pd.DataFrame(out)
+
+
+def gt_only_columns(session, mappings: list[extract.Mapping]) -> list[str]:
+    """GT's columns in ``g`` that none of ours is measured against, lineage aside."""
+    theirs = set(session.execute(text("SELECT * FROM g LIMIT 0")).keys())
+    used = {gt_column(m.column, theirs) for m in mappings}
+    return sorted(theirs - used - set(LINEAGE_COLUMN_NAMES))
 
 
 def shapes(session) -> pd.DataFrame:
@@ -330,14 +368,23 @@ def schedule_i_line2(session) -> dict:
     blanked row is paired with our row under the same url and the same two
     name lines (k-th with k-th, so repeated names pair once each), in the
     repaired ``_current`` relation production reads. Every loaded batch.
+
+    GT's blanked rows go to a temp table first: the planner takes their three
+    tests as independent, and on GT's 2026_10_25 release estimated 10 rows for
+    11,913 and scanned our 2.8M rows once per row (cancelled at 25 minutes);
+    counted, the join is a hash join.
     """
+    session.execute(text("DROP TABLE IF EXISTS pg_temp.b"))
+    session.execute(text(
+        """CREATE TEMP TABLE b AS
+           SELECT url, rtrnbbnline11 AS n1, rtrnbbnline22 AS n2,
+                  row_number() OVER (PARTITION BY url, rtrnbbnline11, rtrnbbnline22) AS k
+           FROM public.grants_to_domestic_organizations_current
+           WHERE rtrnbbnline22 IS NOT NULL AND retaamofcagr IS NULL AND rteinorecipi IS NULL"""))
+    session.execute(text("ANALYZE b"))
     return session.execute(text(
-        f"""WITH g AS (SELECT url, rtrnbbnline11 AS n1, rtrnbbnline22 AS n2,
-                              row_number() OVER (PARTITION BY url, rtrnbbnline11, rtrnbbnline22) AS k
-                       FROM public.grants_to_domestic_organizations_current
-                       WHERE rtrnbbnline22 IS NOT NULL AND retaamofcagr IS NULL
-                         AND rteinorecipi IS NULL
-                         AND url IN (SELECT url FROM {SCHEMA}.grants_to_domestic_organizations)),
+        f"""WITH g AS (SELECT * FROM b
+                       WHERE url IN (SELECT DISTINCT url FROM {SCHEMA}.grants_to_domestic_organizations)),
                  o AS (SELECT url, rtrnbbnline11 AS n1, rtrnbbnline22 AS n2, retaamofcagr, rteinorecipi,
                               row_number() OVER (PARTITION BY url, rtrnbbnline11, rtrnbbnline22
                                                  ORDER BY group_ordinal) AS k

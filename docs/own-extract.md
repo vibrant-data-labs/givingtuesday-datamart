@@ -51,6 +51,13 @@ both hold.
   total into grants, $812.8M of it on 332 returns). `own_extract patch` is
   built and was proven on a scratch copy with production's own `_current`
   DDL; it has not run on production.
+- **Checks that need no GT** (2026-10-28). Our grant rows against each
+  filing's own totals: 96.9% of 990-PFs with grants match line 25, the
+  same where GT holds the return and where it does not; 97.7% of Schedule
+  Is fit within Part IX line 1. And the XML elements no concordance path
+  reads, per schema version: it found the foreign addresses of 990-PF
+  grant recipients we did not read (read since concordance
+  `ce054c032e56`), and would have caught the 2025v4 rename without GT.
 
 ## Why
 
@@ -180,6 +187,13 @@ GT rules one path does not express, all now in the file:
 - **990 foreign address** (`basic_fields.filerfor*`): the counterpart. When
   the header has no foreign address, GT takes the form body's (420 to 722
   of 785,185 returns of 2024-2026).
+- **A 990-PF grant recipient's foreign address** (`privategrants.sigocpyrfa*`,
+  `privategrants_future.sigocaffrfa*`): GT fills the US address columns
+  from the foreign address when there is no US one: lines 1 and 2, the
+  city, `ProvinceOrStateNm` as the state and `ForeignPostalCd` as the ZIP
+  (measured on 56,104 3a and 8,487 3b foreign grants, 2026-10-28). The
+  country stays in `sigocaffrfaco`, which GT leaves empty in 3a. Followed
+  since concordance `ce054c032e56`: production reads these columns.
 
 Corrections to what the search proposed, each measured by `parity` on every
 loaded batch:
@@ -414,6 +428,196 @@ the data onto four volumes, which its documentation says can take hours;
 that copy was deleted unused after 50 minutes. Restore at the same size,
 the evening before.
 
+### Against a new GT release
+
+Since the patch (2026-10-26), production's staging tables hold our rows for
+every batch we read, so `parity` on the shared instance would compare ours
+with ours. A new GT release is measured on a scratch Postgres that holds a
+copy of our extract and GT's release beside it, and nothing else:
+
+```bash
+# 1. a scratch instance (2026-10-28: Postgres 16 on the EC2 box, data in /dev/shm, trust on localhost)
+initdb -D /dev/shm/pgparity -U postgres --auth=trust -E UTF8 --locale=C.UTF-8
+pg_ctl -D /dev/shm/pgparity -l /dev/shm/pgparity.log -w start
+psql -h localhost -U postgres -d postgres -c "CREATE DATABASE gt_datamart"
+# 2. our extract from the shared instance (PG* variables from config.ini): one read of ~12 GB
+pg_dump -Fd -j 4 --compress=lz4 --no-owner --no-privileges -n irs_extract -f /dev/shm/x
+pg_dump -Fd --no-owner --no-privileges -t datamart_meta.ingest_runs -f /dev/shm/m   # -t ignores -n
+psql -h localhost -U postgres -d gt_datamart -c "CREATE SCHEMA datamart_meta"
+pg_restore -h localhost -U postgres -d gt_datamart -j 16 --no-owner /dev/shm/x
+pg_restore -h localhost -U postgres -d gt_datamart --no-owner /dev/shm/m
+# 3. GT's release, then parity there
+python -m givingtuesday_datamart.own_extract gt-release 2026_10_25 --host localhost --jobs 10
+python -m givingtuesday_datamart.own_extract parity --host localhost --report data/own_extract/parity_report_2026_10_25.md
+```
+
+`gt-release` (module `release`) streams each table's CSV through production's
+own ingest path, so the column names, text and lineage stamps are what a
+`sources refresh` would write; keeps only the rows under the returns of our
+loaded batches, in the file's order; and builds the `_current` relations over
+them with production's DDL. It refuses the shared instance's host. Keeping
+only our batches' returns is what `parity` reads anyway; the one thing it
+changes is the version a `_current` relation keeps for a filer-year whose
+other versions are in a batch we do not read (19 of 206,340 990-PF returns
+on 2026-10-24). Where GT's release drops or renames a column, `parity`
+measures our first occurrence (`x_0`) against GT's unnumbered `x` and lists
+the columns either side lacks.
+
+### GT's 2026_10_25 release
+
+GT published new datamarts on 2026-10-27, dated 2026_10_25: a test of
+changes to its parser and concordance made after we flagged the defects
+above, without the IRS's two most recent batches. Measured on 2026-10-28
+as above (load 14 min, `parity` 12 min on the box); the report is
+`data/own_extract/parity_report_2026_10_25.md` (git-ignored).
+
+**Coverage.** It adds 2026's 05A, 06A and 07A in full. It holds none of
+2026 05B (81,475 returns: the IRS index labels that archive 05A), 08A or
+09A, and still 17% of 2025's 09A and 10A. Of the three forms in our 38
+batches it lacks 209,879 returns (360,068 in June): 109,313 990s, 37,115
+990-PFs, 63,451 990-EZs. With them 423,732 990-PF grants ($22.8B), 385,120
+Schedule I grants ($61.3B) and 5,769 future grants ($2.2B).
+
+**On the returns both hold**, the return tables agree as before or better:
+
+| table | returns both hold | read columns equal on every return | June |
+|---|---|---|---|
+| basic_fields (990) | 858,304 | 29 of 29, and all 164 columns | 29 of 29, 163 of 164 |
+| mission_statements, programs | 858,304 | 3 of 3, 5 of 5 | the same |
+| basic_fields_pf (990-PF) | 305,282 | 32 of 33 (the file hash, 27 returns) | 32 of 33 (28) |
+| basic_fields_ez (990-EZ) | 515,145 | 16 of 16 | 16 of 16 |
+
+What GT fixed, of what we flagged:
+
+| defect | June release | 2026_10_25 |
+|---|---|---|
+| doubled return rows (990, 990-EZ, 990-PF) | 42,482 / 16,472 / 15,859 rows | 0 / 0 / 14 |
+| doubled 990-PF grant blocks | 10,328 returns | 4 |
+| 990-PF grant amounts filled with the block's total | 332 returns, $812.8M above line 25 | 28 returns, $7.0M |
+| doubled 990-EZ program lists | 16,472 returns | 0 |
+| a lone application address, contact, shareholder manager lost (numbered columns) | 77.5% / 78.3% / 85.1% of returns agree | 99.6% / 99.7% / 99.8%: GT now writes them unnumbered |
+
+So 990-PF grant totals agree with production's repaired relation, built
+over GT's release, on 229,903 of 231,361 returns (99.4%; June 99.1%), and
+Schedule O on every note but one doubled return's.
+
+What it did not fix:
+
+| defect | 2026_10_25 |
+|---|---|
+| Schedule I rows blanked when the recipient has a name line 2 | every such row: 11,913 in `_current` on 3,578 returns, $3.90B of cash, 10,414 with a recipient EIN; ours has all of them. They are 3,578 of the 3,581 returns whose Schedule I total differs from ours |
+| the 2025v4 rename of a grant recipient's foundation status | NULL on all 403,703 grants of the 33,823 2025v4 990-PFs it holds (June: 42 returns; the new batches are mostly 2025v4) |
+| one 990-EZ program description repeated on every row | 15,683 returns, 41,683 rows |
+| a lone contributing manager (990-PF) and other organization type (990-EZ) lost | 81,942 and 4,311 returns: GT still numbers these |
+| 2025 09A and 10A mostly unprocessed | 17.7% and 17.1% held |
+| Schedule I rows missing | 331 returns (308) |
+
+New in this release: the American Online Giving Foundation's 2024 Schedule
+I (44,583 grants, $1.90B) is doubled, and the `_current` relation's dedup
+keeps 50,725 rows of the 89,166; the AmazonSmile Foundation's 2023v6
+990-PF (363,675 grants) has the relationship NULL on every row, where the
+XML says NONE; and empty grant groups (no recipient, $0) are dropped:
+on 329 returns GT has 1,232 fewer rows than ours, with the same total on
+324 of them.
+
+Two gaps on our side came out of it, both closed the same day. GT writes a
+foreign recipient's address into the 990-PF grant tables' address columns,
+which production reads; our concordance took the US address only (57,655
+grants on 10,811 returns where GT had an address and ours none, 57,594 of
+them with a foreign country in ours). And 49 returns written with an `irs:`
+namespace prefix had no group rows in `irs_extract` (230 Schedule O notes,
+22 990-EZ programs, 3 Schedule I grants of $566,494, 2 990-PF grants of
+$4,402): the loader's form scan missed them until the fix of 2026-10-26,
+which came after the batches were last loaded (a re-parse of all 38
+batches found these and no others).
+
+The concordance now follows GT's foreign-address convention (*The
+concordance*), and `own_extract reload` loaded all 38 batches again on the
+scratch copy, from our copies of the archives (8.5 minutes): every foreign
+grant matched to GT's row (56,104 in 3a, 8,487 in 3b) has the same five
+address columns; our 990-PF rows with an identical GT row went from
+3,371,404 to 3,425,313; the 49 returns have their 257 rows, and GT has no
+rows under our returns that ours lacks beyond its empty and total-only
+990-PF rows. Nothing else moved. The row share with an identical GT row is
+otherwise set by GT: 990-PF grants 81.7% (June 86.4%: the foundation-status
+rename now over many more returns, and AmazonSmile), Schedule I 99.5% of
+GT's rows once the doubled return is set aside (99.5%), future grants all
+114,880. Production still holds the rows of the earlier concordance (*A
+concordance change*, below).
+
+## Checks that need no GT
+
+GT's tables are a second parser: where they agree with ours, two parsers
+read the XML alike, and where they do not, the XML decides. They have
+caught our mistakes (the first load's 34 sibling paths, the foreign
+addresses and the 49 `irs:` returns above) as often as theirs. But they
+prove nothing where we follow GT's conventions, where both parsers miss an
+element, or for a return GT does not hold: 209,879 of our batches' returns
+in its 2026_10_25 release, and every new batch until GT catches up. Two
+checks lean on nothing but the filings:
+
+```bash
+python -m givingtuesday_datamart.own_extract checks [--batch ...] [--host HOST]   # data/own_extract/checks_report.md
+python -m givingtuesday_datamart.own_extract audit [--jobs N] [--host HOST]       # batches loaded before load counted
+```
+
+**Totals the filings state** (module `checks`). A 990-PF's grant rows add
+up to line 25 of Part I, column (d) or (a). A 990's Schedule I lists every
+grant of more than $5,000 to a domestic organization, so its cash and
+non-cash amounts add up to no more than Part IX line 1, column (A). Each
+return is classified from `irs_extract` alone, a batch at a time; `load`
+prints each batch's rates, and the report lists the rates by batch and by
+schema version, any batch 2 points below the median of the others, and the
+largest gaps to sample against the XML. A return that fails is not our
+error by default: grants listed in an attachment, a line 25 that is not the
+grant list, a filer's slip. A batch that falls behind the others is the
+mark of a parse that went wrong in it.
+
+**Elements no concordance path reads** (module `audit`, table
+`irs_extract.unread_paths`). Every leaf element of a parsed return that no
+path reads, where it sits inside a group a table reads or beside an element
+a return-level table reads, counted by batch, form, schema version and
+path, with the archive's and the concordance's SHA-256. `load` counts them
+as it parses; `audit` re-reads batches loaded before, from our copy of each
+archive, checked against the SHA-256 its load stamped. The report lists,
+from 0.5% of a form's returns: elements inside a group, elements with the
+same name as a read one beside them but for the type suffix (`...Txt` to
+`...Cd`: a rename), and elements first seen in a later schema version.
+
+First run, 2026-10-28, on the scratch copy of the extract (all 38 batches,
+concordance `3d9b48d6e5e7`; the audit 8.5 minutes, the report 11 seconds;
+126,309 rows, 687 paths):
+
+| check | returns it applies to | passing | lowest version, batch |
+|---|---|---|---|
+| 990-PF grants against line 25 | 263,734 | 255,648 (96.9%) | 2023v4 93.9%; 2026 03A 94.9% |
+| Schedule I against Part IX line 1 | 137,300 | 134,074 (97.7%) | 2020v4 92.0% (125 returns); 2024 12A 97.0% |
+
+No batch is 2 points below the others. The rates are the same where GT
+holds the return and where it does not (990-PF 96.9% and 97.1%), so ours
+do not lean on GT's. Of the 990-PFs that fail, 3,928 state a line 25 and
+list no grant: the largest state $2.0B, $1.8B and $1.4B. Under concordance
+`ce054c032e56`, after the reload below: 255,649 of 263,734 and 134,075 of
+137,301, the one return more in each being an `irs:` return now read.
+
+The audit lists, inside the 990-PF grant groups, the recipient's foreign
+address (line 1 on 61,612 grants of 12,025 returns, city, postal code,
+province): the gap GT's 2026_10_25 release showed the same morning, found
+without it. It lists no rename. Run over 2026 09A with the concordance as
+it stood before the 2025v4 rename was found (the status read as
+`RecipientFoundationStatusTxt` only), it lists `RecipientFoundationStatusCd`
+beside it on 3,356 of the batch's 4,734 2025v4 990-PFs, so it would have
+caught that rename without GT. The elements first seen in a later version
+are header indicators no table needs (`IRSResponsiblePrtyInfoCurrInd`, from
+2022v5 on 86% of 990s); nothing new inside a group in 2025v4. Once the
+concordance took the foreign address and the batches were reloaded, the
+list inside groups is empty.
+
+What neither check sees: a value read into the wrong column with the
+totals still right, and an element moved under a parent nothing reads (the
+audit sees it only as new in its version). A hand-checked sample of returns
+per form and schema version, kept as test fixtures, would cover the first.
+
 ## The patch, ours first
 
 Decided on 2026-10-24: for every batch we read (2024 on), our rows replace
@@ -494,6 +698,28 @@ every loaded list in our batches our rows hold the placeholder row.
 Monthly, as the IRS posts a batch: `own_extract load <year> --batch
 <new>`, then steps 2 to 4. When GT's next release lands, `sources refresh`
 replaces the staging tables and drops the patch; step 2 puts it back.
+
+**A concordance change.** A new concordance gives every batch a new stamp,
+and `patch` refuses batches loaded under different ones, so all of them are
+loaded again, then patched again:
+
+1. `own_extract reload`: every loaded batch from our copy of its archive,
+   checked against the SHA-256 its first load stamped, nothing fetched
+   from the IRS; it prints each batch's checks. A batch's rows are
+   replaced in one transaction, so 12 GB of dead rows wait for a vacuum
+   unless `irs_extract`'s tables are truncated first (2026-10-23);
+2. `own_extract patch` (snapshot first): our earlier patch rows out, the
+   new ones in, the basic-fields relations rebuilt; then a vacuum of the
+   ten staging tables;
+3. the grants `_current` relations (`current_grants --only` each), then
+   `sources build-canonical`, then the matcher and its gate. The matcher
+   run is the one already due.
+
+The foreign-address change of 2026-10-28 touches the 990-PF grant
+relations (an address on 61,612 more grants, the ZIP column now holding a
+foreign postal code where there is one, as GT's rows had before the patch)
+and, through the 49 `irs:` returns, Schedule O and the 990-EZ programs.
+The return tables do not change.
 
 **Undo.** `sources refresh --force` of the ten sources loads GT's release
 again and rebuilds the basic-fields relations; the grants relations and the

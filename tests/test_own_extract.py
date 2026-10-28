@@ -12,7 +12,7 @@ import zipfile
 import pandas as pd
 import pytest
 
-from givingtuesday_datamart.own_extract import batches, discover, extract, load, parse, patch
+from givingtuesday_datamart.own_extract import audit, batches, checks, discover, extract, load, parse, patch
 
 PF = b"""<?xml version="1.0" encoding="utf-8"?>
 <Return xmlns="http://www.irs.gov/efile" returnVersion="2024v5.2">
@@ -433,3 +433,227 @@ def test_schedule_i_leaves_the_filer_name_line_2_empty_as_gt_does():
              for t in ("privategrants", "grants_to_domestic_organizations")}
     assert paths == {"privategrants": ("/ReturnHeader/Filer/BusinessName/BusinessNameLine2Txt",),
                      "grants_to_domestic_organizations": ()}
+
+
+def test_a_first_occurrence_is_measured_against_gt_unnumbered_column():
+    from givingtuesday_datamart.own_extract import parity
+
+    theirs = {"siasiraaline1", "supinfconman_0", "filerein"}
+    assert parity.gt_column("filerein", theirs) == "filerein"
+    assert parity.gt_column("siasiraaline1_0", theirs) == "siasiraaline1"     # 2026_10_25 dropped the number
+    assert parity.gt_column("supinfconman_0", theirs) == "supinfconman_0"     # still numbered there
+    assert parity.gt_column("siasiraaline1_1", theirs) is None
+    assert parity.gt_column("supinfconman_2", theirs) is None
+
+
+def test_release_files_pick_each_table_of_one_release():
+    from givingtuesday_datamart.own_extract import release
+    from givingtuesday_datamart.sources.resolver import BucketListing, BucketObject
+
+    names = {spec.filename_regex for spec in release.specs().values()}
+    assert len(names) == len(extract.TABLES)
+    stems = ["990StandardFields", "990PFStandardFields", "990EZStandardFields", "990Part1Missions",
+             "990Part3Programs", "990EZPart3Programs", "ScheduleO", "ScheduleIPart2Grants",
+             "990PFPart14Grants3A", "990PFPart14Grants3B"]
+    objects = tuple(BucketObject(key=f"EfileDataMarts/{v}_All_Years_{s}.csv", size=1, last_modified="")
+                    for v in ("2026_06_16", "2026_10_25") for s in stems)
+    listing = BucketListing(bucket="b", prefix="EfileDataMarts/", objects=objects)
+    urls = release.files("2026_10_25", listing)
+    assert sorted(urls) == sorted(extract.TABLES)
+    assert all("/2026_10_25_All_Years_" in u for u in urls.values())
+    assert urls["schedule_o"].endswith("2026_10_25_All_Years_ScheduleO.csv")
+    with pytest.raises(LookupError):
+        release.files("2026_09_01", listing)
+
+
+def test_gt_release_refuses_the_shared_instance(monkeypatch):
+    from givingtuesday_datamart.own_extract import release
+
+    shared = {"postgres": {"host": "shared.example", "database": "gt_datamart"}}
+    monkeypatch.setattr(release, "datamart_config", lambda: shared)
+    with pytest.raises(SystemExit):
+        release.refuse_shared(shared)
+    release.refuse_shared({"postgres": {"host": "localhost", "database": "gt_datamart"}})
+    resolves = {"shared.example": "10.0.0.5", "10.0.0.5": "10.0.0.5", "localhost": "127.0.0.1"}
+    monkeypatch.setattr(release.socket, "getaddrinfo",
+                        lambda host, port: [(None, None, None, "", (resolves[host.lower()], 0))])
+    for alias in ("10.0.0.5", "SHARED.example"):                       # its address, another case
+        with pytest.raises(SystemExit):
+            release.refuse_shared({"postgres": {"host": alias, "database": "gt_datamart"}})
+
+
+# Checks that need no GT: the filings' own totals, the unread elements.
+
+M = extract.Mapping
+CONCORDANCE = {
+    "basic_fields_pf": [M("basic_fields_pf", "filerein", ("ReturnHeader/Filer/EIN",)),
+                        M("basic_fields_pf", "taxyear", ("ReturnHeader/TaxYr",))],
+    "privategrants": [M("privategrants", "filerein", ("/ReturnHeader/Filer/EIN",)),
+                      M("privategrants", "sigocpyrpnam", ("RecipientPersonNm",)),
+                      M("privategrants", "sigocpyamoun", ("Amt",))],
+}
+
+
+def test_a_990pf_is_classified_against_line_25():
+    assert checks.pf_status(0, None, None, None) == checks.NOT_APPLICABLE
+    assert checks.pf_status(0, None, 5000, None) == "line 25, no grant rows"
+    assert checks.pf_status(3, 5250, 5250, 0) == "equal"              # column (d)
+    assert checks.pf_status(3, 5250, None, 5250.4) == "equal"         # column (a), within a dollar
+    assert checks.pf_status(3, 5000, 5250, 5250) == "rows below line 25"
+    assert checks.pf_status(3, 6000, 5250, None) == "rows above line 25"
+    assert checks.pf_status(2, 0, None, None) == "equal"              # empty groups, nothing stated
+    assert checks.pf_status(3, 0, None, 1_000_000) == "rows below line 25"   # an empty (d) is not $0
+
+
+def test_schedule_i_counts_cash_and_non_cash_against_part_ix_line_1():
+    assert checks.schedule_i_status(10_000, 5_000, 15_000) == "within line 1"
+    assert checks.schedule_i_status(10_000, None, 20_000) == "within line 1"
+    assert checks.schedule_i_status(10_000, 5_000, 14_000) == "above line 1"
+    assert checks.schedule_i_status(10_000, None, None) == "above line 1"
+
+
+def _frame(batch, passing, failing, check=checks.PF_LINE25):
+    ok, bad = checks.PASSING[check], "rows below line 25" if check == checks.PF_LINE25 else "above line 1"
+    rows = [(batch, f"{batch}{i}", "2024v5.0", check, ok, 1.0, 1.0) for i in range(passing)]
+    rows += [(batch, f"{batch}x{i}", "2024v5.0", check, bad, float(i), 1000.0) for i in range(failing)]
+    rows += [(batch, f"{batch}n", "2024v5.0", check, checks.NOT_APPLICABLE, 0.0, 0.0)]
+    return pd.DataFrame(rows, columns=["batch", "object_id", "version", "check", "status", "ours", "stated"])
+
+
+def test_rates_leave_out_returns_a_check_does_not_apply_to_and_flag_a_low_batch():
+    frame = pd.concat([_frame("A", 970, 30), _frame("B", 968, 32), _frame("C", 900, 100)], ignore_index=True)
+    by = checks.rates(frame, "batch").set_index("batch")
+    assert by.loc["A", "returns"] == 1000 and by.loc["A", "passing_pct"] == 97.0
+    assert by.loc["C", "rows below line 25"] == 100
+    low = checks.low_batches(by.reset_index())
+    assert list(low["batch"]) == ["C"]
+    gaps = checks.largest_gaps(frame, n=2)
+    assert list(gaps["gap"]) == [-1000.0, -1000.0]        # ours 0 against 1,000 stated, largest first
+
+
+def test_unread_counts_group_elements_and_siblings_of_read_paths_only():
+    cov = audit.coverage(CONCORDANCE)
+    filing = parse.parse(PF, OID, extract.GROUP_PATHS)
+    assert audit.unread(filing, cov) == {
+        (audit.RETURN_SCOPE, "ReturnHeader/ReturnTypeCd"): 1,           # beside the read TaxYr
+        (audit.RETURN_SCOPE, "ReturnHeader/TaxPeriodBeginDt"): 1,
+        ("privategrants", f"{GRANTS}/RecipientBusinessName/BusinessNameLine1Txt"): 1,
+    }   # the filer's business name and the Part XV total sit beside nothing read: not counted
+
+
+def test_a_renamed_element_is_found_by_its_type_suffix():
+    read = {"A/B/RecipientFoundationStatusTxt", "A/B/Amt"}
+    assert audit.renamed_sibling("A/B/RecipientFoundationStatusCd", read) == "A/B/RecipientFoundationStatusTxt"
+    assert audit.renamed_sibling("A/C/RecipientFoundationStatusCd", read) is None
+    assert audit.renamed_sibling("A/B/PurposeTxt", read) is None
+    assert audit.stem("X/CashGrantAmt") == "CashGrant" and audit.stem("X/Amt") == "Amt"
+
+
+def test_extract_batch_counts_the_unread_elements_by_form_version_and_path(tmp_path):
+    out = tmp_path / "rows"
+    out.mkdir()
+    unread: dict = {}
+    load.extract_batch(_zip(tmp_path, {f"{OID}_public.xml": PF, "202600139349101051_public.xml": PF}),
+                       "b", CONCORDANCE, out, unread)
+    key = ("990PF", "2024v5.2", "privategrants", f"{GRANTS}/RecipientBusinessName/BusinessNameLine1Txt")
+    assert unread[key] == [2, 2]
+    assert ("990PF", "2024v5.2", audit.RETURN_SCOPE, "ReturnHeader/ReturnTypeCd") in unread
+
+
+class _S3:
+    def __init__(self, body: bytes):
+        self.body, self.keys = body, []
+
+    def download_file(self, bucket, key, path):
+        self.keys.append((bucket, key))
+        with open(path, "wb") as handle:
+            handle.write(self.body)
+
+
+def test_an_archive_is_reread_from_our_copy_only_if_it_is_the_one_loaded(tmp_path):
+    body = b"the archive"
+    s3 = _S3(body)
+    path = batches.fetch_archived("2025_TEOS_XML_11B", hashlib.sha256(body).hexdigest(), tmp_path, s3)
+    assert path.read_bytes() == body
+    assert s3.keys == [("givingtuesday-datamart", "irs/xml_batches/2025/2025_TEOS_XML_11B.zip")]
+    batches.fetch_archived("2025_TEOS_XML_11B", hashlib.sha256(body).hexdigest(), tmp_path, s3)
+    assert len(s3.keys) == 1                                   # the cached copy matches: no download
+    with pytest.raises(ValueError, match="not the archive that was loaded"):
+        batches.fetch_archived("2025_TEOS_XML_11B", "0" * 64, tmp_path, _S3(b"something else"))
+
+
+FOREIGN = PF.replace(
+    b"<RecipientPersonNm>JANE DOE</RecipientPersonNm>",
+    b"<RecipientPersonNm>THE HONEYGUIDE FOUNDATION</RecipientPersonNm>"
+    b"<RecipientForeignAddress><AddressLine1Txt>P O BOX 8271</AddressLine1Txt><CityNm>ARUSHA</CityNm>"
+    b"<ProvinceOrStateNm>ARUSHA REGION</ProvinceOrStateNm><CountryCd>TZ</CountryCd>"
+    b"<ForeignPostalCd>255</ForeignPostalCd></RecipientForeignAddress>",
+).replace(
+    b"<RecipientBusinessName><BusinessNameLine1Txt>FOOD BANK</BusinessNameLine1Txt></RecipientBusinessName>",
+    b"<RecipientBusinessName><BusinessNameLine1Txt>FOOD BANK</BusinessNameLine1Txt></RecipientBusinessName>"
+    b"<RecipientUSAddress><AddressLine1Txt>1 MAIN ST</AddressLine1Txt><CityNm>DENVER</CityNm>"
+    b"<StateAbbreviationCd>CO</StateAbbreviationCd><ZIPCd>80202</ZIPCd></RecipientUSAddress>",
+)
+
+
+def test_a_foreign_recipient_s_address_fills_the_address_columns_as_gt_does():
+    conc = extract.load()
+    filing = parse.parse(FOREIGN, OID, extract.GROUP_PATHS)
+    us, foreign = extract.rows(filing, "privategrants", conc["privategrants"], "b")
+    assert (us["sigocpyrfaal1"], us["sigocpyrfaci"], us["sigocpyrfapo"], us["sigocpyrfapc"]) == (
+        "1 MAIN ST", "DENVER", "CO", "80202")
+    assert (foreign["sigocpyrfaal1"], foreign["sigocpyrfaci"], foreign["sigocpyrfapo"],
+            foreign["sigocpyrfapc"], foreign["sigocaffrfaco"]) == (
+        "P O BOX 8271", "ARUSHA", "ARUSHA REGION", "255", "TZ")
+    assert us["sigocaffrfaco"] is None
+
+
+def _cli_stubs(monkeypatch, frame):
+    import contextlib
+
+    from givingtuesday_datamart.own_extract import __main__ as cli
+
+    monkeypatch.setattr(cli, "get_session", lambda config=None: contextlib.nullcontext(object()))
+    monkeypatch.setattr(cli, "_config", lambda host: {"postgres": {"host": host}})
+    monkeypatch.setattr(cli.checks, "loaded", lambda session, batch_ids: frame)
+    monkeypatch.setattr(cli.checks, "batch_line", lambda session, batch_id: "rates")
+    return cli
+
+
+STAMP = {"year": "2026", "batch_id": "2026_TEOS_XML_01A", "url": "https://x/2026_TEOS_XML_01A.zip",
+         "last_modified": "Thu, 19 Feb 2026 18:32:24 GMT", "content_length": 3, "sha256": "ab" * 32}
+
+
+def test_reload_reports_a_failing_batch_and_goes_on(monkeypatch, tmp_path, capsys):
+    frame = pd.DataFrame({"batch": ["2025_TEOS_XML_01A", "2026_TEOS_XML_01A"], "stamp": [{}, STAMP]})
+    cli = _cli_stubs(monkeypatch, frame)
+    monkeypatch.setattr(cli.load, "_loaded", lambda session, version, conc: version.startswith("2026"))
+    args = cli.argparse.Namespace(host="localhost", batch=None, cache=tmp_path, keep_zips=False, jobs=1)
+    assert cli._reload(args) == 1
+    out = capsys.readouterr().out
+    assert "2025_TEOS_XML_01A: FAILED: 2025_TEOS_XML_01A: its load stamped no archive SHA-256" in out
+    assert "2026_TEOS_XML_01A: loaded already under this concordance" in out
+    assert "1 of 2 batches failed: 2025_TEOS_XML_01A" in out
+
+
+@pytest.mark.parametrize("cached", [True, False])
+def test_reload_records_the_stamp_and_deletes_only_an_archive_it_downloaded(monkeypatch, tmp_path, cached):
+    cli = _cli_stubs(monkeypatch, pd.DataFrame({"batch": [STAMP["batch_id"]], "stamp": [STAMP]}))
+    archive = tmp_path / f"{STAMP['batch_id']}.zip"
+    if cached:
+        archive.write_bytes(b"zip")
+    monkeypatch.setattr(cli.load, "_loaded", lambda session, version, conc: False)
+
+    def fetched(batch_id, sha256, cache):
+        archive.write_bytes(b"zip")
+        return archive
+
+    def loaded(session, path, concordance):
+        assert batches.stamp_of(path) == STAMP              # the load records the first load's stamp
+        return {"rows": {"privategrants": 2}}
+
+    monkeypatch.setattr(cli.batches, "fetch_archived", fetched)
+    monkeypatch.setattr(cli.load, "load_batch", loaded)
+    line = cli._reload_one({}, STAMP["batch_id"], STAMP, tmp_path, keep=False)
+    assert "privategrants 2" in line and line.endswith("checks: rates")
+    assert archive.exists() == cached

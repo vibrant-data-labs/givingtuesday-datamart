@@ -192,6 +192,7 @@ data/exploratory/bmf_assessment_*
 data/exploratory/bmf_alias_gain_*
 
 # own_extract: the generated parity report, the patch proof and any proposal (docs/own-extract.md holds the results)
-data/own_extract/parity_report.md
+data/own_extract/parity_report*.md
+data/own_extract/checks_report.md
 data/own_extract/patch_proof.md
 data/own_extract/concordance_proposed.csv

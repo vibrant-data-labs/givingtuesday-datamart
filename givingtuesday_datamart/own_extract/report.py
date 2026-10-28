@@ -46,6 +46,7 @@ def loaded_batches(session) -> pd.DataFrame:
                    (SELECT string_agg(substr(k, 9) || ' ' || v, ', ' ORDER BY k)
                     FROM jsonb_each_text(source_manifest->'rows') AS e(k, v)
                     WHERE k LIKE 'version_%') AS schema_versions,
+                   source_manifest->'batch' AS stamp,
                    finished_at
             FROM datamart_meta.ingest_runs
             WHERE logical_name = '{LOGICAL_NAME}' AND status = 'success'
@@ -53,6 +54,21 @@ def loaded_batches(session) -> pd.DataFrame:
 
 
 _FORMS = {"basic_fields": "990", "basic_fields_pf": "990-PF", "basic_fields_ez": "990-EZ"}
+
+
+def _column_sets(cols: pd.DataFrame, gt_only: list[str]) -> list[str]:
+    """Where our columns and GT's table do not line up name for name."""
+    out = []
+    renamed = cols[cols["gt_column"].notna() & (cols["gt_column"] != cols["column"])]
+    if not renamed.empty:
+        out += ["Measured against GT's unnumbered column (its release numbers the element no more):\n",
+                _md(renamed[["column", "gt_column", "agree_pct"]])]
+    missing = cols[cols["gt_column"].isna()]
+    if not missing.empty:
+        out.append(f"Our columns GT's table does not have: {', '.join(missing['column'])}.\n")
+    if gt_only:
+        out.append(f"GT's columns none of ours is measured against: {', '.join(gt_only)}.\n")
+    return out
 
 
 def run(session, out: Path, batch_ids: list[str] | None = None,
@@ -126,6 +142,7 @@ def run(session, out: Path, batch_ids: list[str] | None = None,
             if not rest.empty:
                 section += ["Columns production does not read, below 100%:\n",
                             _md(rest[_COLUMN_FIELDS])]
+            section += _column_sets(cols, parity.gt_only_columns(session, mappings))
         else:
             compared = [parity.rows(session, table, table)]
             if table in parity.CURRENT:
@@ -189,6 +206,7 @@ def schema_checks(session) -> str:
         out.append(f"{int((read['agree_pct'] == 100).sum())} of {len(read)} read columns agree on "
                    f"every one of {int(cols['n'].max()):,} returns.\n")
         out.append(_md(read[read["agree_pct"] < 100][_COLUMN_FIELDS]))
+        out += _column_sets(cols, parity.gt_only_columns(session, mappings))
     out.append("### Columns filled in 2026 01A-04A and much less in 05A-09A\n")
     out.append("Older = 01A-04A, newer = 05A-09A. Listed when the older batches fill the column "
                "on at least 2% of rows and the newer on less than a quarter as many.\n")
