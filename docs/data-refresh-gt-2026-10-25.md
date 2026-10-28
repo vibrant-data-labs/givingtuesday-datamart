@@ -60,12 +60,14 @@ they do.
      runs.
 
    My recommendation: B.
-3. **The instances.** My recommendation: keep both as they are through step
-   9 and scale both back right after the gate. Every class change of the
-   shared instance is a restart of five to ten minutes, which the public
-   trackers feel, and the reload, the proofs and the matcher use the box's
-   cores and memory. Shrinking the box between steps saves about $1.85 an
-   hour against two restarts and two address changes.
+3. **The instances.** The shared instance stays the large class through
+   this run and goes back to the medium after it (Zein, 2026-10-28, in the
+   review of #83): every class change is a restart of five to ten minutes,
+   which the public trackers feel. For the box my recommendation is the
+   same, kept at 256 GB through step 9 and shrunk right after the gate: the
+   reload, the proofs and the matcher use its cores and memory, and
+   shrinking it between steps saves about $1.85 an hour against two
+   restarts and two address changes.
 4. **The read's cap.** $300, as in October. The projection should be small:
    the 74 pages and whatever filings join the work list.
 5. **The quiet window.** Steps 2 to 4 and step 9 in the evening, Pacific;
