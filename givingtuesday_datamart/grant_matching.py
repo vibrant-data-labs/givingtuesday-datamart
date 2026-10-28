@@ -2,6 +2,7 @@ import concurrent.futures as cf
 import hashlib
 import io
 import json
+import multiprocessing
 import re
 import uuid
 from dataclasses import dataclass
@@ -1972,6 +1973,7 @@ def match_records(
     limit: int | None = None,
     recovered_policy: str | None = None,
     skip_rebuild: bool = False,
+    workers: int = 1,
 ):
     """Run the recordlinkage grant-matching pipeline against gt_datamart.
 
@@ -2037,6 +2039,7 @@ def match_records(
             recovered_policy=recovered_policy,
             build_id=build_id,
             skip_rebuild=skip_rebuild,
+            workers=workers,
         )
     except BaseException as err:
         _finalize_build_failed(build_id, err)
@@ -2053,6 +2056,25 @@ def match_records(
     return full_data_df
 
 
+# What a chunk worker needs, set by the parent right before the pool forks
+# so the workers inherit it (copy-on-write): no pickling of the two frames
+# and the pair index per task.
+_POOL_STATE: dict = {}
+
+
+def _chunk_job(chunk_idx: int) -> tuple[int, pd.DataFrame]:
+    """One chunk in a worker: score it, write its checkpoint, return the rows.
+    The same three statements as the serial loop, so a chunk is written only
+    when fully computed and filtered, whichever path computed it."""
+    st = _POOL_STATE
+    start_idx = chunk_idx * st["chunk_size"]
+    end_idx = min(start_idx + st["chunk_size"], st["total_pairs"])
+    chunk = st["candidate_links"][start_idx:end_idx]
+    features = score_pairs(chunk, st["universe_df"], st["grants_df"])
+    pqc.write_dataframe(features, f"{st['uri_base']}/chunk_{chunk_idx:05d}.parquet")
+    return chunk_idx, features
+
+
 def _do_match_records(
     chunk_size: int,
     s3_bucket: str,
@@ -2063,6 +2085,7 @@ def _do_match_records(
     recovered_policy: str | None = None,
     build_id: str | None = None,
     skip_rebuild: bool = False,
+    workers: int = 1,
 ):
     """Inner pipeline body. Returns ``(full_data_df, pg_rows, ug_rows)``.
 
@@ -2184,22 +2207,41 @@ def _do_match_records(
     results: dict[int, pd.DataFrame] = dict(resumed)
     to_compute = [idx for idx in range(total_chunks) if idx not in results]
 
-    # --- Compute path: serial (recordlinkage compute() is single-threaded
-    # internally; parallelizing chunks here would compete for memory without
-    # buying speed). Keeping it serial also keeps the post-crash resume story
-    # simple — every written chunk is fully computed and filtered.
+    # --- Compute path. recordlinkage's compute() is single-threaded, so the
+    # chunks are the unit of parallelism: ``workers`` processes forked from
+    # here (the frames and the pair index inherited copy-on-write), each
+    # scoring whole chunks and writing each one's checkpoint itself, so
+    # every written chunk is fully computed and filtered whichever path made
+    # it, and a resume reads them back the same way. Serial by default (one
+    # worker): a laptop's memory. On 2026-10-27 the serial loop ran 45,855
+    # chunks at 1.6 s each, eighteen hours, on one of an r6i.8xlarge's 32
+    # cores; each worker gradually copies the pages of the string objects
+    # it touches, a few GB each, so size ``workers`` to the box's memory.
     if to_compute:
-        logger.info(f"Computing {len(to_compute)} new chunks...")
-    for chunk_idx in tqdm(to_compute, desc="Computing"):
-        start_idx = chunk_idx * chunk_size
-        end_idx = min(start_idx + chunk_size, total_pairs)
-        chunk = candidate_links[start_idx:end_idx]
-        # The (basic_fields_idx, privategrants_idx) MultiIndex comes back
-        # as regular columns so it survives the parquet round-trip.
-        features = score_pairs(chunk, basic_fields_df, private_foundations_df)
+        logger.info(f"Computing {len(to_compute)} new chunks with {workers} worker(s)...")
+    if workers > 1 and to_compute:
+        _POOL_STATE.update(chunk_size=chunk_size, total_pairs=total_pairs, candidate_links=candidate_links,
+                           universe_df=basic_fields_df, grants_df=private_foundations_df,
+                           uri_base=checkpoint_uri_base)
+        try:
+            with cf.ProcessPoolExecutor(max_workers=workers,
+                                        mp_context=multiprocessing.get_context("fork")) as pool:
+                for chunk_idx, features in tqdm(pool.map(_chunk_job, to_compute, chunksize=4),
+                                                total=len(to_compute), desc="Computing"):
+                    results[chunk_idx] = features
+        finally:
+            _POOL_STATE.clear()
+    else:
+        for chunk_idx in tqdm(to_compute, desc="Computing"):
+            start_idx = chunk_idx * chunk_size
+            end_idx = min(start_idx + chunk_size, total_pairs)
+            chunk = candidate_links[start_idx:end_idx]
+            # The (basic_fields_idx, privategrants_idx) MultiIndex comes back
+            # as regular columns so it survives the parquet round-trip.
+            features = score_pairs(chunk, basic_fields_df, private_foundations_df)
 
-        pqc.write_dataframe(features, f"{checkpoint_uri_base}/chunk_{chunk_idx:05d}.parquet")
-        results[chunk_idx] = features
+            pqc.write_dataframe(features, f"{checkpoint_uri_base}/chunk_{chunk_idx:05d}.parquet")
+            results[chunk_idx] = features
 
     logger.info(
         f"Chunk processing complete: loaded {len(resumed)} from checkpoints, "
@@ -2309,6 +2351,17 @@ if __name__ == "__main__":
             "them, with no load or ingest since; the views are still created."
         ),
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help=(
+            "Processes computing chunks (default 1, the serial loop). Forked "
+            "from the run, so the frames are shared; each worker still copies "
+            "the pages of the strings it touches, a few GB. Size it to the "
+            "box's memory: 12 on an r6i.8xlarge."
+        ),
+    )
     args = parser.parse_args()
 
     match_records(
@@ -2318,4 +2371,5 @@ if __name__ == "__main__":
         resume_workers=args.resume_workers,
         recovered_policy=args.recovered_policy,
         skip_rebuild=args.skip_rebuild,
+        workers=args.workers,
     )
