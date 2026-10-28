@@ -236,13 +236,33 @@ The BMF arm doubles the pairs (PR #68), so the read box does not do.
 - [x] `python -m givingtuesday_datamart.placeholder_recovery check --policy v3`
       (done 13:15:01 to 13:15:35 UTC: every rule ok, paid 582,471 rows of
       4,611 filings in the table and in the view, future 6,531 of 173)
-- [ ] `python -m givingtuesday_datamart.corrections_preflight` (hours on a laptop, minutes on a box)
-- [ ] `python -m givingtuesday_datamart.grant_matching` (about eight hours;
+- [x] `python -m givingtuesday_datamart.corrections_preflight` (hours on a laptop, minutes on a box)
+      (done 13:15:35 to 16:05:30 UTC on 32 cores, exit 0; the ASPCA's
+      family alone 90 million candidate pairs)
+- [x] `python -m givingtuesday_datamart.grant_matching` (about eight hours;
       it rebuilds the `_current` relations itself and reads the policy the
       view shows; the checkpoint prefix is new, so every chunk is computed)
+      (done at the third start, 2026-10-28 00:53:10 to 03:55:17 UTC, build
+      `a8c06fdb`, exit 0, with `--skip-rebuild --workers 12` from `b7b473a`:
+      2,292,738,120 candidate pairs in 45,855 chunks, 5,575 resumed from
+      the serial run, 40,280 computed by the pool 01:52 to 03:27; 27.66
+      million raw matches resolved to 2,557,051 pairs, name-only tier
+      41,221 tuples, 3,310 left unmatched by the one-filer-in-state rule;
+      `privategrants_w_recipients` 10,927,644 rows (7,578,795 in August),
+      `unioned_grants` 19,879,313 (16,044,328); the log)
 - [ ] `python -m givingtuesday_datamart.matching_regression_checks`:
       `GATE: PASS`, or the diagnosis of what moved.
-- [ ] `python -m givingtuesday_datamart.placeholder_recovery check --policy v3`
+      (run 03:55:20 to 04:01:02 UTC: **GATE: FAIL** on two checks,
+      placeholder rows matched 415 against a ceiling of 349, and the
+      Johns Hopkins sentinel 706 rows against a floor of 1,735; every hard
+      rule at zero, both coverage floors held (PF 71.2%, 990 94.7%),
+      MJFF 4,668; warnings: self-matches 3,661 against 3,641, the
+      match_source breakdown moved with the BMF arm (basic_fields 5.72M
+      from 7.48M, eo_bmf 5.13M from 0, basic_fields_pf 60K from 85K,
+      correction 16.4K from 15.4K), 2,972 matched recovered rows of lists
+      marked as grants to individuals; the diagnosis follows in the log)
+- [x] `python -m givingtuesday_datamart.placeholder_recovery check --policy v3`
+      (done 04:01:02 to 04:01:46 UTC after the run, exit 0)
 - [ ] The accepting commit: the baselines updated, every number that moved
       explained, the gate rerun on `PASS`
       (`docs/matching-regression-runbook.md`, *Updating the baselines*).
@@ -632,6 +652,49 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   check after it. Twelve workers, not 31: each worker copies the pages of
   the string objects it touches, a few GB, on a box with 247 GB and a
   78 GB parent.
+- **2026-10-28, 00:53 to 04:01 UTC, the matcher finished; the gate
+  failed.** Build `a8c06fdb`: the integer index 00:53 to 01:52 (the reads
+  and the cleaning included), 2,292,738,120 pairs, 5,575 chunks resumed
+  from S3, 40,280 computed by twelve workers 01:52 to 03:27 (about seven
+  chunks a second against 0.63 serially), 27.66 million raw matches
+  resolved to 2,557,051 pairs, the tables written by 03:55:
+  `privategrants_w_recipients` 10,927,644 rows (7,578,795 in August),
+  `unioned_grants` 19,879,313 (16,044,328). The gate (03:55 to 04:01):
+  FAIL on two checks, every hard rule at zero, both coverage floors held,
+  the numbers on the step 7 box. The `v3` check after: exit 0. Diagnosis,
+  by the runbook's three questions:
+  - *Placeholder rows matched, 415 against 349.* 301 come from the two
+    filed-name arms, the same class as August's 349 and below it (a "SEE
+    ATTACHED STATEMENT" row carrying the funder's bank as its c/o address,
+    matched by address to another trust at that bank). 114 come from the
+    BMF arm, which the baseline predates: 59 are rows whose whole text is
+    "SEE", matched on state and name to BMF organizations named SEE (EINs
+    850645402 and 854054788), 55 are BMF aliases winning at the same bank
+    addresses. The permanent fix is to pair no row whose recipient text is
+    a placeholder phrase (`PLACEHOLDER_REGEX`), as the guard refuses
+    government wins; that takes the check to zero.
+  - *Sentinel 520368135, 706 against 1,735.* The EIN is the Johns Hopkins
+    Club, a social club (subsection 7, NTEE N50) at a Cockeysville PO box
+    in care of the university; August's 1,826 rows were JHU's grants
+    matched to the club because its filing sits at the campus address and
+    its name scores close enough. The university is 520595110, whose 990
+    gives the tax office at 3910 Keswick Road, so it loses the address tier
+    at 3400 N Charles Street and won 200 rows. This run, BMF lines reading
+    "Johns Hopkins University" on other EINs took the rows: 223454231 (an
+    ACM student chapter, sort name JHU, 3400 N Charles) 2,118; 520591627
+    (the Peabody Institute, a group subordinate with the parent's name)
+    684; 237424444 (Jhpiego, the same) 431; 521539714 (a Psi Chi chapter)
+    418; 526055764 (an Alpha Omega Alpha chapter) 140. The view's shape-v4
+    rule drops such host-institution lines only for government-shaped
+    names. Across the output, 417,113 BMF-arm wins ($17.99B, 7,600
+    aliases) rest on an alias equal to a different EIN's filed name; many
+    are right (Boy Scouts councils, 11,466 rows over 259 EINs), the top by
+    dollars are the problem (JHU $2.18B over 4 EINs, Duke University $810M
+    over 1, Heritage Foundation 4,252 rows over 7). The sentinel has
+    guarded a wrong match since it was set and must move to 520595110.
+  No baseline moved. The decision, accept with the fix at the next refresh
+  or fix the alias rule and rerun tonight, is Zein's; the tables as the
+  run wrote them are what the site reads meanwhile.
 - **2026-10-27, 14:09 UTC, step 5 started: the read, beside the matcher.**
   What the 403 was. Zein asked TEOS for a filer's return list from his
   laptop with Python's urllib and no headers of his own and got the JSON;
