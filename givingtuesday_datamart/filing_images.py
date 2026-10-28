@@ -506,15 +506,16 @@ def _retryable(row: FilingImage | None) -> bool:
 
 
 def _refused(row: FilingImage) -> bool:
-    """Did the IRS answer this attempt with HTTP 403? Alone, a filing it
-    will not serve; ``REFUSALS_TO_STOP`` in a row, the client being refused
-    (2026-10-27: every request under an unrecognised User-Agent), which
-    stops ``fetch_filings``. The listing failure keeps the exception's name
-    in its status and the code in the message; the PDF failure keeps the
-    code in its status."""
-    if row.status == "pdf_unavailable:403":
-        return True
-    return row.status == "teos_failed:HTTPError" and (row.last_error or "").startswith("HTTP Error 403")
+    """Did the IRS answer every request of this attempt with HTTP 403?
+    Alone, a filing it will not serve; ``REFUSALS_TO_STOP`` in a row, the
+    client being refused (2026-10-27: every request under an unrecognised
+    User-Agent), which stops ``fetch_filings``. Read from ``last_error``,
+    which says what this attempt did whatever the status: a failed refetch
+    of a fetched row keeps the row's status (``_failed``), so its 403 shows
+    only there. The listing failure's message is the exception's; the PDF
+    failure's has one error per image tried, joined by '; '."""
+    errors = (row.last_error or "").split("; ")
+    return bool(row.last_error) and all(error.startswith("HTTP Error 403") for error in errors)
 
 
 def _warm_index(cache_dir: Path) -> None:

@@ -366,20 +366,26 @@ def repair_funder_pool(out: Path) -> None:
     missing=missing[missing._merge.eq('left_only')][gm._KEYS]
     keys=', '.join(gm._KEYS); keyed=', '.join('g.'+k for k in gm._KEYS)
     amount=AMT.format(col='sigocpyamoun')
+    name="concat_ws(' ', name1_key, name2_key)"
+    # The flags come from the same expressions and patterns as grants_query's,
+    # so a supplement tuple is a placeholder or targeted exactly when it
+    # would have been one in the frozen pool.
     q=f'''WITH selected AS (SELECT * FROM jsonb_to_recordset(CAST(:keys AS jsonb)) AS x(
         {', '.join(k+' text' for k in gm._KEYS)}))
         SELECT {keyed}, count(*)::bigint AS n_rows, coalesce(sum({amount}),0)::float8 AS dollars,
         coalesce(sum(greatest({amount},0)),0)::float8 AS positive_dollars,
-        count(*) FILTER (WHERE row_source='placeholder_recovery') AS recovered_rows
+        count(*) FILTER (WHERE row_source='placeholder_recovery') AS recovered_rows,
+        ({name} ~* :cohort) AS targeted, ({name} ~* :placeholder) AS placeholder
         FROM public.privategrants_w_column_keys_view g JOIN selected USING ({keys})
         GROUP BY {keyed} HAVING bool_or(taxyear::int>=2015) ORDER BY {keyed}'''
+    cohort=json.loads((out/'inputs.json').read_text())['cohort_pattern']
     with get_session(config=datamart_config()) as s:
         s.execute(text('SET TRANSACTION READ ONLY'))
         for setting in ("work_mem='64MB'","max_parallel_workers_per_gather=0","statement_timeout='10min'","temp_file_limit='4GB'"):
             s.execute(text('SET LOCAL '+setting))
-        extra=pd.read_sql_query(text(q),s.connection(),params={'keys':json.dumps(missing.to_dict('records'))})
-    for col in ['general_sample','targeted','high_value']+['risk_'+r for r in RISKS]:extra[col]=False
-    extra['placeholder']=(extra.name1_key+' '+extra.name2_key).str.contains(r'(?i)see.*attach|^see\s*$',regex=True)
+        extra=pd.read_sql_query(text(q),s.connection(),params={'keys':json.dumps(missing.to_dict('records')),
+                                                               'cohort':cohort,'placeholder':PLACEHOLDER_REGEX})
+    for col in ['general_sample','high_value']+['risk_'+r for r in RISKS]:extra[col]=False
     extra['labeled_funder']=True;extra['evaluation_split']='calibration'
     extra.to_parquet(out/'funder_supplement.parquet',index=False)
     u=pd.read_parquet(out/'universe.parquet');b=pd.read_parquet(out/'bmf.parquet');p=pd.read_parquet(out/'production.parquet')

@@ -512,7 +512,11 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   `GT_BUILD_WORK_MEM=1GB`, `GT_BUILD_MAINTENANCE_WORK_MEM=2GB`,
   `GT_BUILD_PARALLEL_WORKERS=2` (the third knob added in `ec52c45`). The
   file is deleted when the class goes back; the defaults are the medium's
-  rule.
+  rule. Since the review of PR #83 the builder also refuses a budget past
+  the defaults when the server's `shared_buffers` says less than 6 GB of
+  memory (`current_grants._check_build_memory`), so a forgotten
+  `bigdb.env` stops the build before any DDL instead of swapping the
+  medium.
 - **2026-10-27, 03:23 to 03:58 UTC, step 3 built.** From the box on
   `ddb47c7`, at 64 MB with no parallel workers, under the corrected
   watchdog. The paid relation 03:23:38 to 03:54:46 UTC, 31 minutes, exit

@@ -119,3 +119,15 @@ def test_risk_strata_are_sampled_independently_and_reproducibly():
     again=rp.risk_sample(p.iloc[::-1],b,u,1)
     pd.testing.assert_frame_equal(risk.sort_values(gm._KEYS).reset_index(drop=True),
                                   again.sort_values(gm._KEYS).reset_index(drop=True))
+
+
+def test_the_funder_supplement_flags_placeholders_and_cohorts_as_the_frozen_pool_does():
+    # The supplement once flagged placeholders with a pattern of its own
+    # ('see.*attach'), which missed "see schedule" and "refer to list" and
+    # took "overseas ... attachment": its tuples entered the ranked policies'
+    # open pool on other terms than the frozen pool's.
+    import inspect
+    source = inspect.getsource(rp.repair_funder_pool)
+    assert "'placeholder':PLACEHOLDER_REGEX" in source and "~* :placeholder" in source
+    assert "~* :cohort" in source and "['cohort_pattern']" in source
+    assert "see.*attach" not in source and "extra['placeholder']=" not in source

@@ -24,7 +24,7 @@ from givingtuesday_datamart._internal.address_cleaning import create_clean_addre
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart._internal.parquet_cache import _decode_json as _pqc_decode_json
-from givingtuesday_datamart.current_grants import build_current_relations
+from givingtuesday_datamart.current_grants import _TABLES as _CURRENT_TABLES, build_current_relations
 from givingtuesday_datamart.ingestion import datamart_config
 from givingtuesday_datamart.canonical.build import (
     CANONICAL_BUILDS_TABLE,
@@ -1003,6 +1003,27 @@ def _resolve_checkpoint_prefix(
     logical_name from datamart_meta.ingest_runs. Raises if any source has
     no successful run on record.
     """
+    versions = _source_versions(connection)
+    # Nested rather than flat (`pg_X__bf_Y`) so the prefix is browseable
+    # with `aws s3 ls`: each level narrows scope, and a single source
+    # version's chunks can be `aws s3 rm --recursive`'d in one shot.
+    return (
+        f"{base_prefix}/"
+        f"pg_{versions['irs_990pf_grants']}/"
+        f"bf_{versions['irs_990_basic_fields']}/"
+        f"bfpf_{versions['irs_990pf_basic_fields']}/"
+        f"bmf_{versions['irs_eo_bmf']}/"
+        f"corr_{_corrections_content_hash()}/"
+        f"rec_{recovered['policy_version']}_{recovered['digest']}/"
+        f"shape_v{MATCHING_INPUT_SHAPE_VERSION}"
+    )
+
+
+def _source_versions(connection) -> dict[str, str]:
+    """The source_version of the latest successful ingest_run of each
+    matching input (``_MATCHING_INPUT_LOGICAL_NAMES``): what the checkpoint
+    prefix is keyed on and what a rebuild stamps on the ``_current``
+    relations. Raises if any source has no successful run on record."""
     rows = connection.execute(
         text("""
             SELECT DISTINCT ON (logical_name) logical_name, source_version
@@ -1020,19 +1041,50 @@ def _resolve_checkpoint_prefix(
             f"No successful ingest run on record for: {sorted(missing)}. "
             "Run `python -m givingtuesday_datamart.sources refresh` first."
         )
-    # Nested rather than flat (`pg_X__bf_Y`) so the prefix is browseable
-    # with `aws s3 ls`: each level narrows scope, and a single source
-    # version's chunks can be `aws s3 rm --recursive`'d in one shot.
-    return (
-        f"{base_prefix}/"
-        f"pg_{versions['irs_990pf_grants']}/"
-        f"bf_{versions['irs_990_basic_fields']}/"
-        f"bfpf_{versions['irs_990pf_basic_fields']}/"
-        f"bmf_{versions['irs_eo_bmf']}/"
-        f"corr_{_corrections_content_hash()}/"
-        f"rec_{recovered['policy_version']}_{recovered['digest']}/"
-        f"shape_v{MATCHING_INPUT_SHAPE_VERSION}"
-    )
+    return versions
+
+
+# A run that rebuilds the ``_current`` relations writes on each of them
+# (COMMENT ON TABLE) the source versions the checkpoint prefix is keyed on.
+# ``--skip-rebuild`` takes the relations only when every one carries the
+# versions the prefix names now: without that, chunks computed on
+# relations built from an older drop would be written under a newer
+# drop's prefix, and a later run would resume them against shifted rows.
+# A relation rebuilt anywhere else (``sources refresh``, the current_grants
+# CLI) is a new table without the stamp, so the next run rebuilds it. A
+# stamp is a catalog read, where comparing the relations with staging
+# (``stale_basic_fields_current``) scans every row of both.
+def _current_stamp(versions: dict[str, str], build_id: str | None) -> str:
+    return json.dumps({"source_versions": versions, "build_id": build_id}, sort_keys=True)
+
+
+def _stamped_versions(comment: str | None) -> dict | None:
+    """The source versions a relation's comment records, or None when it
+    has no stamp (never stamped, or a comment of another kind)."""
+    try:
+        stamp = json.loads(comment) if comment else None
+    except ValueError:
+        return None
+    return stamp.get("source_versions") if isinstance(stamp, dict) else None
+
+
+def _stamp_current_relations(connection, versions: dict[str, str], build_id: str | None) -> None:
+    stamp = _current_stamp(versions, build_id)
+    for table, _ddl in _CURRENT_TABLES:
+        connection.execute(text(f"COMMENT ON TABLE public.{table} IS :stamp"), {"stamp": stamp})
+
+
+def _unstamped_current_relations(connection, versions: dict[str, str]) -> list[str]:
+    """The ``_current`` relations that do not carry ``versions``: missing,
+    rebuilt outside a matcher run, or built from another drop."""
+    stale = []
+    for table, _ddl in _CURRENT_TABLES:
+        comment = connection.execute(
+            text("SELECT obj_description(to_regclass(:name), 'pg_class')"), {"name": f"public.{table}"}
+        ).scalar_one()
+        if _stamped_versions(comment) != versions:
+            stale.append(table)
+    return stale
 
 
 # Filenames the chunk loop writes/reads. Used by the resume listing to
@@ -2109,10 +2161,20 @@ def _do_match_records(
         # order.
         if skip_rebuild:
             # A restart minutes after a run that rebuilt them, with nothing
-            # loaded since: the relations are what that run made.
-            logger.info("--skip-rebuild: the _current relations are taken as they stand")
+            # loaded since: the relations must carry that run's stamp of the
+            # versions the checkpoint prefix is keyed on (_current_stamp).
+            stale = _unstamped_current_relations(connection, _source_versions(connection))
+            if stale:
+                raise RuntimeError(
+                    f"--skip-rebuild: {', '.join('public.' + t for t in stale)} do not carry the source "
+                    "versions the checkpoints are keyed on (rebuilt elsewhere, or from an older drop); "
+                    "run without --skip-rebuild"
+                )
+            logger.info("--skip-rebuild: the _current relations carry the current source versions; "
+                        "taken as they stand")
         else:
             build_current_relations(connection)
+            _stamp_current_relations(connection, _source_versions(connection), build_id)
         create_or_replace_views(connection, recovered_policy=recovered_policy)
         # The recovered grants the run takes, read once: the build's
         # source_runs and the checkpoint prefix name the same rows.
@@ -2348,7 +2410,9 @@ if __name__ == "__main__":
         help=(
             "Take the _current relations as they stand instead of rebuilding "
             "them first. Only for a restart minutes after a run that rebuilt "
-            "them, with no load or ingest since; the views are still created."
+            "them, with no load or ingest since; the views are still created. "
+            "The run refuses when a relation lacks the stamp of the source "
+            "versions the checkpoints are keyed on."
         ),
     )
     parser.add_argument(

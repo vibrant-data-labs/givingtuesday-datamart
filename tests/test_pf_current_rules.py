@@ -525,8 +525,8 @@ def test_line_25_is_the_kept_urls_own():
 
 
 class _Result:
-    def __init__(self, rows=None):
-        self.rows, self.returns_rows = rows or [], rows is not None
+    def __init__(self, rows=None, row=None):
+        self.rows, self.returns_rows, self.row = rows or [], rows is not None, row
 
     def scalar_one(self):
         return 16_648_094
@@ -534,17 +534,24 @@ class _Result:
     def fetchall(self):
         return self.rows
 
+    def one(self):
+        return self.row
+
 
 class _Connection:
     """What ``_build_one`` needs of a connection: it records the statements,
     and answers the watch's SELECT with ``unhalved``."""
 
-    def __init__(self, unhalved):
-        self.unhalved, self.statements = unhalved, []
+    def __init__(self, unhalved, memory=(64 * 2**20, 256 * 2**20, 0, 2**30)):
+        self.unhalved, self.memory, self.statements, self.settings = unhalved, memory, [], {}
 
-    def execute(self, statement):
+    def execute(self, statement, params=None):
         sql = str(statement)
         self.statements.append(sql)
+        if "set_config(:name, :value, false)" in sql:
+            self.settings[params["name"]] = params["value"]
+        if "pg_size_bytes(current_setting('work_mem'))" in sql:
+            return _Result(row=self.memory)
         return _Result(self.unhalved if sql.lstrip().startswith("SELECT t.filerein") else None)
 
 
@@ -601,3 +608,37 @@ def test_a_scratch_copy_is_the_production_ddl_under_another_name():
         assert f"DROP TABLE IF EXISTS public.{production}" not in rendered      # no production table is dropped
     # the future copy can read the paid copy in place of the production paid relation
     assert "FROM public.scratch_pgc_x g" in scratch.scratch_ddl(FUTURE, "x", paid_scratch=True)
+
+
+def test_the_build_binds_its_memory_and_runs_at_the_defaults_on_the_shared_instance(monkeypatch):
+    for name in ("GT_BUILD_WORK_MEM", "GT_BUILD_MAINTENANCE_WORK_MEM", "GT_BUILD_PARALLEL_WORKERS"):
+        monkeypatch.delenv(name, raising=False)
+    connection = _Connection([])
+    cg._build_one(connection, "privategrants_future_current", "SELECT 1")
+    assert connection.settings == {"work_mem": "64MB", "maintenance_work_mem": "256MB",
+                                   "max_parallel_workers_per_gather": "0"}
+    assert not [sql for sql in connection.statements if sql.lstrip().startswith("SET ")]   # bound, not spliced
+
+
+def test_a_larger_budget_is_refused_on_the_shared_instance_before_any_ddl(monkeypatch):
+    # bigdb.env (1 GB work_mem) still sourced after RDS went back to db.t4g.medium
+    monkeypatch.setenv("GT_BUILD_WORK_MEM", "1GB")
+    connection = _Connection([], memory=(2**30, 256 * 2**20, 0, 950 * 2**20))
+    with pytest.raises(RuntimeError, match="the shared instance's size"):
+        cg._build_one(connection, "privategrants_current", "CREATE TABLE public.privategrants_current AS SELECT 1")
+    assert connection.settings["work_mem"] == "1GB"
+    assert not [sql for sql in connection.statements if "CREATE" in sql]
+
+
+@pytest.mark.parametrize("memory, refused", [
+    ((64 * 2**20, 256 * 2**20, 0, 950 * 2**20), False),     # the defaults on db.t4g.medium
+    ((64 * 2**20, 256 * 2**20, 2, 950 * 2**20), True),      # the workers back on the shared instance
+    ((64 * 2**20, 2**30, 0, 950 * 2**20), True),            # a larger maintenance budget there
+    ((2**30, 2 * 2**30, 2, 8_254_029_824), False),          # bigdb.env on db.r6g.xlarge (read 2026-10-28)
+])
+def test_a_budget_past_the_defaults_needs_a_larger_instance(memory, refused):
+    if refused:
+        with pytest.raises(RuntimeError, match="GT_BUILD_"):
+            cg._check_build_memory(*memory)
+    else:
+        cg._check_build_memory(*memory)

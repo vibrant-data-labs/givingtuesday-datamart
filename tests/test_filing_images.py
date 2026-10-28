@@ -311,8 +311,41 @@ def test_a_lone_403_is_a_filing_the_irs_will_not_serve(teos, tmp_path, caplog):
         statuses = _fetch(store, [OID, good.object_id], tmp_path, s3)
     assert statuses == {OID: "pdf_unavailable:403", good.object_id: "fetched"}
     assert store.rows[OID].attempts == 1 and fi._refused(store.rows[OID])
-    assert not fi._refused(replace(store.rows[OID], status="pdf_unavailable:404"))
+    error = store.rows[OID].last_error
+    assert not fi._refused(replace(store.rows[OID], last_error=error.replace("403", "404")))
+    # an older image of the filing answered otherwise: the filing, not the client
+    assert not fi._refused(replace(store.rows[OID], last_error=f"{error}; HTTP Error 404: Not Found (older)"))
     assert "TEOS refused" not in caplog.text
+
+
+def test_403s_on_a_refetch_of_fetched_rows_count_toward_the_stop(teos, tmp_path, caplog, monkeypatch):
+    # A failed refetch keeps the fetched row's status, its object and its
+    # URL (_failed): the 403 is in last_error only, and the stop reads it there.
+    ids = [f"20100000000000000{i}" for i in range(1, 9)]
+    for i, oid in enumerate(ids):
+        teos.add(oid, [(f"202301{10 + i}", PDF)])
+    store, s3 = fi.MemoryStore(), _S3()
+    assert set(_fetch(store, ids, tmp_path, s3).values()) == {"fetched"}
+    for oid in ids:
+        teos.listing[oid] = urllib.error.HTTPError("https://apps.irs.gov/teos", 403, "Forbidden", {}, None)
+    # From the sixth on the listing waits until the stop has cancelled the
+    # jobs not yet started (upsert_as_done's on_stop), so one worker cannot
+    # run past the fifth before the main thread has seen it.
+    go, listing, collect = threading.Event(), irs_source.images, fi.upsert_as_done
+    monkeypatch.setattr(irs_source, "images",
+                        lambda row: (go.wait(5) if row.object_id >= ids[5] else None, listing(row))[1])
+    monkeypatch.setattr(fi, "upsert_as_done", lambda store, futures, chunk: collect(store, futures, chunk,
+                                                                                   on_stop=go.set))
+    teos.listings.clear()
+    with caplog.at_level(logging.ERROR):
+        statuses = fi.fetch_filings(store, ids, bucket="b", cache_dir=tmp_path, s3=s3, workers=1, refetch=True)
+    tried = [oid for oid in ids if store.rows[oid].attempts == 2]
+    assert tried in (ids[:5], ids[:6]) and teos.listings == tried
+    assert all(store.rows[oid].status == "fetched" and "HTTP Error 403" in store.rows[oid].last_error
+               for oid in tried)
+    assert [statuses[oid] for oid in ids[6:]] == ["unfetched:teos_refused"] * 2
+    assert all(store.rows[oid].attempts == 1 for oid in ids[6:])
+    assert "TEOS refused 5 requests in a row" in caplog.text
 
 
 def test_three_failed_attempts_and_the_filing_is_left_alone_unless_refetch(teos, tmp_path):
