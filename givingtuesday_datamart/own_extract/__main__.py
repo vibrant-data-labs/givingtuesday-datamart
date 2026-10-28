@@ -6,6 +6,7 @@
     python -m givingtuesday_datamart.own_extract gt-release 2026_10_25 --host HOST [--jobs N]
     python -m givingtuesday_datamart.own_extract checks [--batch ...] [--report PATH] [--host HOST]
     python -m givingtuesday_datamart.own_extract audit [--batch ...] [--jobs N] [--host HOST]
+    python -m givingtuesday_datamart.own_extract reload [--batch ...] [--jobs N] [--host HOST]
     python -m givingtuesday_datamart.own_extract discover ZIP [--out PATH]
 
 ``batches`` lists the archives the IRS serves for a year (it asks the
@@ -21,6 +22,8 @@ extract, under our batches' returns only, for ``parity --host`` there
 own totals and lists the elements no concordance path reads, without GT
 (``checks``, ``audit``); ``load`` counts those elements as it parses and
 prints each batch's checks, ``audit`` counts them for batches loaded before.
+``reload`` loads the loaded batches again under the current concordance, from
+our copy of each archive, checked against the SHA-256 its first load stamped.
 ``discover`` proposes the concordance from an archive GT has released
 (GT's rows for its returns, read by EIN, about 10 minutes for a 12,000-return
 archive); review the proposal against ``data/own_extract/concordance.csv``.
@@ -31,6 +34,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures as cf
 import csv
+import json
 import sys
 import time
 from pathlib import Path
@@ -176,6 +180,40 @@ def _audit(args) -> int:
     return 0
 
 
+def _reload_one(config: dict, stamp: dict, cache: Path, keep: bool) -> str:
+    batch_id = stamp["batch_id"]
+    concordance = extract.load()
+    with get_session(config=config) as session:
+        if load._loaded(session, f"{batch_id}@{stamp.get('last_modified', '')}", concordance):
+            return f"{batch_id}: loaded already under this concordance"
+    path = batches.fetch_archived(batch_id, stamp["sha256"], cache)
+    path.with_name(f"{batch_id}.json").write_text(json.dumps(stamp, indent=2))   # the load records it
+    with get_session(config=config) as session:
+        manifest = load.load_batch(session, path, concordance)
+    with get_session(config=config) as session:
+        line = checks.batch_line(session, batch_id)
+    if not keep:
+        path.unlink()
+    rows = manifest["rows"]
+    loaded = manifest.get("skipped") or ", ".join(f"{t} {rows.get(t, 0)}" for t in concordance)
+    return f"{batch_id}: {loaded}; checks: {line}"
+
+
+def _reload(args) -> int:
+    # A concordance change gives every batch a new stamp, and `patch` refuses
+    # batches loaded under different ones: reload them all, from the bytes
+    # first loaded rather than whatever the IRS serves under the name today.
+    config = _config(args.host)
+    with get_session(config=config) as session:
+        stamps = checks.loaded(session, args.batch or None)
+    with cf.ProcessPoolExecutor(max_workers=args.jobs) as pool:
+        jobs = [pool.submit(_reload_one, config, dict(stamp), args.cache, args.keep_zips)
+                for stamp in stamps["stamp"]]
+        for job in cf.as_completed(jobs):
+            print(job.result(), flush=True)
+    return 0
+
+
 def _discover(args) -> int:
     lines = []
     with get_session(config=datamart_config()) as session:
@@ -279,6 +317,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--jobs", type=int, default=1, help="batches read at once")
     p.add_argument("--host", default=None, help="database host to write to, e.g. a scratch copy")
     p.set_defaults(func=_audit)
+
+    p = sub.add_parser("reload", help="load the loaded batches again under the current concordance, "
+                                      "from our copies of their archives")
+    p.add_argument("--batch", action="append", help="only this batch id (repeatable)")
+    p.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
+    p.add_argument("--keep-zips", action="store_true")
+    p.add_argument("--jobs", type=int, default=1, help="batches loaded at once")
+    p.add_argument("--host", default=None, help="database host to load into, e.g. a scratch copy")
+    p.set_defaults(func=_reload)
 
     p = sub.add_parser("discover", help="propose the concordance from an archive GT has released")
     p.add_argument("zip", type=Path)

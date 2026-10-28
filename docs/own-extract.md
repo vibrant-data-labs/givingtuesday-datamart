@@ -55,9 +55,9 @@ both hold.
   filing's own totals: 96.9% of 990-PFs with grants match line 25, the
   same where GT holds the return and where it does not; 97.7% of Schedule
   Is fit within Part IX line 1. And the XML elements no concordance path
-  reads, per schema version: it lists the foreign addresses of 990-PF
-  grant recipients that we do not read, and would have caught the 2025v4
-  rename without GT.
+  reads, per schema version: it found the foreign addresses of 990-PF
+  grant recipients we did not read (read since concordance
+  `036d62ea8f4a`), and would have caught the 2025v4 rename without GT.
 
 ## Why
 
@@ -187,6 +187,13 @@ GT rules one path does not express, all now in the file:
 - **990 foreign address** (`basic_fields.filerfor*`): the counterpart. When
   the header has no foreign address, GT takes the form body's (420 to 722
   of 785,185 returns of 2024-2026).
+- **A 990-PF grant recipient's foreign address** (`privategrants.sigocpyrfa*`,
+  `privategrants_future.sigocaffrfa*`): GT fills the US address columns
+  from the foreign address when there is no US one: lines 1 and 2, the
+  city, `ProvinceOrStateNm` as the state and `ForeignPostalCd` as the ZIP
+  (measured on 56,104 3a and 8,487 3b foreign grants, 2026-10-28). The
+  country stays in `sigocaffrfaco`, which GT leaves empty in 3a. Followed
+  since concordance `036d62ea8f4a`: production reads these columns.
 
 Corrections to what the search proposed, each measured by `parity` on every
 loaded batch:
@@ -513,21 +520,30 @@ XML says NONE; and empty grant groups (no recipient, $0) are dropped:
 on 329 returns GT has 1,232 fewer rows than ours, with the same total on
 324 of them.
 
-Two gaps on our side came out of it. GT writes a foreign recipient's
-address line, city and postal code into the 990-PF grant table's address
-columns, which production reads; our concordance takes the US address only
-and puts the country in `sigocaffrfaco`, which GT leaves empty (57,655
-grants on 10,811 returns where GT has an address and ours none, 57,594 of
+Two gaps on our side came out of it, both closed the same day. GT writes a
+foreign recipient's address into the 990-PF grant tables' address columns,
+which production reads; our concordance took the US address only (57,655
+grants on 10,811 returns where GT had an address and ours none, 57,594 of
 them with a foreign country in ours). And 49 returns written with an `irs:`
-namespace prefix have no group rows in `irs_extract` (230 Schedule O
-notes, 22 990-EZ programs, 3 Schedule I grants of $566,494, 2 990-PF grants
-of $4,402): the loader's form scan missed them until the fix of 2026-10-26,
-which came after the batches were last loaded; today's loader reads them
-(a re-parse of all 38 batches, the same day). The row share with an
-identical GT row moved for reasons outside our parse: 990-PF grants 80.4%
-(June 86.4%, the foundation-status rename now over many more returns, plus
-AmazonSmile), Schedule I 99.5% of GT's rows once the doubled return is set
-aside (99.5%), future grants all 114,880.
+namespace prefix had no group rows in `irs_extract` (230 Schedule O notes,
+22 990-EZ programs, 3 Schedule I grants of $566,494, 2 990-PF grants of
+$4,402): the loader's form scan missed them until the fix of 2026-10-26,
+which came after the batches were last loaded (a re-parse of all 38
+batches found these and no others).
+
+The concordance now follows GT's foreign-address convention (*The
+concordance*), and `own_extract reload` loaded all 38 batches again on the
+scratch copy, from our copies of the archives (8.5 minutes): every foreign
+grant matched to GT's row (56,104 in 3a, 8,487 in 3b) has the same five
+address columns; our 990-PF rows with an identical GT row went from
+3,371,404 to 3,425,313; the 49 returns have their 257 rows, and GT has no
+rows under our returns that ours lacks beyond its empty and total-only
+990-PF rows. Nothing else moved. The row share with an identical GT row is
+otherwise set by GT: 990-PF grants 81.7% (June 86.4%: the foundation-status
+rename now over many more returns, and AmazonSmile), Schedule I 99.5% of
+GT's rows once the doubled return is set aside (99.5%), future grants all
+114,880. Production still holds the rows of the earlier concordance (*A
+concordance change*, below).
 
 ## Checks that need no GT
 
@@ -590,7 +606,9 @@ it stood before the 2025v4 rename was found (the status read as
 beside it on 3,356 of the batch's 4,734 2025v4 990-PFs, so it would have
 caught that rename without GT. The elements first seen in a later version
 are header indicators no table needs (`IRSResponsiblePrtyInfoCurrInd`, from
-2022v5 on 86% of 990s); nothing new inside a group in 2025v4.
+2022v5 on 86% of 990s); nothing new inside a group in 2025v4. Once the
+concordance took the foreign address and the batches were reloaded, the
+list inside groups is empty.
 
 What neither check sees: a value read into the wrong column with the
 totals still right, and an element moved under a parent nothing reads (the
@@ -677,6 +695,28 @@ every loaded list in our batches our rows hold the placeholder row.
 Monthly, as the IRS posts a batch: `own_extract load <year> --batch
 <new>`, then steps 2 to 4. When GT's next release lands, `sources refresh`
 replaces the staging tables and drops the patch; step 2 puts it back.
+
+**A concordance change.** A new concordance gives every batch a new stamp,
+and `patch` refuses batches loaded under different ones, so all of them are
+loaded again, then patched again:
+
+1. `own_extract reload`: every loaded batch from our copy of its archive,
+   checked against the SHA-256 its first load stamped, nothing fetched
+   from the IRS; it prints each batch's checks. A batch's rows are
+   replaced in one transaction, so 12 GB of dead rows wait for a vacuum
+   unless `irs_extract`'s tables are truncated first (2026-10-23);
+2. `own_extract patch` (snapshot first): our earlier patch rows out, the
+   new ones in, the basic-fields relations rebuilt; then a vacuum of the
+   ten staging tables;
+3. the grants `_current` relations (`current_grants --only` each), then
+   `sources build-canonical`, then the matcher and its gate. The matcher
+   run is the one already due.
+
+The foreign-address change of 2026-10-28 touches the 990-PF grant
+relations (an address on 61,612 more grants, the ZIP column now holding a
+foreign postal code where there is one, as GT's rows had before the patch)
+and, through the 49 `irs:` returns, Schedule O and the 990-EZ programs.
+The return tables do not change.
 
 **Undo.** `sources refresh --force` of the ten sources loads GT's release
 again and rebuilds the basic-fields relations; the grants relations and the

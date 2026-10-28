@@ -573,3 +573,29 @@ def test_an_archive_is_reread_from_our_copy_only_if_it_is_the_one_loaded(tmp_pat
     assert len(s3.keys) == 1                                   # the cached copy matches: no download
     with pytest.raises(ValueError, match="not the archive that was loaded"):
         batches.fetch_archived("2025_TEOS_XML_11B", "0" * 64, tmp_path, _S3(b"something else"))
+
+
+FOREIGN = PF.replace(
+    b"<RecipientPersonNm>JANE DOE</RecipientPersonNm>",
+    b"<RecipientPersonNm>THE HONEYGUIDE FOUNDATION</RecipientPersonNm>"
+    b"<RecipientForeignAddress><AddressLine1Txt>P O BOX 8271</AddressLine1Txt><CityNm>ARUSHA</CityNm>"
+    b"<ProvinceOrStateNm>ARUSHA REGION</ProvinceOrStateNm><CountryCd>TZ</CountryCd>"
+    b"<ForeignPostalCd>255</ForeignPostalCd></RecipientForeignAddress>",
+).replace(
+    b"<RecipientBusinessName><BusinessNameLine1Txt>FOOD BANK</BusinessNameLine1Txt></RecipientBusinessName>",
+    b"<RecipientBusinessName><BusinessNameLine1Txt>FOOD BANK</BusinessNameLine1Txt></RecipientBusinessName>"
+    b"<RecipientUSAddress><AddressLine1Txt>1 MAIN ST</AddressLine1Txt><CityNm>DENVER</CityNm>"
+    b"<StateAbbreviationCd>CO</StateAbbreviationCd><ZIPCd>80202</ZIPCd></RecipientUSAddress>",
+)
+
+
+def test_a_foreign_recipient_s_address_fills_the_address_columns_as_gt_does():
+    conc = extract.load()
+    filing = parse.parse(FOREIGN, OID, extract.GROUP_PATHS)
+    us, foreign = extract.rows(filing, "privategrants", conc["privategrants"], "b")
+    assert (us["sigocpyrfaal1"], us["sigocpyrfaci"], us["sigocpyrfapo"], us["sigocpyrfapc"]) == (
+        "1 MAIN ST", "DENVER", "CO", "80202")
+    assert (foreign["sigocpyrfaal1"], foreign["sigocpyrfaci"], foreign["sigocpyrfapo"],
+            foreign["sigocpyrfapc"], foreign["sigocaffrfaco"]) == (
+        "P O BOX 8271", "ARUSHA", "ARUSHA REGION", "255", "TZ")
+    assert us["sigocaffrfaco"] is None

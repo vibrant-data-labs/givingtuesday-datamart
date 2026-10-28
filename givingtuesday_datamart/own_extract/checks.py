@@ -88,11 +88,13 @@ def schedule_i_status(cash, noncash, line1) -> str:
 
 
 def loaded(session, batch_ids: list[str] | None = None) -> pd.DataFrame:
-    """The latest successful load of each batch: its archive's SHA-256 and the concordance's."""
+    """The latest successful load of each batch: its archive's SHA-256, the concordance's,
+    and the archive's whole fetch stamp (``batches.fetch``)."""
     frame = pd.read_sql(text(
         f"""SELECT DISTINCT ON (source_url) split_part(source_version, '@', 1) AS batch,
                    source_manifest->'batch'->>'sha256' AS zip_sha256,
-                   source_manifest->>'concordance_sha256' AS concordance_sha256
+                   source_manifest->>'concordance_sha256' AS concordance_sha256,
+                   source_manifest->'batch' AS stamp
             FROM datamart_meta.ingest_runs
             WHERE logical_name = '{LOGICAL_NAME}' AND status = 'success'
             ORDER BY source_url, finished_at DESC"""), session.connection())
