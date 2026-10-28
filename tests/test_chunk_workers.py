@@ -55,5 +55,5 @@ def test_pool_matches_serial_loop(tmp_path):
     assert sorted(pooled) == list(range(n_chunks))
     for idx in range(n_chunks):
         pd.testing.assert_frame_equal(pooled[idx].reset_index(drop=True), serial[idx].reset_index(drop=True))
-        written = pqc.read_dataframe(tmp_path / f"chunk_{idx:05d}.parquet")
+        written = pd.read_parquet(tmp_path / f"chunk_{idx:05d}.parquet")
         assert len(written) == len(serial[idx])
