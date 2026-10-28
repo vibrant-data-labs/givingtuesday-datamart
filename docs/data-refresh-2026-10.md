@@ -609,6 +609,29 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   chunk written, nothing in the output tables touched) and started build
   `b97ac25d` at 21:37:05 with `--skip-rebuild`, in `tmux -L refresh -s
   matcher2`, log `matcher2.log`; the preflight of 13:15 holds.
+- **2026-10-27, 21:37 UTC to 2026-10-28, 00:53 UTC, the second start and
+  the third.** The integer index took 48 minutes (21:48 to about 22:36
+  UTC) where the union had run five hours unfinished, and printed the
+  size the union never reached: 45,855 chunks of 50,000, about 2.3
+  billion candidate pairs, more than double August's 982 million (the BMF
+  arm doubled the filer side; the patch added a quarter to the grants).
+  The chunk phase then ran as the code had it, serially on one core: 1.58
+  s a chunk, 5,575 chunks by 00:53, about eighteen hours in all. A
+  benchmark on the box meanwhile: pandas' union is about linear in the
+  pairs (two blocks of 10 million in 54 s, of 30 million in 176 s) and the
+  packed integers 3.5 times cheaper, so the real blocks are several
+  billion raw pairs. Zein: make it faster. `27e061b` + `b7b473a`: the
+  chunks are computed by `--workers` processes forked from the run, the
+  frames and the pair index inherited copy-on-write, each worker writing
+  its own chunk's checkpoint, serial by default;
+  `tests/test_chunk_workers.py` holds the pool to the serial loop chunk by
+  chunk. Zein, 00:52: restart. The serial run stopped at 00:53:05 with
+  5,575 chunks in S3 under the run's prefix, which the third start
+  resumes; build started 00:53:10 as `--skip-rebuild --workers 12` in
+  `tmux -L refresh -s matcher3`, log `matcher3.log`, the gate and the `v3`
+  check after it. Twelve workers, not 31: each worker copies the pages of
+  the string objects it touches, a few GB, on a box with 247 GB and a
+  78 GB parent.
 - **2026-10-27, 14:09 UTC, step 5 started: the read, beside the matcher.**
   What the 403 was. Zein asked TEOS for a filer's return list from his
   laptop with Python's urllib and no headers of his own and got the JSON;
