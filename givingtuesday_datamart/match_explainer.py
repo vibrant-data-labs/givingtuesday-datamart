@@ -41,7 +41,8 @@ Usage:
 
 Scope: pairs against the target EIN only. A pair that matches here can
 still lose the final best-match-per-recipient resolution to a
-better-scoring row of a *different* EIN (name_score weighted 2x) — the
+preferred row of a *different* EIN (exact cleaned name, geographic support,
+filing/correction source, then 2*name_score + addr_score) — the
 ``current_match_ein`` column shows which EIN won in the last completed
 matching run. Two rules are not a pair's doing and are not explained here:
 the name-only tier (it asks whether the name belongs to one filer of the
@@ -62,6 +63,7 @@ from givingtuesday_datamart.grant_matching import (
     FINAL_FILTER_RULES,
     filter_match_rules,
     guard_government_names,
+    placeholder_names,
     pair_scores,
     prepare,
 )
@@ -190,15 +192,19 @@ def _score_pairs(
                                   grant_index_col="grant_idx", universe_index_col="universe_idx")
     features["passes_filter"] = features.index.isin(kept.index)
     features["guard_refused"] = passes_tier & ~features["passes_filter"]
+    features["placeholder_refused"] = features["grant_idx"].map(placeholder_names(grants))
     features["would_match"] = features["passes_filter"] & (
         features["blocked_via"] != "NOT BLOCKED"
-    )
+    ) & ~features["placeholder_refused"]
     features["explanation"] = features.apply(_tier_report, axis=1)
     features.loc[features["guard_refused"], "explanation"] = (
         "REFUSED by the government-name guard (government-named recipient, name "
-        + features.loc[features["guard_refused"], "name_score"].map("{:.3f}".format)
+        + features.loc[features["guard_refused"], "name_score"].map("{:.3f}".format).astype(str)
         + " below exact and the filer row says something the grant row does not): "
         + features.loc[features["guard_refused"], "explanation"]
+    )
+    features.loc[features["placeholder_refused"], "explanation"] = (
+        "REFUSED: placeholder text does not identify a recipient EIN"
     )
 
     out = features.merge(
@@ -218,7 +224,7 @@ def _score_pairs(
         "grant_addressstate_key", "grant_addresszip_key", "grant_n_grant_rows",
         "filer_full_name", "filer_address1_key", "filer_addresszip_key",
         "filer_source", "blocked_via", "zip_score", "name_score", "addr_score",
-        "state_score", "would_match", "guard_refused", "explanation", "current_match_ein",
+        "state_score", "would_match", "guard_refused", "placeholder_refused", "explanation", "current_match_ein",
     ]]
 
 

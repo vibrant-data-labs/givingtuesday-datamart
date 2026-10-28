@@ -71,6 +71,13 @@ _GOVERNMENT_NAME_PATTERN = (
 )
 GOVERNMENT_NAME_RE = re.compile(_GOVERNMENT_NAME_PATTERN + r"\b")
 GOVERNMENT_NAME_SQL_RE = _GOVERNMENT_NAME_PATTERN + r"\M"
+
+# Shared with the gate. SQL uses PostgreSQL word boundaries; the Python
+# twin below uses the same phrases on raw business-name fields.
+PLACEHOLDER_REGEX = (
+    r"(\y(see|refer)\w*\y[\s,–-]*(attach|addition|schedul|statement|stmt|list))|^\s*see\s*$"
+)
+_PLACEHOLDER_NAME_RE = re.compile(PLACEHOLDER_REGEX.replace(r"\y", r"\b"), re.IGNORECASE)
 # These were previously in sql_queries/unique_fields_for_grants.sql. Lifted into
 # Python so the matching pipeline owns its own preconditions and postconditions
 # in one place. The views must exist before matching reads them; unioned_grants
@@ -198,6 +205,7 @@ _VIEW_DDL = [
           -- string is 0. Pruning them here drops ~16% of recipient tuples
           -- (~12% of candidate pairs) with zero recall impact.
           AND NOT (TRIM(name1_key) = '' AND TRIM(name2_key) = '')
+          AND NOT (concat_ws(' ', name1_key, name2_key) ~* '{placeholder_regex}')
         GROUP BY
             name1_key,
             name2_key,
@@ -476,7 +484,7 @@ _VIEW_DDL = [
 def _view_ddl(relations: "Relations") -> list[str]:
     """The eight views, under the run's names."""
     names = {name: relations.of(name) for name in _CREATED}
-    return [ddl.format(grants=relations.grants, **names) for ddl in _VIEW_DDL]
+    return [ddl.format(grants=relations.grants, placeholder_regex=PLACEHOLDER_REGEX, **names) for ddl in _VIEW_DDL]
 
 
 # --- 1b. CORRECTIONS REGISTRY LOADER ---
@@ -883,7 +891,9 @@ _MATCHING_INPUT_LOGICAL_NAMES = (
 #   v4 (BMF stack): BMF names and host-institution exclusions.
 #   v5 (2026-10-15): combines the BMF universe with recovered grants and
 #   cleaned-name scoring from main; no earlier stack checkpoint is reusable.
-MATCHING_INPUT_SHAPE_VERSION = 5
+#   v6 (2026-10-28): placeholder recipients are excluded before indexing.
+#   Winner ranking now uses exact names, geography and source.
+MATCHING_INPUT_SHAPE_VERSION = 6
 
 
 def _insert_started_build(build_id: str, started_at: datetime, source_runs: dict) -> None:
@@ -1762,23 +1772,70 @@ ONE_FILER_IN_STATE = "street"
 _STREET = r"\d"
 
 
+def placeholder_names(grants_df: pd.DataFrame) -> pd.Series:
+    """Recognized pointer phrases cannot identify a recipient EIN."""
+    empty = pd.Series('', index=grants_df.index)
+    if 'name1_key' in grants_df:
+        names = grants_df['name1_key'].fillna('') + ' ' + grants_df.get('name2_key', empty).fillna('')
+    else:
+        names = grants_df.get('full_name', empty).fillna('')
+    return names.map(lambda name: bool(_PLACEHOLDER_NAME_RE.search(name)))
+
+
+def geographic_support(features: pd.DataFrame, universe_df: pd.DataFrame,
+                       grants_df: pd.DataFrame) -> pd.Series:
+    """3 local, 2 same state, 1 unknown, 0 conflicting state.
+
+    Strong street/ZIP evidence can establish local support despite a
+    contradictory state in the input (Americus IL/31709, Anaconda MO/59711).
+    We normalize punctuation, not speculative city aliases. Missing fields
+    are unknown rather than contradictory.
+    """
+    ui, gi = (features[c] for c in INDEX_COLS)
+
+    def values(frame, column, indices):
+        if column not in frame:
+            return pd.Series('', index=indices.index)
+        raw = indices.map(frame[column]).fillna('')
+        normalized = raw.str.lower().str.replace(r'[^a-z0-9]+', ' ', regex=True).str.strip()
+        return normalized
+
+    us, gs = values(universe_df, 'addressstate_key', ui), values(grants_df, 'addressstate_key', gi)
+    uc, gc = values(universe_df, 'addresscity_key', ui), values(grants_df, 'addresscity_key', gi)
+    # Match the scorer's five-digit ZIP normalization, but never turn an
+    # absent ZIP into local evidence through its "00000" blocking sentinel.
+    uz = values(universe_df, 'addresszip_key', ui).str.replace(' ', '').map(clean_zip).fillna('')
+    gz = values(grants_df, 'addresszip_key', gi).str.replace(' ', '').map(clean_zip).fillna('')
+    same_state = us.ne('') & gs.ne('') & us.eq(gs)
+    conflict = us.ne('') & gs.ne('') & us.ne(gs)
+    same_city = uc.ne('') & gc.ne('') & uc.eq(gc)
+    strong_postal = uz.ne('') & uz.ne('00000') & gz.ne('') & uz.eq(gz) & features['addr_score'].ge(.90)
+    tier = pd.Series(1, index=features.index)
+    tier.loc[same_state] = 2
+    tier.loc[same_state & same_city] = 3
+    tier.loc[conflict] = 0
+    tier.loc[strong_postal] = 3
+    return tier
+
+
 def resolve_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df: pd.DataFrame,
                     one_filer_in_state: str = ONE_FILER_IN_STATE, *, guards: bool = True) -> pd.DataFrame:
     """The final rules, then one universe row per grant tuple, with the
     tier the match rests on (``match_tier``).
 
-    Each private_foundations record (grant recipient) should map to exactly
-    one basic_fields org. When fuzzy matching finds multiple candidates,
-    keep the one with the highest combined score; name_score is weighted 2x
-    since the name is the primary identifier and address collisions (shared
-    buildings, PO boxes) are common.
+    Each matched private_foundations record (grant recipient) maps to one
+    recipient EIN. When fuzzy matching finds multiple candidates,
+    prefer exact cleaned names, then geographic support, then filing or
+    researched correction identities over BMF aliases. The existing
+    2*name+address score breaks remaining ties. Source never removes BMF
+    candidates or overrides stronger geographic support at the same name
+    quality. Existing precision and ambiguity guards still apply.
 
     **One filer in the state.** A winner that only the exact-name tier
     accepts has the name and the state for it and nothing else. When
-    several filers of that state carry the name, the combined score picks
-    among them on the address, and a grant tuple with no street address
-    has an address string that is its city and state at most: the filer
-    with the shortest address wins. So such a tuple matches on the name
+    several filers of that state carry the name, ranking can choose among
+    them, but a grant tuple with no street address has an address string
+    that is its city and state at most. Such a tuple matches on the name
     and the state only when one filer of the state has the name, as the
     name-only tier asks of the whole universe; otherwise it is left
     unmatched. A tuple with a street address (an address line with a digit
@@ -1791,6 +1848,7 @@ def resolve_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df
     # explicit copy so subsequent assignments don't trigger
     # SettingWithCopyWarning on a view.
     matches = filter_match_rules(features_df=features, **FINAL_FILTER_RULES).copy()
+    matches = matches[~matches[INDEX_COLS[1]].map(placeholder_names(grants_df))]
     if guards:
         matches = guard_government_names(matches, grants_df["full_name"], universe_df["full_name"])
     logger.info(f"Found {len(matches)} matches.")
@@ -1808,13 +1866,21 @@ def resolve_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df
 
     pre_resolve_count = len(matches)
     matches = matches.assign(_combined_score=matches['name_score'] * 2 + matches['addr_score'])
-    # mergesort (stable) so score ties resolve deterministically by input
+    grant_names = matches[INDEX_COLS[1]].map(grants_df['full_name'])
+    matches['_exact_name'] = grant_names.ne('') & matches[INDEX_COLS[0]].map(universe_df['full_name']).eq(grant_names)
+    matches['_geography'] = geographic_support(matches, universe_df, grants_df)
+    sources = (universe_df['source'] if 'source' in universe_df
+               else pd.Series('', index=universe_df.index))
+    matches['_preferred_source'] = matches[INDEX_COLS[0]].map(sources).isin(('basic_fields', 'basic_fields_pf', 'correction'))
+    # Stable sorting so complete ranking ties resolve by input
     # order (which is deterministic: chunks concat in index order). Matters
     # more now that correction rows can tie with organic universe rows for
     # the same recipient tuple.
-    matches = matches.sort_values('_combined_score', ascending=False, kind='mergesort')
+    matches = matches.sort_values(
+        ['_exact_name', '_geography', '_preferred_source', '_combined_score'],
+        ascending=False, kind='mergesort')
     matches = matches.drop_duplicates(subset=[INDEX_COLS[1]], keep='first')
-    matches = matches.drop(columns='_combined_score')
+    matches = matches.drop(columns=['_combined_score', '_exact_name', '_geography', '_preferred_source'])
     logger.info(
         f"Resolved multi-matches: {pre_resolve_count} -> {len(matches)} "
         f"pairs after keeping the best basic_fields match per private_foundations record."
@@ -1853,6 +1919,7 @@ def name_only_matches(universe_df: pd.DataFrame, grants_df: pd.DataFrame, matche
         (grants_df['addressstate_key'].str.strip() == "")
         & (grants_df['addresszip_key'].str.strip() == "")
         & (grants_df['full_name'] != "")
+        & ~placeholder_names(grants_df)
         & ~grants_df.index.isin(matched)
     ]
     named = universe_df.loc[universe_df['full_name'].isin(set(open_['full_name'])), ['full_name', 'filerein_key']]

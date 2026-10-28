@@ -46,6 +46,7 @@ from givingtuesday_datamart.grant_matching import (
     FULL_NAME_SQL,
     GOVERNMENT_NAME_EXACT_MIN,
     GOVERNMENT_NAME_SQL_RE,
+    PLACEHOLDER_REGEX,
     government_refusal,
 )
 from givingtuesday_datamart.grant_matching import Relations
@@ -113,9 +114,6 @@ MATCH_SOURCE_SHIFT_WARN = 0.05
 # reports itself skipped. docs/matching-precision-guards.md.
 GOVERNMENT_NONEXACT_ROWS_CEILING = 0
 
-PLACEHOLDER_REGEX = (
-    r"(\y(see|refer)\w*\y[\s,–-]*(attach|addition|schedul|statement|stmt|list))|^\s*see\s*$"
-)
 AMT = r"CASE WHEN {col} ~ '^-?[0-9]+(\.[0-9]+)?$' THEN {col}::numeric END"
 
 

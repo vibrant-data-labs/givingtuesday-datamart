@@ -36,9 +36,15 @@ def winners(u,g,f,ranking):
     return m.set_index(gm.INDEX_COLS[1])[gm.INDEX_COLS[0]].map(u.filerein_key).to_dict()
 
 
-def test_control_resolver_is_identical_to_production_including_ambiguity_and_government_guard():
+def test_historical_weighted_control_and_new_production_ranking_are_distinct():
     u,g,f=frames()
-    pd.testing.assert_frame_equal(rp.ranked_matches(f,u,g,"current"),gm.all_matches(f,u,g))
+    # "current" in the archived experiment means the policy on 2026-10-28,
+    # before the geography-aware policy was implemented in production.
+    old = winners(u,g,f,"current")
+    new = gm.all_matches(f,u,g).set_index(gm.INDEX_COLS[1])[gm.INDEX_COLS[0]].map(u.filerein_key)
+    assert old[101] == "111111111" and new[101] == "333333333"
+    assert 104 not in old and 104 not in new
+    assert old[105] == new[105] == "999999999"
 
 
 def test_source_bonus_and_strict_source_promote_club_but_name_then_source_finds_university():

@@ -88,7 +88,9 @@ def test_policy_moves_university_and_exposes_the_real_dba_cost_and_name_only_gai
     assert before[101] == "111111111" and after[101] == "333333333"
     assert 102 not in before and after[102] == "444444444"  # ambiguity removed
     assert 103 in before and 103 not in after               # genuine DBA lost
-    assert 104 in before and 104 not in after               # placeholder excluded
+    # Production now excludes placeholders itself, including the "current"
+    # wrapper in this historical identity-removal experiment.
+    assert 104 not in before and 104 not in after
 
 
 def test_report_counts_signed_and_positive_dollars_and_keeps_overlap_separate():
