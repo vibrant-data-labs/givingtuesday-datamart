@@ -23,6 +23,7 @@ Two things about them cost time to learn:
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import shutil
 import subprocess
@@ -258,3 +259,31 @@ def archive(path: Path, s3=None, bucket: str = ARCHIVE_BUCKET) -> str:
                      "irs-last-modified": stamp.get("last_modified", ""),
                      "irs-url": stamp.get("url", "")}})
     return f"s3://{bucket}/{key}"
+
+
+def sha256_of(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def fetch_archived(batch_id: str, sha256: str, cache_dir: Path, s3=None,
+                   bucket: str = ARCHIVE_BUCKET) -> Path:
+    """Our copy of a loaded archive (``archive``) in ``cache_dir``, checked against
+    the SHA-256 its load stamped: a re-read sees the bytes that were loaded,
+    not whatever the IRS serves under that name today."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    path = cache_dir / f"{batch_id}.zip"
+    if not path.exists() or sha256_of(path) != sha256:
+        if s3 is None:
+            import boto3                                          # the ``ingest`` extra
+            s3 = boto3.client("s3")
+        partial = path.with_suffix(".zip.part")
+        s3.download_file(bucket, f"{ARCHIVE_PREFIX}/{batch_id[:4]}/{batch_id}.zip", str(partial))
+        partial.replace(path)
+        if sha256_of(path) != sha256:
+            raise ValueError(f"{batch_id}: our copy is not the archive that was loaded "
+                             f"(SHA-256 {sha256_of(path)[:12]}, loaded {sha256[:12]})")
+    return path

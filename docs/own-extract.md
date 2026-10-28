@@ -51,6 +51,13 @@ both hold.
   total into grants, $812.8M of it on 332 returns). `own_extract patch` is
   built and was proven on a scratch copy with production's own `_current`
   DDL; it has not run on production.
+- **Checks that need no GT** (2026-10-28). Our grant rows against each
+  filing's own totals: 96.9% of 990-PFs with grants match line 25, the
+  same where GT holds the return and where it does not; 97.7% of Schedule
+  Is fit within Part IX line 1. And the XML elements no concordance path
+  reads, per schema version: it lists the foreign addresses of 990-PF
+  grant recipients that we do not read, and would have caught the 2025v4
+  rename without GT.
 
 ## Why
 
@@ -521,6 +528,74 @@ identical GT row moved for reasons outside our parse: 990-PF grants 80.4%
 (June 86.4%, the foundation-status rename now over many more returns, plus
 AmazonSmile), Schedule I 99.5% of GT's rows once the doubled return is set
 aside (99.5%), future grants all 114,880.
+
+## Checks that need no GT
+
+GT's tables are a second parser: where they agree with ours, two parsers
+read the XML alike, and where they do not, the XML decides. They have
+caught our mistakes (the first load's 34 sibling paths, the foreign
+addresses and the 49 `irs:` returns above) as often as theirs. But they
+prove nothing where we follow GT's conventions, where both parsers miss an
+element, or for a return GT does not hold: 209,879 of our batches' returns
+in its 2026_10_25 release, and every new batch until GT catches up. Two
+checks lean on nothing but the filings:
+
+```bash
+python -m givingtuesday_datamart.own_extract checks [--batch ...] [--host HOST]   # data/own_extract/checks_report.md
+python -m givingtuesday_datamart.own_extract audit [--jobs N] [--host HOST]       # batches loaded before load counted
+```
+
+**Totals the filings state** (module `checks`). A 990-PF's grant rows add
+up to line 25 of Part I, column (d) or (a). A 990's Schedule I lists every
+grant of more than $5,000 to a domestic organization, so its cash and
+non-cash amounts add up to no more than Part IX line 1, column (A). Each
+return is classified from `irs_extract` alone, a batch at a time; `load`
+prints each batch's rates, and the report lists the rates by batch and by
+schema version, any batch 2 points below the median of the others, and the
+largest gaps to sample against the XML. A return that fails is not our
+error by default: grants listed in an attachment, a line 25 that is not the
+grant list, a filer's slip. A batch that falls behind the others is the
+mark of a parse that went wrong in it.
+
+**Elements no concordance path reads** (module `audit`, table
+`irs_extract.unread_paths`). Every leaf element of a parsed return that no
+path reads, where it sits inside a group a table reads or beside an element
+a return-level table reads, counted by batch, form, schema version and
+path, with the archive's and the concordance's SHA-256. `load` counts them
+as it parses; `audit` re-reads batches loaded before, from our copy of each
+archive, checked against the SHA-256 its load stamped. The report lists,
+from 0.5% of a form's returns: elements inside a group, elements with the
+same name as a read one beside them but for the type suffix (`...Txt` to
+`...Cd`: a rename), and elements first seen in a later schema version.
+
+First run, 2026-10-28, on the scratch copy of the extract (all 38 batches;
+the audit 8.5 minutes, the report 11 seconds; 126,309 rows, 687 paths):
+
+| check | returns it applies to | passing | lowest version, batch |
+|---|---|---|---|
+| 990-PF grants against line 25 | 263,734 | 255,648 (96.9%) | 2023v4 93.9%; 2026 03A 94.9% |
+| Schedule I against Part IX line 1 | 137,300 | 134,074 (97.7%) | 2020v4 92.0% (125 returns); 2024 12A 97.0% |
+
+No batch is 2 points below the others. The rates are the same where GT
+holds the return and where it does not (990-PF 96.9% and 97.1%), so ours
+do not lean on GT's. Of the 990-PFs that fail, 3,928 state a line 25 and
+list no grant: the largest state $2.0B, $1.8B and $1.4B.
+
+The audit lists, inside the 990-PF grant groups, the recipient's foreign
+address (line 1 on 61,612 grants of 12,025 returns, city, postal code,
+province): the gap GT's 2026_10_25 release showed the same morning, found
+without it. It lists no rename. Run over 2026 09A with the concordance as
+it stood before the 2025v4 rename was found (the status read as
+`RecipientFoundationStatusTxt` only), it lists `RecipientFoundationStatusCd`
+beside it on 3,356 of the batch's 4,734 2025v4 990-PFs, so it would have
+caught that rename without GT. The elements first seen in a later version
+are header indicators no table needs (`IRSResponsiblePrtyInfoCurrInd`, from
+2022v5 on 86% of 990s); nothing new inside a group in 2025v4.
+
+What neither check sees: a value read into the wrong column with the
+totals still right, and an element moved under a parent nothing reads (the
+audit sees it only as new in its version). A hand-checked sample of returns
+per form and schema version, kept as test fixtures, would cover the first.
 
 ## The patch, ours first
 

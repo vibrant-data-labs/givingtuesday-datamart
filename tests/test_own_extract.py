@@ -12,7 +12,7 @@ import zipfile
 import pandas as pd
 import pytest
 
-from givingtuesday_datamart.own_extract import batches, discover, extract, load, parse, patch
+from givingtuesday_datamart.own_extract import audit, batches, checks, discover, extract, load, parse, patch
 
 PF = b"""<?xml version="1.0" encoding="utf-8"?>
 <Return xmlns="http://www.irs.gov/efile" returnVersion="2024v5.2">
@@ -474,3 +474,102 @@ def test_gt_release_refuses_the_shared_instance(monkeypatch):
     with pytest.raises(SystemExit):
         release.refuse_shared(shared)
     release.refuse_shared({"postgres": {"host": "localhost", "database": "gt_datamart"}})
+
+
+# Checks that need no GT: the filings' own totals, the unread elements.
+
+M = extract.Mapping
+CONCORDANCE = {
+    "basic_fields_pf": [M("basic_fields_pf", "filerein", ("ReturnHeader/Filer/EIN",)),
+                        M("basic_fields_pf", "taxyear", ("ReturnHeader/TaxYr",))],
+    "privategrants": [M("privategrants", "filerein", ("/ReturnHeader/Filer/EIN",)),
+                      M("privategrants", "sigocpyrpnam", ("RecipientPersonNm",)),
+                      M("privategrants", "sigocpyamoun", ("Amt",))],
+}
+
+
+def test_a_990pf_is_classified_against_line_25():
+    assert checks.pf_status(0, None, None, None) == checks.NOT_APPLICABLE
+    assert checks.pf_status(0, None, 5000, None) == "line 25, no grant rows"
+    assert checks.pf_status(3, 5250, 5250, 0) == "equal"              # column (d)
+    assert checks.pf_status(3, 5250, None, 5250.4) == "equal"         # column (a), within a dollar
+    assert checks.pf_status(3, 5000, 5250, 5250) == "rows below line 25"
+    assert checks.pf_status(3, 6000, 5250, None) == "rows above line 25"
+    assert checks.pf_status(2, 0, None, None) == "equal"              # empty groups, nothing stated
+
+
+def test_schedule_i_counts_cash_and_non_cash_against_part_ix_line_1():
+    assert checks.schedule_i_status(10_000, 5_000, 15_000) == "within line 1"
+    assert checks.schedule_i_status(10_000, None, 20_000) == "within line 1"
+    assert checks.schedule_i_status(10_000, 5_000, 14_000) == "above line 1"
+    assert checks.schedule_i_status(10_000, None, None) == "above line 1"
+
+
+def _frame(batch, passing, failing, check=checks.PF_LINE25):
+    ok, bad = checks.PASSING[check], "rows below line 25" if check == checks.PF_LINE25 else "above line 1"
+    rows = [(batch, f"{batch}{i}", "2024v5.0", check, ok, 1.0, 1.0) for i in range(passing)]
+    rows += [(batch, f"{batch}x{i}", "2024v5.0", check, bad, float(i), 1000.0) for i in range(failing)]
+    rows += [(batch, f"{batch}n", "2024v5.0", check, checks.NOT_APPLICABLE, 0.0, 0.0)]
+    return pd.DataFrame(rows, columns=["batch", "object_id", "version", "check", "status", "ours", "stated"])
+
+
+def test_rates_leave_out_returns_a_check_does_not_apply_to_and_flag_a_low_batch():
+    frame = pd.concat([_frame("A", 970, 30), _frame("B", 968, 32), _frame("C", 900, 100)], ignore_index=True)
+    by = checks.rates(frame, "batch").set_index("batch")
+    assert by.loc["A", "returns"] == 1000 and by.loc["A", "passing_pct"] == 97.0
+    assert by.loc["C", "rows below line 25"] == 100
+    low = checks.low_batches(by.reset_index())
+    assert list(low["batch"]) == ["C"]
+    gaps = checks.largest_gaps(frame, n=2)
+    assert list(gaps["gap"]) == [-1000.0, -1000.0]        # ours 0 against 1,000 stated, largest first
+
+
+def test_unread_counts_group_elements_and_siblings_of_read_paths_only():
+    cov = audit.coverage(CONCORDANCE)
+    filing = parse.parse(PF, OID, extract.GROUP_PATHS)
+    assert audit.unread(filing, cov) == {
+        (audit.RETURN_SCOPE, "ReturnHeader/ReturnTypeCd"): 1,           # beside the read TaxYr
+        (audit.RETURN_SCOPE, "ReturnHeader/TaxPeriodBeginDt"): 1,
+        ("privategrants", f"{GRANTS}/RecipientBusinessName/BusinessNameLine1Txt"): 1,
+    }   # the filer's business name and the Part XV total sit beside nothing read: not counted
+
+
+def test_a_renamed_element_is_found_by_its_type_suffix():
+    read = {"A/B/RecipientFoundationStatusTxt", "A/B/Amt"}
+    assert audit.renamed_sibling("A/B/RecipientFoundationStatusCd", read) == "A/B/RecipientFoundationStatusTxt"
+    assert audit.renamed_sibling("A/C/RecipientFoundationStatusCd", read) is None
+    assert audit.renamed_sibling("A/B/PurposeTxt", read) is None
+    assert audit.stem("X/CashGrantAmt") == "CashGrant" and audit.stem("X/Amt") == "Amt"
+
+
+def test_extract_batch_counts_the_unread_elements_by_form_version_and_path(tmp_path):
+    out = tmp_path / "rows"
+    out.mkdir()
+    unread: dict = {}
+    load.extract_batch(_zip(tmp_path, {f"{OID}_public.xml": PF, "202600139349101051_public.xml": PF}),
+                       "b", CONCORDANCE, out, unread)
+    key = ("990PF", "2024v5.2", "privategrants", f"{GRANTS}/RecipientBusinessName/BusinessNameLine1Txt")
+    assert unread[key] == [2, 2]
+    assert ("990PF", "2024v5.2", audit.RETURN_SCOPE, "ReturnHeader/ReturnTypeCd") in unread
+
+
+class _S3:
+    def __init__(self, body: bytes):
+        self.body, self.keys = body, []
+
+    def download_file(self, bucket, key, path):
+        self.keys.append((bucket, key))
+        with open(path, "wb") as handle:
+            handle.write(self.body)
+
+
+def test_an_archive_is_reread_from_our_copy_only_if_it_is_the_one_loaded(tmp_path):
+    body = b"the archive"
+    s3 = _S3(body)
+    path = batches.fetch_archived("2025_TEOS_XML_11B", hashlib.sha256(body).hexdigest(), tmp_path, s3)
+    assert path.read_bytes() == body
+    assert s3.keys == [("givingtuesday-datamart", "irs/xml_batches/2025/2025_TEOS_XML_11B.zip")]
+    batches.fetch_archived("2025_TEOS_XML_11B", hashlib.sha256(body).hexdigest(), tmp_path, s3)
+    assert len(s3.keys) == 1                                   # the cached copy matches: no download
+    with pytest.raises(ValueError, match="not the archive that was loaded"):
+        batches.fetch_archived("2025_TEOS_XML_11B", "0" * 64, tmp_path, _S3(b"something else"))

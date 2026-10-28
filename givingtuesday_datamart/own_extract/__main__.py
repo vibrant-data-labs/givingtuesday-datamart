@@ -4,6 +4,8 @@
     python -m givingtuesday_datamart.own_extract load 2026 [--batch 2026_TEOS_XML_09A ...] [--keep-zips]
     python -m givingtuesday_datamart.own_extract parity [--batch ...] [--report PATH] [--host HOST]
     python -m givingtuesday_datamart.own_extract gt-release 2026_10_25 --host HOST [--jobs N]
+    python -m givingtuesday_datamart.own_extract checks [--batch ...] [--report PATH] [--host HOST]
+    python -m givingtuesday_datamart.own_extract audit [--batch ...] [--jobs N] [--host HOST]
     python -m givingtuesday_datamart.own_extract discover ZIP [--out PATH]
 
 ``batches`` lists the archives the IRS serves for a year (it asks the
@@ -15,7 +17,11 @@ a year of archives is 4-5 GB. ``parity`` measures
 the loaded batches against GT's tables and writes a markdown report.
 ``gt-release`` loads a GT release into a scratch host holding a copy of our
 extract, under our batches' returns only, for ``parity --host`` there
-(``release``). ``discover`` proposes the concordance from an archive GT has released
+(``release``). ``checks`` measures the loaded batches against their filings'
+own totals and lists the elements no concordance path reads, without GT
+(``checks``, ``audit``); ``load`` counts those elements as it parses and
+prints each batch's checks, ``audit`` counts them for batches loaded before.
+``discover`` proposes the concordance from an archive GT has released
 (GT's rows for its returns, read by EIN, about 10 minutes for a 12,000-return
 archive); review the proposal against ``data/own_extract/concordance.csv``.
 """
@@ -23,6 +29,7 @@ archive); review the proposal against ``data/own_extract/concordance.csv``.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures as cf
 import csv
 import sys
 import time
@@ -32,8 +39,8 @@ from sqlalchemy import text
 
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart.ingestion import datamart_config
-from givingtuesday_datamart.own_extract import (batches, discover, extract, load, parity, patch, proof,
-                                                release, report)
+from givingtuesday_datamart.own_extract import (batches, checks, discover, extract, load, parity, patch,
+                                                proof, release, report)
 
 DEFAULT_CACHE = Path.home() / ".cache" / "irs_batches"
 
@@ -95,6 +102,8 @@ def _load_one(args, batch, concordance) -> None:
     print(f"{batch.batch_id}: {members} returns ({deflate64} Deflate64), "
           + ", ".join(f"{t} {rows.get(t, 0)}" for t in concordance)
           + f"  [{time.time() - started:.0f} s] -> {kept}", flush=True)
+    with get_session(config=datamart_config()) as session:
+        print(f"{batch.batch_id} checks: {checks.batch_line(session, batch.batch_id)}", flush=True)
     if not args.keep_zips:
         path.unlink()
 
@@ -133,6 +142,37 @@ def _gt_release(args) -> int:
         print(f"{summary['table']}: {summary['kept']:,} of GT's {summary['gt_rows']:,} rows kept "
               f"({summary['file']}, {summary['bytes'] / 1e9:.2f} GB, sha256 {summary['sha256'][:12]})",
               flush=True)
+    return 0
+
+
+def _checks(args) -> int:
+    # Reads our tables only, a batch at a time, at parity's session settings.
+    with get_session(config=_config(args.host)) as session:
+        checks.run(session, args.report, args.batch or None)
+    print(f"wrote {args.report}")
+    return 0
+
+
+def _audit_one(config: dict, batch_id: str, zip_sha256: str, cache: Path, keep: bool) -> str:
+    path = batches.fetch_archived(batch_id, zip_sha256, cache)
+    with get_session(config=config) as session:
+        n = load.audit_batch(session, path, batch_id, extract.load(), zip_sha256)
+    if not keep:
+        path.unlink()
+    return f"{batch_id}: {n:,} unread paths"
+
+
+def _audit(args) -> int:
+    # Re-reads each loaded batch from our copy of its archive, checked against
+    # the SHA-256 its load stamped; a load from now on counts them itself.
+    config = _config(args.host)
+    with get_session(config=config) as session:
+        stamps = checks.loaded(session, args.batch or None)
+    with cf.ProcessPoolExecutor(max_workers=args.jobs) as pool:
+        jobs = [pool.submit(_audit_one, config, b, sha, args.cache, args.keep_zips)
+                for b, sha in zip(stamps["batch"], stamps["zip_sha256"])]
+        for job in cf.as_completed(jobs):
+            print(job.result(), flush=True)
     return 0
 
 
@@ -224,6 +264,21 @@ def main(argv: list[str] | None = None) -> int:
                    help="only this table (repeatable); the _current relations are rebuilt either way")
     p.add_argument("--jobs", type=int, default=1, help="tables loaded at once")
     p.set_defaults(func=_gt_release)
+
+    p = sub.add_parser("checks", help="the loaded batches against their filings' own totals; unread elements")
+    p.add_argument("--batch", action="append", help="only this batch id (repeatable)")
+    p.add_argument("--report", type=Path,
+                   default=extract.REPO_ROOT / "data" / "own_extract" / "checks_report.md")
+    p.add_argument("--host", default=None, help="database host to read, e.g. a scratch copy")
+    p.set_defaults(func=_checks)
+
+    p = sub.add_parser("audit", help="count the unread elements of batches loaded before load counted them")
+    p.add_argument("--batch", action="append", help="only this batch id (repeatable)")
+    p.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
+    p.add_argument("--keep-zips", action="store_true")
+    p.add_argument("--jobs", type=int, default=1, help="batches read at once")
+    p.add_argument("--host", default=None, help="database host to write to, e.g. a scratch copy")
+    p.set_defaults(func=_audit)
 
     p = sub.add_parser("discover", help="propose the concordance from an archive GT has released")
     p.add_argument("zip", type=Path)

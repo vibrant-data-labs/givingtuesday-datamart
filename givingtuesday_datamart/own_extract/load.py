@@ -9,7 +9,8 @@ failed load leaves the previous rows in place.
 Each load is a run in ``datamart_meta.ingest_runs`` (logical name
 ``irs_extract``): the batch url as ``source_url``, ``<batch>@<Last-Modified>``
 as ``source_version``, and in ``source_manifest`` the archive's SHA-256 and
-size, the concordance file's SHA-256, and the rows per table.
+size, the concordance file's SHA-256, and the rows per table. With the rows
+go the batch's unread elements (``audit``) in ``irs_extract.unread_paths``.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ from pathlib import Path
 from sqlalchemy import text
 
 from givingtuesday_datamart.ingestion import INGEST_RUNS_TABLE, ensure_meta_schema
-from givingtuesday_datamart.own_extract import batches, extract, parse
+from givingtuesday_datamart.own_extract import audit, batches, extract, parse
 
 SCHEMA = "irs_extract"
 LOGICAL_NAME = "irs_extract"
@@ -36,6 +37,11 @@ LOGICAL_NAME = "irs_extract"
 RETURNS = "returns"
 RETURNS_COLUMNS = ("object_id", "_batch_id", "return_type", "return_version", "filesha256",
                    "filerein", "taxperend")
+# The elements no concordance path reads (``audit``), per batch, form, schema
+# version and path, with the archive and concordance they were counted from.
+UNREAD = "unread_paths"
+UNREAD_COLUMNS = ("_batch_id", "return_type", "return_version", "scope", "path", "returns",
+                  "occurrences", "zip_sha256", "concordance_sha256")
 
 
 def columns_of(table: str, mappings: list[extract.Mapping]) -> list[str]:
@@ -55,6 +61,11 @@ def ensure_tables(session, concordance: dict[str, list[extract.Mapping]]) -> Non
             f"CREATE TABLE {SCHEMA}.{RETURNS} ({', '.join(c + ' text' for c in RETURNS_COLUMNS)})"))
         session.execute(text(f"CREATE INDEX ix_returns_object_id ON {SCHEMA}.{RETURNS} (object_id)"))
         session.execute(text(f"CREATE INDEX ix_returns_batch ON {SCHEMA}.{RETURNS} (_batch_id)"))
+    if session.execute(text(f"SELECT to_regclass('{SCHEMA}.{UNREAD}')")).scalar() is None:
+        cols = ", ".join(f"{c} {'integer' if c in ('returns', 'occurrences') else 'text'}"
+                         for c in UNREAD_COLUMNS)
+        session.execute(text(f"CREATE TABLE {SCHEMA}.{UNREAD} ({cols})"))
+        session.execute(text(f"CREATE INDEX ix_unread_paths_batch ON {SCHEMA}.{UNREAD} (_batch_id)"))
     for table, mappings in concordance.items():
         if session.execute(text(f"SELECT to_regclass('{SCHEMA}.{table}')")).scalar() is not None:
             continue
@@ -68,8 +79,9 @@ def ensure_tables(session, concordance: dict[str, list[extract.Mapping]]) -> Non
 
 
 def extract_batch(path: Path, batch_id: str, concordance: dict[str, list[extract.Mapping]],
-                  out_dir: Path) -> tuple[dict[str, Path], Counter]:
-    """Parse every return of an archive into one CSV file per table in ``out_dir``.
+                  out_dir: Path, unread: dict | None = None) -> tuple[dict[str, Path], Counter]:
+    """Parse every return of an archive into one CSV file per table in ``out_dir``,
+    and count its unread elements into ``unread`` when given (``audit.add``).
 
     Files, not memory: the largest archive (2024 11A, 1.2 GB) holds about
     6 GB of XML.
@@ -77,6 +89,7 @@ def extract_batch(path: Path, batch_id: str, concordance: dict[str, list[extract
     tables = [*concordance, RETURNS]
     files = {t: out_dir / f"{t}.csv" for t in tables}
     counts: Counter = Counter()
+    cov = audit.coverage(concordance) if unread is not None else None
     with ExitStack() as stack:
         writers = {t: csv.writer(stack.enter_context(files[t].open("w", newline=""))) for t in tables}
         for object_id, xml in batches.iter_members(path):
@@ -86,6 +99,8 @@ def extract_batch(path: Path, batch_id: str, concordance: dict[str, list[extract
                 raise ValueError(f"{batch_id}: return {object_id} does not parse: {err}") from err
             counts[f"returns_{filing.return_type or 'unknown'}"] += 1
             counts[f"version_{filing.version or 'unknown'}"] += 1     # a new IRS schema shows up here
+            if cov is not None:
+                audit.add(unread, filing, cov)
             writers[RETURNS].writerow([_csv(v) for v in (
                 object_id, batch_id, filing.return_type, filing.version, filing.sha256,
                 filing.first("ReturnHeader/Filer/EIN"), filing.first("ReturnHeader/TaxPeriodEndDt"))])
@@ -112,6 +127,34 @@ def _replace(session, files: dict[str, Path], batch_id: str, columns: dict[str, 
             with files[table].open(newline="") as handle:
                 cursor.copy_expert(
                     f"COPY {SCHEMA}.{table} ({', '.join(cols)}) FROM STDIN WITH (FORMAT csv)", handle)
+
+
+def _write_unread(session, batch_id: str, unread: dict, zip_sha256: str, concordance_sha256: str) -> None:
+    """Replace the batch's rows of ``unread_paths`` (inside the caller's transaction)."""
+    session.execute(text(f"DELETE FROM {SCHEMA}.{UNREAD} WHERE _batch_id = :b"), {"b": batch_id})
+    rows = [dict(zip(UNREAD_COLUMNS, (batch_id, form, version, scope, path, n_returns, n_occurrences,
+                                      zip_sha256, concordance_sha256)))
+            for (form, version, scope, path), (n_returns, n_occurrences) in sorted(unread.items())]
+    if rows:
+        session.execute(text(
+            f"INSERT INTO {SCHEMA}.{UNREAD} ({', '.join(UNREAD_COLUMNS)}) "
+            f"VALUES ({', '.join(':' + c for c in UNREAD_COLUMNS)})"), rows)
+
+
+def audit_batch(session, path: Path, batch_id: str, concordance: dict[str, list[extract.Mapping]],
+                zip_sha256: str) -> int:
+    """Count the unread elements of an archive already loaded and store them; the
+    batch's other rows are not touched. Returns the number of distinct paths."""
+    unread: dict = {}
+    cov = audit.coverage(concordance)
+    for object_id, xml in batches.iter_members(path):
+        audit.add(unread, parse.parse(xml, object_id, extract.GROUP_PATHS), cov)
+    session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+                    {"key": f"{LOGICAL_NAME}:{batch_id}"})
+    ensure_tables(session, concordance)
+    _write_unread(session, batch_id, unread, zip_sha256, getattr(concordance, "sha256", ""))
+    session.commit()
+    return len(unread)
 
 
 def load_returns(session, path: Path) -> int:
@@ -152,13 +195,14 @@ def load_batch(session, path: Path, concordance: dict[str, list[extract.Mapping]
     batch_id = stamp.get("batch_id") or path.stem
     started = datetime.now(timezone.utc)
     run_id = str(uuid.uuid4())
+    unread: dict = {}
     with tempfile.TemporaryDirectory(dir=path.parent) as tmp:
-        files, counts = extract_batch(path, batch_id, concordance, Path(tmp))
-        manifest = _copy(session, files, batch_id, concordance, stamp, counts, run_id, started)
+        files, counts = extract_batch(path, batch_id, concordance, Path(tmp), unread)
+        manifest = _copy(session, files, batch_id, concordance, stamp, counts, run_id, started, unread)
     return manifest
 
 
-def _copy(session, files, batch_id, concordance, stamp, counts, run_id, started) -> dict:
+def _copy(session, files, batch_id, concordance, stamp, counts, run_id, started, unread=None) -> dict:
     manifest = {
         "batch": stamp,
         "concordance_sha256": getattr(concordance, "sha256", ""),
@@ -181,6 +225,8 @@ def _copy(session, files, batch_id, concordance, stamp, counts, run_id, started)
         ensure_meta_schema()
     ensure_tables(session, concordance)
     _replace(session, files, batch_id, {t: columns_of(t, m) for t, m in concordance.items()})
+    if unread is not None:
+        _write_unread(session, batch_id, unread, stamp.get("sha256", ""), manifest["concordance_sha256"])
     session.execute(text(
         f"""INSERT INTO {INGEST_RUNS_TABLE} (run_id, logical_name, staging_table, source_version,
                 source_url, started_at, finished_at, status, row_count, source_manifest)
