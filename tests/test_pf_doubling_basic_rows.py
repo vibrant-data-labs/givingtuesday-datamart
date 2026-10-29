@@ -160,9 +160,12 @@ def test_the_total_row_sql_renders_and_writes_nothing_under_public():
     assert "CASE WHEN t.fires_d THEN t.line25_d WHEN t.fires_a THEN t.line25_a ELSE t.max_amt END AS total" in rendered
     assert "(s.k_held >= 1 AND s.rest = s.total * s.div) AS shape" in rendered
     assert "WHEN s.total IN (s.line25_d, s.line25_a) THEN 'the total'" in rendered
-    # the regression gate's name patterns, as the gate has them
-    from givingtuesday_datamart.matching_regression_checks import PLACEHOLDER_REGEX
-    assert PLACEHOLDER_REGEX in rendered and "ILIKE 'pfizer%'" in rendered and "'%world health organi%'" in rendered
+    # the regression gate's name patterns, as the gate had them when the proof ran (PR #69); the
+    # placeholder pattern has widened since (input shape 7), and the proof stays the dated measurement it is
+    placeholder_regex_of_the_proof = (
+        r"(\y(see|refer)\w*\y[\s,–-]*(attach|addition|schedul|statement|stmt|list))|^\s*see\s*$")
+    assert (placeholder_regex_of_the_proof in rendered and "ILIKE 'pfizer%'" in rendered
+            and "'%world health organi%'" in rendered)
 
 
 def test_the_field_fill_sql_renders_and_writes_nothing_under_public():

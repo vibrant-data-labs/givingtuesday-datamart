@@ -206,7 +206,9 @@ def test_guard_runs_before_winner_resolution_so_an_exact_pair_of_another_ein_win
     universe = pd.DataFrame({"full_name": ["university of chicago cancer research foundation",
                                            "university of chicago"], "filerein_key": ["111111111", "222222222"]})
     # The affiliate outscores the exact row on combined score (2*name + addr):
-    # 2*0.8875 + 0.96 = 2.735 > 2*1.0 + 0.5 = 2.5. Without the guard it wins.
+    # 2*0.8875 + 0.96 = 2.735 > 2*1.0 + 0.5 = 2.5. Exact-name preference
+    # now picks the exact row even without the guard. The guard must still
+    # refuse the affiliate when the exact competitor is absent.
     features = pd.DataFrame({
         "basic_fields_df_index": [0, 1],
         "private_foundations_df_index": [0, 0],
@@ -218,7 +220,11 @@ def test_guard_runs_before_winner_resolution_so_an_exact_pair_of_another_ein_win
     with_guard = corrections_preflight._resolve_winners(features, universe, grants)
     without = corrections_preflight._resolve_winners(features, universe, grants, guards=False)
     assert with_guard["basic_fields_df_index"].tolist() == [1]
-    assert without["basic_fields_df_index"].tolist() == [0]
+    assert without["basic_fields_df_index"].tolist() == [1]
+    affiliate_only = features.iloc[:1]
+    assert corrections_preflight._resolve_winners(affiliate_only, universe, grants).empty
+    assert corrections_preflight._resolve_winners(
+        affiliate_only, universe, grants, guards=False)["basic_fields_df_index"].tolist() == [0]
 
 
 # --- lockstep across the matcher's readers ---------------------------------

@@ -35,7 +35,8 @@ from givingtuesday_datamart import grant_matching as gm
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart.ingestion import datamart_config
-from givingtuesday_datamart.matching_regression_checks import AMT, PLACEHOLDER_REGEX
+from givingtuesday_datamart.grant_matching import PLACEHOLDER_REGEX
+from givingtuesday_datamart.matching_regression_checks import AMT
 
 POLICIES = ("current", "placeholders_only", "no_sort", "conservative", "no_bmf")
 # Textual cohorts, not a promise to include every fuzzy spelling of an EIN.
@@ -48,17 +49,19 @@ WATCH_EINS = ("520595110", "520368135", "223454231", "520591627", "237424444",
 _STATE: dict = {}
 
 
-def selection_sql() -> str:
+def selection_sql(seed: int = 0) -> str:
     """All years of a selected seven-key tuple, including previously unmatched.
 
     Selection depends only on the tuple's keys. The general cohort is a
     stable 1/N hash sample of tuples, not grant rows or only current wins.
     Eligibility is 2015+, but the production write joins every year of an
     eligible tuple. HAVING keeps that distinction out of the row weights.
+    ``seed`` salts the hash: 0 drew the pools this proof inspected, and a
+    fresh sample takes another.
     """
     keys = ", ".join(gm._KEYS)
     name = "concat_ws(' ', name1_key, name2_key)"
-    sample = "mod(abs(hashtextextended(jsonb_build_array(" + keys + ")::text, 0)), :one_in) = 0"
+    sample = f"mod(abs(hashtextextended(jsonb_build_array({keys})::text, {int(seed)})), :one_in) = 0"
     placeholder = f"{name} ~* :placeholder"
     targeted = f"{name} ~* :cohort"
     amount = AMT.format(col="sigocpyamoun")
@@ -228,9 +231,10 @@ def resolve_policy(features: pd.DataFrame, universe: pd.DataFrame, grants: pd.Da
     g = grants if policy == "current" else grants[~grants["placeholder"]]
     f = features[features[gm.INDEX_COLS[0]].isin(u.index)
                  & features[gm.INDEX_COLS[1]].isin(g.index)]
-    # Pair order is the production matcher's deterministic tie-break.
+    # Pair order is the production matcher's deterministic tie-break, and
+    # "weighted" its winner order when this proof ran (2026-10-15).
     f = f.sort_values(gm.INDEX_COLS, kind="mergesort")
-    return gm.all_matches(f, u, g)
+    return gm.all_matches(f, u, g, ranking="weighted")
 
 
 def _score_chunk(number: int) -> str:

@@ -90,6 +90,7 @@ from givingtuesday_datamart.grant_matching import (
     ADDRESS_TIER,
     INDEX_COLS,
     NAME_ONLY,
+    PLACEHOLDER_REGEX,
     STATE_TIER,
     Relations,
     _KEYS,
@@ -108,7 +109,6 @@ from givingtuesday_datamart.ingestion import datamart_config
 from givingtuesday_datamart.matching_regression_checks import (
     AMT,
     FUNDER_SENTINEL_FLOORS,
-    PLACEHOLDER_REGEX,
     RECIPIENT_SENTINEL_FLOORS,
 )
 from givingtuesday_datamart.placeholder_recovery import loader as recovered_loader
@@ -169,7 +169,8 @@ def tuples_sql(names: Relations) -> str:
                coalesce(sum({amount}) FILTER (WHERE f.filerein IS NOT NULL AND NOT {recovered}), 0)::float8
                    AS funder_dollars,
                bool_or(l.filerein IS NOT NULL) AS in_loaded,
-               bool_or(concat_ws(' ', sigocpyrpnam, sigocpyrbnbn1, sigocpyrbnbn2) ~* '{PLACEHOLDER_REGEX}'
+               -- the matcher's own placeholder predicate, the name keys, as the gate counts it
+               bool_or(concat_ws(' ', name1_key, name2_key) ~* '{PLACEHOLDER_REGEX}'
                        OR sigocpyrbnbn1 ILIKE 'pfizer%' OR sigocpyrbnbn1 ILIKE '%world health organi%') AS in_gate
         FROM public.{names.of('privategrants_w_column_keys_view')} g
         LEFT JOIN loaded l ON l.filerein = g.filerein AND l.taxyear = g.taxyear
@@ -281,8 +282,9 @@ def build(prefix: str = PREFIX, policy: str | None = None, one_in: int = ONE_IN,
     regular = subset[subset["n_rows"] > subset["recovered_rows"]]
     logger.info(f"Matching before: {len(regular):,} tuples")
     universe_before, regular_before = as_before(universe), as_before(regular)
+    # The matcher before input shape 3 ranked by the score alone.
     before = resolve_matches(score(universe_before, regular_before, workers), universe_before, regular_before,
-                             one_filer_in_state="none")
+                             one_filer_in_state="none", ranking="weighted")
     joined = (subset[["addresscity_key", "addressstate_key", "addresszip_key"]] != "").all(axis=1)
     before = before[before[INDEX_COLS[1]].map(joined)]
     logger.info(f"Matching after: {len(subset):,} tuples")
