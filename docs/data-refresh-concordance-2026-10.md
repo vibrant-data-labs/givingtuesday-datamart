@@ -117,24 +117,37 @@ they do.
 
 ### 0. Preflight (the box and the laptop, about an hour; nothing written to production)
 
-- [ ] The box's clone on this branch and reinstalled:
+- [x] The box's clone on this branch and reinstalled:
       `git fetch && git switch zeclaude/data-refresh-concordance && pip install -e '.[ingest]'`.
-- [ ] `python -m givingtuesday_datamart.sources status`: GT's newest is
+      Done 2026-10-29 16:45 UTC at f995657; the install had nothing new to
+      add.
+- [x] `python -m givingtuesday_datamart.sources status`: GT's newest is
       `2026_10_25` (a newer one is decision 2); the BMF at `2026_10_13`.
       `python -m givingtuesday_datamart.own_extract batches 2026`: `09A`
-      the latest.
-- [ ] No backend on the instance but ours (appendix); free storage at
+      the latest. Done 16:48 UTC, as expected on every line
+      (`preflight-status.log`).
+- [x] No backend on the instance but ours (appendix); free storage at
       least 60 GB; the instance the large class and `bigdb.env` on the box.
-- [ ] `python -m givingtuesday_datamart.placeholder_recovery status`
-      logged.
-- [ ] The watchdog as repo code, with tests, started on the box for each
-      heavy step.
-- [ ] The census before: for each relation production reads (the
+      Done 16:50 UTC: no active backend but my own (ten idle, the site's
+      pool); 63.5 GB free, swap 0.00 GB, 23.0 GB of memory free; the large
+      class; `bigdb.env` where the October run left it on the box.
+- [x] `python -m givingtuesday_datamart.placeholder_recovery status`
+      logged. Done 16:48 UTC (`preflight-status.log`): every figure as
+      read on 2026-10-28.
+- [x] The watchdog as repo code, with tests, started on the box for each
+      heavy step. PR #85 (36a116e): `python -m givingtuesday_datamart.watchdog
+      --log FILE -- COMMAND` runs the step and watches; it ran first over
+      the census below, from the box's worktree of that branch. Each heavy
+      step's run script wraps its command with it.
+- [x] The census before: for each relation production reads (the
       basic-fields and grants `_current` relations, `nonprofit_canonical`,
       the recovered rows, the matcher's two tables), rows and dollars by
       tax year, as a small rerunnable module; the CSV stays with the run's
       logs, the table goes in this log. Run again in step 10, it says what
-      moved where, which the accepting commit must explain.
+      moved where, which the accepting commit must explain. Done 17:03 to
+      17:10 UTC: `census take` (PR #85) from the box under the watchdog,
+      `census-before.csv` beside the logs, the table in the log entry.
+      Step 10 runs `census compare` against that file.
 - [x] For decision B: the fresh validation sample frozen now, read-only,
       with a new hash seed and none of the recipients any proof has
       inspected. Done 2026-10-29 04:37 UTC: seed 7, 1 in 100, 39,178
@@ -351,3 +364,36 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   "every flag reviewed, the order a net correction". The other orders left
   the code the same day; PR #84 awaits review and merge. Steps 1 to 6 do
   not wait on it.
+- **2026-10-29, step 0.** 16:45 to 17:10 UTC. The box's clone on f995657
+  and reinstalled. `sources status` as expected: GT's `2026_10_25`
+  upstream for every source and not loaded, the BMF at `2026_10_13`, `09A`
+  of 21 October the latest batch. No active backend but my own (ten idle,
+  the site's pool); 63.5 GB free, 0.00 GB of swap, 23.0 GB of memory
+  free; the large class; `bigdb.env` in place. `placeholder_recovery
+  status` as read on 10-28 (`preflight-status.log` in the run's log
+  directory). The watchdog and the census are repo code on PR #85
+  (36a116e, f3c831e), each with tests; the census before ran from the
+  box's worktree of that branch under the watchdog: ten relations in 6
+  minutes 23 seconds, one sequential scan each with no parallel workers
+  (`privategrants_current` 3 minutes 22 seconds), the instance flat at
+  63.5 GB free and 0.00 GB of swap throughout; the watchdog saw the
+  census's one backend every poll and ended with its exit code. The CSV is
+  `census-before.csv` (171 relation-years); `nonprofit_canonical` counts
+  by the organization's latest tax year, and `privategrants_w_recipients`
+  holds matched rows only, so every row of it has an EIN.
+
+  | relation | rows | with EIN | $B | $B with EIN | rows 2023 | rows 2024 | rows 2025 |
+  |---|---|---|---|---|---|---|---|
+  | basic_fields_current | 3,992,135 |  | 1,733.59 |  | 352,807 | 357,856 | 118,380 |
+  | basic_fields_pf_current | 1,226,420 |  | 859.07 |  | 124,404 | 123,982 | 71,937 |
+  | basic_fields_ez_current | 2,257,600 |  | 15.69 |  | 206,611 | 206,541 | 112,934 |
+  | grants_to_domestic_organizations_current | 9,190,418 |  | 1,452.08 |  | 967,650 | 1,035,351 | 174,223 |
+  | privategrants_current | 17,392,341 |  | 868.94 |  | 2,039,606 | 1,586,112 | 710,304 |
+  | privategrants_future_current | 452,460 |  | 185.05 |  | 51,521 | 49,712 | 7,104 |
+  | nonprofit_canonical | 1,983,340 |  |  |  | 35,687 | 354,882 | 231,253 |
+  | privategrants_current_w_recovered | 582,471 |  | 16.21 |  | 143,802 | 123,392 | 1,803 |
+  | privategrants_w_recipients | 10,927,644 | 10,927,644 | 488.79 | 488.79 | 1,510,723 | 1,100,948 | 443,416 |
+  | unioned_grants | 19,879,313 | 19,259,196 | 1,937.37 | 1,876.49 | 2,448,508 | 2,122,550 | 613,541 |
+
+  Step 0 is complete. Step 1 (the reload of our extract) is next, any
+  time, with the watchdog over it.
