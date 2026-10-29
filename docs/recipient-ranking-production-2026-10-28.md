@@ -11,9 +11,10 @@ geography and a filing before a BMF line at every name score. Our review of
 it on 2026-10-28 found fifteen problems; the table near the end says what
 answers each. Validating the revision on the inspected pools then showed
 that the plan's criteria pull against each other, so this version carries
-three orders, measured side by side, and the choice of the default is still
-open (the last section). No production table has been rebuilt by this
-change.
+three orders, measured side by side on the inspected pools and on a fresh
+sample whose every changed winner we reviewed, and the choice of the default
+is still open (the last section). No production table has been rebuilt by
+this change.
 
 ## How candidates compete
 
@@ -194,7 +195,9 @@ What the flags are:
   University, "virginia association of health plans" for Virginia Tech
   Foundation, "mt hood medical center foundation" for Medical Teams
   International. The flag cannot tell these from errors: the old winner sat
-  in the grant's city, the right one files from another.
+  in the grant's city, the right one files from another. On the fresh
+  sample, where every flag was reviewed, they run about three corrections
+  to one error.
 - **The state-typo pattern**, the failure the criterion was written for:
   `exact_first` sends "temple emanu el", Closter NY 07624, to a New York
   namesake instead of "temple emanu el of closter" in New Jersey, and "youth
@@ -230,28 +233,128 @@ Johns Hopkins University exactly to the university (191 in production;
 3,832 under `geographic`, 3,834 under the other two; none to the club), and
 Duke University's from 1,890 to 5,221.
 
+## Validation on a fresh sample
+
+Code: `ranking_validation freeze`, then `fresh`, on the box on 2026-10-29.
+The freeze read production in one read-only transaction (work_mem 64 MB, no
+parallel workers) in two and a half minutes: a 1-in-100 hash sample of
+recipient tuples under seed 7, 39,178 tuples and 134,512 grant rows, after
+dropping the 5,844 that an inspected pool held. Its manifest pins every
+order's code by digest (`751fe2dc…`), and `fresh` refuses to run after any
+change to it. The run from `a7f52ab` and its rerun from `1afa3f8`, which only
+adds each winner's place to the outputs, gave the same numbers; the records
+are `ranking-validation-fresh/manifest.json` and
+`ranking-validation-fresh-2/validation.json` in the run's logs.
+
+**The control holds.** `weighted` reproduces production's winner for all
+39,178 tuples. Every placeholder tuple was in an inspected pool, so none is
+in the sample. Every order matches the same 24,802 tuples as production and
+leaves the same 14,376 unmatched: the orders differ only in which EIN wins.
+
+| | geographic | named_first | exact_first |
+|---|---:|---:|---:|
+| winners changed from production | 379 | 543 | 567 |
+| criterion location flags | 0 | 113 | 172 |
+| … moving off a winner whose name holds the grant's | 0 | 0 | 56 |
+| … the state-typo pattern | 0 | 0 | 0 |
+
+**We reviewed every winner `geographic` or `named_first` changes**: the 363
+changes they share and the 195 tuples where they disagree, 558 in all. Each
+verdict, with a note, is in
+[`ranking_validation_fresh_reviewed_2026_10_29.csv`](../data/placeholder_recovery/ranking_validation_fresh_reviewed_2026_10_29.csv).
+A verdict is a reading of the names and addresses, not a confirmed payee;
+*unclear* means the name and the address point at two different
+organizations and nothing else decides. Against production's winner (rows
+are grant rows, dollars their positive amounts):
+
+| | geographic | named_first |
+|---|---:|---:|
+| corrections | 283 tuples, 1,459 rows, $50.6M | 395 tuples, 1,813 rows, $62.0M |
+| regressions | 32 tuples, 149 rows, $2.6M | 51 tuples, 195 rows, $1.6M |
+| both wrong | 44 | 50 |
+| unclear | 20 | 47 |
+
+- **The 363 shared changes: 283 corrections, 18 regressions.** The
+  corrections are an organization's own filing over another EIN under its
+  name (NYU, Columbia, Yale, Emory, Memorial Sloan Kettering) and the named
+  organization over a neighbor production took for it (the Billings Clinic
+  Foundation over the Billings Catholic Schools Foundation, the Florida State
+  University Foundation over its international programs association). The
+  regressions: an exact namesake in the grant's city over the grant's
+  organization at its own address under a longer or variant name (ten, among
+  them Second Baptist Church of Richmond, Cancer Services of Greater Baton
+  Rouge, Cambridge Academy and five Brooklyn and Lakewood organizations); a
+  city the BMF or the grant writes another way (six: GROSSE PT FRM, SAINT
+  PAUL, SAINT PETER, Roxbury for Boston, FAYETTE VILLE, Wawa for Media); a BMF
+  line under a typo or a former name (two: "duck unlimited", "quinnipiac
+  college").
+- **Where the two disagree, `named_first` is right 126 times and `geographic`
+  33**; both are wrong 9 times and 27 are unclear. `named_first`'s are mostly
+  production's errors that `geographic` keeps, another organization near the
+  grant's address (a radio amateurs' club for the Johnson County Library
+  Foundation, a family foundation for the Beverly Hills Athletic Alumni
+  Association). Fourteen are production's right winners that `geographic`
+  loses to a neighbor of the grant's address: in nine the BMF or the grant
+  writes the same place another way (SAINT LOUIS for ST LOUIS, the Regional
+  Business Council, $1.3M; CHARLOTTESVLE; RCHO STA MARG; Jamaica Plain for
+  Boston), in five the organization files from a nearby city.
+  `geographic`'s are mostly `named_first` sending a congregation to a
+  namesake in another city (St Luke's in East Hampton to the Bronx, St
+  Joseph's in Killeen to Manor, Trinity Lutheran in Omaha to Blair), a
+  generic agency name to another city's agency (Jewish Family Services,
+  Cincinnati to Columbus), an organization's grant to its foundation or
+  another affiliate, and one mistyped state the flag misses ("meta
+  foundation", Corvallis "CA", sent to Beverly Hills; the old address score
+  is 0.88).
+- **The flags.** All 113 of `named_first`'s criterion flags fall where the
+  orders disagree: 67 corrections, 23 errors, 2 both wrong, 21 unclear. Its
+  81 other strong location losses are 61 corrections and 8 errors.
+  `geographic` raises no criterion flag; its 77 strong losses, each a lost
+  ZIP in the same city, are 59 corrections, 8 regressions and 10 unclear.
+
+We did not review `exact_first` row by row: it makes `named_first`'s
+corrections, and its 56 flags off a winner holding the grant's name are the
+error the inspected pools showed (Temple Beth El of St Petersburg Florida,
+at the grant's address, to an exact namesake elsewhere in Florida).
+
 ## The decision left
 
-1. **`geographic`**, the default as this branch stands: no location flag,
-   467 of 647, and it keeps production's errors where another name holds a
-   similar address in the grant's city.
-2. **`named_first`**, our recommendation: 469 of 647 with none lost, and it
-   corrects most of those errors; its 742 flags are corrections but for one
-   ambiguous state typo, which asks the plan's location criterion to be read
-   as the state-typo pattern it was written for.
-3. **Fix A** of the plan: the placeholder exclusion and the gate alone.
+Either order beats the old one by a wide margin; they differ in what they
+risk.
 
-Whichever order is chosen, a fresh sample, frozen read-only from production
-before it is scored and with all three orders' code pinned by digest
-(`ranking_validation freeze`, then `fresh`), checks it on recipients nobody
-has inspected; the orders not chosen leave the code before the merge.
+1. **`named_first`**, our recommendation. It corrects the most (395 tuples
+   against 283 on the fresh sample) at about the same precision (89% of the
+   decided changes against 90%), covers 469 of 647 labeled relationships
+   with none lost, and keeps the 14 right winners `geographic` loses. It
+   fails the location criterion as written: 113 flags on the fresh sample,
+   about one in four of the decided ones an error, and 742 on the inspected
+   pools, not reviewed one by one. Choosing it amends that criterion from
+   "no flag" to "every flag reviewed, the order a net correction".
+2. **`geographic`**, the default as this branch stands: the only order with
+   no criterion flag on either pool, two relationships short of the labeled
+   floor (467), both errors production makes today. It corrects 283 tuples
+   and regresses 32 on the fresh sample.
+3. **Fix A** of the plan: the placeholder exclusion and the gate alone. It
+   gives up 251 to 344 net corrections on these 39,178 tuples alone.
+
+The orders not chosen leave the code before the merge. Two weaknesses stay
+for a later change, each with its own fresh sample: a city written two ways,
+and in `named_first`, congregation names whose generic words ("church",
+"catholic") decide the word test.
 
 ## Limits
 
 - Two organizations with the grant's exact name in the grant's own city tie
   on geography, and a filing beats a BMF line there. A correction for the
   right one wins it back.
-- SAINT and ST are different cities, here as in the address score.
+- SAINT and ST are different cities, here as in the address score, and so
+  is a city abbreviated (JAX BCH, RCHO STA MARG), misspelled (CHARLOTTESVLE)
+  or named by its neighborhood (Jamaica Plain for Boston). On the fresh
+  sample, these cause 9 of `geographic`'s 14 own regressions and 6 of the
+  shared ones.
+- Within the grant's city, an exact name at another address beats the
+  grant's organization at its own address under a longer or variant name
+  (10 of the fresh sample's shared regressions).
 - The address-line city is read only for a grant without a city; a street
   name equal to a candidate's city in the grant's state counts as its city.
 - A move to another ZIP in the same city (the Hopkins rows to the
