@@ -13,7 +13,12 @@ import pytest
 
 from givingtuesday_datamart import corrections_preflight, grant_matching as gm, match_explainer
 
-COLUMNS = ['name1_key', 'address1_key', 'addresscity_key', 'addressstate_key', 'addresszip_key']
+# The ranking tests run with the chained-assignment warning as an error: an
+# assignment in resolve_matches on a slice whose parent frame is still alive
+# fails here, not in a log.
+pytestmark = pytest.mark.filterwarnings("error::pandas.errors.SettingWithCopyWarning")
+
+COLUMNS =['name1_key', 'address1_key', 'addresscity_key', 'addressstate_key', 'addresszip_key']
 PAWS = 'progressive animal welfare society'
 
 
