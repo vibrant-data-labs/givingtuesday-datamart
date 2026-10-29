@@ -228,17 +228,29 @@ were. If anything here looks wrong we stop with production untouched.
 
 ### 7. The matcher's fix (the laptop and the box, beside steps 1 to 6)
 
-- [ ] A: `PLACEHOLDER_REGEX` moves into the matcher; the grants view
+- [x] A: `PLACEHOLDER_REGEX` moves into the matcher; the grants view
       leaves out the rows it matches, and the gate imports it from there;
       `MATCHING_INPUT_SHAPE_VERSION` 5 to 6, so no chunk of an earlier
-      shape is resumed; tests.
-- [ ] B, if chosen: the geography-aware winner order in `grant_matching.py`
+      shape is resumed; tests. Done in PR #84 (merged b65477e, 2026-10-29
+      19:18 UTC): the shape went 5 to 7 (6 the exclusion, 7 the punctuated
+      "see" and a correction row before a BMF row in the universe's
+      DISTINCT ON); the bare-"see" arm is one constant shared with the
+      recovery classifier (`SEE_ALONE`, classifier v3), so a row the view
+      leaves out of matching is a row the work list counts.
+- [x] B, if chosen: the geography-aware winner order in `grant_matching.py`
       with the revised state rule; tests; the policy hashed and frozen
       before the sample of step 0 is scored; the regression pool and the
       fresh sample against the criteria above; a proof document; Zein's
-      review of the diff and the proof.
-- [ ] The gate: the Johns Hopkins sentinel on 520595110, its floor set from
-      the accepted run; the placeholder check a hard zero.
+      review of the diff and the proof. Done as `named_first` (decision 1):
+      the orders' code hashed before the fresh sample was scored, the
+      inspected pools and the fresh sample measured (the log of decision
+      1), `docs/recipient-ranking-production-2026-10-28.md`, the review of
+      2026-10-29 (ten comments) answered in 7359ad7 and merged.
+- [x] The gate: the Johns Hopkins sentinel on 520595110, its floor set from
+      the accepted run; the placeholder check a hard zero. Done in PR #84
+      with a provisional floor of 190 (the university's 191 rows on
+      October's output); the accepting commit of step 9 sets the floor
+      from the accepted run.
 
 ### 8. The matcher (the 256 GB box, quiet window, Zein's go; about seven hours)
 
@@ -397,3 +409,14 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
 
   Step 0 is complete. Step 1 (the reload of our extract) is next, any
   time, with the watchdog over it.
+- **2026-10-29, step 7.** PR #84 merged to main as b65477e at 19:18 UTC,
+  after its review of the same day: ten comments, answered in 7359ad7 (one
+  of them a real gap: the matcher's widened placeholder pattern had left a
+  recipient line of "SEE." neither matched nor recovered; the arm is now
+  one constant the matcher and the recovery classifier share, and the
+  classifier is v3), a warning pinned as an error in the ranking tests in
+  71d7697. The classifier's change reaches production through steps 5 (the
+  work list) and 6 (the view), so those two run on code that carries the
+  merge. The box's worktree for the steps is PR #85's branch with main
+  merged in (19828ac), which has both; the detached worktree the ranking
+  proofs ran from is obsolete. Step 8 waits only on steps 1 to 6.
