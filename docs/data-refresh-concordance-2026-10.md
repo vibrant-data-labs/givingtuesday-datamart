@@ -187,18 +187,30 @@ were. If anything here looks wrong we stop with production untouched.
 
 ### 2. The patch again (the box, quiet window, about an hour with the vacuum; snapshot first)
 
-- [ ] A manual snapshot of the instance, status *available*.
-- [ ] `python -m givingtuesday_datamart.own_extract patch`: in one
+- [x] A manual snapshot of the instance, status *available*. Done:
+      `gt-datamart-before-repatch-20261029`, requested 21:10 UTC, available
+      21:16 UTC.
+- [x] `python -m givingtuesday_datamart.own_extract patch`: in one
       transaction our earlier rows (under `3d9b48d6e5e7`) out and the new
       ones in; GT's rows go only under urls our tables hold for the first
       time (the 49 returns'); ten `irs_extract_patch` runs under
-      `irs_extract@ce054c032e56`; the basic-fields relations rebuilt.
-- [ ] The counts per table logged: about 20.11 million of our rows out and
-      back in on the ten tables, ours 257 rows more.
-- [ ] `VACUUM (ANALYZE)` on the ten staging tables (appendix).
-- [ ] Checks: no url holds both GT's rows and ours on `basic_fields_pf`
+      `irs_extract@ce054c032e56`; the basic-fields relations rebuilt. Done
+      21:30 to 22:00 UTC under the watchdog: the transaction to 21:51, GT's
+      142 rows out under the 49 returns' urls (129 Schedule O, 11 990-EZ
+      programs, 2 990-PF grants), the ten runs recorded, the three relations
+      rebuilt with the same filer-year counts (3,992,135 / 1,226,420 /
+      2,257,600).
+- [x] The counts per table logged: about 20.11 million of our rows out and
+      back in on the ten tables, ours 257 rows more. Done: 20,109,675 out,
+      20,109,932 in (`patch.log`).
+- [x] `VACUUM (ANALYZE)` on the ten staging tables (appendix). Done 22:00 to
+      22:13 UTC, no dead row left; `schedule_o` took ten of the thirteen
+      minutes.
+- [x] Checks: no url holds both GT's rows and ours on `basic_fields_pf`
       and `privategrants` (appendix); the filer-years with a tax period
-      ending in 2025 or later are all ours.
+      ending in 2025 or later are all ours. Done 22:18 UTC: 0 and 0 mixed
+      urls; 2025+ filer-years 261,728 / 94,024 / 174,267 ours, GT's 0, as in
+      October.
 
 ### 3. The canonical build (the box, about 15 minutes)
 
@@ -472,3 +484,20 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   leaves matching unrecovered until then. Step 2 started at 21:30 UTC under
   the watchdog, after the manual snapshot `gt-datamart-before-repatch-20261029`
   reported available at 21:16 UTC.
+- **2026-10-29, step 2.** 21:30 to 22:18 UTC under the watchdog
+  (`run-patch.sh` beside the logs), the box's clone on 285701d. The patch's
+  one transaction ran to 21:51: 20,109,675 of our rows out and 20,109,932
+  in, the 257 more the plan expected; GT's rows left only under the 49
+  returns' urls, 142 of them (129 Schedule O notes, 11 990-EZ programs, 2
+  990-PF grants); ten `irs_extract_patch` runs under
+  `irs_extract@ce054c032e56`. The three basic-fields `_current` relations
+  were rebuilt by 22:00 with the builder's large-class knobs, same
+  filer-year counts as before. `VACUUM (ANALYZE)` of the ten tables ran
+  22:00 to 22:13 and left no dead row. Checks: no url with both sources on
+  `basic_fields_pf` or `privategrants`; every filer-year with a tax period
+  ending in 2025 or later is ours (261,728 / 94,024 / 174,267, GT's 0),
+  October's figures exactly. The watchdog saw our backend on 47 polls, no
+  breach, swap 0.00 GB throughout; free storage dipped to 50.0 GB during the
+  transaction and stands at 57.8 GB after. Production's staging now carries
+  our rows under `ce054c032e56`; the site reads them as its caches turn
+  over. Steps 3 and 4 are next.
