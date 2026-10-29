@@ -88,10 +88,8 @@ def test_known_runs_the_shipped_orders_and_checks_the_plan_s_criteria(pool, tmp_
                                              "gained_vs_production": 1}
         assert summary["criteria"][order] == {"control_reproduces_production": True,
                                               "labeled_covered_at_least_469": False,
-                                              "no_labeled_relationship_lost": True,
-                                              "no_criterion_location_flag": True}
+                                              "no_labeled_relationship_lost": True}
         assert summary["passed"][order] is False
-    assert summary["disagreements"] == {"exact_first": [], "named_first": []}
     assert summary["ranking_digest"] == rv.ranking_digest() != rv.scoring_digest()
 
 
@@ -115,30 +113,6 @@ def test_fresh_runs_a_frozen_sample_only_under_the_orders_it_pinned(pool, tmp_pa
     monkeypatch.setattr(rv, "ranking_digest", lambda: "another order")
     with pytest.raises(RuntimeError, match="freeze a new sample"):
         rv.fresh(pool, out, workers=1)
-
-
-def test_the_orders_under_test_disagree_where_they_were_built_to():
-    universe = pd.DataFrame([dict(filerein_key=e, **_tuple(n, a, c, 'or', z), source='basic_fields')
-                             for e, n, a, c, z in (
-                                 ('930794951', 'mt hood medical center foundation', 'po box 4228', 'portland', '97208'),
-                                 ('930878944', 'medical teams international', '14150 sw milton ct', 'tigard', '97224'))])
-    grants = pd.DataFrame([_tuple('medical teams international', 'po box 4288', 'portland', 'or', '97208')])
-    for frame in (universe, grants):
-        gm.prepare(frame)
-    results = grants.assign(geographic_ein='930794951', geographic_name='mt hood medical center foundation',
-                            geographic_row=0, geographic_name_score=.735, geographic_addr_score=.913,
-                            exact_first_ein='930878944', exact_first_name='medical teams international',
-                            exact_first_row=1, exact_first_name_score=1., exact_first_addr_score=.3)
-    split = rv.disagreements(results, universe, grants, 'exact_first')
-    assert split[['kind', 'geographic_geo_tier', 'exact_first_geo_tier', 'geographic_holds_grant_name',
-                  'exact_first_holds_grant_name']].values.tolist() == [
-        ['fuzzy_local_vs_exact_in_state', 3, 2, False, True]]
-    breakdown = rv.disagreement_breakdown(split.assign(n_rows=4, positive_dollars=10., production_ein='930794951'),
-                                          'exact_first')
-    assert breakdown.to_dict('records') == [{
-        'kind': 'fuzzy_local_vs_exact_in_state', 'geographic_holds_grant_name': False,
-        'exact_first_holds_grant_name': True, 'tuples': 1, 'rows': 4, 'positive_dollars': 10.,
-        'geographic_is_production': 1, 'exact_first_is_production': 0}]
 
 
 def test_the_score_cache_refuses_another_scorer(pool, tmp_path, monkeypatch):
@@ -177,9 +151,9 @@ def test_a_lost_city_at_a_strong_address_with_the_old_city_and_zip_is_the_criter
         gm.prepare(frame)
     results = grants.assign(n_rows=1, dollars=1., positive_dollars=1., pool='x',
                             weighted_ein='ga', weighted_name='river fund', weighted_row=0, weighted_addr_score=.95,
-                            geographic_ein='il', geographic_name='river fund', geographic_row=1,
-                            geographic_addr_score=.40)
-    audit = rv.location_audit(results, universe, grants, 'geographic')
+                            named_first_ein='il', named_first_name='river fund', named_first_row=1,
+                            named_first_addr_score=.40)
+    audit = rv.location_audit(results, universe, grants, 'named_first')
     assert audit[['lost_city', 'lost_state', 'lost_zip', 'strong_location_loss', 'criterion_flag',
                   'state_typo_flag', 'before_holds_grant_name']].values.tolist() \
         == [[True, False, True, True, True, True, True]]

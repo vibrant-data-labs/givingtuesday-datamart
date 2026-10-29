@@ -1811,30 +1811,26 @@ def placeholder_names(grants_df: pd.DataFrame) -> pd.Series:
 
 # How resolve_matches picks the winner of a grant tuple among the pairs the
 # final rules accept (docs/recipient-ranking-production-2026-10-28.md):
-#   "geographic", the default since 2026-10-28: geographic support first
-#     (location_agreement's tier), then an exact name (name_score at the
-#     exact-name threshold), then, among exact names, any arm of the
-#     universe before a BMF line (ALIAS_SOURCES), then 2*name_score +
-#     addr_score. The one-filer-in-the-state rule refuses its pairs before
-#     the winner is picked.
-#   "exact_first", under evaluation against "geographic": a candidate in a
-#     state that contradicts the grant's last, then an exact name, then
-#     geographic support, then the same source preference and score. It
-#     differs from "geographic" only where an exact name elsewhere in the
-#     grant's state meets a closer address under another name.
-#   "named_first", under evaluation too: as "exact_first", with a name that
-#     holds every word of the grant's (``_names_held``) counted with the
-#     exact names: "jewish community foundation of los angeles" is named for
-#     a grant to "jewish community foundation", "stanford review" is not
-#     for one to "stanford university".
+#   "named_first", the default since 2026-10-29: a candidate in a state that
+#     contradicts the grant's last; then a named candidate, one whose name
+#     is exact (name_score at the exact-name threshold) or holds every word
+#     of the grant's (``_names_held``: "jewish community foundation of los
+#     angeles" is named for a grant to "jewish community foundation",
+#     "stanford review" is not for one to "stanford university"); then
+#     geographic support (location_agreement's tier); then an exact name;
+#     then, among exact names, any arm of the universe before a BMF line
+#     (ALIAS_SOURCES); then 2*name_score + addr_score. The
+#     one-filer-in-the-state rule refuses its pairs before the winner is
+#     picked. Two orders measured beside it left the code when it was
+#     chosen: "geographic" (geography before an exact name; 467 of 647
+#     labeled relationships) and "exact_first" (an exact name before
+#     geography, whatever the local candidate's name).
 #   "weighted": 2*name_score + addr_score alone, then the one-filer rule on
 #     the winner: the order of every run up to 2026-10-27, kept to measure
 #     the default against and to fall back to.
-RANKINGS = ("geographic", "exact_first", "named_first", "weighted")
-RANKING = "geographic"
+RANKINGS = ("named_first", "weighted")
+RANKING = "named_first"
 _ORDERS = {
-    "geographic": ['_geography', '_exact', '_exact_preferred', '_combined_score'],
-    "exact_first": ['_not_conflict', '_exact', '_geography', '_exact_preferred', '_combined_score'],
     "named_first": ['_not_conflict', '_named', '_geography', '_exact', '_exact_preferred', '_combined_score'],
     "weighted": ['_combined_score'],
 }
@@ -2018,32 +2014,39 @@ def resolve_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df
     same for a slice. The government-name guard refuses its pairs before
     any winner is picked.
 
-    **The winner** (``ranking``). Under "geographic", among the pairs the
+    **The winner** (``ranking``). Under "named_first", among the pairs the
     rules accept for a grant tuple:
 
-    1. the best geographic support (``location_agreement``): a candidate
-       in the grant's own city before one elsewhere in its state, before
-       one with no location to compare, before one in another state;
-    2. then an exact name: ``name_score`` at the threshold of the
-       exact-name tier, so a name that scores 1 is exact whatever its
-       punctuation ("us fund for unicef", "u.s. fund for unicef");
-    3. then, among exact names only, a filing or a correction before a BMF
+    1. a candidate whose state contradicts the grant's comes last
+       (``location_agreement``'s conflict tier): "saint pauls episcopal
+       church" at the grant's street in Kansas City MO, name 0.87, beats
+       an exact "st pauls episcopal church" across the state line;
+    2. then a named candidate: an exact name, ``name_score`` at the
+       threshold of the exact-name tier, so a name that scores 1 is exact
+       whatever its punctuation ("us fund for unicef", "u.s. fund for
+       unicef"), or a name that holds every word of the grant's
+       (``_names_held``). A named candidate elsewhere in the state beats
+       a closer address under another name in the grant's city: "medical
+       teams international" in Tigard takes a Portland PO box grant from
+       "mt hood medical center foundation" at a box string one digit
+       away, and "jewish community foundation of los angeles", at the
+       grant's address, keeps a Los Angeles grant to "jewish community
+       foundation" from the exact namesake in San Diego;
+    3. then the best geographic support: a candidate in the grant's own
+       city before one elsewhere in its state, before one with no
+       location to compare;
+    4. then an exact name;
+    5. then, among exact names only, a filing or a correction before a BMF
        line (``ALIAS_SOURCES``): the Johns Hopkins University's own filing
        before the BMF line of a student chapter that carries its name.
        Below an exact name the source decides nothing, and the closer name
        wins: "friends of the springfield public library" (0.93), not a
        filing named "springfield public library foundation" (0.74);
-    4. then 2*name_score + addr_score;
-    5. then the order of the pairs: the sort is stable, and chunks
+    6. then 2*name_score + addr_score;
+    7. then the order of the pairs: the sort is stable, and chunks
        concatenate in index order.
 
-    Geography comes first so that a namesake elsewhere cannot take a
-    grant from the organization at the grant's own address: "saint pauls
-    episcopal church" at the grant's street in Kansas City MO, name 0.87,
-    beats an exact "st pauls episcopal church" across the state line.
-    "exact_first" moves the exact name ahead of geography for every
-    candidate whose state does not contradict the grant's (``RANKINGS``).
-    Under "weighted", step 4 alone decides, as it did in every run up to
+    Under "weighted", step 6 alone decides, as it did in every run up to
     2026-10-27.
 
     **One filer in the state.** A pair that only the exact-name tier
@@ -2104,8 +2107,7 @@ def resolve_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df
         matches['_not_conflict'] = matches['_geography'] > 0
         matches['_exact'] = exact
         matches['_exact_preferred'] = exact & ~matches[INDEX_COLS[0]].map(sources).isin(ALIAS_SOURCES)
-        if ranking == "named_first":
-            matches['_named'] = exact.to_numpy() | _names_held(matches, universe_df, grants_df)
+        matches['_named'] = exact.to_numpy() | _names_held(matches, universe_df, grants_df)
     # Stable sorting so complete ranking ties resolve by input
     # order (which is deterministic: chunks concat in index order). Matters
     # more now that correction rows can tie with organic universe rows for
@@ -2357,7 +2359,7 @@ def match_records(
     are still rebuilt — small data while testing, restored to full data
     on the next non-limited run.
 
-    ``ranking`` names the winner order (``RANKINGS``): "geographic" by
+    ``ranking`` names the winner order (``RANKINGS``): "named_first" by
     default, "weighted" for the order of the runs up to 2026-10-27. It
     acts after the checkpoints, so either one resumes the same chunks.
 
@@ -2744,6 +2746,8 @@ if __name__ == "__main__":
         default=RANKING,
         help=(
             f"How the winner of a grant tuple is picked (default {RANKING}): "
+            "a candidate in a state that contradicts the grant's last, then "
+            "a name that is exact or holds every word of the grant's, then "
             "geographic support, then an exact name, then a filing or "
             "correction over a BMF line among exact names, then the score; "
             "or 'weighted', the score alone, the order of the runs up to "

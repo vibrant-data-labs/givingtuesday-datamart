@@ -3,12 +3,14 @@
 Every order comes from ``grant_matching.all_matches`` itself. "weighted",
 the order of every run up to 2026-10-27, is the control and must reproduce
 production's winner for every grant tuple that names a recipient. The
-orders under test are "geographic" (geography before an exact name) and
-"exact_first" (an exact name before geography, except against a state that
-contradicts the grant's); ``disagreements.csv`` lists every tuple they send
-to different EINs. Scores come from the shipped scorer (``candidate_pairs``,
-``score_pairs``), cached under a key of the scoring code alone, so a change
-to an order reuses them and a change to the scorer cannot.
+order under test is the shipped default, "named_first". Until it was chosen
+on 2026-10-29 this harness ran "geographic" (geography before an exact
+name) and "exact_first" (an exact name before geography) beside it and
+listed every tuple two orders sent to different EINs; their measurements
+are the record in docs/recipient-ranking-production-2026-10-28.md. Scores
+come from the shipped scorer (``candidate_pairs``, ``score_pairs``), cached
+under a key of the scoring code alone, so a change to an order reuses them
+and a change to the scorer cannot.
 
 ``known`` reruns the inspected pools of 2026-10-28 (the ranking proof's
 recipients and funder lists, and the fresh sample the geography prototype
@@ -17,13 +19,16 @@ flags. ``freeze`` draws a new sample from production, read-only, with a new
 hash seed and none of the recipients of those pools, and records the
 digest of the orders' code. ``fresh`` refuses to run when that code has
 changed since the freeze. The criteria, fixed in the run plan before
-either was run (docs/data-refresh-concordance-2026-10.md, decision 1):
+either was run (docs/data-refresh-concordance-2026-10.md, decision 1) and
+amended when the default was chosen:
 
 - the control reproduces production's winners;
 - labeled coverage at least 469 of 647 relationships, none lost;
-- no strong location-loss flag where the grant's city and ZIP agree with
-  the old winner and the new one is in another city or state; every other
-  flag listed and reviewed.
+- every strong location-loss flag listed and reviewed, the order a net
+  correction on the reviewed changes. As first written, no such flag
+  where the grant's city and ZIP agree with the old winner and the new
+  one is in another city or state (``criterion_flag``): the harness still
+  counts and lists those, and the review decides them.
 
 A strong location-loss flag is the audit's of 2026-10-28
 (``geographic_rank_audit``), over every winner that changed, not only
@@ -64,8 +69,8 @@ from givingtuesday_datamart._internal import address_cleaning
 from givingtuesday_datamart._internal.logger import logger
 
 CONTROL = "weighted"
-# The default first: every other order is also compared with it tuple by tuple.
-CANDIDATES = ("geographic", "exact_first", "named_first")
+# The shipped order. Until 2026-10-29 the three orders measured side by side.
+CANDIDATES = (gm.RANKING,)
 LABELED_FLOOR = 469
 STRONG_ADDRESS, STRONG_DROP = 0.90, 0.20
 CHUNK = 50_000
@@ -100,8 +105,8 @@ def scoring_digest() -> str:
 
 
 def ranking_digest() -> str:
-    """The code that picks the winner from scored pairs, every order. Not
-    which order is the default: choosing it after a fresh run keeps the run."""
+    """The code that picks the winner from scored pairs, and the orders it
+    knows; not which of them is the default."""
     return _code_digest(
         [gm.resolve_matches, gm._one_filer_refused, gm.location_agreement, gm.geographic_support, gm._codes,
          gm._city_tails, gm._line_tails, gm._place, gm._state, gm._zip, gm._positions, gm._names_held,
@@ -289,28 +294,6 @@ def _holds(name: pd.Series, winner: pd.Series) -> pd.Series:
                       for n, w in zip(name, winner)], index=name.index)
 
 
-def disagreements(results: pd.DataFrame, universe: pd.DataFrame, grants: pd.DataFrame,
-                  other: str) -> pd.DataFrame:
-    """Every tuple the default order and ``other`` send to different EINs,
-    both matched, with each winner's geography, name and source. The kind
-    ``fuzzy_local_vs_exact_in_state`` is where the orders were built to
-    differ: the default keeps a closer address under another name in the
-    grant's city, ``other`` an exact name elsewhere in its state."""
-    first = CANDIDATES[0]
-    a, b = results[f"{first}_ein"], results[f"{other}_ein"]
-    split = results[a.ne("") & b.ne("") & a.ne(b)].copy()
-    exact = gm.FINAL_FILTER_RULES["exact_name_name_min"]
-    for ranking in (first, other):
-        split = split.join(_agreement(split, ranking, universe, grants, f"{ranking}_geo"))
-        split[f"{ranking}_exact"] = split[f"{ranking}_name_score"].ge(exact)
-        split[f"{ranking}_holds_grant_name"] = _holds(split["full_name"], split[f"{ranking}_name"])
-    split["kind"] = "other"
-    built_for = (~split[f"{first}_exact"] & split[f"{first}_geo_tier"].eq(3)
-                 & split[f"{other}_exact"] & split[f"{other}_geo_tier"].eq(2))
-    split.loc[built_for, "kind"] = "fuzzy_local_vs_exact_in_state"
-    return split
-
-
 def movements(results: pd.DataFrame, candidate: str) -> pd.DataFrame:
     before, after = results[f"{CONTROL}_ein"], results[f"{candidate}_ein"]
     change = pd.Series("unmatched_both", index=results.index)
@@ -405,18 +388,6 @@ def evaluate(universe: pd.DataFrame, grants: pd.DataFrame, out: Path, workers: i
             "criterion_flags_from_a_winner_holding_the_grant_name": int(flagged["before_holds_grant_name"].sum()),
             "state_typo_flags": int(audit["state_typo_flag"].sum()),
         }
-    summary["disagreements"] = {}
-    for other in CANDIDATES[1:]:
-        split = disagreements(results, universe, grants, other)
-        pair = (CANDIDATES[0], other)
-        split_columns = (gm._KEYS + ["pool", "full_name", "n_rows", "dollars", "positive_dollars", "production_ein",
-                                     "kind"]
-                         + [f"{r}_{c}" for r in pair for c in ("ein", "name", *PLACE, "source", "name_score",
-                                                              "addr_score", "exact", "holds_grant_name")]
-                         + [f"{r}_geo_{c}" for r in pair for c in ("same_city", "same_state", "same_zip", "tier")])
-        split[split_columns].sort_values("positive_dollars", ascending=False).to_csv(
-            out / f"disagreements_{other}.csv", index=False)
-        summary["disagreements"][other] = disagreement_breakdown(split, other).to_dict("records")
     results.drop(columns=["compare_addr"], errors="ignore").to_parquet(out / "results.parquet", index=False)
     pd.concat([movements(results, c) for c in CANDIDATES]).to_csv(out / "movements.csv", index=False)
     families(results).to_csv(out / "families.csv", index=False)
@@ -452,7 +423,6 @@ def known(pool: Path, extra: list[Path], out: Path, workers: int) -> None:
         "control_reproduces_production": parity,
         "labeled_covered_at_least_469": int(labeled.loc[order, "covered"]) >= LABELED_FLOOR,
         "no_labeled_relationship_lost": int(labeled.loc[order, "lost_vs_production"]) == 0,
-        "no_criterion_location_flag": summary["orders"][order]["criterion_flags"] == 0,
     } for order in CANDIDATES})
 
 
@@ -511,29 +481,12 @@ def fresh(pool: Path, out: Path, workers: int) -> None:
     summary.pop("_results")
     summary.update(universe_rows_relabelled_correction=relabelled, sample=manifest["tuples"])
     parity = summary["control_parity"]["mismatches"] == 0
-    _finish(out, summary, {order: {
-        "control_reproduces_production": parity,
-        "no_criterion_location_flag": summary["orders"][order]["criterion_flags"] == 0,
-    } for order in CANDIDATES})
-
-
-def disagreement_breakdown(split: pd.DataFrame, other: str) -> pd.DataFrame:
-    """The disagreements of the default order and ``other`` by kind and by
-    whether each winner holds every word of the grant's name, with their
-    rows, dollars and how many keep production's winner."""
-    pair = (CANDIDATES[0], other)
-    split = split.assign(**{f"{r}_is_production": split[f"{r}_ein"].eq(split["production_ein"]) for r in pair})
-    keys = ["kind"] + [f"{r}_holds_grant_name" for r in pair]
-    return (split.groupby(keys).agg(tuples=("n_rows", "size"), rows=("n_rows", "sum"),
-                                    positive_dollars=("positive_dollars", "sum"),
-                                    **{f"{r}_is_production": (f"{r}_is_production", "sum") for r in pair})
-            .reset_index())
+    _finish(out, summary, {order: {"control_reproduces_production": parity} for order in CANDIDATES})
 
 
 def review(out: Path, top: int) -> None:
-    """Print a finished run's summary, and for each order compared with the
-    default, the disagreement breakdown and the largest disagreements, from
-    the run's own outputs."""
+    """Print a finished run's summary and the largest criterion flags of
+    each order, from the run's own outputs."""
     summary = json.loads((out / "validation.json").read_text())
     print(json.dumps({k: summary[k] for k in ("control_parity", "orders", "criteria")
                       + (("labeled",) if "labeled" in summary else ())}, indent=1))
@@ -548,20 +501,6 @@ def review(out: Path, top: int) -> None:
         columns = [c for c in columns if c in flags]
         with pd.option_context("display.width", 300, "display.max_colwidth", 38):
             print(flags.sort_values("positive_dollars", ascending=False)[columns].head(top).to_string(index=False))
-    for other in CANDIDATES[1:]:
-        split = pd.read_csv(out / f"disagreements_{other}.csv", dtype=str, keep_default_na=False)
-        for column in ("n_rows", "positive_dollars"):
-            split[column] = pd.to_numeric(split[column])
-        for column in [c for c in split if c.endswith("holds_grant_name")]:
-            split[column] = split[column].eq("True")
-        print(f"\n{CANDIDATES[0]} against {other}: {len(split)} tuples")
-        with pd.option_context("display.width", 250, "display.max_colwidth", 40):
-            print(disagreement_breakdown(split, other).to_string(index=False))
-            columns = ["full_name", "addresscity_key", "addressstate_key", "n_rows", "positive_dollars"] + [
-                f"{r}_{c}" for r in (CANDIDATES[0], other) for c in ("name", "city", "state", "name_score",
-                                                                      "addr_score")]
-            columns = [c for c in columns if c in split]
-            print(split.sort_values("positive_dollars", ascending=False)[columns].head(top).to_string(index=False))
 
 
 def main() -> None:
@@ -574,7 +513,7 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--one-in", type=int, default=100)
-    parser.add_argument("--top", type=int, default=25, help="review: how many of the largest disagreements to print")
+    parser.add_argument("--top", type=int, default=25, help="review: how many of the largest criterion flags to print")
     args = parser.parse_args()
     if args.command != "review" and args.pool is None:
         parser.error(f"{args.command} needs --pool")

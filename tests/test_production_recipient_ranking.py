@@ -1,6 +1,8 @@
-"""The matcher's winner order (``grant_matching.resolve_matches``): geography,
-then an exact name, then a filing or correction before a BMF line among
-exact names, then the score; the "weighted" order it replaced; the
+"""The matcher's winner order (``grant_matching.resolve_matches``): a
+conflicting state last, then a name that is exact or holds every word of
+the grant's, then geography, then an exact name, then a filing or
+correction before a BMF line among exact names, then the score; the
+"weighted" order it replaced; the
 placeholder refusal; and the pin that keeps checkpoints on the rows they
 were scored on. Each case is one the order was made for or one the review
 of its first version found. No database."""
@@ -225,7 +227,7 @@ def test_a_pair_naming_a_row_its_frame_lacks_is_an_error():
         gm.location_agreement(scores([(5, 0, 1., 1., 1, 1)]), u, g)
 
 
-# --- The two orders under evaluation: where they differ ----------------------------
+# --- The named tier: a name over a closer address under another name -----------
 
 def test_an_exact_name_in_the_state_against_a_close_po_box_string_under_another_name():
     # A labeled relationship of 2026-10-28: the grant's PO box string is close
@@ -236,9 +238,7 @@ def test_an_exact_name_in_the_state_against_a_close_po_box_string_under_another_
     ], [('medical teams international', 'po box 4288', 'portland', 'or', '97208')])
     f = scores([(0, 0, .735, .913, 1, 1), (1, 0, 1., .3, 1, 0)])
     assert eins(u, gm.all_matches(f, u, g, ranking='weighted')) == {0: '930794951'}
-    assert eins(u, gm.all_matches(f, u, g, ranking='geographic')) == {0: '930794951'}
-    assert eins(u, gm.all_matches(f, u, g, ranking='exact_first')) == {0: '930878944'}
-    assert eins(u, gm.all_matches(f, u, g, ranking='named_first')) == {0: '930878944'}
+    assert eins(u, gm.all_matches(f, u, g)) == {0: '930878944'}
 
 
 def test_a_local_name_holding_the_grant_s_words_against_an_exact_namesake_elsewhere():
@@ -249,9 +249,7 @@ def test_a_local_name_holding_the_grant_s_words_against_an_exact_namesake_elsewh
          'basic_fields'),
     ], [('jewish community foundation', '6505 wilshire blvd', 'los angeles', 'ca', '90048')])
     f = scores([(0, 0, .93, .90, 1, 1), (1, 0, 1., .38, 1, 0)])
-    assert eins(u, gm.all_matches(f, u, g, ranking='geographic')) == {0: 'la'}
-    assert eins(u, gm.all_matches(f, u, g, ranking='named_first')) == {0: 'la'}
-    assert eins(u, gm.all_matches(f, u, g, ranking='exact_first')) == {0: 'elsewhere'}
+    assert eins(u, gm.all_matches(f, u, g)) == {0: 'la'}
 
 
 def test_a_name_holds_the_grant_s_name_only_with_every_word():
@@ -269,19 +267,16 @@ def test_a_chapter_at_the_grant_s_street_against_an_exact_namesake_elsewhere_in_
         ('marion', 'habitat for humanity', '1 w main st', 'marion', 'il', '62959', 'basic_fields'),
     ], [('habitat for humanity', '123 main st', 'springfield', 'il', '62701')])
     f = scores([(0, 0, .86, 1., 1, 1), (1, 0, 1., .3, 1, 0)])
-    assert eins(u, gm.all_matches(f, u, g, ranking='geographic')) == {0: 'sangamon'}
-    assert eins(u, gm.all_matches(f, u, g, ranking='named_first')) == {0: 'sangamon'}
-    assert eins(u, gm.all_matches(f, u, g, ranking='exact_first')) == {0: 'marion'}
+    assert eins(u, gm.all_matches(f, u, g)) == {0: 'sangamon'}
 
 
-def test_neither_order_lets_a_conflicting_state_win():
+def test_a_conflicting_state_never_wins():
     u, g = frames([
         ('local', 'saint pauls episcopal church', '11 e 40th st', 'kansas city', 'mo', '64111', 'basic_fields'),
         ('ks', 'st pauls episcopal church', '11 e 40th st', 'kansas city', 'ks', '66101', 'basic_fields'),
     ], [('st pauls episcopal church', '11 e 40th st', 'kansas city', 'mo', '64111')])
     f = gm.score_slice(u, g)
-    for ranking in ('geographic', 'exact_first', 'named_first'):
-        assert eins(u, gm.all_matches(f, u, g, ranking=ranking)) == {0: 'local'}
+    assert eins(u, gm.all_matches(f, u, g)) == {0: 'local'}
 
 
 # --- Names and sources --------------------------------------------------------

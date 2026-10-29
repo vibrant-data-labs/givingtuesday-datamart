@@ -10,31 +10,35 @@ The first version of this change (`d987695`) put an exact name before
 geography and a filing before a BMF line at every name score. Our review of
 it on 2026-10-28 found fifteen problems; the table near the end says what
 answers each. Validating the revision on the inspected pools then showed
-that the plan's criteria pull against each other, so this version carries
-three orders, measured side by side on the inspected pools and on a fresh
-sample whose every changed winner we reviewed, and the choice of the default
-is still open (the last section). No production table has been rebuilt by
-this change.
+that the plan's criteria pull against each other, so three orders were
+measured side by side on the inspected pools and on a fresh sample whose
+every changed winner we reviewed. `named_first` is the default since
+2026-10-29 and the other two have left the code (*The decision*). No
+production table has been rebuilt by this change.
 
 ## How candidates compete
 
 Blocking, the scores and the qualification thresholds are unchanged. A grant
 tuple whose name is a placeholder ("SEE ATTACHED STATEMENT", "SEE.") matches
 nothing, and the government-name guard still refuses its pairs first. The
-one-filer-in-the-state rule then refuses its pairs (below), and the orders
-sort what is left:
+one-filer-in-the-state rule then refuses its pairs (below), and
+`named_first` sorts what is left:
 
-| key | `geographic` (default today) | `named_first` | `exact_first` |
-|---|---|---|---|
-| 1 | geographic support | no state conflict | no state conflict |
-| 2 | exact name | **named**: exact, or holds every word of the grant's name | exact name |
-| 3 | among exact names, a filing or correction before a BMF line | geographic support | geographic support |
-| 4 | 2 × name + address score | exact name | among exact names, a filing or correction before a BMF line |
-| 5 | | among exact names, a filing or correction before a BMF line | 2 × name + address score |
-| 6 | | 2 × name + address score | |
+| key | `named_first` |
+|---|---|
+| 1 | no state conflict |
+| 2 | **named**: exact, or holds every word of the grant's name |
+| 3 | geographic support |
+| 4 | exact name |
+| 5 | among exact names, a filing or correction before a BMF line |
+| 6 | 2 × name + address score |
 
-Ties keep the order of the pairs, as before. All three share everything
-else in this document; `weighted` is the old order, score alone.
+Ties keep the order of the pairs, as before. `weighted` is the old order,
+score alone. Two orders were measured beside `named_first` and left the
+code when it was chosen (*The decision*): `geographic` (geographic support,
+then an exact name, then the source preference, then the score) and
+`exact_first` (`named_first` with only exact names in key 2). The
+validation sections keep their numbers as the record.
 
 - **An exact name** is a `name_score` at the exact-name tier's threshold
   (0.99): a name that scores 1 is exact whatever its punctuation ("us fund
@@ -45,16 +49,19 @@ else in this document; `weighted` is the old order, score alone.
   at the campus address). Below an exact name the closer name wins: "friends
   of the springfield public library" (0.93), not a filing named "springfield
   public library foundation" (0.74).
-- **A conflicting state never wins** over a candidate without one, in any
-  order: "St Pauls Episcopal Church" at 11 E 40th St, Kansas City MO, goes to
-  "Saint Pauls Episcopal Church" at that address (name 0.87), not to the
-  exact namesake in Kansas City KS.
-- **The orders differ where an exact name elsewhere in the grant's state meets
-  a closer address under another name in the grant's city.** `geographic`
-  takes the address; `exact_first` takes the exact name; `named_first` takes
-  the exact name unless the local candidate's name holds every word of the
-  grant's ("jewish community foundation of los angeles" for a Los Angeles
-  grant to "jewish community foundation").
+- **A conflicting state never wins** over a candidate without one: "St
+  Pauls Episcopal Church" at 11 E 40th St, Kansas City MO, goes to "Saint
+  Pauls Episcopal Church" at that address (name 0.87), not to the exact
+  namesake in Kansas City KS.
+- **A named candidate beats a closer address under another name.** Where an
+  exact name elsewhere in the grant's state meets a closer address under
+  another name in the grant's city, the exact name wins unless the local
+  candidate's name holds every word of the grant's: "medical teams
+  international" in Tigard takes a Portland PO box grant from "mt hood
+  medical center foundation" at a closer box string, and "jewish community
+  foundation of los angeles" keeps a Los Angeles grant to "jewish community
+  foundation" from the exact namesake in San Diego. `geographic` took the
+  address in both cases, `exact_first` the exact name in both.
 
 ### Geographic support
 
@@ -90,8 +97,8 @@ else in this document; `weighted` is the old order, score alone.
 A pair only the exact-name tier accepts has the name and the state for it
 and nothing else. When several filers of the state carry the name and the
 grant has no street address, such a pair cannot say which filer the grant
-meant. Every order but `weighted` refuses these pairs before the winner is
-picked, so a candidate the address tiers accept can still win the tuple.
+meant. `named_first` refuses these pairs before the winner is picked, so a
+candidate the address tiers accept can still win the tuple.
 The first version refused the winner after picking it, and an exact-name
 state pair now outranked the address match, so the tuple went unmatched.
 
@@ -134,7 +141,7 @@ order acts after the checkpoints, so any order resumes the same chunks.
 |---|---|---|---|
 | 1 | the proofs' control called the new resolver, so nothing validated it | `proofs/ranking_validation.py`: control and candidates are all the shipped resolver, the old order named | `test_ranking_validation.py` |
 | 2 | recovered grants have no city key; PAWS went to Aberdeen | a grant with no city reads it at the end of its address line | `…recovered_grant_s_city…` |
-| 3 | an exact namesake across a state line beat the local organization | a conflicting state never wins; in the state, the open choice below | `…namesake_across_the_state_line…`, `…orders_under_evaluation…` |
+| 3 | an exact namesake across a state line beat the local organization | a conflicting state never wins; in the state, the named tier (*The decision*) | `…namesake_across_the_state_line…`, `…holding_the_grant_s_words…` |
 | 4 | the state-typo rescue needed 0.90 on a string with the wrong state | the same city and ZIP are local | `…mistyped_state…` |
 | 5 | the gate guarded the club and allowed 349 placeholder rows | university floor, club ceiling, hard zero | gate constants |
 | 6 | a filing beat a much closer BMF name below an exact name | source counts only among exact names | `…closer_name_wins…` |
@@ -317,29 +324,35 @@ corrections, and its 56 flags off a winner holding the grant's name are the
 error the inspected pools showed (Temple Beth El of St Petersburg Florida,
 at the grant's address, to an exact namesake elsewhere in Florida).
 
-## The decision left
+## The decision
 
-Either order beats the old one by a wide margin; they differ in what they
-risk.
+Either new order beats the old one by a wide margin; they differ in what
+they risk, and each misses one of the plan's criteria as written:
+`named_first` the location criterion (113 flags on the fresh sample, 742 on
+the inspected pools), `geographic` the labeled floor (467 of 469; both
+misses are errors production makes today). Read to the letter, the plan then
+falls back to its fix A, the placeholder exclusion and the gate alone, which
+gives up 251 to 344 net corrections on the 39,178 fresh tuples alone.
 
-1. **`named_first`**, our recommendation. It corrects the most (395 tuples
-   against 283 on the fresh sample) at about the same precision (89% of the
-   decided changes against 90%), covers 469 of 647 labeled relationships
-   with none lost, and keeps the 14 right winners `geographic` loses. It
-   fails the location criterion as written: 113 flags on the fresh sample,
-   about one in four of the decided ones an error, and 742 on the inspected
-   pools, not reviewed one by one. Choosing it amends that criterion from
-   "no flag" to "every flag reviewed, the order a net correction".
-2. **`geographic`**, the default as this branch stands: the only order with
-   no criterion flag on either pool, two relationships short of the labeled
-   floor (467), both errors production makes today. It corrects 283 tuples
-   and regresses 32 on the fresh sample.
-3. **Fix A** of the plan: the placeholder exclusion and the gate alone. It
-   gives up 251 to 344 net corrections on these 39,178 tuples alone.
+**`named_first` is the default since 2026-10-29**, and the location
+criterion is amended from "no flag" to "every flag reviewed, the order a net
+correction". It corrects the most (395 tuples against 283 on the fresh
+sample) at about the same precision (89% of the decided changes against
+90%), covers 469 of 647 labeled relationships with none lost, and keeps the
+14 right winners `geographic` loses. Its 113 fresh flags were reviewed one
+by one, 67 corrections to 23 errors; the 742 on the inspected pools were
+not, and run about three corrections to one error where they were.
 
-The orders not chosen leave the code before the merge. Two weaknesses stay
-for a later change, each with its own fresh sample: a city written two ways,
-and in `named_first`, congregation names whose generic words ("church",
+`geographic` would have been the choice under the criteria as written but
+for the floor: the only order with no criterion flag on either pool, 283
+corrections and 32 regressions on the fresh sample, and a miss wherever a
+city is written two ways. `geographic` and `exact_first` left the code in
+the commit that made the choice; their measurements above stand as the
+record. The ranking digest changed with them, so `fresh` refuses the sample
+frozen on 2026-10-29 from now on.
+
+Two weaknesses stay for a later change, each with its own fresh sample: a
+city written two ways, and congregation names whose generic words ("church",
 "catholic") decide the word test.
 
 ## Limits
@@ -349,12 +362,22 @@ and in `named_first`, congregation names whose generic words ("church",
   right one wins it back.
 - SAINT and ST are different cities, here as in the address score, and so
   is a city abbreviated (JAX BCH, RCHO STA MARG), misspelled (CHARLOTTESVLE)
-  or named by its neighborhood (Jamaica Plain for Boston). On the fresh
-  sample, these cause 9 of `geographic`'s 14 own regressions and 6 of the
-  shared ones.
+  or named by its neighborhood (Jamaica Plain for Boston). A named candidate
+  wins before geography, so these cost `named_first` less than they cost
+  `geographic` (9 of its 14 own regressions on the fresh sample): 6 of the
+  18 regressions the two orders shared.
+- A generic name goes to a namesake elsewhere in the state when the
+  candidate at the grant's address lacks a word of it: a congregation (St
+  Luke's in East Hampton to a St Luke's in the Bronx), an agency (Jewish
+  Family Services, Cincinnati to Columbus), an organization's grant to its
+  foundation or another affiliate. Most of the 33 regressions `named_first`
+  makes on the fresh sample where `geographic` kept production's right
+  winner, and 23 of its 113 criterion flags.
+- A mistyped state whose old winner scored under 0.90 on the address raises
+  no flag: "meta foundation", Corvallis "CA", went to Beverly Hills at 0.88.
 - Within the grant's city, an exact name at another address beats the
   grant's organization at its own address under a longer or variant name
-  (10 of the fresh sample's shared regressions).
+  (10 of the 18 regressions the two orders shared on the fresh sample).
 - The address-line city is read only for a grant without a city; a street
   name equal to a candidate's city in the grant's state counts as its city.
 - A move to another ZIP in the same city (the Hopkins rows to the

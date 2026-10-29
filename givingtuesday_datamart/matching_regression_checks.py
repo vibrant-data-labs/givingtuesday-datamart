@@ -69,8 +69,8 @@ RECIPIENT_SENTINEL_FLOORS = {
     # under the weighted winner order the grants naming it at the campus
     # went to the club and to BMF lines carrying its name, and it won 200
     # rows on 2026-10-27 (95%: 190). Provisional, as a floor no ranking
-    # should go under: the commit that accepts the first geographic run
-    # sets it from that run.
+    # should go under: the commit that accepts the first run under the new
+    # order sets it from that run.
     "520595110": ("Johns Hopkins University", 190),
 }
 # Recipient-side ceilings: EIN as matched recipient, maximum matched rows,

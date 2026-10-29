@@ -41,9 +41,11 @@ Usage:
 
 Scope: pairs against the target EIN only. A pair that matches here can
 still lose the final best-match-per-recipient resolution to a
-preferred row of a *different* EIN (geographic support, an exact name,
-among exact names a filing or correction before a BMF line, then
-2*name_score + addr_score: ``grant_matching.resolve_matches``) — the
+preferred row of a *different* EIN (a state that does not contradict the
+grant's, a name that is exact or holds every word of the grant's,
+geographic support, an exact name, among exact names a filing or
+correction before a BMF line, then 2*name_score + addr_score:
+``grant_matching.resolve_matches``) — the
 ``current_match_ein`` column shows which EIN won in the last completed
 matching run. Two rules are not a pair's doing and are not explained here:
 the name-only tier (it asks whether the name belongs to one filer of the
