@@ -72,8 +72,12 @@ def test_known_runs_the_shipped_orders_and_checks_the_plan_s_criteria(pool, tmp_
                                          "placeholder_tuples_matched_now": 0}
     # The exact name moves to the university; the fuzzy one stays on the closer alias.
     results = pd.read_parquet(out / "results.parquet").set_index('name1_key')
+    assert results.loc['johns hopkins university', ['weighted_address', 'weighted_zip']].tolist() == [
+        '3400 n charles st', '21218']
     for order in rv.CANDIDATES:
         assert results.loc['johns hopkins university', f'{order}_ein'] == '520595110'
+        assert results.loc['johns hopkins university', [f'{order}_city', f'{order}_zip']].tolist() == [
+            'baltimore', '21211']
         assert results.loc['johns hopkins univ', f'{order}_ein'] == '223454231'
         assert summary["orders"][order]["changed_winners"] == 1
         assert summary["orders"][order]["criterion_flags"] == 0
@@ -89,6 +93,28 @@ def test_known_runs_the_shipped_orders_and_checks_the_plan_s_criteria(pool, tmp_
         assert summary["passed"][order] is False
     assert summary["disagreements"] == {"exact_first": [], "named_first": []}
     assert summary["ranking_digest"] == rv.ranking_digest() != rv.scoring_digest()
+
+
+def test_fresh_runs_a_frozen_sample_only_under_the_orders_it_pinned(pool, tmp_path, monkeypatch):
+    out = tmp_path / "fresh"
+    out.mkdir()
+    pd.DataFrame(GRANTS).assign(n_rows=[10, 3, 2], dollars=[1e6, 3e4, 5e3], positive_dollars=[1e6, 3e4, 5e3],
+                                general_sample=True, targeted=False, placeholder=[False, False, True],
+                                recovered_rows=0).to_parquet(out / "grants.parquet", index=False)
+    manifest = {"tuples": 3, "grants_sha256": rv._digest(out / "grants.parquet"),
+                "ranking_digest": rv.ranking_digest(), "pool_inputs": rv._digest(pool / "inputs.json")}
+    (out / "manifest.json").write_text(json.dumps(manifest))
+    rv.fresh(pool, out, workers=1)
+    summary = json.loads((out / "validation.json").read_text())
+    assert summary["control_parity"]["mismatches"] == 0 and summary["sample"] == 3
+    assert summary["passed"] == {order: True for order in rv.CANDIDATES}
+    # A flag row carries both winners' places.
+    flags = pd.read_csv(out / "location_flags_named_first.csv", dtype=str)
+    assert flags[['weighted_zip', 'named_first_zip', 'named_first_address']].values.tolist() == [
+        ['21218', '21211', '3910 keswick road']]
+    monkeypatch.setattr(rv, "ranking_digest", lambda: "another order")
+    with pytest.raises(RuntimeError, match="freeze a new sample"):
+        rv.fresh(pool, out, workers=1)
 
 
 def test_the_orders_under_test_disagree_where_they_were_built_to():

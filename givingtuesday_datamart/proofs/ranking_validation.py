@@ -71,6 +71,8 @@ STRONG_ADDRESS, STRONG_DROP = 0.90, 0.20
 CHUNK = 50_000
 FAMILIES = ("johns hopkins university", "duke university", "progressive animal welfare society",
             "notre dame high school", "bates college", "weta public television and radio")
+# Where each winner is, so a reviewer reads both sides of a flag from one row.
+PLACE = {"address": "address1_key", "city": "addresscity_key", "state": "addressstate_key", "zip": "addresszip_key"}
 _STATE: dict = {}
 
 
@@ -208,14 +210,15 @@ def score(universe: pd.DataFrame, grants: pd.DataFrame, out: Path, workers: int,
 # --- Outcomes --------------------------------------------------------------------
 
 def winners(matches: pd.DataFrame, universe: pd.DataFrame, grants: pd.DataFrame, ranking: str) -> pd.DataFrame:
-    """One row per grant tuple: the winner's universe row, EIN, name, source,
-    tier and scores, '' or NaN where the tuple is unmatched."""
+    """One row per grant tuple: the winner's universe row, EIN, name, place,
+    source, tier and scores, '' or NaN where the tuple is unmatched."""
     found = matches.set_index(gm.INDEX_COLS[1]).reindex(grants.index)
     row = found[gm.INDEX_COLS[0]].astype("Int64")
     return pd.DataFrame({
         f"{ranking}_row": row,
         f"{ranking}_ein": row.map(universe["filerein_key"]).fillna(""),
         f"{ranking}_name": row.map(universe["full_name"]).fillna(""),
+        **{f"{ranking}_{place}": row.map(universe[key]).fillna("") for place, key in PLACE.items()},
         f"{ranking}_source": row.map(universe["source"]).fillna(""),
         f"{ranking}_tier": found["match_tier"].fillna(""),
         f"{ranking}_name_score": found["name_score"],
@@ -381,7 +384,7 @@ def evaluate(universe: pd.DataFrame, grants: pd.DataFrame, out: Path, workers: i
     for candidate in CANDIDATES:
         audit = location_audit(results, universe, grants, candidate)
         keep = (gm._KEYS + ["pool", "full_name", "n_rows", "dollars", "positive_dollars"]
-                + [f"{r}_{c}" for r in (CONTROL, candidate) for c in ("ein", "name", "source", "tier",
+                + [f"{r}_{c}" for r in (CONTROL, candidate) for c in ("ein", "name", *PLACE, "source", "tier",
                                                                      "name_score", "addr_score")]
                 + [c for c in audit.columns if c.startswith(("before_", "after_", "lost_"))]
                 + ["strong_location_loss", "strong_city_state_loss", "criterion_flag", "state_typo_flag", "same_name",
@@ -408,8 +411,8 @@ def evaluate(universe: pd.DataFrame, grants: pd.DataFrame, out: Path, workers: i
         pair = (CANDIDATES[0], other)
         split_columns = (gm._KEYS + ["pool", "full_name", "n_rows", "dollars", "positive_dollars", "production_ein",
                                      "kind"]
-                         + [f"{r}_{c}" for r in pair for c in ("ein", "name", "source", "name_score", "addr_score",
-                                                              "exact", "holds_grant_name")]
+                         + [f"{r}_{c}" for r in pair for c in ("ein", "name", *PLACE, "source", "name_score",
+                                                              "addr_score", "exact", "holds_grant_name")]
                          + [f"{r}_geo_{c}" for r in pair for c in ("same_city", "same_state", "same_zip", "tier")])
         split[split_columns].sort_values("positive_dollars", ascending=False).to_csv(
             out / f"disagreements_{other}.csv", index=False)
@@ -540,9 +543,10 @@ def review(out: Path, top: int) -> None:
         flags["positive_dollars"] = pd.to_numeric(flags["positive_dollars"])
         print(f"\n{order}: {len(flags)} criterion flags, {flags['n_rows'].astype(int).sum()} rows")
         columns = ["full_name", "addresscity_key", "addressstate_key", "addresszip_key", "n_rows", "positive_dollars",
-                   f"{CONTROL}_name", f"{CONTROL}_addr_score", f"{order}_name", f"{order}_addr_score",
-                   "lost_city", "lost_state", "lost_zip"]
-        with pd.option_context("display.width", 260, "display.max_colwidth", 38):
+                   *[f"{r}_{c}" for r in (CONTROL, order) for c in ("name", "city", "state", "zip", "addr_score")]]
+        # Runs before the winners carried their places print without them.
+        columns = [c for c in columns if c in flags]
+        with pd.option_context("display.width", 300, "display.max_colwidth", 38):
             print(flags.sort_values("positive_dollars", ascending=False)[columns].head(top).to_string(index=False))
     for other in CANDIDATES[1:]:
         split = pd.read_csv(out / f"disagreements_{other}.csv", dtype=str, keep_default_na=False)
@@ -554,7 +558,9 @@ def review(out: Path, top: int) -> None:
         with pd.option_context("display.width", 250, "display.max_colwidth", 40):
             print(disagreement_breakdown(split, other).to_string(index=False))
             columns = ["full_name", "addresscity_key", "addressstate_key", "n_rows", "positive_dollars"] + [
-                f"{r}_{c}" for r in (CANDIDATES[0], other) for c in ("name", "name_score", "addr_score")]
+                f"{r}_{c}" for r in (CANDIDATES[0], other) for c in ("name", "city", "state", "name_score",
+                                                                      "addr_score")]
+            columns = [c for c in columns if c in split]
             print(split.sort_values("positive_dollars", ascending=False)[columns].head(top).to_string(index=False))
 
 
