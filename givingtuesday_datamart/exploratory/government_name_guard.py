@@ -96,8 +96,8 @@ _TUPLES_SQL = f"""
 _ARMS = [
     ("basic_fields", 1, "public.basic_fields_unique_names_view"),
     ("basic_fields_pf", 2, "public.basic_fields_pf_unique_names_view"),
-    ("eo_bmf", 3, "public.eo_bmf_unique_names_view"),
-    ("correction", 4, "public.corrections_unique_names_view"),
+    ("correction", 3, "public.corrections_unique_names_view"),
+    ("eo_bmf", 4, "public.eo_bmf_unique_names_view"),
 ]
 
 

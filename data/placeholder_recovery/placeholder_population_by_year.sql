@@ -21,8 +21,11 @@ SELECT filerein, taxyear::text AS taxyear,
 FROM privategrants_current
 WHERE taxyear::text ~ '^[0-9]{4}$' AND taxyear::text >= '2020';
 ALTER TABLE pg ADD COLUMN v1 boolean, ADD COLUMN v2 boolean, ADD COLUMN withheld boolean, ADD COLUMN various boolean;
+-- v3 (2026-10-29): the bare-see arm takes punctuation around the word, as the
+-- matcher's placeholder pattern does; the figures in the docs were measured
+-- with v2's arm, '^\s*see\s*$'.
 UPDATE pg SET
-  v1 = name ~* '(\y(see|refer)\w*\y[\s,–-]*(attach|addition|schedul|statement|stmt|list))|^\s*see\s*$',
+  v1 = name ~* '(\y(see|refer)\w*\y[\s,–-]*(attach|addition|schedul|statement|stmt|list))|^[^a-z0-9]*see[^a-z0-9]*$',
   withheld = name ~* 'upon request|on request|on file|kept on file|hipaa|hippa|not required|privacy|confidential',
   various = name ~* '^\W*various\y|^\W*(miscellaneous|misc)\y|^\W*numerous\y';
 UPDATE pg SET v2 = NOT withheld AND (v1
