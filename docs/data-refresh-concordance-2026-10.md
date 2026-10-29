@@ -214,21 +214,34 @@ were. If anything here looks wrong we stop with production untouched.
 
 ### 3. The canonical build (the box, about 15 minutes)
 
-- [ ] `python -m givingtuesday_datamart.sources build-canonical`.
-- [ ] A `success` row in `datamart_meta.canonical_builds`; its lineage
+- [x] `python -m givingtuesday_datamart.sources build-canonical`. Done
+      22:21 to 22:35 UTC under the watchdog (821 s), build a0879ba0.
+- [x] A `success` row in `datamart_meta.canonical_builds`; its lineage
       names the new patch run. `nonprofit_canonical` should hold the same
       rows as on 2026-10-27 (1,983,340); the text tables gain the 49
-      returns' notes and programs.
+      returns' notes and programs. Done: `success`, lineage
+      `irs_extract_patch` 38cce5de under `ce054c032e56` and the reload's
+      last run; `nonprofit_canonical` 1,983,340, 628,622 with their latest
+      return from our extract and 412,224 with a 2025+ tax period (GT's 0),
+      as on 10-27; `schedule_o_part_iii` 1,149,203 (+3), `nonprofit_text`
+      811,437 (+1), `funder_canonical` 174,809 (same).
 
 ### 4. The grants relations (the box, about 45 minutes)
 
-- [ ] `python -m givingtuesday_datamart.current_grants --only privategrants_current`,
-      then `--only privategrants_future_current`.
-- [ ] The paid build's last line reads `0 filer-years look doubled without
+- [x] `python -m givingtuesday_datamart.current_grants --only privategrants_current`,
+      then `--only privategrants_future_current`. Done 22:35 to 23:03 UTC
+      under the watchdog: the paid relation in 24 minutes, the future one
+      in a minute; the recovered view recreated for policy `v3` and the
+      matcher's first view with it.
+- [x] The paid build's last line reads `0 filer-years look doubled without
       a repeated basic row`; otherwise the filings it names are checked
-      against their XML before step 8.
-- [ ] `status` shows the three line-25 rules; the rows by rule logged
-      against October's (17,392,341 paid, 452,460 future).
+      against their XML before step 8. Done: 0.
+- [x] `status` shows the three line-25 rules; the rows by rule logged
+      against October's (17,392,341 paid, 452,460 future). Done 23:10 UTC:
+      17,392,341 paid and 452,460 future, every rule's count October's to
+      the row (passthrough 16,702,141, latest_url 672,530, total_row
+      16,806, the rest as logged); the view shows `v3` and holds 17,970,006
+      rows, 582,471 of them recovered.
 
 ### 5. The work list and the read (skipped this run; decided 2026-10-29)
 
@@ -501,3 +514,18 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   transaction and stands at 57.8 GB after. Production's staging now carries
   our rows under `ce054c032e56`; the site reads them as its caches turn
   over. Steps 3 and 4 are next.
+- **2026-10-29, steps 3 and 4.** 22:21 to 23:10 UTC in one session under
+  the watchdog (`run-steps34.sh` beside the logs). The canonical build
+  a0879ba0 took 821 s and succeeded with the same 1,983,340 organizations
+  as on 10-27, 628,622 of them with their latest return from our extract
+  and 412,224 with a 2025+ tax period; its lineage names the patch run of
+  step 2 and the reload's last run; the text tables moved by the 49
+  returns' notes and programs (`schedule_o_part_iii` +3, `nonprofit_text`
+  +1). `privategrants_current` rebuilt in 24 minutes to 17,392,341 rows
+  with October's rule counts to the row and a doubling watch of 0;
+  `privategrants_future_current` to 452,460; the recovered view came back
+  under `v3` with 17,970,006 rows, 582,471 of them recovered, so the lists
+  loaded on 10-27 ride into the matcher. The watchdog saw our backend on
+  47 polls, no breach, swap 0.00 GB; free storage dipped to 45.3 GB during
+  the paid build's temp spill and stands at 57.8 GB after. Step 6 is next:
+  the load of the 10-27 verdicts, the view and the check under `v3`.
