@@ -20,7 +20,7 @@ from sqlalchemy import text
 from tqdm import tqdm
 
 from givingtuesday_datamart._internal import parquet_cache as pqc
-from givingtuesday_datamart._internal.address_cleaning import create_clean_address
+from givingtuesday_datamart._internal.address_cleaning import ADDRESS_PATTERN, USPS_MAP, create_clean_address
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart._internal.parquet_cache import _decode_json as _pqc_decode_json
@@ -31,6 +31,8 @@ from givingtuesday_datamart.canonical.build import (
     ensure_canonical_meta,
     latest_successful_run_ids,
 )
+from givingtuesday_datamart.placeholder_recovery import address as recovery_address
+from givingtuesday_datamart.placeholder_recovery import classifier as recovery_classifier
 from givingtuesday_datamart.placeholder_recovery import loader as recovered_loader
 from givingtuesday_datamart.placeholder_recovery import view as recovered_view
 
@@ -71,6 +73,22 @@ _GOVERNMENT_NAME_PATTERN = (
 )
 GOVERNMENT_NAME_RE = re.compile(_GOVERNMENT_NAME_PATTERN + r"\b")
 GOVERNMENT_NAME_SQL_RE = _GOVERNMENT_NAME_PATTERN + r"\M"
+
+# Shared with the gate. SQL uses PostgreSQL word boundaries; the Python
+# twin below uses the same phrases on raw business-name fields. The second
+# arm is a name that is the word "see" with nothing else but punctuation:
+# "SEE", "SEE.", "(SEE)", "SEE -". October matched 59 bare "SEE" rows to
+# the BMF organizations named SEE (850645402, 854054788), and the
+# punctuated spellings clean to the same name. The arm is the recovery
+# classifier's (``SEE_ALONE``), so a row the view leaves out of matching is
+# a row the work list counts and the recovery reads. The pattern decides
+# which grant tuples the view holds, so an edit to it moves row positions:
+# MATCHING_INPUT_SHAPE_VERSION and the pin in
+# tests/test_production_recipient_ranking.py move with it.
+PLACEHOLDER_REGEX = (
+    r"(\y(see|refer)\w*\y[\s,–-]*(attach|addition|schedul|statement|stmt|list))|" + recovery_classifier.SEE_ALONE
+)
+_PLACEHOLDER_NAME_RE = re.compile(PLACEHOLDER_REGEX.replace(r"\y", r"\b"), re.IGNORECASE)
 # These were previously in sql_queries/unique_fields_for_grants.sql. Lifted into
 # Python so the matching pipeline owns its own preconditions and postconditions
 # in one place. The views must exist before matching reads them; unioned_grants
@@ -198,6 +216,7 @@ _VIEW_DDL = [
           -- string is 0. Pruning them here drops ~16% of recipient tuples
           -- (~12% of candidate pairs) with zero recall impact.
           AND NOT (TRIM(name1_key) = '' AND TRIM(name2_key) = '')
+          AND NOT (concat_ws(' ', name1_key, name2_key) ~* '{placeholder_regex}')
         GROUP BY
             name1_key,
             name2_key,
@@ -476,7 +495,7 @@ _VIEW_DDL = [
 def _view_ddl(relations: "Relations") -> list[str]:
     """The eight views, under the run's names."""
     names = {name: relations.of(name) for name in _CREATED}
-    return [ddl.format(grants=relations.grants, **names) for ddl in _VIEW_DDL]
+    return [ddl.format(grants=relations.grants, placeholder_regex=PLACEHOLDER_REGEX, **names) for ddl in _VIEW_DDL]
 
 
 # --- 1b. CORRECTIONS REGISTRY LOADER ---
@@ -883,7 +902,13 @@ _MATCHING_INPUT_LOGICAL_NAMES = (
 #   v4 (BMF stack): BMF names and host-institution exclusions.
 #   v5 (2026-10-15): combines the BMF universe with recovered grants and
 #   cleaned-name scoring from main; no earlier stack checkpoint is reusable.
-MATCHING_INPUT_SHAPE_VERSION = 5
+#   v6 (2026-10-28): placeholder recipients are excluded before indexing.
+#   v7 (2026-10-28): the placeholder pattern also takes "see" between
+#   punctuation ("SEE.", "(SEE)"), and a correction row outranks a BMF row
+#   with the same key tuple in the universe's DISTINCT ON. A test pins the
+#   view DDL and the two reads to this number, so the next edit to them
+#   cannot resume chunks against shifted rows without moving it.
+MATCHING_INPUT_SHAPE_VERSION = 7
 
 
 def _insert_started_build(build_id: str, started_at: datetime, source_runs: dict) -> None:
@@ -1578,13 +1603,17 @@ def universe_sql(relations: Relations = Relations(), limit_clause: str = "") -> 
     `source` no longer collapse), so dedup is done explicitly:
     UNION ALL + DISTINCT ON (key tuple), with source_rank as the
     tie-break. An org whose key tuple appears in multiple arms keeps
-    one row, organic sources winning over corrections — so a
+    one row: a filing first, then a correction, then a BMF line. So a
     correction that duplicates a real filing collapses away, and
     match_source='correction' only appears where the correction row
     itself supplied the winning identity (the prunability signal:
-    docs/corrections-plan.md). source_rank in the DISTINCT ON ORDER BY
-    keeps the winner deterministic; the outer ORDER BY keeps row order
-    deterministic over the whole universe.
+    docs/corrections-plan.md). A correction that repeats a BMF line
+    keeps its own row: the winner order prefers it to the BMF line
+    among exact names (``ALIAS_SOURCES``), so it is not redundant.
+    Which row survives changes only ``source``, never the key tuple, so
+    row positions are the same either way. source_rank in the DISTINCT
+    ON ORDER BY keeps the winner deterministic; the outer ORDER BY keeps
+    row order deterministic over the whole universe.
     """
     of = relations.of
     return f"""
@@ -1604,11 +1633,11 @@ def universe_sql(relations: Relations = Relations(), limit_clause: str = "") -> 
                 SELECT *, 'basic_fields_pf' AS source, 2 AS source_rank
                 FROM public.{of('basic_fields_pf_unique_names_view')}
                 UNION ALL
-                SELECT *, 'eo_bmf' AS source, 3 AS source_rank
-                FROM public.{of('eo_bmf_unique_names_view')}
-                UNION ALL
-                SELECT *, 'correction' AS source, 4 AS source_rank
+                SELECT *, 'correction' AS source, 3 AS source_rank
                 FROM public.{of('corrections_unique_names_view')}
+                UNION ALL
+                SELECT *, 'eo_bmf' AS source, 4 AS source_rank
+                FROM public.{of('eo_bmf_unique_names_view')}
             ) arms
             ORDER BY filerein_key, name1_key, name2_key, address1_key,
                      address2_key, addresscity_key, addressstate_key,
@@ -1641,6 +1670,13 @@ SCORE_COLS = ['zip_score', 'name_score', 'addr_score', 'state_score']
 ADDRESS_TIER = "address_and_name"
 STATE_TIER = "state_and_name"
 NAME_ONLY = "name_only"
+# The arms of the universe whose rows are names the IRS Business Master
+# File lists for an EIN (its primary and sort names), not a name the
+# organization filed under or a researcher confirmed for a grant. Among
+# candidates that carry a grant's exact name, every other arm, a new one
+# included, wins over these (resolve_matches); elsewhere the arm decides
+# nothing.
+ALIAS_SOURCES = ("eo_bmf",)
 
 
 def candidate_pairs(universe_df: pd.DataFrame, grants_df: pd.DataFrame) -> pd.MultiIndex:
@@ -1762,35 +1798,307 @@ ONE_FILER_IN_STATE = "street"
 _STREET = r"\d"
 
 
+def placeholder_names(grants_df: pd.DataFrame) -> pd.Series:
+    """Which grant tuples name no recipient: a pointer phrase ("SEE
+    ATTACHED STATEMENT") or "see" alone (``PLACEHOLDER_REGEX``), tested on
+    the business-name lines as the view tests them. One boolean per row of
+    ``grants_df``, on its index, an empty frame included."""
+    if 'name1_key' in grants_df:
+        empty = pd.Series('', index=grants_df.index)
+        names = grants_df['name1_key'].fillna('') + ' ' + grants_df.get('name2_key', empty).fillna('')
+    else:
+        names = grants_df.get('full_name', pd.Series('', index=grants_df.index)).fillna('')
+    return pd.Series([bool(_PLACEHOLDER_NAME_RE.search(str(name))) for name in names],
+                     index=grants_df.index, dtype=bool)
+
+
+# How resolve_matches picks the winner of a grant tuple among the pairs the
+# final rules accept (docs/recipient-ranking-production-2026-10-28.md):
+#   "named_first", the default since 2026-10-29: a candidate in a state that
+#     contradicts the grant's last; then a named candidate, one whose name
+#     is exact (name_score at the exact-name threshold) or holds every word
+#     of the grant's (``_names_held``: "jewish community foundation of los
+#     angeles" is named for a grant to "jewish community foundation",
+#     "stanford review" is not for one to "stanford university"); then
+#     geographic support (location_agreement's tier); then an exact name;
+#     then, among exact names, any arm of the universe before a BMF line
+#     (ALIAS_SOURCES); then 2*name_score + addr_score. The
+#     one-filer-in-the-state rule refuses its pairs before the winner is
+#     picked. Two orders measured beside it left the code when it was
+#     chosen: "geographic" (geography before an exact name; 467 of 647
+#     labeled relationships) and "exact_first" (an exact name before
+#     geography, whatever the local candidate's name).
+#   "weighted": 2*name_score + addr_score alone, then the one-filer rule on
+#     the winner: the order of every run up to 2026-10-27, kept to measure
+#     the default against and to fall back to.
+RANKING = "named_first"
+_ORDERS = {
+    "named_first": ['_not_conflict', '_named', '_geography', '_exact', '_exact_preferred', '_combined_score'],
+    "weighted": ['_combined_score'],
+}
+RANKINGS = tuple(_ORDERS)
+# The address score at which a shared ZIP is local evidence by itself.
+LOCAL_ADDRESS_MIN = 0.90
+# How many of the last words of an address line may be a city.
+_CITY_TAIL_WORDS = 3
+
+
+def _place(value: str) -> str:
+    """A city, or an address line, as the address score writes it
+    (``create_clean_address``): upper case, the USPS abbreviations (FORT is
+    FT, MOUNT is MT), punctuation dropped, single spaces."""
+    value = ADDRESS_PATTERN.sub(lambda m: USPS_MAP[m.group().upper().replace('.', '')], value.upper())
+    return re.sub(r'\s+', ' ', re.sub(r'[^\w\s]', '', value)).strip()
+
+
+def _state(value: str) -> str:
+    return re.sub(r'[^0-9A-Z]', '', value.upper())
+
+
+def _zip(value: str) -> str:
+    """The scorer's five-digit ZIP (``clean_zip``), or '' where there is
+    none: never the '00000' it blocks an absent ZIP under."""
+    zip_code = clean_zip(value)
+    return '' if zip_code in (None, '00000') else zip_code
+
+
+def _tails_of(words: list[str]) -> list[str]:
+    return [' '.join(words[-k:]) if len(words) >= k else '' for k in range(1, _CITY_TAIL_WORDS + 1)]
+
+
+def _line_tails(line: str, state: str) -> list[str]:
+    """The last one, two and three words of an address line, after a ZIP
+    and then a state code printed at its end: the tuple's own ``state``,
+    or, for a tuple that carries none, any US state code ("15305 44th ave
+    w lynnwood wa 98087" on a recovered row with no state of its own). A
+    code the tuple did not vouch for may end the city instead ("rocky
+    mount" is ROCKY MT after the USPS abbreviation), so for such a line
+    the tails with the code kept come too."""
+    words = _place(line).split()
+    while words and words[-1].isdigit():
+        words.pop()
+    if state:
+        if words and words[-1] == state:
+            words.pop()
+        return _tails_of(words)
+    if words and words[-1] in recovery_address.USPS:
+        kept = _tails_of(words)
+        words.pop()
+        return _tails_of(words) + kept
+    return _tails_of(words)
+
+
+def _column(frame: pd.DataFrame, name: str) -> pd.Series:
+    return frame[name] if name in frame else pd.Series('', index=frame.index, dtype=object)
+
+
+def _codes(columns: list[pd.Series], normalize) -> list[np.ndarray]:
+    """Integer codes of ``normalize(value)`` for the values of several
+    columns, shared between them, so equal codes mean equal normalized
+    values; -1 where the normalized value is empty. ``normalize`` runs once
+    per distinct value, not once per pair: a full run compares about 28
+    million pairs over a few hundred thousand distinct cities."""
+    raw = pd.concat(columns, ignore_index=True).fillna('').astype(str)
+    codes, distinct = pd.factorize(raw)
+    normalized = np.array([normalize(value) for value in distinct], dtype=object)
+    shared, _ = pd.factorize(normalized)
+    shared = np.where(normalized == '', -1, shared)
+    out = shared[codes]
+    bounds = np.cumsum([0] + [len(column) for column in columns])
+    return [out[start:end] for start, end in zip(bounds[:-1], bounds[1:])]
+
+
+def _positions(index: pd.Index, labels: pd.Series) -> np.ndarray:
+    """The positions of ``labels`` in ``index``: a label it lacks is an
+    error, never its last row."""
+    positions = index.get_indexer(labels.to_numpy())
+    if (positions < 0).any():
+        raise KeyError("a pair names a row its frame does not have")
+    return positions
+
+
+def _pair_positions(pairs: pd.DataFrame, universe_df: pd.DataFrame,
+                    grants_df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    """The positions of each pair's two rows in their frames."""
+    return _positions(universe_df.index, pairs[INDEX_COLS[0]]), _positions(grants_df.index, pairs[INDEX_COLS[1]])
+
+
+def _city_tails(grants_df: pd.DataFrame, rows: np.ndarray) -> list[pd.Series]:
+    """For the grant tuples at positions ``rows`` that have no city, the
+    candidates for it at the end of the address line (``_line_tails``); ''
+    elsewhere. A recovered grant has no city column, and its list prints
+    the city there: "15305 44th ave w lynnwood", "150 west 65th street, new
+    york", "p.o. box 6281 richmond"."""
+    # Twice _CITY_TAIL_WORDS: a line ending in a state code the tuple did
+    # not vouch for gives its tails with the code and without it.
+    tails = [np.full(len(grants_df), '', dtype=object) for _ in range(2 * _CITY_TAIL_WORDS)]
+    no_city = _column(grants_df, 'addresscity_key').fillna('').astype(str).str.strip().eq('').to_numpy()
+    rows = rows[no_city[rows]]
+    if len(rows):
+        frame = grants_df.iloc[rows]
+        lines = (_column(frame, 'address1_key').fillna('').astype(str) + ' '
+                 + _column(frame, 'address2_key').fillna('').astype(str))
+        states = _column(frame, 'addressstate_key').fillna('').astype(str)
+        for row, line, state in zip(rows, lines, states):
+            for k, tail in enumerate(_line_tails(line, _state(state))):
+                tails[k][row] = tail
+    return [pd.Series(tail, index=grants_df.index) for tail in tails]
+
+
+def location_agreement(pairs: pd.DataFrame, universe_df: pd.DataFrame, grants_df: pd.DataFrame,
+                       positions: tuple[np.ndarray, np.ndarray] | None = None) -> pd.DataFrame:
+    """Where the two locations of each pair agree, on the pairs' index:
+    ``same_state``, ``same_city`` and ``same_zip`` (False where either side
+    lacks the value), and the pair's geographic ``tier``:
+
+    - 3, local: the same city in the same state; or the same city and the
+      same ZIP, whatever the states say (a grant to Americus IL 31709 at a
+      Georgia street address is in Americus GA); or the same ZIP with an
+      address score of at least ``LOCAL_ADDRESS_MIN``;
+    - 2, state: the same state, nothing local;
+    - 1, unknown: nothing agrees and nothing contradicts;
+    - 0, conflict: two states that differ, nothing local.
+
+    Cities compare as the address score writes them (``_place``: FT
+    LAUDERDALE is FORT LAUDERDALE). A grant tuple with no city takes the
+    candidate's city as its own when its address line ends with it
+    (``_city_tails``): that is where a recovered grant's list prints it. A
+    missing value is unknown, never a contradiction, and an absent ZIP is
+    never local evidence. Each value is normalized once per distinct
+    value, and the pairs compare integer codes. ``positions`` are the
+    pairs' row positions in the two frames (``_pair_positions``) when the
+    caller has them already.
+    """
+    u_pos, g_pos = positions if positions is not None else _pair_positions(pairs, universe_df, grants_df)
+    u_state, g_state = _codes([_column(universe_df, 'addressstate_key'), _column(grants_df, 'addressstate_key')],
+                              _state)
+    u_zip, g_zip = _codes([_column(universe_df, 'addresszip_key'), _column(grants_df, 'addresszip_key')], _zip)
+    tails = _city_tails(grants_df, np.unique(g_pos))
+    u_city, g_city, *g_tails = _codes(
+        [_column(universe_df, 'addresscity_key'), _column(grants_df, 'addresscity_key'), *tails], _place)
+
+    us, gs = u_state[u_pos], g_state[g_pos]
+    uz, gz = u_zip[u_pos], g_zip[g_pos]
+    uc, gc = u_city[u_pos], g_city[g_pos]
+    same_state = (us >= 0) & (us == gs)
+    same_zip = (uz >= 0) & (uz == gz)
+    in_line = np.zeros(len(pairs), dtype=bool)
+    for tail in g_tails:
+        in_line |= uc == tail[g_pos]
+    same_city = (uc >= 0) & ((uc == gc) | ((gc < 0) & in_line))
+    address = (pairs['addr_score'].to_numpy(dtype=float) if 'addr_score' in pairs
+               else np.zeros(len(pairs)))
+    local = (same_city & (same_state | same_zip)) | (same_zip & (address >= LOCAL_ADDRESS_MIN))
+    conflict = (us >= 0) & (gs >= 0) & (us != gs) & ~local
+    tier = np.ones(len(pairs), dtype=np.int8)
+    tier[same_state] = 2
+    tier[local] = 3
+    tier[conflict] = 0
+    return pd.DataFrame({'same_state': same_state, 'same_city': same_city, 'same_zip': same_zip, 'tier': tier},
+                        index=pairs.index)
+
+
+def _names_held(pairs: pd.DataFrame, universe_df: pd.DataFrame, grants_df: pd.DataFrame,
+                positions: tuple[np.ndarray, np.ndarray] | None = None) -> np.ndarray:
+    """Does each pair's filer name hold every word of the grant's cleaned
+    name? The word sets are built once per row the pairs name;
+    ``positions`` as in ``location_agreement``."""
+    u_pos, g_pos = positions if positions is not None else _pair_positions(pairs, universe_df, grants_df)
+    u_names, g_names = universe_df['full_name'].to_numpy(), grants_df['full_name'].to_numpy()
+    u_words = {p: frozenset(str(u_names[p]).split()) for p in np.unique(u_pos)}
+    g_words = {p: frozenset(str(g_names[p]).split()) for p in np.unique(g_pos)}
+    return np.fromiter((bool(g_words[g]) and g_words[g] <= u_words[u] for u, g in zip(u_pos, g_pos)),
+                       dtype=bool, count=len(u_pos))
+
+
+def _one_filer_refused(matches: pd.DataFrame, grants_df: pd.DataFrame, filers_in_state: pd.Series,
+                       one_filer_in_state: str) -> pd.Series:
+    """The pairs the one-filer-in-the-state rule refuses: pairs only the
+    exact-name tier accepts, of a grant tuple whose name several filers of
+    its state carry, held to tuples with no street address ("street") or
+    to every tuple ("all")."""
+    shared = (matches['match_tier'] == STATE_TIER) & (
+        matches[INDEX_COLS[1]].map(filers_in_state).fillna(1) > 1)
+    if one_filer_in_state == "street":
+        lines = grants_df['address1_key'] + " " + grants_df['address2_key']
+        shared &= matches[INDEX_COLS[1]].map(~lines.str.contains(_STREET)).eq(True)
+    return shared
+
+
 def resolve_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df: pd.DataFrame,
-                    one_filer_in_state: str = ONE_FILER_IN_STATE, *, guards: bool = True) -> pd.DataFrame:
+                    one_filer_in_state: str = ONE_FILER_IN_STATE, *, guards: bool = True,
+                    ranking: str = RANKING, placeholder: pd.Series | None = None) -> pd.DataFrame:
     """The final rules, then one universe row per grant tuple, with the
     tier the match rests on (``match_tier``).
 
-    Each private_foundations record (grant recipient) should map to exactly
-    one basic_fields org. When fuzzy matching finds multiple candidates,
-    keep the one with the highest combined score; name_score is weighted 2x
-    since the name is the primary identifier and address collisions (shared
-    buildings, PO boxes) are common.
+    A grant tuple that names no recipient (``placeholder_names``, or
+    ``placeholder`` when the caller has that mask already) matches
+    nothing: the view leaves such tuples out of a run, and this holds the
+    same for a slice. The government-name guard refuses its pairs before
+    any winner is picked.
 
-    **One filer in the state.** A winner that only the exact-name tier
+    **The winner** (``ranking``). Under "named_first", among the pairs the
+    rules accept for a grant tuple:
+
+    1. a candidate whose state contradicts the grant's comes last
+       (``location_agreement``'s conflict tier): "saint pauls episcopal
+       church" at the grant's street in Kansas City MO, name 0.87, beats
+       an exact "st pauls episcopal church" across the state line;
+    2. then a named candidate: an exact name, ``name_score`` at the
+       threshold of the exact-name tier, so a name that scores 1 is exact
+       whatever its punctuation ("us fund for unicef", "u.s. fund for
+       unicef"), or a name that holds every word of the grant's
+       (``_names_held``). A named candidate elsewhere in the state beats
+       a closer address under another name in the grant's city: "medical
+       teams international" in Tigard takes a Portland PO box grant from
+       "mt hood medical center foundation" at a box string one digit
+       away, and "jewish community foundation of los angeles", at the
+       grant's address, keeps a Los Angeles grant to "jewish community
+       foundation" from the exact namesake in San Diego;
+    3. then the best geographic support: a candidate in the grant's own
+       city before one elsewhere in its state, before one with no
+       location to compare;
+    4. then an exact name;
+    5. then, among exact names only, a filing or a correction before a BMF
+       line (``ALIAS_SOURCES``): the Johns Hopkins University's own filing
+       before the BMF line of a student chapter that carries its name.
+       Below an exact name the source decides nothing, and the closer name
+       wins: "friends of the springfield public library" (0.93), not a
+       filing named "springfield public library foundation" (0.74);
+    6. then 2*name_score + addr_score;
+    7. then the order of the pairs: the sort is stable, and chunks
+       concatenate in index order.
+
+    Under "weighted", step 6 alone decides, as it did in every run up to
+    2026-10-27.
+
+    **One filer in the state.** A pair that only the exact-name tier
     accepts has the name and the state for it and nothing else. When
-    several filers of that state carry the name, the combined score picks
-    among them on the address, and a grant tuple with no street address
-    has an address string that is its city and state at most: the filer
-    with the shortest address wins. So such a tuple matches on the name
-    and the state only when one filer of the state has the name, as the
-    name-only tier asks of the whole universe; otherwise it is left
-    unmatched. A tuple with a street address (an address line with a digit
-    in it) keeps the pick of the address (``ONE_FILER_IN_STATE``): held to
-    every tuple, the rule took 359 rows and $52M of the sampled
-    foundations' itemised grants on 2026-10-01, most of them to a
-    university or a hospital at its own street address.
+    several filers of the state carry the name, such a pair cannot say
+    which of them a grant tuple with no street address (no digit in its
+    address lines) meant (``ONE_FILER_IN_STATE``). Under every order but
+    "weighted" the rule refuses those pairs before the winner is
+    picked, so a candidate
+    the address tiers accept can still win the tuple; when none does, the
+    tuple is left unmatched. Under "weighted" it looks at the winner only
+    and leaves its tuple unmatched, as it did. A tuple with a street
+    address keeps the pick of the address: held to every tuple, the rule
+    took 359 rows and $52M of the sampled foundations' itemised grants on
+    2026-10-01, most of them to a university or a hospital at its own
+    street address.
     """
-    # filter_match_rules returns a boolean-mask slice (a view). Take an
-    # explicit copy so subsequent assignments don't trigger
+    if ranking not in RANKINGS:
+        raise ValueError(f"ranking must be one of {RANKINGS}, not {ranking!r}")
+    matches = filter_match_rules(features_df=features, **FINAL_FILTER_RULES)
+    if placeholder is None:
+        placeholder = placeholder_names(grants_df)
+    # A boolean array: an empty column maps to float64, which would select
+    # columns instead of rows.
+    named_nothing = matches[INDEX_COLS[1]].map(placeholder).eq(True).to_numpy()
+    # filter_match_rules and the mask give boolean-mask slices (views). One
+    # explicit copy after both, so the assignments below do not raise
     # SettingWithCopyWarning on a view.
-    matches = filter_match_rules(features_df=features, **FINAL_FILTER_RULES).copy()
+    matches = matches[~named_nothing].copy()
     if guards:
         matches = guard_government_names(matches, grants_df["full_name"], universe_df["full_name"])
     logger.info(f"Found {len(matches)} matches.")
@@ -1798,34 +2106,49 @@ def resolve_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df
     matches['match_tier'] = pd.Series(STATE_TIER, index=matches.index).where(~_by_address(matches), ADDRESS_TIER)
     # The filers of the tuple's state that carry its name: the pairs the
     # exact-name tier accepts.
-    by_state = matches[
-        (matches['name_score'] >= FINAL_FILTER_RULES['exact_name_name_min']) & (matches['state_score'] == 1)
-    ]
+    exact_min = FINAL_FILTER_RULES['exact_name_name_min']
+    by_state = matches[(matches['name_score'] >= exact_min) & (matches['state_score'] == 1)]
     filers_in_state = (
         by_state.assign(_ein=by_state[INDEX_COLS[0]].map(universe_df['filerein_key']))
         .groupby(INDEX_COLS[1])['_ein'].nunique()
     )
+    if ranking != "weighted" and one_filer_in_state != "none":
+        refused = _one_filer_refused(matches, grants_df, filers_in_state, one_filer_in_state)
+        tuples = pd.Index(matches.loc[refused, INDEX_COLS[1]].unique())
+        matches = matches[~refused]
+        left = int((~tuples.isin(matches[INDEX_COLS[1]])).sum())
+        logger.info(
+            f"One filer in the state: {int(refused.sum())} pairs of {len(tuples)} grant tuples refused, "
+            f"their name shared by several filers of their state; {left} of the tuples left unmatched."
+        )
 
     pre_resolve_count = len(matches)
     matches = matches.assign(_combined_score=matches['name_score'] * 2 + matches['addr_score'])
-    # mergesort (stable) so score ties resolve deterministically by input
+    if ranking != "weighted":
+        sources = (universe_df['source'] if 'source' in universe_df
+                   else pd.Series('', index=universe_df.index))
+        exact = matches['name_score'] >= exact_min
+        positions = _pair_positions(matches, universe_df, grants_df)
+        matches['_geography'] = location_agreement(matches, universe_df, grants_df, positions)['tier'].to_numpy()
+        matches['_not_conflict'] = matches['_geography'] > 0
+        matches['_exact'] = exact
+        matches['_exact_preferred'] = exact & ~matches[INDEX_COLS[0]].map(sources).isin(ALIAS_SOURCES)
+        matches['_named'] = exact.to_numpy() | _names_held(matches, universe_df, grants_df, positions)
+    # Stable sorting so complete ranking ties resolve by input
     # order (which is deterministic: chunks concat in index order). Matters
     # more now that correction rows can tie with organic universe rows for
     # the same recipient tuple.
-    matches = matches.sort_values('_combined_score', ascending=False, kind='mergesort')
+    matches = matches.sort_values(_ORDERS[ranking], ascending=False, kind='mergesort')
     matches = matches.drop_duplicates(subset=[INDEX_COLS[1]], keep='first')
-    matches = matches.drop(columns='_combined_score')
+    matches = matches.drop(columns=['_combined_score', '_geography', '_not_conflict', '_named', '_exact',
+                                    '_exact_preferred'], errors='ignore')
     logger.info(
-        f"Resolved multi-matches: {pre_resolve_count} -> {len(matches)} "
+        f"Resolved multi-matches ({ranking}): {pre_resolve_count} -> {len(matches)} "
         f"pairs after keeping the best basic_fields match per private_foundations record."
     )
 
-    if one_filer_in_state != "none":
-        shared = (matches['match_tier'] == STATE_TIER) & (
-            matches[INDEX_COLS[1]].map(filers_in_state).fillna(1) > 1)
-        if one_filer_in_state == "street":
-            lines = grants_df['address1_key'] + " " + grants_df['address2_key']
-            shared &= matches[INDEX_COLS[1]].map(~lines.str.contains(_STREET)).astype(bool)
+    if ranking == "weighted" and one_filer_in_state != "none":
+        shared = _one_filer_refused(matches, grants_df, filers_in_state, one_filer_in_state)
         logger.info(
             f"One filer in the state: {int(shared.sum())} grant tuples left unmatched, "
             f"their name shared by several filers of their state."
@@ -1834,10 +2157,12 @@ def resolve_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df
     return matches
 
 
-def name_only_matches(universe_df: pd.DataFrame, grants_df: pd.DataFrame, matched) -> pd.DataFrame:
+def name_only_matches(universe_df: pd.DataFrame, grants_df: pd.DataFrame, matched,
+                      placeholder: pd.Series | None = None) -> pd.DataFrame:
     """The name-only tier: a grant tuple with no state and no zip, which
     no other tier matched, and whose cleaned name belongs to exactly one
-    filer of the universe.
+    filer of the universe. ``placeholder`` is the mask of
+    ``placeholder_names`` when the caller has it already.
 
     A name several filers share is never matched, whatever its length:
     that is what rules out most one-word names. A tuple with a state is not
@@ -1853,6 +2178,7 @@ def name_only_matches(universe_df: pd.DataFrame, grants_df: pd.DataFrame, matche
         (grants_df['addressstate_key'].str.strip() == "")
         & (grants_df['addresszip_key'].str.strip() == "")
         & (grants_df['full_name'] != "")
+        & ~(placeholder_names(grants_df) if placeholder is None else placeholder)
         & ~grants_df.index.isin(matched)
     ]
     named = universe_df.loc[universe_df['full_name'].isin(set(open_['full_name'])), ['full_name', 'filerein_key']]
@@ -1868,13 +2194,16 @@ def name_only_matches(universe_df: pd.DataFrame, grants_df: pd.DataFrame, matche
 
 
 def all_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df: pd.DataFrame,
-                one_filer_in_state: str = ONE_FILER_IN_STATE, *, guards: bool = True) -> pd.DataFrame:
+                one_filer_in_state: str = ONE_FILER_IN_STATE, *, guards: bool = True,
+                ranking: str = RANKING) -> pd.DataFrame:
     """Every match of a run, one row per grant tuple matched: the winners
-    of the scored pairs, then the name-only tier on what they left.
-    ``match_tier`` says which; ``match_name_words`` is missing but on a
-    name-only match."""
-    matches = resolve_matches(features, universe_df, grants_df, one_filer_in_state, guards=guards)
-    name_only = name_only_matches(universe_df, grants_df, matches[INDEX_COLS[1]])
+    of the scored pairs under ``ranking``, then the name-only tier on what
+    they left. ``match_tier`` says which; ``match_name_words`` is missing
+    but on a name-only match."""
+    placeholder = placeholder_names(grants_df)  # one pass of the pattern over the grant tuples
+    matches = resolve_matches(features, universe_df, grants_df, one_filer_in_state, guards=guards,
+                              ranking=ranking, placeholder=placeholder)
+    name_only = name_only_matches(universe_df, grants_df, matches[INDEX_COLS[1]], placeholder)
     logger.info(f"Name-only tier: {len(name_only)} grant tuples matched on a name that belongs to one filer.")
     name_only = name_only.assign(name_score=1.0, addr_score=float("nan"))
     matches = pd.concat([matches.assign(match_name_words=pd.NA), name_only], ignore_index=True)
@@ -1897,7 +2226,8 @@ def score_slice(universe_slice: pd.DataFrame, grants_slice: pd.DataFrame, chunk_
     return score_pairs(pairs, u, g, chunk_rules=chunk_rules)
 
 
-def match_slice(universe_slice: pd.DataFrame, grants_slice: pd.DataFrame) -> pd.DataFrame:
+def match_slice(universe_slice: pd.DataFrame, grants_slice: pd.DataFrame,
+                ranking: str = RANKING) -> pd.DataFrame:
     """A run on a slice: block, score, the two stages of rules, the winner
     of each grant tuple, the name-only tier. One row per matched grant
     tuple, as ``all_matches`` gives them.
@@ -1907,7 +2237,7 @@ def match_slice(universe_slice: pd.DataFrame, grants_slice: pd.DataFrame) -> pd.
     every universe row that can block with them (``corrections_preflight``
     has the argument in full).
     """
-    return all_matches(score_slice(universe_slice, grants_slice), universe_slice, grants_slice)
+    return all_matches(score_slice(universe_slice, grants_slice), universe_slice, grants_slice, ranking=ranking)
 
 
 def matched_tuples(universe_df: pd.DataFrame, grants_df: pd.DataFrame, matches: pd.DataFrame) -> pd.DataFrame:
@@ -2026,6 +2356,7 @@ def match_records(
     recovered_policy: str | None = None,
     skip_rebuild: bool = False,
     workers: int = 1,
+    ranking: str = RANKING,
 ):
     """Run the recordlinkage grant-matching pipeline against gt_datamart.
 
@@ -2057,13 +2388,20 @@ def match_records(
     are still rebuilt — small data while testing, restored to full data
     on the next non-limited run.
 
+    ``ranking`` names the winner order (``RANKINGS``): "named_first" by
+    default, "weighted" for the order of the runs up to 2026-10-27. It
+    acts after the checkpoints, so either one resumes the same chunks.
+
     Each run is recorded in ``datamart_meta.canonical_builds`` with
     ``build_kind='grant_matching'``, the ingest_run_ids of every staging
-    source at run time, and (on success) the row counts of
+    source at run time, the ranking (``source_runs -> 'matcher'``), and
+    (on success) the row counts of
     ``public.privategrants_w_recipients`` and ``public.unioned_grants``.
     Consumers can join against ``datamart_meta.ingest_runs`` to detect
     when the matched/unioned tables are stale relative to upstream.
     """
+    if ranking not in RANKINGS:
+        raise ValueError(f"ranking must be one of {RANKINGS}, not {ranking!r}")
     ensure_canonical_meta()
     build_id = str(uuid.uuid4())
     started_at = datetime.now(timezone.utc)
@@ -2075,6 +2413,9 @@ def match_records(
         "content_hash": _corrections_content_hash(),
         "rows": len(_read_corrections_csv()),
     }
+    # The winner order is the matcher's own input: the same sources under
+    # another ranking give other tables.
+    source_runs["matcher"] = {"ranking": ranking}
     # So are the recovered grants; the run reads them once, after the
     # rebuild, and stamps them on this row (``_stamp_recovered``).
     _insert_started_build(build_id, started_at, source_runs)
@@ -2092,6 +2433,7 @@ def match_records(
             build_id=build_id,
             skip_rebuild=skip_rebuild,
             workers=workers,
+            ranking=ranking,
         )
     except BaseException as err:
         _finalize_build_failed(build_id, err)
@@ -2138,6 +2480,7 @@ def _do_match_records(
     build_id: str | None = None,
     skip_rebuild: bool = False,
     workers: int = 1,
+    ranking: str = RANKING,
 ):
     """Inner pipeline body. Returns ``(full_data_df, pg_rows, ug_rows)``.
 
@@ -2324,8 +2667,8 @@ def _do_match_records(
     # The index columns are already regular columns on the features
     # (materialized at chunk-write time), so no reset_index / rename
     # gymnastics needed.
-    logger.info(f"Filtering matches...")
-    matches = all_matches(final_features, basic_fields_df, private_foundations_df)
+    logger.info(f"Filtering matches (ranking: {ranking})...")
+    matches = all_matches(final_features, basic_fields_df, private_foundations_df, ranking=ranking)
 
     percentage_matched = (
         basic_fields_df.loc[matches[INDEX_COLS[0]].unique(), 'filerein_key'].nunique()
@@ -2426,6 +2769,21 @@ if __name__ == "__main__":
             "box's memory: 12 on an r6i.8xlarge."
         ),
     )
+    parser.add_argument(
+        "--ranking",
+        choices=RANKINGS,
+        default=RANKING,
+        help=(
+            f"How the winner of a grant tuple is picked (default {RANKING}): "
+            "a candidate in a state that contradicts the grant's last, then "
+            "a name that is exact or holds every word of the grant's, then "
+            "geographic support, then an exact name, then a filing or "
+            "correction over a BMF line among exact names, then the score; "
+            "or 'weighted', the score alone, the order of the runs up to "
+            "2026-10-27. Stamped on the build; the checkpoints are the same "
+            "under either."
+        ),
+    )
     args = parser.parse_args()
 
     match_records(
@@ -2436,4 +2794,5 @@ if __name__ == "__main__":
         recovered_policy=args.recovered_policy,
         skip_rebuild=args.skip_rebuild,
         workers=args.workers,
+        ranking=args.ranking,
     )

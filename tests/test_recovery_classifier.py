@@ -16,7 +16,8 @@ from givingtuesday_datamart.placeholder_recovery import classifier
 MEASURED = Path(__file__).resolve().parents[1] / "data" / "placeholder_recovery" / "placeholder_population_by_year.sql"
 POINTERS = ["SEE ATTACHED", "See Attachment 22", "SEE GRANTS PAID ATTACHMENT", "REFER TO STATEMENT 12",
             "SCHEDULE ATTACHED", "STATEMENT 25", "ATCH 4", "Please see attached list", "EXHIBIT A", "GRANTS",
-            "TOTAL", "Contributions", "Grants Paid", "see", "PER ATTACHED SCHEDULE", "SUPPLEMENTAL SCHEDULE 3"]
+            "TOTAL", "Contributions", "Grants Paid", "see", "PER ATTACHED SCHEDULE", "SUPPLEMENTAL SCHEDULE 3",
+            "SEE.", "(SEE)", "SEE -"]
 NOT_POINTERS = ["AVAILABLE UPON REQUEST", "SEE ATTACHED - KEPT ON FILE", "United Way of Greater Atlanta",
                 "Various", "Tennessee Aquarium", "The Seeing Eye Inc", "Grant Elementary School PTA",
                 "Statement of Faith Ministries International Outreach Center", "", "Listening Post Collective Fund"]

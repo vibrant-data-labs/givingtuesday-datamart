@@ -56,6 +56,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
+from givingtuesday_datamart.placeholder_recovery.classifier import SEE_ALONE
+
 # Ordered by preference. Fair market value must beat book value: a non-cash
 # section lists both, and book value is the cost basis, not the gift.
 AMOUNT_HEADERS: tuple[str, ...] = (
@@ -103,7 +105,10 @@ _POINTER_NAME = re.compile(
     r"\b(?:see|refer)\w*\b.{0,40}\b(?:attach|schedul|statement|stmt|list|exhibit|detail|footnote|supplement)"
     r"|^\W*(?:please\s+)?(?:see\s+)?(?:attached|attachment|atch|sched|schedule|statement|stmt|exhibit|listing|list|details?|supplement(?:al)?)\b[\w\s#&().,/-]{0,30}$"
     r"|\b(?:attached|attachment|atch)\b"
-    r"|^\W*(?:total|grants?|contributions?|donations?|grants?\s+paid|grants?\s+approved\s+for\s+future\s+payment)\W*$",
+    r"|^\W*(?:total|grants?|contributions?|donations?|grants?\s+paid|grants?\s+approved\s+for\s+future\s+payment)\W*$"
+    # v3 (2026-10-29): "see" alone between punctuation ("SEE.", "(SEE)"), the
+    # classifier's arm. PLACEHOLDER above stays as the frame was drawn.
+    "|" + SEE_ALONE,
     re.I,
 )
 

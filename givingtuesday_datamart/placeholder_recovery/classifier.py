@@ -2,8 +2,9 @@
 
 A pointer row is a grant row whose recipient name points at an attachment
 ("SEE ATTACHED", "STATEMENT 25", "ATCH 4") instead of naming a grantee. The
-pattern is version ``v2`` of ``data/placeholder_recovery/placeholder_population_by_year.sql``,
-where it was measured; a test holds the two texts equal. It is the SQL form
+pattern is that of ``data/placeholder_recovery/placeholder_population_by_year.sql``,
+where version ``v2`` was measured; a test holds the two texts equal, and the
+SQL carries the one change since (``SEE_ALONE``, v3). It is the SQL form
 of ``attachment_grants.is_pointer``: the two agreed on every one of 13,589
 filer-years when checked on 2026-09-28. A row that withholds the list
 ("available upon request") is not a pointer, since nothing is attached.
@@ -21,11 +22,20 @@ from __future__ import annotations
 
 from typing import Sequence
 
-CLASSIFIER_VERSION = "v2"
+# v3 (2026-10-29): "see" alone between punctuation ("SEE.", "(SEE)") is a
+# pointer, as it is a placeholder to the matcher (``SEE_ALONE``); under v2's
+# bare "see" such a row was neither recovered nor matched.
+CLASSIFIER_VERSION = "v3"
+
+# A name that is the word "see" with nothing else but punctuation. The
+# matcher's placeholder pattern (``grant_matching.PLACEHOLDER_REGEX``) takes
+# this arm from here, so a row the view leaves out of matching is a row the
+# work list counts and the recovery reads.
+SEE_ALONE = r"^[^a-z0-9]*see[^a-z0-9]*$"
 
 WITHHELD = r"upon request|on request|on file|kept on file|hipaa|hippa|not required|privacy|confidential"
 POINTER = (
-    r"(\y(see|refer)\w*\y[\s,–-]*(attach|addition|schedul|statement|stmt|list))|^\s*see\s*$",
+    r"(\y(see|refer)\w*\y[\s,–-]*(attach|addition|schedul|statement|stmt|list))|" + SEE_ALONE,
     r"\y(see|refer)\w*\y.{0,40}\y(attach|schedul|statement|stmt|list|exhibit|detail|footnote|supplement)",
     r"^\W*(please\s+)?(see\s+)?(attached|attachment|atch|sched|schedule|statement|stmt|exhibit|listing|list"
     r"|details?|supplement(al)?)\y[\w\s#&().,/-]{0,30}$",

@@ -24,7 +24,7 @@ from givingtuesday_datamart import grant_matching as gm
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart.ingestion import datamart_config
-from givingtuesday_datamart.matching_regression_checks import AMT, PLACEHOLDER_REGEX
+from givingtuesday_datamart.matching_regression_checks import AMT
 from givingtuesday_datamart.proofs import bmf_policy_subset as base
 
 RANKINGS = ("current", "filing_tie", "filing_bonus_005", "filing_first", "name_then_filing")
@@ -161,7 +161,7 @@ def extract(out: Path, previous: Path, one_in: int = 50, funder_count: int = 100
                    "WHERE filing_type = '990PF' ORDER BY funder_ein"))]
         # Fixed hash order; selecting funders never depends on policy outcomes.
         funders = sorted(funders, key=lambda e: hashlib.sha256(e.encode()).hexdigest())[:funder_count]
-        params = {"one_in": one_in, "cohort": PATTERN, "placeholder": PLACEHOLDER_REGEX,
+        params = {"one_in": one_in, "cohort": PATTERN, "placeholder": gm.PLACEHOLDER_REGEX,
                   "risk_keys": json.dumps(risks[gm._KEYS].to_dict("records")), "funders": funders,
                   "high_value": manifest["high_value"]}
         grants = _freeze(c, grants_query(), params, out, "grants", manifest)
@@ -193,7 +193,8 @@ def ranked_matches(features: pd.DataFrame, u: pd.DataFrame, g: pd.DataFrame, ran
     """Same thresholds, guards and ambiguity rules; experimental winner order only.
 
     Kept inside proofs so production's resolver is untouched. Offline tests
-    require the 'current' order to equal gm.all_matches on adversarial cases.
+    require the 'current' order to equal gm.all_matches under "weighted",
+    production's order when this proof ran, on adversarial cases.
     """
     if ranking not in RANKINGS:
         raise ValueError(ranking)
@@ -310,7 +311,9 @@ def compare(out: Path, workers: int = 8) -> None:
     for policy in POLICIES:
         logger.info("Resolving %s", policy)
         if policy == "current":
-            matches = gm.all_matches(features, u, g)
+            # Production's order when this proof ran (2026-10-15); the
+            # parity check below holds against that run's output.
+            matches = gm.all_matches(features, u, g, ranking="weighted")
         elif policy in ("placeholders_only", "conservative"):
             matches = base.resolve_policy(features, u, g, flags, policy)
         else:
@@ -384,7 +387,7 @@ def repair_funder_pool(out: Path) -> None:
         for setting in ("work_mem='64MB'","max_parallel_workers_per_gather=0","statement_timeout='10min'","temp_file_limit='4GB'"):
             s.execute(text('SET LOCAL '+setting))
         extra=pd.read_sql_query(text(q),s.connection(),params={'keys':json.dumps(missing.to_dict('records')),
-                                                               'cohort':cohort,'placeholder':PLACEHOLDER_REGEX})
+                                                               'cohort':cohort,'placeholder':gm.PLACEHOLDER_REGEX})
     for col in ['general_sample','high_value']+['risk_'+r for r in RISKS]:extra[col]=False
     extra['labeled_funder']=True;extra['evaluation_split']='calibration'
     extra.to_parquet(out/'funder_supplement.parquet',index=False)
@@ -394,7 +397,7 @@ def repair_funder_pool(out: Path) -> None:
     gm.prepare(u);gm.prepare(extra)
     f=gm.score_slice(u,extra);flags=base.identity_flags(u,b);frames=[]
     for policy in POLICIES:
-        if policy=='current':m=gm.all_matches(f,u,extra)
+        if policy=='current':m=gm.all_matches(f,u,extra,ranking="weighted")
         elif policy in ('placeholders_only','conservative'):m=base.resolve_policy(f,u,extra,flags,policy)
         else:
             open_=extra[~extra.placeholder]

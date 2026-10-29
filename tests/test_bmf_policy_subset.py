@@ -88,7 +88,9 @@ def test_policy_moves_university_and_exposes_the_real_dba_cost_and_name_only_gai
     assert before[101] == "111111111" and after[101] == "333333333"
     assert 102 not in before and after[102] == "444444444"  # ambiguity removed
     assert 103 in before and 103 not in after               # genuine DBA lost
-    assert 104 in before and 104 not in after               # placeholder excluded
+    # Production now excludes placeholders itself, including the "current"
+    # wrapper in this historical identity-removal experiment.
+    assert 104 not in before and 104 not in after
 
 
 def test_report_counts_signed_and_positive_dollars_and_keeps_overlap_separate():
@@ -111,6 +113,9 @@ def test_selection_includes_unmatched_and_selects_by_tuple_not_current_winner():
     # Production joins ALL years of a tuple selected from 2015+ identities.
     assert "HAVING bool_or(taxyear::int >= 2015)" in sql
     assert "WHERE taxyear::int >= 2015" not in sql
+    # the seed salts the hash; 0 drew the inspected pools, a fresh sample takes another
+    assert "::text, 0)), :one_in) = 0" in sql
+    assert "::text, 7)), :one_in) = 0" in proof.selection_sql(seed=7)
 
 
 def test_all_year_weights_preserve_eins_order_and_unmatched_outcomes():
