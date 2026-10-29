@@ -159,19 +159,29 @@ they do.
 Only `irs_extract` changes: production's staging and the site are as they
 were. If anything here looks wrong we stop with production untouched.
 
-- [ ] The eleven `irs_extract` tables truncated (appendix). `reload` takes
+- [x] The eleven `irs_extract` tables truncated (appendix). `reload` takes
       its list of batches from the run records, not from the tables, and a
       batch's load replaces its rows in all eleven, so without the truncate
       the old rows would be 12 GB of dead tuples; `patch` refuses any batch
-      not reloaded.
-- [ ] `python -m givingtuesday_datamart.own_extract reload --jobs 4`: each
+      not reloaded. Done 2026-10-29 19:00 UTC, in a second; free storage
+      63.4 to 75.8 GB.
+- [x] `python -m givingtuesday_datamart.own_extract reload --jobs 4`: each
       batch from our S3 copy, checked against the SHA-256 its first load
       stamped, nothing fetched from the IRS; 38 batches report, none fails.
-- [ ] `python -m givingtuesday_datamart.own_extract checks`: 990-PF grants
+      Done 19:00 to 20:54 UTC under the watchdog: 38 reported, none failed,
+      38 runs under `ce054c032e56`; against the previous load's run records
+      the rows are identical on every table but the four the concordance
+      change reaches (+230 `schedule_o`, +22 `programs_ez`, +3
+      `grants_to_domestic_organizations`, +2 `privategrants`: the 257 rows
+      expected).
+- [x] `python -m givingtuesday_datamart.own_extract checks`: 990-PF grants
       against line 25 about 255,649 of 263,734; Schedule I against Part IX
       line 1 about 134,075 of 137,301 (the scratch copy's figures under
       `ce054c032e56`); no batch 2 points below the others.
-      `irs_extract.unread_paths` lists nothing inside a group.
+      `irs_extract.unread_paths` lists nothing inside a group. Done 20:54
+      UTC: both totals the scratch copy's to the row (96.9% and 97.7%); no
+      batch 2 points below the median; nothing unread inside a group
+      (`checks-report.md` beside the logs).
 
 ### 2. The patch again (the box, quiet window, about an hour with the vacuum; snapshot first)
 
@@ -420,3 +430,26 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   merge. The box's worktree for the steps is PR #85's branch with main
   merged in (19828ac), which has both; the detached worktree the ranking
   proofs ran from is obsolete. Step 8 waits only on steps 1 to 6.
+- **2026-10-29, step 1.** 19:00 to 20:54 UTC, from the box under the
+  watchdog (`run-reload.sh` beside the logs). The eleven tables truncated
+  in a second (free storage 63.4 to 75.8 GB); `reload --jobs 4` loaded the
+  38 batches from our S3 copies, none failed, 38 runs under `ce054c032e56`
+  recorded 19:00 to 20:41 UTC. Against the previous load's run records the
+  rows per table are identical except on the four tables the concordance
+  change reaches: +230 `schedule_o`, +22 `programs_ez`, +3
+  `grants_to_domestic_organizations`, +2 `privategrants`, the 257 rows the
+  plan expected (the 49 returns' `irs:` group rows). `checks`: 990-PF
+  grants against line 25 255,649 of 263,734 (96.9%), Schedule I against
+  Part IX line 1 134,075 of 137,301 (97.7%), both the scratch copy's
+  figures to the row; no batch 2 points below the median; nothing unread
+  inside a group and no rename candidates; the elements first seen in a
+  later schema version are return-header flags. `irs_extract` is 12.35 GB
+  as before; free storage 62.1 GB after. The watchdog read the instance
+  flat (swap 0.00 GB throughout) on 113 polls with our backend active and
+  ended with the script's code. Slower than the hour planned because of
+  the checks line written after each batch's load, up to twenty minutes
+  on the largest batches; an index on `_batch_id` or one pass at the end
+  would fix it (afterwards). Also this evening: PR #85 merged (a71844b) and
+  main merged into this branch (285701d), so the box's clone on this
+  branch runs every later step; the two detached worktrees are gone. Step
+  2, the patch, is next: snapshot first, then on the go-ahead.
