@@ -65,7 +65,15 @@ they do.
      winner; every other flag listed and reviewed. If B does not pass, A
      runs.
 
-   My recommendation: B.
+   My recommendation: B. **Decided 2026-10-29: B, with `named_first`.** The
+   fresh sample of step 0 (39,178 tuples) found neither new order passes
+   every criterion as written: `named_first` raises 113 location flags,
+   `geographic` covers 467 labeled relationships, and A is the worst of
+   the three on the reviewed changes. Every flag was reviewed (67
+   corrections, 23 errors), so the location criterion becomes "every flag
+   reviewed, the order a net correction", and `named_first` is PR #84's
+   default (`docs/recipient-ranking-production-2026-10-28.md`, *The
+   decision*).
 2. **GT's next release.** If the release GT promised lands before step 8, I
    measure it on a scratch copy as #81 did, and we decide then whether to
    take it in before the matcher or leave it for the next run. The matcher
@@ -127,9 +135,11 @@ they do.
       tax year, as a small rerunnable module; the CSV stays with the run's
       logs, the table goes in this log. Run again in step 10, it says what
       moved where, which the accepting commit must explain.
-- [ ] For decision B: the fresh validation sample frozen now, read-only,
+- [x] For decision B: the fresh validation sample frozen now, read-only,
       with a new hash seed and none of the recipients any proof has
-      inspected.
+      inspected. Done 2026-10-29 04:37 UTC: seed 7, 1 in 100, 39,178
+      tuples in 2.5 minutes with the instance quiet; run and reviewed the
+      same day (the log).
 
 ### 1. Our extract under the new concordance (the box, about an hour)
 
@@ -328,3 +338,16 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   run. GT's `2026_10_25` stays out (GT's email of 2026-10-28). Read from the
   instance and the registry the same evening: the state table above;
   nothing newer from the IRS or the BMF; no backend running.
+- **2026-10-29, decision 1.** The fresh sample for B frozen read-only at
+  04:37 UTC (seed 7, 1 in 100, 39,178 recipient tuples and 134,512 rows,
+  2.5 minutes, work_mem 64 MB, no parallel workers, the instance quiet) and
+  run under PR #84's three orders; the old order reproduces production on
+  every tuple. All 558 winners `geographic` or `named_first` change were
+  reviewed: against production `geographic` corrects 283 and regresses 32,
+  `named_first` 395 and 51; where they disagree `named_first` is right 126
+  times to 33. Each misses one criterion as written (`named_first` 113
+  location flags, 67 of them corrections and 23 errors; `geographic` 467
+  labeled). Decided: `named_first`, with the location criterion amended to
+  "every flag reviewed, the order a net correction". The other orders left
+  the code the same day; PR #84 awaits review and merge. Steps 1 to 6 do
+  not wait on it.
