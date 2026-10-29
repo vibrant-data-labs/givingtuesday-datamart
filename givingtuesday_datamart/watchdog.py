@@ -400,6 +400,8 @@ def configure_logging(path: str | None) -> None:
     root = logging.getLogger()
     root.addHandler(handler)
     root.setLevel(logging.INFO)
+    # boto3 announces where it found credentials; the watch's log is the metrics
+    logging.getLogger("botocore").setLevel(logging.WARNING)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
