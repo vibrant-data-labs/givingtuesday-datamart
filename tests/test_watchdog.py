@@ -4,7 +4,9 @@ the command under watch faked. No network, no database, no sleeping."""
 from __future__ import annotations
 
 import logging
+import os
 import sys
+import time
 
 import pytest
 from sqlalchemy.exc import OperationalError
@@ -261,3 +263,21 @@ def test_a_process_is_stopped_by_a_signal():
     assert process.wait(0.5) is None
     assert process.stop() != 0
     assert process.proc.poll() is not None
+
+
+def test_a_process_leads_its_own_group_so_a_stop_reaches_its_children():
+    process = wd.Process([sys.executable, "-c",
+                          "import subprocess, sys, time; "
+                          "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); time.sleep(60)"])
+    assert process.wait(0.5) is None
+    assert os.getpgid(process.proc.pid) == process.proc.pid != os.getpgid(0)
+    assert process.stop() != 0
+    # the command's own child went down with the group: within seconds nothing in it is left
+    for _ in range(50):
+        try:
+            os.killpg(process.proc.pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.1)
+    else:
+        raise AssertionError("the command's own child outlived the stop")

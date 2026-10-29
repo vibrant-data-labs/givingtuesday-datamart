@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import signal
 import subprocess
 import sys
@@ -223,13 +224,15 @@ class Child(Protocol):
 
 
 class Process:
-    """A command run as a child of the watchdog, with its standard streams."""
+    """A command run as a child of the watchdog, with its standard streams,
+    leading a process group of its own: a stop is sent to the group, so a
+    loader's workers go down with it."""
 
     GRACES = ((signal.SIGINT, 30.0), (signal.SIGTERM, 15.0))
 
     def __init__(self, argv: Sequence[str]):
         self.argv = list(argv)
-        self.proc = subprocess.Popen(self.argv)
+        self.proc = subprocess.Popen(self.argv, start_new_session=True)
         logger.info("under watch: pid %s %s", self.proc.pid, " ".join(self.argv))
 
     def wait(self, timeout: float) -> int | None:
@@ -238,17 +241,23 @@ class Process:
         except subprocess.TimeoutExpired:
             return None
 
+    def _signal(self, sig: signal.Signals) -> None:
+        try:
+            os.killpg(self.proc.pid, sig)  # the child leads its group, so the group id is its pid
+        except ProcessLookupError:
+            pass
+
     def stop(self) -> int | None:
         for sig, grace in self.GRACES:
             if self.proc.poll() is not None:
                 return self.proc.returncode
-            logger.warning("sending %s to pid %s", sig.name, self.proc.pid)
-            self.proc.send_signal(sig)
+            logger.warning("sending %s to the process group of pid %s", sig.name, self.proc.pid)
+            self._signal(sig)
             if self.wait(grace) is not None:
                 return self.proc.returncode
         if self.proc.poll() is None:
-            logger.warning("killing pid %s", self.proc.pid)
-            self.proc.kill()
+            logger.warning("killing the process group of pid %s", self.proc.pid)
+            self._signal(signal.SIGKILL)
             self.proc.wait()
         return self.proc.returncode
 
