@@ -150,7 +150,9 @@ order acts after the checkpoints, so any order resumes the same chunks.
 ## Validation on the inspected pools
 
 Code: `givingtuesday_datamart.proofs.ranking_validation known`, run on the box
-on 2026-10-29 from this branch. Inputs, frozen on 2026-10-28 and all
+on 2026-10-29 from commit `532b76b`; its record is
+`ranking-validation-known-532b76b/validation.json` in the run's logs
+(`~/logs/refresh-concordance/`). Inputs, frozen on 2026-10-28 and all
 inspected before: the ranking proof's 183,919 recipient tuples and the 251
 of its funder supplement, and the 38,983 of the geography prototype's fresh
 sample, 223,153 tuples in all, against the frozen universe of 3,356,738
