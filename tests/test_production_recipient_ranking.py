@@ -18,7 +18,7 @@ from givingtuesday_datamart import corrections_preflight, grant_matching as gm, 
 # fails here, not in a log.
 pytestmark = pytest.mark.filterwarnings("error::pandas.errors.SettingWithCopyWarning")
 
-COLUMNS =['name1_key', 'address1_key', 'addresscity_key', 'addressstate_key', 'addresszip_key']
+COLUMNS = ['name1_key', 'address1_key', 'addresscity_key', 'addressstate_key', 'addresszip_key']
 PAWS = 'progressive animal welfare society'
 
 
