@@ -65,7 +65,23 @@ NP_PAIR_COVERAGE_FLOOR = 94.5       # %, 990 funders. Not moved by matching
 # (95% of the August 4 count, so ordinary data drift doesn't trip the gate).
 RECIPIENT_SENTINEL_FLOORS = {
     "134141945": ("Michael J. Fox Foundation", 3044),      # 3,204 rows (corrections)
-    "520368135": ("Johns Hopkins (Bloomberg et al.)", 1735),  # 1,826 rows
+    # The university. Its 990 gives the tax office at 3910 Keswick Road, so
+    # under the weighted winner order the grants naming it at the campus
+    # went to the club and to BMF lines carrying its name, and it won 200
+    # rows on 2026-10-27 (95%: 190). Provisional, as a floor no ranking
+    # should go under: the commit that accepts the first geographic run
+    # sets it from that run.
+    "520595110": ("Johns Hopkins University", 190),
+}
+# Recipient-side ceilings: EIN as matched recipient, maximum matched rows,
+# for an EIN that took another organization's grants.
+RECIPIENT_SENTINEL_CEILINGS = {
+    # The Johns Hopkins Club, a social club at a Cockeysville PO box in care
+    # of the university. Until 2026-10-28 a floor guarded it as if it were
+    # the university: 1,826 rows on August 4, the university's grants
+    # matched to its filing at the campus address; 706 on 2026-10-27. It
+    # keeps what names it; it must not grow back.
+    "520368135": ("Johns Hopkins Club (held the university's rows)", 706),
 }
 # Funder-side sentinels: EIN as funder, minimum rows that matched anything.
 FUNDER_SENTINEL_FLOORS = {
@@ -75,7 +91,12 @@ FUNDER_SENTINEL_FLOORS = {
 # Precision ceilings — false-positive classes must not grow faster than the
 # matched corpus. Absolute counts from the August 4 run (matched rows +25%
 # vs July 23; every class below grew slower than that).
-PLACEHOLDER_ROWS_MATCHED_CEILING = 349     # all organic (0 correction-sourced)
+PLACEHOLDER_ROWS_MATCHED_CEILING = 0       # hard zero since input shape 6: the
+                                           # grants view leaves out every tuple
+                                           # whose name keys match the pattern,
+                                           # and the check counts with that same
+                                           # predicate. August: 349; 2026-10-27:
+                                           # 415 (59 bare "SEE" to BMF orgs SEE).
 CORPORATE_NAME_ROWS_MATCHED_CEILING = 14   # proxy: rows named PFIZER%
 FOREIGN_ROWS_MATCHED_CEILING = 2           # proxy: WORLD HEALTH ORGANI%. The
                                            # 2nd row is "WORLD HEALTH ORGANIZATION
@@ -161,7 +182,10 @@ def run_checks(fast: bool, relations: Relations = Relations()) -> int:
         logger.info("Negative controls + sentinels ...")
         nc = pd.read_sql_query(text(f"""
             SELECT
-              COUNT(*) FILTER (WHERE concat_ws(' ', sigocpyrpnam, sigocpyrbnbn1, sigocpyrbnbn2)
+              -- The predicate of the matcher itself: the name keys of the
+              -- grants view (the business-name lines), not the person-name
+              -- line, which no match rule reads.
+              COUNT(*) FILTER (WHERE concat_ws(' ', name1_key, name2_key)
                   ~* '{PLACEHOLDER_REGEX}') AS placeholder_rows,
               COUNT(*) FILTER (WHERE NULLIF(TRIM(sigocpyrpnam), '') IS NOT NULL
                   AND NULLIF(TRIM(sigocpyrbnbn1), '') IS NULL) AS person_rows,
@@ -186,6 +210,11 @@ def run_checks(fast: bool, relations: Relations = Relations()) -> int:
                 f"SELECT COUNT(*) FROM {matched} WHERE recipeint_ein_key = :e"
             ), {"e": ein}).scalar()
             gate.check(f"sentinel {label} (>= {floor})", n >= floor, f"{n}")
+        for ein, (label, ceiling) in RECIPIENT_SENTINEL_CEILINGS.items():
+            n = conn.execute(text(
+                f"SELECT COUNT(*) FROM {matched} WHERE recipeint_ein_key = :e"
+            ), {"e": ein}).scalar()
+            gate.check(f"sentinel {label} (<= {ceiling})", n <= ceiling, f"{n}")
         for ein, (label, floor) in FUNDER_SENTINEL_FLOORS.items():
             n = conn.execute(text(
                 f"SELECT COUNT(*) FROM {matched} WHERE filerein = :e"

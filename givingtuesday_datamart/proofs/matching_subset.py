@@ -281,8 +281,9 @@ def build(prefix: str = PREFIX, policy: str | None = None, one_in: int = ONE_IN,
     regular = subset[subset["n_rows"] > subset["recovered_rows"]]
     logger.info(f"Matching before: {len(regular):,} tuples")
     universe_before, regular_before = as_before(universe), as_before(regular)
+    # The matcher before input shape 3 ranked by the score alone.
     before = resolve_matches(score(universe_before, regular_before, workers), universe_before, regular_before,
-                             one_filer_in_state="none")
+                             one_filer_in_state="none", ranking="weighted")
     joined = (subset[["addresscity_key", "addressstate_key", "addresszip_key"]] != "").all(axis=1)
     before = before[before[INDEX_COLS[1]].map(joined)]
     logger.info(f"Matching after: {len(subset):,} tuples")

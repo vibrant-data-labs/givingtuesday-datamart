@@ -85,12 +85,13 @@ from givingtuesday_datamart.corrections_preflight import (
 from givingtuesday_datamart.grant_matching import (
     CHUNK_FILTER_RULES,
     FINAL_FILTER_RULES,
+    PLACEHOLDER_REGEX,
     filter_match_rules,
     join_name,
     normalize_org_name,
 )
 from givingtuesday_datamart.ingestion import datamart_config
-from givingtuesday_datamart.matching_regression_checks import AMT, PLACEHOLDER_REGEX
+from givingtuesday_datamart.matching_regression_checks import AMT
 
 # Same-state fuzzy floor for calling a universe row a plausible identity of
 # an unmatched tuple. Set below the matcher's 0.99 exact-name tier (these

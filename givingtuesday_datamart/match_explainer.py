@@ -41,8 +41,9 @@ Usage:
 
 Scope: pairs against the target EIN only. A pair that matches here can
 still lose the final best-match-per-recipient resolution to a
-preferred row of a *different* EIN (exact cleaned name, geographic support,
-filing/correction source, then 2*name_score + addr_score) — the
+preferred row of a *different* EIN (geographic support, an exact name,
+among exact names a filing or correction before a BMF line, then
+2*name_score + addr_score: ``grant_matching.resolve_matches``) — the
 ``current_match_ein`` column shows which EIN won in the last completed
 matching run. Two rules are not a pair's doing and are not explained here:
 the name-only tier (it asks whether the name belongs to one filer of the
@@ -96,12 +97,12 @@ _UNIVERSE_SQL = """
         FROM public.basic_fields_pf_unique_names_view
         WHERE filerein_key = :ein
         UNION ALL
-        SELECT *, 'eo_bmf' AS source
-        FROM public.eo_bmf_unique_names_view
-        WHERE filerein_key = :ein
-        UNION ALL
         SELECT *, 'correction' AS source
         FROM public.corrections_unique_names_view
+        WHERE filerein_key = :ein
+        UNION ALL
+        SELECT *, 'eo_bmf' AS source
+        FROM public.eo_bmf_unique_names_view
         WHERE filerein_key = :ein
     ) arms
 """
@@ -192,7 +193,7 @@ def _score_pairs(
                                   grant_index_col="grant_idx", universe_index_col="universe_idx")
     features["passes_filter"] = features.index.isin(kept.index)
     features["guard_refused"] = passes_tier & ~features["passes_filter"]
-    features["placeholder_refused"] = features["grant_idx"].map(placeholder_names(grants))
+    features["placeholder_refused"] = features["grant_idx"].map(placeholder_names(grants)).eq(True)
     features["would_match"] = features["passes_filter"] & (
         features["blocked_via"] != "NOT BLOCKED"
     ) & ~features["placeholder_refused"]

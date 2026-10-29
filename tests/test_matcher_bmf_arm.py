@@ -39,19 +39,22 @@ def _arm_order(sql: str) -> list[tuple[str, int | None]]:
 
 def test_universe_arms_are_in_lockstep_across_matcher_preflight_and_explainer():
     matcher_sql = grant_matching.universe_sql()
-    expected = [("basic_fields", 1), ("basic_fields_pf", 2), ("eo_bmf", 3), ("correction", 4)]
+    expected = [("basic_fields", 1), ("basic_fields_pf", 2), ("correction", 3), ("eo_bmf", 4)]
+    assert _arm_order(matcher_sql) == expected
     assert _arm_order(corrections_preflight._UNIVERSE_SQL) == expected
     assert [src for src, _ in _arm_order(match_explainer._UNIVERSE_SQL)] == [src for src, _ in expected]
-    assert expected[0] in _arm_order(matcher_sql) and ("eo_bmf", 3) in _arm_order(matcher_sql) and ("correction", 4) in _arm_order(matcher_sql)
 
 
-def test_bmf_ranks_below_filings_and_above_corrections():
+def test_a_key_tuple_keeps_a_filing_then_a_correction_then_a_bmf_line():
+    # A correction that repeats a BMF line keeps its own row: among exact
+    # names the winner order prefers it to the BMF line (ALIAS_SOURCES).
     order = dict(_arm_order(corrections_preflight._UNIVERSE_SQL))
-    assert order["basic_fields"] < order["basic_fields_pf"] < order["eo_bmf"] < order["correction"]
+    assert order["basic_fields"] < order["basic_fields_pf"] < order["correction"] < order["eo_bmf"]
+    assert {src for src, rank in order.items() if rank > order["correction"]} == set(grant_matching.ALIAS_SOURCES)
 
 
-def test_shape_version_bumped_for_placeholder_exclusion_and_preserves_bmf_lineage():
-    assert grant_matching.MATCHING_INPUT_SHAPE_VERSION == 6
+def test_shape_version_bumped_for_the_placeholder_pattern_and_preserves_bmf_lineage():
+    assert grant_matching.MATCHING_INPUT_SHAPE_VERSION == 7
     assert "irs_eo_bmf" in grant_matching._MATCHING_INPUT_LOGICAL_NAMES
 
 
@@ -80,7 +83,7 @@ def test_checkpoint_prefix_carries_the_bmf_version(monkeypatch):
     })
     prefix = grant_matching._resolve_checkpoint_prefix(conn, {"policy_version": "v3", "rows": 5, "digest": "1234abcd"})
     assert prefix == ("grant_matching_checkpoints/pg_2026_06_16/bf_2026_06_16/bfpf_2026_06_16/"
-                      "bmf_2026_10_13/corr_abcd1234/rec_v3_1234abcd/shape_v6")
+                      "bmf_2026_10_13/corr_abcd1234/rec_v3_1234abcd/shape_v7")
 
 
 def test_checkpoint_prefix_refuses_without_a_bmf_ingest(monkeypatch):
