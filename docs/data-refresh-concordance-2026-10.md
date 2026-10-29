@@ -264,12 +264,19 @@ unrecovered.
 
 ### 6. The load, the view and the checks under v3 (the box, about 40 minutes; never while the matcher runs)
 
-- [ ] `python -m givingtuesday_datamart.placeholder_recovery load --policy v3`
+- [x] `python -m givingtuesday_datamart.placeholder_recovery load --policy v3`
       (it takes the verdicts stored on 2026-10-27 over the October work
-      list, which the loader reads as it stands).
-- [ ] `python -m givingtuesday_datamart.placeholder_recovery view --policy v3`.
-- [ ] `python -m givingtuesday_datamart.placeholder_recovery check --policy v3`
-      passes; rows and dollars by target logged.
+      list, which the loader reads as it stands). Done 23:12 to 23:25 UTC
+      under the watchdog (762 s): 56 filings written, 4,653 unchanged, no
+      row taken out; paid 4,664 filings, 584,684 rows, $16,313.2M (from
+      4,611, 582,471, $16,210.9M); future 177 filings, 6,671 rows,
+      $1,295.1M (from 173, 6,531, $1,268.7M).
+- [x] `python -m givingtuesday_datamart.placeholder_recovery view --policy v3`.
+      Done 23:25 UTC: the view shows the rows loaded under `v3`.
+- [x] `python -m givingtuesday_datamart.placeholder_recovery check --policy v3`
+      passes; rows and dollars by target logged. Done 23:25 UTC: the nine
+      checks pass with 0 each; 584,684 paid rows of 4,664 filings in the
+      view, the dollars by target as above (`step6.log`).
 
 ### 7. The matcher's fix (the laptop and the box, beside steps 1 to 6)
 
@@ -529,3 +536,16 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   47 polls, no breach, swap 0.00 GB; free storage dipped to 45.3 GB during
   the paid build's temp spill and stands at 57.8 GB after. Step 6 is next:
   the load of the 10-27 verdicts, the view and the check under `v3`.
+- **2026-10-29, step 6.** 23:12 to 23:27 UTC under the watchdog
+  (`run-step6.sh` beside the logs). `load --policy v3` over the October
+  work list (25,612 filings, 9,154 with a fetched attachment) wrote 56
+  filings from the verdicts stored on 10-27 and left the 4,653 already
+  loaded as they were: the paid lists now 4,664 filings, 584,684 rows,
+  $16,313.2M (53 filings, 2,213 rows and $102.3M more than on 10-27), the
+  future lists 177 filings, 6,671 rows, $1,295.1M (4, 140 and $26.4M
+  more); 24 filings whose list adds up only to paid and future together
+  stay out ($346.7M). The view was recreated under `v3` and `check` passes
+  its nine checks with 0 each; the status screen shows the same figures.
+  The watchdog saw our backend on 14 polls, no breach, swap 0.00 GB, free
+  storage 57.8 GB throughout. Everything the matcher reads is in place:
+  step 8 is next, on the go-ahead, from the staged `run-matcher.sh`.
