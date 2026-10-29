@@ -35,6 +35,11 @@ def scores(rows):
     return pd.DataFrame(rows, columns=[*gm.INDEX_COLS, 'name_score', 'addr_score', 'state_score', 'zip_score'])
 
 
+def tiers(f, u, g):
+    """3 local, 2 same state, 1 unknown, 0 conflicting state: location_agreement's tier per pair."""
+    return gm.location_agreement(f, u, g)['tier'].tolist()
+
+
 # --- Johns Hopkins: the case the order was made for -------------------------
 
 HOPKINS = [
@@ -98,7 +103,7 @@ def test_a_recovered_grant_s_city_is_read_at_the_end_of_its_address_line(line, z
                    ('237174196', PAWS, '800 w 1st st', 'aberdeen', 'wa', '98520', 'basic_fields')],
                   [(PAWS, line, '', 'wa', zip_code)])
     f = gm.score_slice(u, g)
-    assert gm.geographic_support(f, u, g).tolist() == [3, 2]
+    assert tiers(f, u, g) == [3, 2]
     assert eins(u, gm.all_matches(f, u, g)) == {0: '916073154'}
 
 
@@ -108,9 +113,21 @@ def test_a_recovered_grant_s_city_is_read_at_the_end_of_its_address_line(line, z
     ('150 west 65th street, new york', 'NY', 'NEW YORK'),
     ('p.o. box 6281 richmond', 'VA', 'RICHMOND'),
     ('state college', 'PA', 'STATE COLLEGE'),
+    # a row that carries no state of its own reads the one printed in the line
+    ('15305 44th ave w lynnwood wa 98087', '', 'LYNNWOOD'),
+    # and keeps a city whose last word abbreviates to a state code (MOUNT is MT)
+    ('po box 5 rocky mount', '', 'ROCKY MT'),
+    ('po box 5 rocky mount nc 27804', '', 'ROCKY MT'),
+    ('po box 5 rocky mount', 'NC', 'ROCKY MT'),
 ])
 def test_the_city_candidates_of_an_address_line(line, state, city):
     assert city in gm._line_tails(line, state)
+
+
+def test_a_line_that_ends_in_no_state_code_gives_three_candidates_and_one_that_does_gives_six():
+    assert len(gm._line_tails('15305 44th ave w lynnwood', '')) == 3
+    assert len(gm._line_tails('15305 44th ave w lynnwood wa', '')) == 6
+    assert len(gm._line_tails('15305 44th ave w lynnwood wa', 'WA')) == 3
 
 
 def test_a_line_whose_last_words_are_not_the_candidate_s_city_gives_no_city():
@@ -126,7 +143,7 @@ def test_a_namesake_across_the_state_line_cannot_take_a_grant_from_its_own_addre
         ('ks', 'st pauls episcopal church', '11 e 40th st', 'kansas city', 'ks', '66101', 'basic_fields'),
     ], [('st pauls episcopal church', '11 e 40th st', 'kansas city', 'mo', '64111')])
     f = gm.score_slice(u, g)
-    assert gm.geographic_support(f, u, g).tolist() == [3, 0]
+    assert tiers(f, u, g) == [3, 0]
     assert eins(u, gm.all_matches(f, u, g)) == {0: 'local'}
     # The score alone took it across the line: the address strings differ in the state only.
     assert eins(u, gm.all_matches(f, u, g, ranking='weighted')) == {0: 'ks'}
@@ -138,7 +155,7 @@ def test_a_namesake_elsewhere_in_the_state_cannot_take_a_grant_from_its_own_addr
         ('marion', 'habitat for humanity', '1 w main st', 'marion', 'il', '62959', 'basic_fields'),
     ], [('habitat for humanity', '123 main st', 'springfield', 'il', '62701')])
     f = scores([(0, 0, .86, 1., 1, 1), (1, 0, 1., .3, 1, 0)])
-    assert gm.geographic_support(f, u, g).tolist() == [3, 2]
+    assert tiers(f, u, g) == [3, 2]
     assert eins(u, gm.all_matches(f, u, g)) == {0: 'sangamon'}
 
 
@@ -154,7 +171,7 @@ def test_a_mistyped_state_does_not_undo_a_city_and_zip_that_agree(local, grant):
                   [('river fund', *grant)])
     f = gm.score_slice(u, g)
     assert f.addr_score.iloc[0] < gm.LOCAL_ADDRESS_MIN
-    assert gm.geographic_support(f, u, g).tolist() == [3, 2]
+    assert tiers(f, u, g) == [3, 2]
     assert eins(u, gm.all_matches(f, u, g)) == {0: 'local'}
 
 
@@ -172,7 +189,7 @@ def test_a_street_and_zip_outweigh_a_contradictory_state(
         ('wrong-state', name, '99 other rd', other_city, wrong_state, other_zip, 'basic_fields'),
     ], [(name, street, city, wrong_state, zip_code)])
     f = scores([(0, 0, 1., local_score, 0, 1), (1, 0, 1., .35, 1, 0)])
-    assert gm.geographic_support(f, u, g).tolist() == [3, 2]
+    assert tiers(f, u, g) == [3, 2]
     assert eins(u, gm.all_matches(f, u, g)) == {0: 'local'}
 
 
@@ -181,7 +198,7 @@ def test_a_zip_without_the_city_needs_the_address_to_outweigh_the_state(address_
     u, g = frames([('1', 'river fund', '1 main st', 'cambridge', 'ny', '02139', 'eo_bmf')],
                   [('river fund', '1 main st', 'boston', 'ma', '02139-1234')])
     f = scores([(0, 0, 1., address_score, 0, 1)])
-    assert gm.geographic_support(f, u, g).tolist() == [expected]
+    assert tiers(f, u, g) == [expected]
 
 
 def test_missing_locations_and_the_missing_zip_sentinel_are_not_local():
@@ -189,7 +206,7 @@ def test_missing_locations_and_the_missing_zip_sentinel_are_not_local():
                    ('2', 'river fund', '1 main st', '', '', '00000', 'basic_fields')],
                   [('river fund', '1 main st', '', '', '')])
     f = scores([(0, 0, 1., 1., 0, 1), (1, 0, 1., 1., 0, 1)])
-    assert gm.geographic_support(f, u, g).tolist() == [1, 1]
+    assert tiers(f, u, g) == [1, 1]
 
 
 @pytest.mark.parametrize('grant_city,filer_city', [('ft lauderdale', 'fort lauderdale'),
@@ -199,7 +216,7 @@ def test_cities_compare_as_the_address_score_writes_them(grant_city, filer_city)
                    ('remote', 'river fund', '1 tampa st', 'tampa', 'fl', '33602', 'basic_fields')],
                   [('river fund', '100 se third ave', grant_city, 'fl', '33301')])
     f = scores([(0, 0, 1., .81, 1, 0), (1, 0, 1., .36, 1, 0)])
-    assert gm.geographic_support(f, u, g).tolist() == [3, 2]
+    assert tiers(f, u, g) == [3, 2]
     assert eins(u, gm.all_matches(f, u, g)) == {0: 'local'}
 
 
@@ -225,6 +242,32 @@ def test_a_pair_naming_a_row_its_frame_lacks_is_an_error():
                   [('river fund', '1 main st', 'town', 'ny', '10001')])
     with pytest.raises(KeyError):
         gm.location_agreement(scores([(5, 0, 1., 1., 1, 1)]), u, g)
+
+
+def test_a_recovered_row_without_a_state_reads_its_city_and_state_off_the_line():
+    # The review of 2026-10-29: addressstate_key '' and the state printed in the line
+    # left the city unread, so the local candidate sat in the unknown tier.
+    u, g = frames([('916073154', PAWS, '15305 44th ave w', 'lynnwood', 'wa', '98087', 'eo_bmf'),
+                   ('237174196', PAWS, '800 w 1st st', 'aberdeen', 'wa', '98520', 'basic_fields')],
+                  [(PAWS, '15305 44th ave w lynnwood wa 98087', '', '', '98087')])
+    f = scores([(0, 0, 1., .9, 0, 1), (1, 0, 1., .3, 0, 0)])
+    assert tiers(f, u, g) == [3, 1]
+    assert eins(u, gm.all_matches(f, u, g)) == {0: '916073154'}
+
+
+def test_the_placeholder_mask_is_computed_once_per_run(monkeypatch):
+    calls = []
+    real = gm.placeholder_names
+    monkeypatch.setattr(gm, 'placeholder_names', lambda frame: calls.append(len(frame)) or real(frame))
+    u, g = frames(HOPKINS, HOPKINS_GRANTS)
+    gm.all_matches(gm.score_slice(u, g), u, g)
+    assert calls == [len(g)]
+
+
+def test_the_bare_see_arm_is_the_classifier_s_so_the_recovery_reads_what_the_view_drops():
+    from givingtuesday_datamart.placeholder_recovery import classifier
+    assert gm.PLACEHOLDER_REGEX.endswith('|' + classifier.SEE_ALONE)
+    assert classifier.POINTER[0].endswith('|' + classifier.SEE_ALONE)
 
 
 # --- The named tier: a name over a closer address under another name -----------

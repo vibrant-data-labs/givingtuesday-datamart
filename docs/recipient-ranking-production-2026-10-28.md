@@ -81,11 +81,16 @@ validation sections keep their numbers as the record.
 - **Cities compare as the address score writes them**: FT is FORT, MT is
   MOUNT. SAINT and ST stay different, as they do in the address score.
 - **A grant with no city takes the candidate's city when its address line ends
-  with it**, after a ZIP and the grant's own state code. Every recovered grant
-  is such a tuple: its list prints the city at the end of the address line
-  ("15305 44th ave w lynnwood"). Without this, the first version gave the
-  Lynnwood PAWS and the Aberdeen PAWS the same tier for such a grant, and
-  the filing in Aberdeen won it on source.
+  with it**, after a ZIP and a state code: the grant's own, or, when it
+  carries none, any US state code printed there ("15305 44th ave w lynnwood
+  wa 98087" on a recovered row with no state of its own, which the review of
+  2026-10-29 found read no city). A code the grant did not vouch for may end
+  the city instead ("rocky mount" is ROCKY MT after the USPS abbreviation),
+  so the tails with it kept count too. Every recovered grant is such a
+  tuple: its list prints the city at the end of the address line ("15305
+  44th ave w lynnwood"). Without this, the first version gave the Lynnwood
+  PAWS and the Aberdeen PAWS the same tier for such a grant, and the filing
+  in Aberdeen won it on source.
 - A missing value is unknown, never a contradiction. An absent ZIP, which the
   scorer blocks under `00000`, is never local evidence.
 - Values are normalized once per distinct value and pairs compare integer

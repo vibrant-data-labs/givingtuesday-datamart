@@ -134,6 +134,6 @@ def test_the_funder_supplement_flags_placeholders_and_cohorts_as_the_frozen_pool
     # open pool on other terms than the frozen pool's.
     import inspect
     source = inspect.getsource(rp.repair_funder_pool)
-    assert "'placeholder':PLACEHOLDER_REGEX" in source and "~* :placeholder" in source
+    assert "'placeholder':gm.PLACEHOLDER_REGEX" in source and "~* :placeholder" in source
     assert "~* :cohort" in source and "['cohort_pattern']" in source
     assert "see.*attach" not in source and "extra['placeholder']=" not in source

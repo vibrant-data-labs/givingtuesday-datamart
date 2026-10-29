@@ -31,6 +31,8 @@ from givingtuesday_datamart.canonical.build import (
     ensure_canonical_meta,
     latest_successful_run_ids,
 )
+from givingtuesday_datamart.placeholder_recovery import address as recovery_address
+from givingtuesday_datamart.placeholder_recovery import classifier as recovery_classifier
 from givingtuesday_datamart.placeholder_recovery import loader as recovered_loader
 from givingtuesday_datamart.placeholder_recovery import view as recovered_view
 
@@ -77,12 +79,14 @@ GOVERNMENT_NAME_SQL_RE = _GOVERNMENT_NAME_PATTERN + r"\M"
 # arm is a name that is the word "see" with nothing else but punctuation:
 # "SEE", "SEE.", "(SEE)", "SEE -". October matched 59 bare "SEE" rows to
 # the BMF organizations named SEE (850645402, 854054788), and the
-# punctuated spellings clean to the same name. The pattern decides which
-# grant tuples the view holds, so an edit to it moves row positions:
+# punctuated spellings clean to the same name. The arm is the recovery
+# classifier's (``SEE_ALONE``), so a row the view leaves out of matching is
+# a row the work list counts and the recovery reads. The pattern decides
+# which grant tuples the view holds, so an edit to it moves row positions:
 # MATCHING_INPUT_SHAPE_VERSION and the pin in
 # tests/test_production_recipient_ranking.py move with it.
 PLACEHOLDER_REGEX = (
-    r"(\y(see|refer)\w*\y[\s,–-]*(attach|addition|schedul|statement|stmt|list))|^[^a-z0-9]*see[^a-z0-9]*$"
+    r"(\y(see|refer)\w*\y[\s,–-]*(attach|addition|schedul|statement|stmt|list))|" + recovery_classifier.SEE_ALONE
 )
 _PLACEHOLDER_NAME_RE = re.compile(PLACEHOLDER_REGEX.replace(r"\y", r"\b"), re.IGNORECASE)
 # These were previously in sql_queries/unique_fields_for_grants.sql. Lifted into
@@ -899,7 +903,6 @@ _MATCHING_INPUT_LOGICAL_NAMES = (
 #   v5 (2026-10-15): combines the BMF universe with recovered grants and
 #   cleaned-name scoring from main; no earlier stack checkpoint is reusable.
 #   v6 (2026-10-28): placeholder recipients are excluded before indexing.
-#   Winner ranking now uses exact names, geography and source.
 #   v7 (2026-10-28): the placeholder pattern also takes "see" between
 #   punctuation ("SEE.", "(SEE)"), and a correction row outranks a BMF row
 #   with the same key tuple in the universe's DISTINCT ON. A test pins the
@@ -1828,12 +1831,12 @@ def placeholder_names(grants_df: pd.DataFrame) -> pd.Series:
 #   "weighted": 2*name_score + addr_score alone, then the one-filer rule on
 #     the winner: the order of every run up to 2026-10-27, kept to measure
 #     the default against and to fall back to.
-RANKINGS = ("named_first", "weighted")
 RANKING = "named_first"
 _ORDERS = {
     "named_first": ['_not_conflict', '_named', '_geography', '_exact', '_exact_preferred', '_combined_score'],
     "weighted": ['_combined_score'],
 }
+RANKINGS = tuple(_ORDERS)
 # The address score at which a shared ZIP is local evidence by itself.
 LOCAL_ADDRESS_MIN = 0.90
 # How many of the last words of an address line may be a city.
@@ -1859,15 +1862,30 @@ def _zip(value: str) -> str:
     return '' if zip_code in (None, '00000') else zip_code
 
 
+def _tails_of(words: list[str]) -> list[str]:
+    return [' '.join(words[-k:]) if len(words) >= k else '' for k in range(1, _CITY_TAIL_WORDS + 1)]
+
+
 def _line_tails(line: str, state: str) -> list[str]:
     """The last one, two and three words of an address line, after a ZIP
-    and then the state code ``state`` printed at its end."""
+    and then a state code printed at its end: the tuple's own ``state``,
+    or, for a tuple that carries none, any US state code ("15305 44th ave
+    w lynnwood wa 98087" on a recovered row with no state of its own). A
+    code the tuple did not vouch for may end the city instead ("rocky
+    mount" is ROCKY MT after the USPS abbreviation), so for such a line
+    the tails with the code kept come too."""
     words = _place(line).split()
     while words and words[-1].isdigit():
         words.pop()
-    if state and words and words[-1] == state:
+    if state:
+        if words and words[-1] == state:
+            words.pop()
+        return _tails_of(words)
+    if words and words[-1] in recovery_address.USPS:
+        kept = _tails_of(words)
         words.pop()
-    return [' '.join(words[-k:]) if len(words) >= k else '' for k in range(1, _CITY_TAIL_WORDS + 1)]
+        return _tails_of(words) + kept
+    return _tails_of(words)
 
 
 def _column(frame: pd.DataFrame, name: str) -> pd.Series:
@@ -1899,13 +1917,21 @@ def _positions(index: pd.Index, labels: pd.Series) -> np.ndarray:
     return positions
 
 
+def _pair_positions(pairs: pd.DataFrame, universe_df: pd.DataFrame,
+                    grants_df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    """The positions of each pair's two rows in their frames."""
+    return _positions(universe_df.index, pairs[INDEX_COLS[0]]), _positions(grants_df.index, pairs[INDEX_COLS[1]])
+
+
 def _city_tails(grants_df: pd.DataFrame, rows: np.ndarray) -> list[pd.Series]:
     """For the grant tuples at positions ``rows`` that have no city, the
     candidates for it at the end of the address line (``_line_tails``); ''
     elsewhere. A recovered grant has no city column, and its list prints
     the city there: "15305 44th ave w lynnwood", "150 west 65th street, new
     york", "p.o. box 6281 richmond"."""
-    tails = [np.full(len(grants_df), '', dtype=object) for _ in range(_CITY_TAIL_WORDS)]
+    # Twice _CITY_TAIL_WORDS: a line ending in a state code the tuple did
+    # not vouch for gives its tails with the code and without it.
+    tails = [np.full(len(grants_df), '', dtype=object) for _ in range(2 * _CITY_TAIL_WORDS)]
     no_city = _column(grants_df, 'addresscity_key').fillna('').astype(str).str.strip().eq('').to_numpy()
     rows = rows[no_city[rows]]
     if len(rows):
@@ -1919,7 +1945,8 @@ def _city_tails(grants_df: pd.DataFrame, rows: np.ndarray) -> list[pd.Series]:
     return [pd.Series(tail, index=grants_df.index) for tail in tails]
 
 
-def location_agreement(pairs: pd.DataFrame, universe_df: pd.DataFrame, grants_df: pd.DataFrame) -> pd.DataFrame:
+def location_agreement(pairs: pd.DataFrame, universe_df: pd.DataFrame, grants_df: pd.DataFrame,
+                       positions: tuple[np.ndarray, np.ndarray] | None = None) -> pd.DataFrame:
     """Where the two locations of each pair agree, on the pairs' index:
     ``same_state``, ``same_city`` and ``same_zip`` (False where either side
     lacks the value), and the pair's geographic ``tier``:
@@ -1938,10 +1965,11 @@ def location_agreement(pairs: pd.DataFrame, universe_df: pd.DataFrame, grants_df
     (``_city_tails``): that is where a recovered grant's list prints it. A
     missing value is unknown, never a contradiction, and an absent ZIP is
     never local evidence. Each value is normalized once per distinct
-    value, and the pairs compare integer codes.
+    value, and the pairs compare integer codes. ``positions`` are the
+    pairs' row positions in the two frames (``_pair_positions``) when the
+    caller has them already.
     """
-    u_pos = _positions(universe_df.index, pairs[INDEX_COLS[0]])
-    g_pos = _positions(grants_df.index, pairs[INDEX_COLS[1]])
+    u_pos, g_pos = positions if positions is not None else _pair_positions(pairs, universe_df, grants_df)
     u_state, g_state = _codes([_column(universe_df, 'addressstate_key'), _column(grants_df, 'addressstate_key')],
                               _state)
     u_zip, g_zip = _codes([_column(universe_df, 'addresszip_key'), _column(grants_df, 'addresszip_key')], _zip)
@@ -1970,23 +1998,17 @@ def location_agreement(pairs: pd.DataFrame, universe_df: pd.DataFrame, grants_df
                         index=pairs.index)
 
 
-def _names_held(pairs: pd.DataFrame, universe_df: pd.DataFrame, grants_df: pd.DataFrame) -> np.ndarray:
+def _names_held(pairs: pd.DataFrame, universe_df: pd.DataFrame, grants_df: pd.DataFrame,
+                positions: tuple[np.ndarray, np.ndarray] | None = None) -> np.ndarray:
     """Does each pair's filer name hold every word of the grant's cleaned
-    name? The word sets are built once per row the pairs name."""
-    u_pos = _positions(universe_df.index, pairs[INDEX_COLS[0]])
-    g_pos = _positions(grants_df.index, pairs[INDEX_COLS[1]])
+    name? The word sets are built once per row the pairs name;
+    ``positions`` as in ``location_agreement``."""
+    u_pos, g_pos = positions if positions is not None else _pair_positions(pairs, universe_df, grants_df)
     u_names, g_names = universe_df['full_name'].to_numpy(), grants_df['full_name'].to_numpy()
     u_words = {p: frozenset(str(u_names[p]).split()) for p in np.unique(u_pos)}
     g_words = {p: frozenset(str(g_names[p]).split()) for p in np.unique(g_pos)}
     return np.fromiter((bool(g_words[g]) and g_words[g] <= u_words[u] for u, g in zip(u_pos, g_pos)),
                        dtype=bool, count=len(u_pos))
-
-
-def geographic_support(features: pd.DataFrame, universe_df: pd.DataFrame,
-                       grants_df: pd.DataFrame) -> pd.Series:
-    """3 local, 2 same state, 1 unknown, 0 conflicting state: the ``tier``
-    of ``location_agreement``."""
-    return location_agreement(features, universe_df, grants_df)['tier']
 
 
 def _one_filer_refused(matches: pd.DataFrame, grants_df: pd.DataFrame, filers_in_state: pd.Series,
@@ -2005,11 +2027,12 @@ def _one_filer_refused(matches: pd.DataFrame, grants_df: pd.DataFrame, filers_in
 
 def resolve_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df: pd.DataFrame,
                     one_filer_in_state: str = ONE_FILER_IN_STATE, *, guards: bool = True,
-                    ranking: str = RANKING) -> pd.DataFrame:
+                    ranking: str = RANKING, placeholder: pd.Series | None = None) -> pd.DataFrame:
     """The final rules, then one universe row per grant tuple, with the
     tier the match rests on (``match_tier``).
 
-    A grant tuple that names no recipient (``placeholder_names``) matches
+    A grant tuple that names no recipient (``placeholder_names``, or
+    ``placeholder`` when the caller has that mask already) matches
     nothing: the view leaves such tuples out of a run, and this holds the
     same for a slice. The government-name guard refuses its pairs before
     any winner is picked.
@@ -2066,14 +2089,16 @@ def resolve_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df
     """
     if ranking not in RANKINGS:
         raise ValueError(f"ranking must be one of {RANKINGS}, not {ranking!r}")
-    # filter_match_rules returns a boolean-mask slice (a view). Take an
-    # explicit copy so subsequent assignments don't trigger
-    # SettingWithCopyWarning on a view.
-    matches = filter_match_rules(features_df=features, **FINAL_FILTER_RULES).copy()
+    matches = filter_match_rules(features_df=features, **FINAL_FILTER_RULES)
+    if placeholder is None:
+        placeholder = placeholder_names(grants_df)
     # A boolean array: an empty column maps to float64, which would select
     # columns instead of rows.
-    named_nothing = matches[INDEX_COLS[1]].map(placeholder_names(grants_df)).eq(True).to_numpy()
-    matches = matches[~named_nothing]
+    named_nothing = matches[INDEX_COLS[1]].map(placeholder).eq(True).to_numpy()
+    # filter_match_rules and the mask give boolean-mask slices (views). One
+    # explicit copy after both, so the assignments below do not raise
+    # SettingWithCopyWarning on a view.
+    matches = matches[~named_nothing].copy()
     if guards:
         matches = guard_government_names(matches, grants_df["full_name"], universe_df["full_name"])
     logger.info(f"Found {len(matches)} matches.")
@@ -2103,11 +2128,12 @@ def resolve_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df
         sources = (universe_df['source'] if 'source' in universe_df
                    else pd.Series('', index=universe_df.index))
         exact = matches['name_score'] >= exact_min
-        matches['_geography'] = geographic_support(matches, universe_df, grants_df).to_numpy()
+        positions = _pair_positions(matches, universe_df, grants_df)
+        matches['_geography'] = location_agreement(matches, universe_df, grants_df, positions)['tier'].to_numpy()
         matches['_not_conflict'] = matches['_geography'] > 0
         matches['_exact'] = exact
         matches['_exact_preferred'] = exact & ~matches[INDEX_COLS[0]].map(sources).isin(ALIAS_SOURCES)
-        matches['_named'] = exact.to_numpy() | _names_held(matches, universe_df, grants_df)
+        matches['_named'] = exact.to_numpy() | _names_held(matches, universe_df, grants_df, positions)
     # Stable sorting so complete ranking ties resolve by input
     # order (which is deterministic: chunks concat in index order). Matters
     # more now that correction rows can tie with organic universe rows for
@@ -2131,10 +2157,12 @@ def resolve_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df
     return matches
 
 
-def name_only_matches(universe_df: pd.DataFrame, grants_df: pd.DataFrame, matched) -> pd.DataFrame:
+def name_only_matches(universe_df: pd.DataFrame, grants_df: pd.DataFrame, matched,
+                      placeholder: pd.Series | None = None) -> pd.DataFrame:
     """The name-only tier: a grant tuple with no state and no zip, which
     no other tier matched, and whose cleaned name belongs to exactly one
-    filer of the universe.
+    filer of the universe. ``placeholder`` is the mask of
+    ``placeholder_names`` when the caller has it already.
 
     A name several filers share is never matched, whatever its length:
     that is what rules out most one-word names. A tuple with a state is not
@@ -2150,7 +2178,7 @@ def name_only_matches(universe_df: pd.DataFrame, grants_df: pd.DataFrame, matche
         (grants_df['addressstate_key'].str.strip() == "")
         & (grants_df['addresszip_key'].str.strip() == "")
         & (grants_df['full_name'] != "")
-        & ~placeholder_names(grants_df)
+        & ~(placeholder_names(grants_df) if placeholder is None else placeholder)
         & ~grants_df.index.isin(matched)
     ]
     named = universe_df.loc[universe_df['full_name'].isin(set(open_['full_name'])), ['full_name', 'filerein_key']]
@@ -2172,9 +2200,10 @@ def all_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df: pd
     of the scored pairs under ``ranking``, then the name-only tier on what
     they left. ``match_tier`` says which; ``match_name_words`` is missing
     but on a name-only match."""
+    placeholder = placeholder_names(grants_df)  # one pass of the pattern over the grant tuples
     matches = resolve_matches(features, universe_df, grants_df, one_filer_in_state, guards=guards,
-                              ranking=ranking)
-    name_only = name_only_matches(universe_df, grants_df, matches[INDEX_COLS[1]])
+                              ranking=ranking, placeholder=placeholder)
+    name_only = name_only_matches(universe_df, grants_df, matches[INDEX_COLS[1]], placeholder)
     logger.info(f"Name-only tier: {len(name_only)} grant tuples matched on a name that belongs to one filer.")
     name_only = name_only.assign(name_score=1.0, addr_score=float("nan"))
     matches = pd.concat([matches.assign(match_name_words=pd.NA), name_only], ignore_index=True)

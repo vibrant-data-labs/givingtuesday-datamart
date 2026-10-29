@@ -108,8 +108,9 @@ def ranking_digest() -> str:
     """The code that picks the winner from scored pairs, and the orders it
     knows; not which of them is the default."""
     return _code_digest(
-        [gm.resolve_matches, gm._one_filer_refused, gm.location_agreement, gm.geographic_support, gm._codes,
-         gm._city_tails, gm._line_tails, gm._place, gm._state, gm._zip, gm._positions, gm._names_held,
+        [gm.resolve_matches, gm._one_filer_refused, gm.location_agreement, gm._codes,
+         gm._city_tails, gm._line_tails, gm._tails_of, gm._place, gm._state, gm._zip, gm._positions,
+         gm._pair_positions, gm._names_held,
          gm.placeholder_names, gm.name_only_matches, gm.all_matches, gm.guard_government_names, gm._by_address],
         [gm.RANKINGS, gm._ORDERS, gm.LOCAL_ADDRESS_MIN, gm.ALIAS_SOURCES, gm.FINAL_FILTER_RULES,
          gm.PLACEHOLDER_REGEX, gm._CITY_TAIL_WORDS, gm.ONE_FILER_IN_STATE, gm._STREET])
@@ -438,7 +439,7 @@ def freeze(pool: Path, extra: list[Path], out: Path, seed: int, one_in: int) -> 
     out.mkdir(parents=True, exist_ok=True)
     if (out / "manifest.json").exists():
         raise FileExistsError("A sample is frozen here already; use a new --out")
-    query = selection_sql().replace("::text, 0)", f"::text, {int(seed)})")
+    query = selection_sql(seed)
     params = {"one_in": one_in, "cohort": "a^", "placeholder": gm.PLACEHOLDER_REGEX}
     with get_session(config=datamart_config()) as session:
         session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))

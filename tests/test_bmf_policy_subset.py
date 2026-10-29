@@ -113,6 +113,9 @@ def test_selection_includes_unmatched_and_selects_by_tuple_not_current_winner():
     # Production joins ALL years of a tuple selected from 2015+ identities.
     assert "HAVING bool_or(taxyear::int >= 2015)" in sql
     assert "WHERE taxyear::int >= 2015" not in sql
+    # the seed salts the hash; 0 drew the inspected pools, a fresh sample takes another
+    assert "::text, 0)), :one_in) = 0" in sql
+    assert "::text, 7)), :one_in) = 0" in proof.selection_sql(seed=7)
 
 
 def test_all_year_weights_preserve_eins_order_and_unmatched_outcomes():

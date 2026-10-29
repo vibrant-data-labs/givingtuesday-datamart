@@ -90,6 +90,7 @@ from givingtuesday_datamart.grant_matching import (
     ADDRESS_TIER,
     INDEX_COLS,
     NAME_ONLY,
+    PLACEHOLDER_REGEX,
     STATE_TIER,
     Relations,
     _KEYS,
@@ -108,7 +109,6 @@ from givingtuesday_datamart.ingestion import datamart_config
 from givingtuesday_datamart.matching_regression_checks import (
     AMT,
     FUNDER_SENTINEL_FLOORS,
-    PLACEHOLDER_REGEX,
     RECIPIENT_SENTINEL_FLOORS,
 )
 from givingtuesday_datamart.placeholder_recovery import loader as recovered_loader
@@ -169,7 +169,8 @@ def tuples_sql(names: Relations) -> str:
                coalesce(sum({amount}) FILTER (WHERE f.filerein IS NOT NULL AND NOT {recovered}), 0)::float8
                    AS funder_dollars,
                bool_or(l.filerein IS NOT NULL) AS in_loaded,
-               bool_or(concat_ws(' ', sigocpyrpnam, sigocpyrbnbn1, sigocpyrbnbn2) ~* '{PLACEHOLDER_REGEX}'
+               -- the matcher's own placeholder predicate, the name keys, as the gate counts it
+               bool_or(concat_ws(' ', name1_key, name2_key) ~* '{PLACEHOLDER_REGEX}'
                        OR sigocpyrbnbn1 ILIKE 'pfizer%' OR sigocpyrbnbn1 ILIKE '%world health organi%') AS in_gate
         FROM public.{names.of('privategrants_w_column_keys_view')} g
         LEFT JOIN loaded l ON l.filerein = g.filerein AND l.taxyear = g.taxyear

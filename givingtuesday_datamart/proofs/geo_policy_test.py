@@ -61,7 +61,7 @@ def policy_hash():
 def freeze_fresh(previous,out):
     out.mkdir(parents=True,exist_ok=True)
     if (out/'manifest.json').exists():raise FileExistsError('Use a fresh validation directory')
-    q=base.selection_sql().replace('::text, 0)', '::text, 42)')
+    q=base.selection_sql(seed=42)
     params={'one_in':100,'cohort':'a^','placeholder':base.PLACEHOLDER_REGEX}
     with get_session(config=datamart_config()) as s:
         s.execute(text('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY'))
@@ -103,7 +103,8 @@ def run(previous,out,fresh=False):
         if sig['inputs']!=base._digest(previous/'inputs.json') or sig['matcher']!=base._digest(Path(gm.__file__)):raise RuntimeError('Old score cache is stale')
         f=pd.concat([pd.read_parquet(p) for p in sorted((previous/'scores').glob('*.parquet'))],ignore_index=True)
     def resolve(grants,features):
-        baseline=base.comparison_rows(grants,u,gm.all_matches(features,u,grants),'current')
+        # production's order when this proof ran (2026-10-28), which the parity check below holds against
+        baseline=base.comparison_rows(grants,u,gm.all_matches(features,u,grants,ranking="weighted"),'current')
         if baseline.ein.ne(grants.production_ein).any():raise RuntimeError('Current resolver differs from production')
         open_=grants[~grants.placeholder]
         new=base.comparison_rows(grants,u,matches(features[features[gm.INDEX_COLS[1]].isin(open_.index)],u,open_),'name_geo_source')
