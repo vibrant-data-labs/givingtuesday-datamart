@@ -40,8 +40,10 @@ they do.
   group rows of 49 returns written with an `irs:` prefix come in (230
   Schedule O notes, 22 990-EZ programs, 3 Schedule I grants of $566,494, 2
   990-PF grants of $4,402). The return tables do not change.
-- The placeholder lists read on 2026-10-27 and in step 5, loaded under
-  `v3`.
+- The placeholder lists read on 2026-10-27 whose verdicts are stored but
+  not loaded (530 pages), loaded under `v3`. No new work list and no new
+  read this run (decided 2026-10-29): nothing has been filed or read
+  since.
 - The matcher's fix (decision 1), in its first full run since #83: the
   integer index, the chunk pool, the source stamps.
 
@@ -216,22 +218,30 @@ were. If anything here looks wrong we stop with production untouched.
 - [ ] `status` shows the three line-25 rules; the rows by rule logged
       against October's (17,392,341 paid, 452,460 future).
 
-### 5. The work list and the read (the box; the read on Zein's go, cap $300)
+### 5. The work list and the read (skipped this run; decided 2026-10-29)
 
-- [ ] `python -m givingtuesday_datamart.placeholder_recovery work-list`;
+Nothing has been filed or read since the work list and the read of 27
+October, so neither is repeated this run: the work list of that day
+stands, no read is bought, and the verdicts stored on 2026-10-27 go in at
+step 6. The classifier's new arm (v3) reaches the work list and the read
+in the next run; until then a recipient line of "SEE." leaves matching
+unrecovered.
+
+- [x] Skipped: `python -m givingtuesday_datamart.placeholder_recovery work-list`;
       counts by tax year and band logged against October's 25,612.
-- [ ] The projection:
+- [x] Skipped: the projection,
       `python -m givingtuesday_datamart.placeholder_recovery run --policy v3 --tax-years 2020-2025 --keep-list --dry-run --no-fetch`.
-- [ ] Qwen's provider answers before the read starts (it failed most calls
-      on 2026-10-27).
-- [ ] The read, in `tmux -L frame`:
-      `python -m givingtuesday_datamart.placeholder_recovery run --policy v3 --tax-years 2020-2025 --keep-list --cache /data/irs_index --cap 300`.
-      Spend logged; no page left without a verdict, or the reason.
+- [x] Skipped: Qwen's provider answers before the read starts (it failed
+      most calls on 2026-10-27).
+- [x] Skipped: the read, in `tmux -L frame`,
+      `python -m givingtuesday_datamart.placeholder_recovery run --policy v3 --tax-years 2020-2025 --keep-list --cache /data/irs_index --cap 300`;
+      spend logged; no page left without a verdict, or the reason.
 
 ### 6. The load, the view and the checks under v3 (the box, about 40 minutes; never while the matcher runs)
 
 - [ ] `python -m givingtuesday_datamart.placeholder_recovery load --policy v3`
-      (it takes the verdicts stored on 2026-10-27 and in step 5).
+      (it takes the verdicts stored on 2026-10-27 over the October work
+      list, which the loader reads as it stands).
 - [ ] `python -m givingtuesday_datamart.placeholder_recovery view --policy v3`.
 - [ ] `python -m givingtuesday_datamart.placeholder_recovery check --policy v3`
       passes; rows and dollars by target logged.
@@ -453,3 +463,12 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   main merged into this branch (285701d), so the box's clone on this
   branch runs every later step; the two detached worktrees are gone. Step
   2, the patch, is next: snapshot first, then on the go-ahead.
+- **2026-10-29, step 5 skipped; step 2 started.** Nothing has been filed
+  or read since the work list and the read of 27 October, so neither is
+  repeated this run (decided while step 2 ran): step 6 loads the 530
+  pages' verdicts stored that day over the October work list, which the
+  loader reads as it stands. The classifier's new arm therefore reaches the
+  work list and the read in the next run only; a recipient line of "SEE."
+  leaves matching unrecovered until then. Step 2 started at 21:30 UTC under
+  the watchdog, after the manual snapshot `gt-datamart-before-repatch-20261029`
+  reported available at 21:16 UTC.
