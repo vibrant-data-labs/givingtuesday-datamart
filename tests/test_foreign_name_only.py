@@ -165,3 +165,19 @@ def test_the_gate_guards_the_class_with_a_floor_on_a_foreign_recipient():
 
     label, floor = RECIPIENT_SENTINEL_FLOORS[fn.GLOBAL_FUND]
     assert fn.GLOBAL_FUND.startswith("98") and "foreign" in label and floor > 0
+
+
+def test_the_guard_refuses_a_one_word_namesake_and_the_unguarded_rule_measures_it():
+    u, g = frames(UNIVERSE + [("921368036", "cnrs", "1 main st", "goehner", "ne", "68364", "eo_bmf")],
+                  GRANTS + [("cnrs", "3 rue michel-ange", "paris", "", "75016")], FOREIGN_COUNTRY + [True])
+    assert 5 not in eins(u, g, "after")
+    assert eins(u, g, "unguarded")[5] == "921368036"
+    g["n_rows"], g["dollars"], g["positive_dollars"], g["recovered_rows"], g["our_rows"] = 1, 10.0, 10.0, 0, 1
+    g["pool"] = g["gate"] = g["sample"] = False
+    g["foreign"] = fn.eligibility(g, "after") & ~fn.before_rule(g)
+    f = gm.score_slice(u, g)
+    results = [fn.outcomes(g, u, fn.resolve(f, u, g, policy), policy) for policy in fn.POLICIES]
+    for frame in results:
+        frame["baseline_ein"] = results[0]["ein"]
+    table = fn.refused(pd.concat(results, ignore_index=True))
+    assert table[["name1_key", "ein", "filer_state"]].values.tolist() == [["cnrs", "921368036", "ne"]]

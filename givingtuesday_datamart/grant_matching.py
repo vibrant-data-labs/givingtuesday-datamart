@@ -2231,8 +2231,45 @@ def no_us_address(grants_df: pd.DataFrame) -> pd.Series:
     return foreign
 
 
+def one_word_namesakes(grants_df: pd.DataFrame, filers_df: pd.DataFrame) -> np.ndarray:
+    """The one-word guard of the name-only tier: which name-only matches it
+    refuses. ``grants_df`` holds the matched grant tuples and ``filers_df``
+    the universe row each would match, row for row. A match is refused when
+    all four hold:
+
+    - the tuple has a foreign address in its keys: no US address
+      (``no_us_address``) and a state or a zip key. A tuple with no address
+      at all is matched as before 2026-10-30;
+    - its cleaned name is one word;
+    - the filer's row is at a US address (``US_STATE_KEYS``);
+    - the filer's EIN is not a 98- EIN, the IRS's prefix for a foreign
+      organization, which is the recipient's own registration.
+
+    A name that one filer alone carries is strong evidence when it has
+    several words and weak when it has one: unrelated groups share an
+    acronym or a short word. The proof of the rule found grants to CNRS in
+    Paris going to a CNRS in Nebraska, to BRAC in Dhaka to a BRAC in
+    Nebraska, to FAU in Erlangen to an FAU in South Carolina, and to the UK
+    charities Crisis, Catch22 and Foxglove to namesakes in Michigan and
+    Texas: 246 tuples, 400 rows and $44M, most of them another
+    organization. The guard refuses a few right ones with them (EarthEnable,
+    a US nonprofit working in Rwanda, $1.5M). Zein chose it on 2026-10-30
+    (docs/foreign-recipients-name-only-2026-10-30.md). A longer namesake
+    (the Hospital for Sick Children in Washington for SickKids in Toronto)
+    is for the corrections registry.
+    """
+    keyed = (grants_df['addressstate_key'].fillna('').str.strip() != '') | (
+        grants_df['addresszip_key'].fillna('').str.strip() != '')
+    abroad = (no_us_address(grants_df) & keyed).to_numpy()
+    one_word = (grants_df['full_name'].str.split().str.len() == 1).to_numpy()
+    filer_in_us = filers_df['addressstate_key'].fillna('').str.strip().str.lower().isin(US_STATE_KEYS).to_numpy()
+    domestic = ~filers_df['filerein_key'].astype(str).str.startswith('98').to_numpy()
+    return abroad & one_word & filer_in_us & domestic
+
+
 def name_only_matches(universe_df: pd.DataFrame, grants_df: pd.DataFrame, matched,
-                      placeholder: pd.Series | None = None, eligible: pd.Series | None = None) -> pd.DataFrame:
+                      placeholder: pd.Series | None = None, eligible: pd.Series | None = None,
+                      one_word_guard: bool = True) -> pd.DataFrame:
     """The name-only tier: a grant tuple with no US address, which no other
     tier matched, and whose cleaned name belongs to exactly one filer of
     the universe. ``placeholder`` is the mask of ``placeholder_names`` when
@@ -2245,7 +2282,9 @@ def name_only_matches(universe_df: pd.DataFrame, grants_df: pd.DataFrame, matche
     agrees, and nothing matches it where it does not. A tuple with a
     foreign address (a province, a postal code, a country other than the
     US) has no US state to agree with anything: it is for this tier, as a
-    tuple with no address is.
+    tuple with no address is, but for a one-word name whose only filer is
+    a domestic organization at a US address (``one_word_namesakes``;
+    ``one_word_guard`` sets the guard aside to measure it).
 
     Returns one row per tuple matched: the two positions (``INDEX_COLS``;
     the universe row is the filer's first row under the name) and
@@ -2263,8 +2302,15 @@ def name_only_matches(universe_df: pd.DataFrame, grants_df: pd.DataFrame, matche
     first = named[named['full_name'].isin(owners[owners == 1].index)].drop_duplicates('full_name')
     row_of = pd.Series(first.index, index=first['full_name'])
     found = open_[open_['full_name'].isin(row_of.index)]
+    rows = row_of.reindex(found['full_name']).to_numpy()
+    if one_word_guard and len(found):
+        refused = one_word_namesakes(found, universe_df.loc[rows])
+        if refused.any():
+            logger.info(f"Name-only tier: {int(refused.sum())} grant tuples with a foreign address refused, "
+                        "their one-word name a domestic filer's at a US address.")
+        found, rows = found[~refused], rows[~refused]
     return pd.DataFrame({
-        INDEX_COLS[0]: row_of.reindex(found['full_name']).to_numpy(),
+        INDEX_COLS[0]: rows,
         INDEX_COLS[1]: found.index.to_numpy(),
         'match_name_words': found['full_name'].str.split().str.len().to_numpy(),
     }).astype('int64').assign(match_tier=NAME_ONLY)
@@ -2272,17 +2318,19 @@ def name_only_matches(universe_df: pd.DataFrame, grants_df: pd.DataFrame, matche
 
 def all_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df: pd.DataFrame,
                 one_filer_in_state: str = ONE_FILER_IN_STATE, *, guards: bool = True,
-                ranking: str = RANKING, eligible: pd.Series | None = None) -> pd.DataFrame:
+                ranking: str = RANKING, eligible: pd.Series | None = None,
+                one_word_guard: bool = True) -> pd.DataFrame:
     """Every match of a run, one row per grant tuple matched: the winners
     of the scored pairs under ``ranking``, then the name-only tier on what
     they left. ``match_tier`` says which; ``match_name_words`` is missing
-    but on a name-only match. ``eligible`` is the name-only tier's
-    (``name_only_matches``): the tuples with no US address unless a proof
-    passes the mask of another rule."""
+    but on a name-only match. ``eligible`` and ``one_word_guard`` are the
+    name-only tier's (``name_only_matches``): a proof passes them to
+    measure another rule."""
     placeholder = placeholder_names(grants_df)  # one pass of the pattern over the grant tuples
     matches = resolve_matches(features, universe_df, grants_df, one_filer_in_state, guards=guards,
                               ranking=ranking, placeholder=placeholder)
-    name_only = name_only_matches(universe_df, grants_df, matches[INDEX_COLS[1]], placeholder, eligible=eligible)
+    name_only = name_only_matches(universe_df, grants_df, matches[INDEX_COLS[1]], placeholder, eligible=eligible,
+                                  one_word_guard=one_word_guard)
     logger.info(f"Name-only tier: {len(name_only)} grant tuples matched on a name that belongs to one filer.")
     name_only = name_only.assign(name_score=1.0, addr_score=float("nan"))
     matches = pd.concat([matches.assign(match_name_words=pd.NA), name_only], ignore_index=True)

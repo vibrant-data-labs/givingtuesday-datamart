@@ -34,11 +34,13 @@ run and the matched rows per recipient in one read-only repeatable-read
 transaction (64 MB work_mem, no parallel workers, a 25-minute statement
 timeout) and freezes them under ``--out`` with their digests. ``compare``
 scores the frozen tuples once with the matcher's own blocking and
-scoring, then resolves four rules: ``before`` (no state and no zip),
+scoring, then resolves five rules: ``before`` (no state and no zip),
 ``keys`` (the state key alone), ``country`` (the old rule plus the
-country column) and ``after`` (production's rule, both signals). The
-rule before must reproduce the last run's winner for every tuple, and no
-rule may lose or move a match: the tier only adds. The reports go beside
+country column), ``after`` (production's rule: both signals and the
+one-word guard, ``grant_matching.one_word_namesakes``) and ``unguarded``
+(production's rule without the guard). The rule before must reproduce the
+last run's winner for every tuple, and no rule may lose or move a match:
+the tier only adds. ``refused.csv`` lists what the guard refuses. The reports go beside
 the frozen files; ``docs/foreign-recipients-name-only-2026-10-30.md``
 holds the findings.
 """
@@ -65,7 +67,7 @@ from givingtuesday_datamart.placeholder_recovery.view import FROM_RECOVERY
 from givingtuesday_datamart.proofs import bmf_policy_subset as base
 
 POOL = Path(__file__).resolve().parents[2] / "data" / "proofs" / "name_only_lost_names_2026_10_30.csv"
-POLICIES = ("before", "keys", "country", "after")
+POLICIES = ("before", "keys", "country", "after", "unguarded")
 COHORTS = ("pool", "foreign", "gate", "sample")
 GATE_PATTERNS = ("pfizer%", "%world health organi%")
 GLOBAL_FUND = "980380092"
@@ -150,7 +152,7 @@ def eligibility(grants: pd.DataFrame, policy: str) -> pd.Series:
         return gm.no_us_address(grants.drop(columns=["foreign_country"], errors="ignore"))
     if policy == "country":
         return before_rule(grants) | grants.get("foreign_country", pd.Series(False, index=grants.index)).eq(True)
-    if policy == "after":
+    if policy in ("after", "unguarded"):
         return gm.no_us_address(grants)
     raise ValueError(policy)
 
@@ -217,8 +219,10 @@ def extract(out: Path, one_in: int = 500, pool: Path = POOL) -> None:
 
 def resolve(features: pd.DataFrame, universe: pd.DataFrame, grants: pd.DataFrame, policy: str) -> pd.DataFrame:
     """The matcher's winners under ``ranking`` as it stands, and the
-    name-only tier under the rule of ``policy``."""
-    return gm.all_matches(features, universe, grants, eligible=eligibility(grants, policy))
+    name-only tier under the rule of ``policy``: the one-word guard holds
+    for every rule but ``unguarded``."""
+    return gm.all_matches(features, universe, grants, eligible=eligibility(grants, policy),
+                          one_word_guard=policy != "unguarded")
 
 
 def outcomes(grants: pd.DataFrame, universe: pd.DataFrame, matches: pd.DataFrame, policy: str) -> pd.DataFrame:
@@ -397,9 +401,21 @@ def compare(out: Path, workers: int = 8) -> None:
         raise RuntimeError("The rule before does not reproduce production; diagnose before reading the gains")
 
 
-def gained_after(combined: pd.DataFrame) -> pd.DataFrame:
-    after = combined[combined["policy"] == "after"]
+def gained_after(combined: pd.DataFrame, policy: str = "after") -> pd.DataFrame:
+    after = combined[combined["policy"] == policy]
     return after[changes(after).eq("gained")]
+
+
+def refused(combined: pd.DataFrame) -> pd.DataFrame:
+    """The tuples the one-word guard refuses: gained without it, not with
+    it, with the filer they would have gone to."""
+    kept = set(map(tuple, gained_after(combined)[gm._KEYS].to_numpy()))
+    unguarded = gained_after(combined, "unguarded")
+    lost = unguarded[[key not in kept for key in map(tuple, unguarded[gm._KEYS].to_numpy())]]
+    columns = ["name1_key", "name2_key", "address1_key", "addresscity_key", "addressstate_key", "addresszip_key",
+               "foreign_country", "n_rows", "dollars", "our_rows", "ein", "matched_name", "source", "filer_city",
+               "filer_state", "filer_zip"]
+    return lost.sort_values("dollars", ascending=False)[columns]
 
 
 def write_reports(combined: pd.DataFrame, years: pd.DataFrame, matched_rows: pd.DataFrame, out: Path) -> None:
@@ -412,6 +428,7 @@ def write_reports(combined: pd.DataFrame, years: pd.DataFrame, matched_rows: pd.
         "by_kind": gained_by_kind(gained),
         "recipients": recipients(gained, matched_rows),
         "examples": examples(gained),
+        "refused": refused(combined),
         "gate": combined[combined["gate"]].groupby(["policy", "ein", "matched_name"]).agg(
             tuples=("n_rows", "size"), rows=("n_rows", "sum"), dollars=("dollars", "sum")).reset_index(),
     }

@@ -410,10 +410,11 @@ def test_a_foreign_address_matches_on_a_name_that_belongs_to_one_filer():
 
 def test_a_province_spelled_out_and_a_postal_code_of_any_shape_are_no_us_address():
     # the keys hold the first five characters of a postal code, as the view cuts them
-    found = matched([("visionspring", "20 bay st", "toronto", "ontario", "m5j 2"),          # a province and a postal code
-                     ("river fund inc", "po box 1", "nairobi", "", "00100"),              # a five-digit postal code, no province
-                     ("foreign friends of the arts", "1 rue a", "paris", "", "75001")])
-    assert found == {"visionspring": ("555", gm.NAME_ONLY, 1), "river fund inc": ("111", gm.NAME_ONLY, 2),
+    found = matched([("open door ministries inc", "20 bay st", "toronto", "ontario", "m5j 2"),   # a province and a postal code
+                     ("river fund inc", "po box 1", "nairobi", "", "00100"),                   # a five-digit postal code, no province
+                     ("foreign friends of the arts", "1 rue a", "paris", "", "75001")],
+                    [row for row in UNIVERSE if row[0] != "222"])          # one filer of "open door ministries" left
+    assert found == {"open door ministries inc": ("333", gm.NAME_ONLY, 3), "river fund inc": ("111", gm.NAME_ONLY, 2),
                      "foreign friends of the arts": ("444", gm.NAME_ONLY, 5)}
 
 
@@ -433,11 +434,11 @@ def test_a_country_other_than_the_us_makes_the_tuple_eligible_when_its_keys_look
     """Tamil Nadu's code is Tennessee's and an Indian postal code has five
     digits to the key: only the country column says the address is abroad."""
     filers = frame(UNIVERSE, universe=True)
-    tuples = frame([("visionspring", "12 anna salai", "chennai", "tn", "60000")])
+    tuples = frame([("river fund", "12 anna salai", "chennai", "tn", "60000")])
     assert gm.match_slice(filers, tuples).empty
     tuples["foreign_country"] = True
     found = gm.matched_tuples(filers, tuples, gm.match_slice(filers, tuples))
-    assert found[["recipeint_ein_key", "match_tier"]].values.tolist() == [["555", gm.NAME_ONLY]]
+    assert found[["recipeint_ein_key", "match_tier"]].values.tolist() == [["111", gm.NAME_ONLY]]
 
 
 def test_a_proof_can_resolve_the_tier_under_the_rule_before():
@@ -579,3 +580,49 @@ def test_the_checkpoint_prefix_names_the_versions_the_run_read_once():
     prefix = gm._resolve_checkpoint_prefix(Connection(None), {"policy_version": "v3", "rows": 5, "digest": "0a1b2c3d"},
                                            versions={**versions, "irs_990pf_grants": "2026_10_25"})
     assert "/pg_2026_10_25/bf_2026_06_16/" in prefix                    # no read: the fake answers no ingest_runs query
+
+
+# --- the one-word guard --------------------------------------------------------
+
+NAMESAKES = [
+    ("921368036", "cnrs", "1 main st", "goehner", "ne", "68364"),          # a Nebraska group, at a US address
+    ("980118876", "tostan", "1 king st", "alexandria", "va", "22314"),     # a 98- EIN: the recipient's own
+    ("203074517", "trustafrica", "", "dakar", "", ""),                     # a domestic EIN filing from abroad
+    ("311685031", "sahaj marg spirituality foundation", "1 main st", "austin", "tx", "78701"),
+]
+
+
+def test_a_one_word_name_abroad_does_not_go_to_a_domestic_filer_at_a_us_address():
+    """CNRS in Paris is not the CNRS in Nebraska. A 98- EIN is the
+    recipient's own registration, and a filer abroad is the recipient
+    filing from there: both keep their match. So does a longer name."""
+    found = matched([("cnrs", "3 rue michel-ange", "paris", "", "75016"),
+                     ("tostan", "bp 29371", "dakar", "", "10700"),
+                     ("trustafrica", "route du king fahd", "dakar", "", "10700"),
+                     ("sahaj marg spirituality foundation", "babuji memorial ashram", "chennai", "tamil nadu", "60000")],
+                    NAMESAKES)
+    assert found == {"tostan": ("980118876", gm.NAME_ONLY, 1), "trustafrica": ("203074517", gm.NAME_ONLY, 1),
+                     "sahaj marg spirituality foundation": ("311685031", gm.NAME_ONLY, 4)}
+
+
+def test_the_guard_leaves_a_one_word_name_with_no_address_matched_as_before():
+    """A tuple with no address at all was the tier's before 2026-10-30, one
+    word or not; the guard is for the foreign addresses the rule added."""
+    assert matched([("cnrs", "", "", "", "")], NAMESAKES) == {"cnrs": ("921368036", gm.NAME_ONLY, 1)}
+
+
+def test_a_country_alone_is_a_foreign_address_for_the_guard():
+    filers = frame(NAMESAKES, universe=True)
+    tuples = frame([("cnrs", "1 rue a", "paris", "tn", "75016")])     # keys that read as Tennessee
+    tuples["foreign_country"] = True
+    assert gm.match_slice(filers, tuples).empty
+
+
+def test_the_guard_can_be_set_aside_to_measure_it():
+    filers = frame(NAMESAKES, universe=True)
+    tuples = frame([("cnrs", "3 rue michel-ange", "paris", "", "75016")])
+    scored = gm.score_slice(filers, tuples)
+    assert gm.all_matches(scored, filers, tuples).empty
+    found = gm.all_matches(scored, filers, tuples, one_word_guard=False)
+    assert found[gm.INDEX_COLS[0]].map(filers["filerein_key"]).tolist() == ["921368036"]
+    assert gm.one_word_namesakes(tuples, filers.iloc[[0]]).tolist() == [True]
