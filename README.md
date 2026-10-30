@@ -351,6 +351,20 @@ at the server's default 4 MB `work_mem`, and gave it back at its commit,
 a 13.5 GB dip. The identity builds now run at the builder's memory budget
 (no parallel workers); that dip has not been measured since.
 
+**Stamps:** every staging table an ingest completes, and every `_current`
+relation, carries a stamp: a JSON table comment written in the
+transaction that writes the table. A staging table's names the ingest run
+and the own-extract patch run its rows come from; a relation's names its
+inputs' stamps and a hash of its rules
+([docs/current-relations-stamp.md](docs/current-relations-stamp.md)).
+`python -m givingtuesday_datamart.current_grants --check` prints each
+relation's state from the comments alone: current, stale, or blocked by an
+input whose load is running, failed or was interrupted. Tables loaded and
+relations built before the stamps carry none; `--adopt` stamps them once,
+by night (`--verify` reads every row of a staging table instead of a
+sample of its pages). Nothing is decided from the stamps yet: the
+canonical build and the matcher move to them next.
+
 ### Trace a filing back to the IRS
 
 ```bash

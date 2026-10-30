@@ -1080,9 +1080,9 @@ def _source_versions(connection) -> dict[str, str]:
     return versions
 
 
-# A run that rebuilds the ``_current`` relations writes on each of them
-# (COMMENT ON TABLE, in the transaction that builds it) the source versions
-# and the input shape the checkpoint prefix is keyed on, from the one read
+# A run that rebuilds the ``_current`` relations has the builder write on
+# each of them (in its stamp, in the transaction that builds it) the source
+# versions and the input shape the checkpoint prefix is keyed on, from the one read
 # of the versions the prefix is resolved from: a relation carries the stamp
 # only when it is complete, and the stamp and the prefix cannot disagree.
 # ``--skip-rebuild`` takes the relations that carry the stamp the prefix
@@ -1090,12 +1090,13 @@ def _source_versions(connection) -> dict[str, str]:
 # relations built from an older drop, or under older dedup rules, would be
 # written under a newer prefix, and a later run would resume them against
 # shifted rows. A relation rebuilt anywhere else (``sources refresh``, the
-# current_grants CLI) is a new table without the stamp, so the next run
-# rebuilds it. A stamp is a catalog read, where comparing the relations
+# current_grants CLI) carries the builder's stamp without these keys, so
+# the next run rebuilds it. A stamp is a catalog read, where comparing the relations
 # with staging (``stale_basic_fields_current``) scans every row of both.
-def _current_stamp(versions: dict[str, str], build_id: str | None) -> str:
-    return json.dumps({"source_versions": versions, "shape": MATCHING_INPUT_SHAPE_VERSION, "build_id": build_id},
-                      sort_keys=True)
+def _current_stamp(versions: dict[str, str], build_id: str | None) -> dict:
+    """The matcher's keys in a relation's stamp, written by the builder
+    beside its own (``build_current_relations``'s ``stamp_extra``)."""
+    return {"source_versions": versions, "shape": MATCHING_INPUT_SHAPE_VERSION, "build_id": build_id}
 
 
 def _stamp_of(comment: str | None) -> dict | None:
@@ -1123,17 +1124,15 @@ def _unstamped_current_relations(connection, versions: dict[str, str]) -> list[s
     return stale
 
 
-def after_current_build(connection, table: str, recovered_policy: str, stamp: str | None = None) -> None:
+def after_current_build(connection, table: str, recovered_policy: str) -> None:
     """What commits with a ``_current`` relation's build or not at all
     (``build_current_relations``'s hook): the views the DROP ... CASCADE of
     the relations the matching views are defined over took with it, back
     in the same transaction (the view of current and recovered grants for
-    ``recovered_policy``, then the matching views over it), and the
-    matcher's ``stamp``, when there is one, last of all."""
+    ``recovered_policy``, then the matching views over it). The builder
+    writes the relation's stamp after it, last."""
     if table in _MATCHING_VIEW_TABLES:
         create_or_replace_views(connection, recovered_policy=recovered_policy)
-    if stamp is not None:
-        connection.execute(text(f"COMMENT ON TABLE public.{table} IS :stamp"), {"stamp": stamp})
 
 
 # Filenames the chunk loop writes/reads. Used by the resume listing to
@@ -2607,8 +2606,8 @@ def _load_inputs(
     if to_build:
         build_current_relations(
             datamart_config(), to_build,
-            after=partial(after_current_build, recovered_policy=recovered_policy,
-                          stamp=_current_stamp(versions, build_id)))
+            after=partial(after_current_build, recovered_policy=recovered_policy),
+            stamp_extra=_current_stamp(versions, build_id), built_by="grant_matching")
     # 3. The corrections, the views and the two reads, one transaction at
     # the builds' memory budget: the TRUNCATE's lock holds the correction
     # rows the prefix's hash names until the universe read has them, as

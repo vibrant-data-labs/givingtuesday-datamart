@@ -280,7 +280,7 @@ def _patch(args) -> int:
     for table, c in counts.items():
         print(f"{table}: GT's {c['gt_release']} less {c['gt_rows']:,} rows, earlier patch rows "
               f"{c['earlier_patch_rows']:,} out, ours {c['inserted']:,} in", flush=True)
-    build_current_relations(datamart_config(), basic_fields_relations())
+    build_current_relations(datamart_config(), basic_fields_relations(), built_by="own_extract patch")
     return 0
 
 
