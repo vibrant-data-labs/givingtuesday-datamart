@@ -8,6 +8,10 @@ commands are in ``docs/placeholder_recovery_operations.md``; the SQL the
 measurements run is under ``data/proofs/``.
 
 =========================  ==================================================
+``foreign_name_only``       the name-only tier for a foreign address (2026-10-30):
+                            the rule before and after on the names the run of
+                            2026-10-30 lost and on every tuple with a foreign
+                            address, from frozen inputs, with nothing written
 ``matching_subset``         the matcher on a subset of the grant tuples, before
                             and after a change, under the prefix ``scratch_matcher_``
 ``pf_current_scratch``      the 990-PF ``_current`` rules proved on scratch

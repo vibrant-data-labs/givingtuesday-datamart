@@ -53,8 +53,8 @@ def test_a_key_tuple_keeps_a_filing_then_a_correction_then_a_bmf_line():
     assert {src for src, rank in order.items() if rank > order["correction"]} == set(grant_matching.ALIAS_SOURCES)
 
 
-def test_shape_version_bumped_for_the_placeholder_pattern_and_preserves_bmf_lineage():
-    assert grant_matching.MATCHING_INPUT_SHAPE_VERSION == 7
+def test_shape_version_bumped_for_the_foreign_country_column_and_preserves_bmf_lineage():
+    assert grant_matching.MATCHING_INPUT_SHAPE_VERSION == 8
     assert "irs_eo_bmf" in grant_matching._MATCHING_INPUT_LOGICAL_NAMES
 
 
@@ -83,7 +83,7 @@ def test_checkpoint_prefix_carries_the_bmf_version(monkeypatch):
     })
     prefix = grant_matching._resolve_checkpoint_prefix(conn, {"policy_version": "v3", "rows": 5, "digest": "1234abcd"})
     assert prefix == ("grant_matching_checkpoints/pg_2026_06_16/bf_2026_06_16/bfpf_2026_06_16/"
-                      "bmf_2026_10_13/corr_abcd1234/rec_v3_1234abcd/shape_v7")
+                      "bmf_2026_10_13/corr_abcd1234/rec_v3_1234abcd/shape_v8")
 
 
 def test_checkpoint_prefix_refuses_without_a_bmf_ingest(monkeypatch):

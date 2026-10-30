@@ -214,7 +214,15 @@ _VIEW_DDL = [
             address2_key,
             addresscity_key,
             addressstate_key,
-            addresszip_key
+            addresszip_key,
+            -- A row of the tuple whose country is not the US: the
+            -- recipient's foreign address, which fills the US address
+            -- columns (a province in the state key, a postal code in the
+            -- zip key). Our extract writes the IRS country code on every
+            -- foreign row; GT's rows carry USA on domestic rows or nothing
+            -- at all, so on them the state key alone says (no_us_address).
+            -- The name-only tier takes a tuple with no US address.
+            bool_or(UPPER(TRIM(COALESCE(sigocaffrfaco, ''))) NOT IN ('', 'US', 'USA')) AS foreign_country
         FROM public.{privategrants_w_column_keys_view}
         WHERE taxyear::int >= 2015
           -- Rows with no business name (person-named scholarship / patient
@@ -562,23 +570,31 @@ def _corrections_content_hash() -> str:
     return hashlib.sha256(_CORRECTIONS_CSV_PATH.read_bytes()).hexdigest()[:8]
 
 
-def _read_corrections_csv() -> pd.DataFrame:
-    """Read and validate the corrections CSV. Raises on any bad row.
+def _read_corrections_csv(path: Path | None = None) -> pd.DataFrame:
+    """Read and validate the corrections CSV (``path``, the registry by
+    default). Raises on any bad row.
 
     Values are raw and verbatim (normalization is the view's job), but
     structural mistakes — a truncated EIN, a missing provenance field —
     should kill the run loudly rather than author a dead or wrong row.
+
+    The state is a two-letter code, or, for a recipient abroad, its
+    province or country as the grant row writes it ("OXFORDSHIRE"): the
+    keys of a foreign grant hold what the filer typed (``no_us_address``).
+    A US state spelled out or punctuated ("New York", "N.Y.") is refused,
+    as a dead row: its grants carry the code.
     """
-    if not _CORRECTIONS_CSV_PATH.exists():
+    path = _CORRECTIONS_CSV_PATH if path is None else path
+    if not path.exists():
         raise RuntimeError(
-            f"Corrections CSV not found at {_CORRECTIONS_CSV_PATH}. "
+            f"Corrections CSV not found at {path}. "
             "It is tracked in git (data/corrections/org_identities.csv) — "
             "a missing file means a broken checkout, not 'no corrections'."
         )
     # keep_default_na=False: values are curator-entered strings; an org
     # legitimately named "NA" (or an empty note) must stay a string, not
     # become NaN.
-    df = pd.read_csv(_CORRECTIONS_CSV_PATH, dtype=str, keep_default_na=False)
+    df = pd.read_csv(path, dtype=str, keep_default_na=False)
     if list(df.columns) != _CORRECTIONS_COLUMNS:
         raise RuntimeError(
             f"Corrections CSV columns {list(df.columns)} != expected "
@@ -594,9 +610,10 @@ def _read_corrections_csv() -> pd.DataFrame:
             )
         if not row.name1.strip():
             errors.append(f"line {line_no}: name1 is empty")
-        if not re.fullmatch(r"[A-Za-z]{2}", row.state.strip()):
+        state = row.state.strip()
+        if not (re.fullmatch(r"[A-Za-z]{2}", state) or (state and not us_state(pd.Series([state])).iloc[0])):
             errors.append(
-                f"line {line_no}: state {row.state!r} is not a 2-letter code"
+                f"line {line_no}: state {row.state!r} is not a 2-letter code or a foreign province as written"
             )
         if not row.zip.strip():
             errors.append(f"line {line_no}: zip is empty")
@@ -915,7 +932,12 @@ _MATCHING_INPUT_LOGICAL_NAMES = (
 #   with the same key tuple in the universe's DISTINCT ON. A test pins the
 #   view DDL and the two reads to this number, so the next edit to them
 #   cannot resume chunks against shifted rows without moving it.
-MATCHING_INPUT_SHAPE_VERSION = 7
+#   v8 (2026-10-30): the grants view carries foreign_country, whether a row
+#   of the tuple names a country other than the US, and the name-only tier
+#   takes a tuple with no US address (no_us_address) instead of one with
+#   no state and no zip. The seven keys, the filter and the order are v7's,
+#   so row positions are the same; the pin moves with the DDL.
+MATCHING_INPUT_SHAPE_VERSION = 8
 
 
 def _insert_started_build(build_id: str, started_at: datetime, source_runs: dict) -> None:
@@ -1488,6 +1510,30 @@ _STATE_ABBREVIATIONS = {
     "tx": "texas", "ut": "utah", "vt": "vermont", "va": "virginia", "wa": "washington",
     "wv": "west virginia", "wi": "wisconsin", "wy": "wyoming", "dc": "district of columbia",
 }
+_TERRITORY_ABBREVIATIONS = {
+    "pr": "puerto rico", "vi": "virgin islands", "gu": "guam", "as": "american samoa",
+    "mp": "northern mariana islands",
+}
+# The state keys that name a US state, the District or a territory: the
+# USPS code or the name spelled out, as the keys are lower case. A grant
+# tuple whose state key is none of these gives no US address: GT and our
+# extract fill the state column from a foreign address's province when the
+# recipient has no US address ("ontario", "on", "england", "geneva", "11";
+# docs/own-extract.md), and a domestic address always carries its code.
+US_STATE_KEYS = frozenset(
+    key for table in (_STATE_ABBREVIATIONS, _TERRITORY_ABBREVIATIONS) for key in (*table, *table.values())
+)
+
+
+def us_state(states: pd.Series) -> pd.Series:
+    """Which state keys name a US state or territory (``US_STATE_KEYS``),
+    read with letters and single spaces only: a filer who typed "N.Y.",
+    "D.C." or "NY 10001" gave a US state."""
+    bare = (states.fillna('').astype(str).str.lower().str.replace(r'[^a-z ]', '', regex=True)
+            .str.replace(r'\s+', ' ', regex=True).str.strip())
+    return bare.isin(US_STATE_KEYS)
+
+
 # Abbreviations and truncations grant rows use for words the filer spells
 # out ("univ of florida fndtn", "umass foundat", "mt st vincent"); each
 # pattern matches the whole token.
@@ -2180,17 +2226,84 @@ def resolve_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df
     return matches
 
 
+def no_us_address(grants_df: pd.DataFrame) -> pd.Series:
+    """Which grant tuples give no US address: the state key is not a US
+    state or territory (``US_STATE_KEYS``: empty, or a foreign province),
+    or a row of the tuple names a country other than the US
+    (``foreign_country``, the grants view's column, where the frame has
+    it). One boolean per row, on the frame's index.
+
+    A foreign address fills the US address columns, so until 2026-10-30
+    the Global Fund's grants, keyed "ge" and "1218", were a tuple with a
+    state for the tiers: the exact-name tier asks for the state to agree
+    with a filer's, which a province never does, and the name-only tier
+    asked for no state at all. Measured on the rows of 2026-10-30: every
+    domestic row of our extract carries a state code, and GT's rows with an
+    empty state key are foreign (Paris, Jerusalem, Nairobi, Beijing),
+    whatever their zip key; the country column is set on every foreign row
+    of our extract and on 7 of GT's, which carry USA on 1.5M domestic rows
+    and nothing on the rest (docs/foreign-recipients-name-only-2026-10-30.md).
+    """
+    foreign = ~us_state(grants_df['addressstate_key'])
+    if 'foreign_country' in grants_df:
+        foreign |= grants_df['foreign_country'].eq(True)
+    return foreign
+
+
+def one_word_namesakes(grants_df: pd.DataFrame, filers_df: pd.DataFrame) -> np.ndarray:
+    """The one-word guard of the name-only tier: which name-only matches it
+    refuses. ``grants_df`` holds the matched grant tuples and ``filers_df``
+    the universe row each would match, row for row. A match is refused when
+    all four hold:
+
+    - the tuple has a foreign address in its keys: no US address
+      (``no_us_address``) and a state or a zip key. A tuple with no address
+      at all is matched as before 2026-10-30;
+    - its cleaned name is one word;
+    - the filer's row is at a US address (``US_STATE_KEYS``);
+    - the filer's EIN is not a 98- EIN, the IRS's prefix for a foreign
+      organization, which is the recipient's own registration.
+
+    A name that one filer alone carries is strong evidence when it has
+    several words and weak when it has one: unrelated groups share an
+    acronym or a short word. The proof of the rule found grants to CNRS in
+    Paris going to a CNRS in Nebraska, to BRAC in Dhaka to a BRAC in
+    Nebraska, to FAU in Erlangen to an FAU in South Carolina, and to the UK
+    charities Crisis, Catch22 and Foxglove to namesakes in Michigan and
+    Texas: 246 tuples, 400 rows and $44M, most of them another
+    organization. The guard refuses a few right ones with them (EarthEnable,
+    a US nonprofit working in Rwanda, $1.5M). Zein chose it on 2026-10-30
+    (docs/foreign-recipients-name-only-2026-10-30.md). A longer namesake
+    (the Hospital for Sick Children in Washington for SickKids in Toronto)
+    is for the corrections registry.
+    """
+    keyed = (grants_df['addressstate_key'].fillna('').str.strip() != '') | (
+        grants_df['addresszip_key'].fillna('').str.strip() != '')
+    abroad = (no_us_address(grants_df) & keyed).to_numpy()
+    one_word = (grants_df['full_name'].str.split().str.len() == 1).to_numpy()
+    filer_in_us = us_state(filers_df['addressstate_key']).to_numpy()
+    domestic = ~filers_df['filerein_key'].astype(str).str.startswith('98').to_numpy()
+    return abroad & one_word & filer_in_us & domestic
+
+
 def name_only_matches(universe_df: pd.DataFrame, grants_df: pd.DataFrame, matched,
-                      placeholder: pd.Series | None = None) -> pd.DataFrame:
-    """The name-only tier: a grant tuple with no state and no zip, which
-    no other tier matched, and whose cleaned name belongs to exactly one
-    filer of the universe. ``placeholder`` is the mask of
-    ``placeholder_names`` when the caller has it already.
+                      placeholder: pd.Series | None = None, eligible: pd.Series | None = None,
+                      one_word_guard: bool = True) -> pd.DataFrame:
+    """The name-only tier: a grant tuple with no US address, which no other
+    tier matched, and whose cleaned name belongs to exactly one filer of
+    the universe. ``placeholder`` is the mask of ``placeholder_names`` when
+    the caller has it already; ``eligible`` is the mask of the tuples the
+    tier may take, ``no_us_address`` unless a proof passes another.
 
     A name several filers share is never matched, whatever its length:
-    that is what rules out most one-word names. A tuple with a state is not
-    for this tier; the exact-name tier matches it where the state agrees,
-    and nothing matches it where it does not.
+    that is what rules out most one-word names. A tuple with a US state is
+    not for this tier; the exact-name tier matches it where the state
+    agrees, and nothing matches it where it does not. A tuple with a
+    foreign address (a province, a postal code, a country other than the
+    US) has no US state to agree with anything: it is for this tier, as a
+    tuple with no address is, but for a one-word name whose only filer is
+    a domestic organization at a US address (``one_word_namesakes``;
+    ``one_word_guard`` sets the guard aside to measure it).
 
     Returns one row per tuple matched: the two positions (``INDEX_COLS``;
     the universe row is the filer's first row under the name) and
@@ -2198,8 +2311,7 @@ def name_only_matches(universe_df: pd.DataFrame, grants_df: pd.DataFrame, matche
     consumer can be stricter than the rule.
     """
     open_ = grants_df[
-        (grants_df['addressstate_key'].str.strip() == "")
-        & (grants_df['addresszip_key'].str.strip() == "")
+        (no_us_address(grants_df) if eligible is None else eligible)
         & (grants_df['full_name'] != "")
         & ~(placeholder_names(grants_df) if placeholder is None else placeholder)
         & ~grants_df.index.isin(matched)
@@ -2209,8 +2321,15 @@ def name_only_matches(universe_df: pd.DataFrame, grants_df: pd.DataFrame, matche
     first = named[named['full_name'].isin(owners[owners == 1].index)].drop_duplicates('full_name')
     row_of = pd.Series(first.index, index=first['full_name'])
     found = open_[open_['full_name'].isin(row_of.index)]
+    rows = row_of.reindex(found['full_name']).to_numpy()
+    if one_word_guard and len(found):
+        refused = one_word_namesakes(found, universe_df.loc[rows])
+        if refused.any():
+            logger.info(f"Name-only tier: {int(refused.sum())} grant tuples with a foreign address refused, "
+                        "their one-word name a domestic filer's at a US address.")
+        found, rows = found[~refused], rows[~refused]
     return pd.DataFrame({
-        INDEX_COLS[0]: row_of.reindex(found['full_name']).to_numpy(),
+        INDEX_COLS[0]: rows,
         INDEX_COLS[1]: found.index.to_numpy(),
         'match_name_words': found['full_name'].str.split().str.len().to_numpy(),
     }).astype('int64').assign(match_tier=NAME_ONLY)
@@ -2218,15 +2337,22 @@ def name_only_matches(universe_df: pd.DataFrame, grants_df: pd.DataFrame, matche
 
 def all_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df: pd.DataFrame,
                 one_filer_in_state: str = ONE_FILER_IN_STATE, *, guards: bool = True,
-                ranking: str = RANKING) -> pd.DataFrame:
+                ranking: str = RANKING, eligible: pd.Series | None = None,
+                one_word_guard: bool | None = None) -> pd.DataFrame:
     """Every match of a run, one row per grant tuple matched: the winners
     of the scored pairs under ``ranking``, then the name-only tier on what
     they left. ``match_tier`` says which; ``match_name_words`` is missing
-    but on a name-only match."""
+    but on a name-only match. ``eligible`` and ``one_word_guard`` are the
+    name-only tier's (``name_only_matches``): a proof passes them to
+    measure another rule. ``guards`` sets the precision guards aside for a
+    gain measurement, the one-word guard with them unless
+    ``one_word_guard`` says otherwise."""
+    one_word_guard = guards if one_word_guard is None else one_word_guard
     placeholder = placeholder_names(grants_df)  # one pass of the pattern over the grant tuples
     matches = resolve_matches(features, universe_df, grants_df, one_filer_in_state, guards=guards,
                               ranking=ranking, placeholder=placeholder)
-    name_only = name_only_matches(universe_df, grants_df, matches[INDEX_COLS[1]], placeholder)
+    name_only = name_only_matches(universe_df, grants_df, matches[INDEX_COLS[1]], placeholder, eligible=eligible,
+                                  one_word_guard=one_word_guard)
     logger.info(f"Name-only tier: {len(name_only)} grant tuples matched on a name that belongs to one filer.")
     name_only = name_only.assign(name_score=1.0, addr_score=float("nan"))
     matches = pd.concat([matches.assign(match_name_words=pd.NA), name_only], ignore_index=True)
