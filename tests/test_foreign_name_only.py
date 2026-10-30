@@ -133,7 +133,9 @@ def test_the_gains_by_year_kind_and_recipient_and_the_sentinel_floor():
         "name2_key": "", "address1_key": ["chemin du pommier 40"] * 2 + ["babuji memorial ashram"], "address2_key": "",
         "addresscity_key": ["geneva", "geneva", "chennai"], "addressstate_key": ["ge", "ge", "tn"],
         "addresszip_key": ["1218", "1218", "60000"], "taxyear": ["2023", "2024", "2024"],
-        "n_rows": [1, 2, 2], "dollars": [100.0, 200.0, 200.0], "our_rows": [1, 2, 2], "recovered_rows": 0})
+        "n_rows": [1, 2, 2], "dollars": [100.0, 200.0, 200.0], "our_rows": [1, 2, 2], "recovered_rows": 0,
+        # the flags ride on every year row, as extract writes them
+        "foreign_country": [False, False, True], "pool": True, "gate": False, "sample": False})
     by_year = fn.gained_by_year(gained, years).set_index("taxyear")
     assert by_year.loc["2024", ["tuples", "rows", "dollars", "pool_rows"]].tolist() == [2, 4, 400.0, 4]
     assert by_year.loc["all", ["tuples", "rows", "dollars"]].tolist() == [2, 5, 500.0]

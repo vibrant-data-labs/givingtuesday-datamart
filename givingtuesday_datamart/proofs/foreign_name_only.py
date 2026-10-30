@@ -270,7 +270,9 @@ def summarize(results: pd.DataFrame) -> pd.DataFrame:
 def gained_by_year(gained: pd.DataFrame, years: pd.DataFrame) -> pd.DataFrame:
     """The rows and dollars of the tuples gained under the rule after, by
     tax year: all of them, the pool's, and our extract's rows."""
-    found = years.merge(gained[gm._KEYS + ["pool", "ein"]], on=gm._KEYS, how="inner")
+    # The year rows repeat the tuple's flags: the tuple's own come from ``gained``.
+    found = years.drop(columns=[flag for flag in ("foreign_country", "pool", "gate", "sample") if flag in years]).merge(
+        gained[gm._KEYS + ["pool", "ein"]], on=gm._KEYS, how="inner")
     table = found.groupby("taxyear").agg(tuples=("ein", "size"), rows=("n_rows", "sum"), dollars=("dollars", "sum"),
                                         our_rows=("our_rows", "sum"), recovered_rows=("recovered_rows", "sum"))
     pool = found[found["pool"]].groupby("taxyear").agg(pool_rows=("n_rows", "sum"), pool_dollars=("dollars", "sum"))
