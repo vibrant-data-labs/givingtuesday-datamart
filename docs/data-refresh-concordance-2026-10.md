@@ -306,13 +306,16 @@ unrecovered.
 
 ### 8. The matcher (the 256 GB box, quiet window, Zein's go; about seven hours)
 
-- [ ] `python -m givingtuesday_datamart.placeholder_recovery check --policy v3`.
-- [ ] `python -m givingtuesday_datamart.corrections_preflight` (2 h 50 min
-      in October).
+- [x] `python -m givingtuesday_datamart.placeholder_recovery check --policy v3`.
+- [x] `python -m givingtuesday_datamart.corrections_preflight` (2 h 50 min
+      in October; 2 h 49 min on 10-29, `GATE: PASS`).
 - [ ] `python -m givingtuesday_datamart.grant_matching --workers 12`: a
       full run, which rebuilds the `_current` relations and stamps them.
       In October the integer index took about an hour and the pool an hour
-      and a half.
+      and a half. The first attempt of 10-30 was stopped by the watchdog
+      at the 35 GB storage floor during the rebuild (see the log): a full
+      run dips about 30 GB below its resting level twice, once in the
+      rebuild and once in the write phase, each a single transaction.
 - [ ] `python -m givingtuesday_datamart.matching_regression_checks`:
       `GATE: PASS`, or the diagnosis of what moved.
 - [ ] `python -m givingtuesday_datamart.placeholder_recovery check --policy v3`.
@@ -549,3 +552,40 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   The watchdog saw our backend on 14 polls, no breach, swap 0.00 GB, free
   storage 57.8 GB throughout. Everything the matcher reads is in place:
   step 8 is next, on the go-ahead, from the staged `run-matcher.sh`.
+- **2026-10-29 to 10-30, step 8, first attempt.** 23:29 to 02:50 UTC under
+  the watchdog (`run-matcher.sh` beside the logs), the box's clone on
+  285701d. `check --policy v3` passed at 23:29. The corrections preflight
+  ran 23:29 to 02:19, 2 h 49 min, October's time to the minute: all 27
+  correction rows survive the universe dedup, every verbatim tuple wins to
+  its EIN at a name score of 1.00 from the correction source, every row
+  wins at least one grant tuple, and the same two advisory warnings as in
+  October (rows 8 and 26 were authored without a sighted grant row);
+  `GATE: PASS`. The matcher started at 02:19 as build 8112f05d and rebuilt
+  the `_current` relations in one transaction: the three basic-fields
+  relations by 02:24 (3,992,135 / 1,226,420 / 2,257,600 rows, the counts of
+  step 2), `grants_to_domestic_organizations_current` by 02:30 (9,190,418),
+  and it was 19 minutes into `privategrants_current` when free storage
+  touched 34.99 GB; the watchdog cancelled the backend and stopped the run
+  (exit 2). The cancel rolled the whole rebuild back: every `_current`
+  relation is the one steps 2 and 4 built (their statistics timestamps are
+  unchanged), nothing is half-built, no backend was left behind, and free
+  storage was back at 57.9 GB within the minute. Lineage records the build
+  as `failed` at 02:50:28. Why this dip is deeper than step 4's 15 GB: the
+  matcher rebuilds the six relations inside one transaction, and a table
+  dropped inside a transaction gives its space back only at commit, so the
+  old and new copies of all six coexist, about 26 GB, plus the sort spill;
+  the standalone rebuild of step 4 commits per relation. CloudWatch shows
+  the same shape on October's complete run of the same code: the rebuild
+  dipped from 69.9 to 39.5 GB (10-27, 16:00 to 16:50) and the write phase,
+  which swaps its two output tables in one transaction by design, from
+  69.7 to 41.7 GB (10-28, 03:30 to 03:50). The run now starts from 57.9 GB
+  rather than 69.9 (October's outputs are 10 GB larger than August's), so
+  the rebuild's trough falls near 29 GB and the write's between 28 and
+  38 GB: under the 35 GB floor, and 25 GB or more above empty on the 300 GB
+  volume, consumed at no more than a gigabyte a minute against a poll every
+  minute. My proposal for the second attempt, Zein's call: `run-matcher-2.sh`
+  (beside the logs) under the watchdog with `--min-free-gb 25`, starting at
+  the matcher, since the check and the preflight passed on this very data
+  and nothing has been written since; about four hours. For afterwards: the
+  rebuild and the write committing per relation, so a full run no longer
+  needs 30 GB of headroom (a PR, not a change mid-run).
