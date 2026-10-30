@@ -155,3 +155,13 @@ def test_the_gains_by_year_kind_and_recipient_and_the_sentinel_floor():
 
 def test_a_98_ein_is_the_recipients_own_registration_and_any_other_a_domestic_ein():
     assert fn.kind_of(pd.Series(["980380092", "311685031", ""])).tolist() == [fn.KIND_FOREIGN, fn.KIND_DOMESTIC, ""]
+
+
+def test_the_gate_guards_the_class_with_a_floor_on_a_foreign_recipient():
+    """The Global Fund is the gate's canary for grants to foreign
+    recipients matched on the name alone: a 98- EIN, the recipient's own
+    registration, with a floor the proof set."""
+    from givingtuesday_datamart.matching_regression_checks import RECIPIENT_SENTINEL_FLOORS
+
+    label, floor = RECIPIENT_SENTINEL_FLOORS[fn.GLOBAL_FUND]
+    assert fn.GLOBAL_FUND.startswith("98") and "foreign" in label and floor > 0

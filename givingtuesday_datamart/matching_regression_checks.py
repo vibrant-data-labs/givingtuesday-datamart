@@ -72,6 +72,16 @@ RECIPIENT_SENTINEL_FLOORS = {
     # should go under: the commit that accepts the first run under the new
     # order sets it from that run.
     "520595110": ("Johns Hopkins University", 190),
+    # The Global Fund, in Geneva: the canary of grants to foreign recipients
+    # matched on the name alone. Their address fills the US address columns
+    # with a province and a postal code, which kept them off the name-only
+    # tier until input shape 8 (docs/foreign-recipients-name-only-2026-10-30.md).
+    # 8 rows on 2026-10-30; the proof of the rule expects 56 on the next run
+    # (10 tuples and 48 rows gained, $1.89B), and the floor is 95% of that:
+    # set before the first run under the rule, so against the output of
+    # 2026-10-30 this line fails. The commit that accepts that run sets it
+    # from the run's own count.
+    "980380092": ("Global Fund (foreign, on the name alone)", 53),
 }
 # Recipient-side ceilings: EIN as matched recipient, maximum matched rows,
 # for an EIN that took another organization's grants.
