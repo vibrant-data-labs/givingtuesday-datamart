@@ -98,9 +98,13 @@ they do.
   box, each in its own `tmux -L refresh` session, logging to
   `~/logs/refresh-concordance/`.
 - A watchdog over the instance through every heavy step: stop under 35 GB
-  of free storage, on a rise of more than 0.5 GB of swap from the watch's
-  start (the metric keeps reporting pages swapped out earlier), under 0.3 GB
-  of freeable memory; on a breach it cancels the box's backends. New in this
+  of free storage (10 GB for step 8's second attempt, my decision of
+  2026-10-30 after the first attempt stopped at 35: the matcher's rebuild
+  and its write phase are each one transaction and dip about 30 GB, and no
+  one else was on the instance), on a rise of more than 0.5 GB of swap from
+  the watch's start (the metric keeps reporting pages swapped out earlier),
+  under 0.3 GB of freeable memory; on a breach it cancels the box's
+  backends. New in this
   run: the watchdog is repo code and runs on the box, not a script on a
   laptop whose connection drops.
 - The builder's memory comes from `bigdb.env` only while the instance is
@@ -589,3 +593,9 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   and nothing has been written since; about four hours. For afterwards: the
   rebuild and the write committing per relation, so a full run no longer
   needs 30 GB of headroom (a PR, not a change mid-run).
+- **2026-10-30, step 8, second attempt started.** 04:15 UTC,
+  `run-matcher-2.sh` under the watchdog with `--min-free-gb 10`, my call
+  rather than the 25 GB proposed: the first attempt showed the shape of the
+  dips, and no one else uses the instance tonight. It starts at the
+  matcher; the check and the preflight stand from the first attempt, with
+  nothing written in between. About four hours.
