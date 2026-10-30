@@ -252,7 +252,7 @@ def test_the_run_carries_the_winning_name_and_scores_into_the_output():
     assert found["match_name"] == "university of chicago"
     assert found["match_name_score"] == 1.0
     assert found["match_addr_score"] == 0.5
-    src = inspect.getsource(grant_matching.write_matches)
+    src = inspect.getsource(grant_matching._write_privategrants_w_recipients)
     assert re.search(r"pfgm\.match_name,\s*pfgm\.match_name_score,\s*pfgm\.match_addr_score\s*INTO public", src)
 
 

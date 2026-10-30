@@ -525,11 +525,14 @@ def test_line_25_is_the_kept_urls_own():
 
 
 class _Result:
-    def __init__(self, rows=None, row=None):
-        self.rows, self.returns_rows, self.row = rows or [], rows is not None, row
+    def __init__(self, rows=None, row=None, value=16_648_094):
+        self.rows, self.returns_rows, self.row, self.value = rows or [], rows is not None, row, value
 
     def scalar_one(self):
-        return 16_648_094
+        return self.value
+
+    def scalar(self):
+        return self.value
 
     def fetchall(self):
         return self.rows
