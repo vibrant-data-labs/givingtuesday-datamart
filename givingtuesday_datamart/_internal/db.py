@@ -60,8 +60,10 @@ def get_session(
     """Yield a transactional session against the postgres in ``config``.
 
     Builds a fresh engine + session per call. Commits on clean exit,
-    rolls back + re-raises on exception, always closes.
+    rolls back + re-raises on exception, always closes, and disposes the
+    engine it built.
     """
+    engine = None
     if session is None:
         engine = _engine_from_config(config)
         session = sessionmaker(bind=engine)()
@@ -74,3 +76,10 @@ def get_session(
         raise
     finally:
         session.close()
+        # A closed session returns its connection to the engine's pool,
+        # and the engine sits in a reference cycle that only a full
+        # garbage collection frees: an idle backend on the shared instance
+        # for every session a run opens until then (the matcher opens a
+        # dozen). Disposing the engine this call built closes it at once.
+        if engine is not None:
+            engine.dispose()

@@ -284,7 +284,7 @@ row does not, so "university of utah" no longer resolves to the
 University of Utah Asia Campus
 ([docs/matching-precision-guards.md](docs/matching-precision-guards.md)).
 At the start of every run it reloads the corrections CSV,
-rebuilds all four filing-version-deduped `_current` relations
+rebuilds all six filing-version-deduped `_current` relations
 ([`current_grants.py`](givingtuesday_datamart/current_grants.py), issues
 #33 and #34), and recreates the matching views — no separate step needed.
 
@@ -301,6 +301,47 @@ any input change forces a clean recompute at a fresh prefix.
 memory and needs an r7a.4xlarge-class host (~128 GB). A 16 GB laptop is
 killed at the indexing step. Checkpoints make interrupted runs cheap to
 resume on the same inputs.
+
+**Storage:** two phases of the run dip the shared instance's free
+storage and give it back: the rebuild of the six `_current` relations
+and the write of the two output tables. Postgres frees a dropped table's
+files only when the transaction that dropped it commits, so a phase
+holds the old and the new copy of whatever it rebuilds until it commits.
+The rebuild commits one relation at a time (since October 2026; one
+transaction for all six, held to the end of the reads, dipped 27 GB on
+2026-10-30, the six copies being about 26 GB with their indexes), so its
+dip is one relation's new copy with its indexes plus the sort spill of
+that build, and which phase is the deeper depends on the class the
+database instance runs as:
+
+- On the enlarged class with the larger memory budget (`work_mem` 1 GB;
+  the 2026-10-30 figures): the rebuild dips about 13 GB
+  (`privategrants_current` is 11.4 GB, its spill a gigabyte or two) and
+  the write phase about 26 GB, the deeper of the two. The write phase is
+  one transaction by design, so a failure leaves both output tables as
+  the last run left them; `--commit-between-outputs` commits
+  `privategrants_w_recipients` in a transaction of its own before
+  `unioned_grants` is rebuilt, roughly 9 GB less at the deepest point, at
+  the cost of that guarantee: a failure in the second transaction leaves
+  the two tables from different runs, the build row failed with the new
+  table's count, until the matcher is rerun with `--skip-rebuild`. From
+  the 59 GB free in October 2026, a floor of 30 GB or lower, or the
+  watchdog's default 35 GB with the flag.
+- On the medium class at the builder's defaults (`work_mem` 64 MB): the
+  sorts of the `privategrants_current` build spill some 20 GB more, and
+  that one build dipped 32 GB on 2026-10-27, deeper than the write phase
+  and untouched by the flag. From 59 GB free, a floor of 25 GB or lower;
+  a full run does not pass the default floor there.
+
+Set the watchdog's floor
+([`watchdog.py`](givingtuesday_datamart/watchdog.py), `--min-free-gb`,
+35 GB by default) under the deeper phase's dip from the free storage the
+run starts with. Two smaller things hold either way: the last run's join
+table (`pf_grant_matching_temp_table`, under a gigabyte) is dropped in a
+transaction of its own before the write phase, so its old copy is not
+held through it, and the views over `privategrants_current` are
+recreated in the transaction that rebuilds it, so no session sees them
+gone.
 
 ### Trace a filing back to the IRS
 
