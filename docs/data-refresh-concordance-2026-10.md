@@ -332,9 +332,13 @@ unrecovered.
 
 ### 9. The accepting commit (laptop)
 
-- [ ] The baselines updated in one commit, every number that moved
+- [x] The baselines updated in one commit, every number that moved
       explained with the census, the gate rerun on `PASS`
       (`docs/matching-regression-runbook.md`, *Updating the baselines*).
+      Done as 66b4f76 on 10-30: the gate rerun with the new baselines 19
+      PASS, 1 WARN, no FAIL (13:41 to 13:48 UTC); the census after at
+      13:54 UTC, three relations moved, each explained in the commit and
+      the log.
 
 ### 10. Close out
 
@@ -367,7 +371,19 @@ unrecovered.
   27 GB the two troughs of 10-30 took, and runs under the 35 GB floor by
   day. The write phase is one transaction by design (a failure leaves no
   stale `unioned_grants`); committing after `privategrants_w_recipients`
-  trades that for the headroom, a decision for the PR.
+  trades that for the headroom, a decision for the PR. PR #87 (open on
+  10-30): the rebuild commits one relation at a time, and the write
+  phase's two transactions are an opt-in flag, `--commit-between-outputs`,
+  off by default; its headroom after the change is arithmetic on the
+  relation sizes, not measured, so the next full run measures it.
+- A corrections row for Johns Hopkins University at the campus address
+  (3400 N Charles Street, Baltimore). The club's filing there still takes
+  the 428 grants that name the university or one of its schools inexactly
+  ("johns hopkins", "johns hopkins u", "johns hopkins medicine") at that
+  address, where no filer name is exact and the address decides; the gate's
+  ceiling on the club is that count, from the run of 10-30. A row of the
+  registry giving the university a filer row at the campus address would
+  take them under `named_first`.
 
 ## Appendix: SQL
 
@@ -672,3 +688,57 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   took 7 h 18 min over its two attempts, the seven hours planned. No
   backend but ours was on the database when it ended. Next: step 9, the
   accepting commit, with the census after as its evidence.
+- **2026-10-30, step 9: the accepting commit, `GATE: PASS`.** The box's
+  part 13:41 to 13:54 UTC under the watchdog at its default floor
+  (`run-step9.sh`, `step9.log` and `watchdog-step9.log` beside the logs:
+  14 polls, no breach, free storage 61.9 to 61.0 GB, swap flat at
+  0.04 GB), all of it read-only. The baselines of
+  `matching_regression_checks.py` moved to the run's numbers by the
+  runbook's rules, every move explained in the commit (66b4f76,
+  *Regression baselines: accept the 2026-10-30 run*): the coverage floors
+  PF 71.9 and 990 94.7; the Michael J. Fox Foundation's floor 4,434 (95%
+  of 4,667; 3,204 in August and 4,668 on 10-28, so the rise is the BMF
+  arm's 958 rows, 272 recovered rows and 297 rows of 2025 filer-years,
+  not the winner order); Johns Hopkins University 3,659 (95% of 3,852,
+  all on its own filing, none left to a BMF line); the club's ceiling
+  428, the count itself, since no grant row names the club: its 428 rows
+  name the university or one of its schools inexactly ("johns hopkins",
+  "johns hopkins u", "johns hopkins medicine") at 3400 N Charles Street,
+  where no filer name is exact and the address decides (Afterwards: a
+  corrections row); self-matches 3,419; the rows per arm as observed, the
+  BMF arm's first accepted run, the PF arm's fall the move between arms
+  the step 8 entry describes; placeholder, corporate, foreign and person
+  rows, the Gates Trust and the government guard unchanged. The gate
+  rerun on the box with the edited module copied into the clone's working
+  tree, the commit waiting on its result as the runbook asks: 19 PASS, 1
+  WARN (the recovered rows of lists marked as grants to individuals, a
+  count to look at by design), no FAIL. The census after against the
+  census before of 10-29 17:10 UTC, which preceded steps 1 to 8: 34
+  relation-years moved, all in the three relations the run wrote; the
+  seven source relations unchanged to the row and the dollar in every tax
+  year, so the reload under the new concordance and the patch changed
+  what the columns hold, not which rows exist.
+
+  | relation | rows before | rows after | moved | $B before | $B after | moved |
+  |---|---|---|---|---|---|---|
+  | privategrants_current_w_recovered | 582,471 | 584,684 | +2,213 | 16.21 | 16.31 | +0.10 |
+  | privategrants_w_recipients | 10,927,644 | 10,925,841 | -1,803 | 488.79 | 486.39 | -2.40 |
+  | unioned_grants | 19,879,313 | 19,877,536 | -1,777 | 1,937.37 | 1,934.98 | -2.39 |
+
+  The recovered view's rows are step 6's load (53 filings, 2,213 rows,
+  $102.3M, in 2023 and 2024). The matcher's two tables against October's
+  output under the old order: the 415 placeholder rows October matched are
+  out of the grants view since input shape 6, and their aggregate amounts
+  are the dollars (-$1.01B in 2023 and -$0.96B in 2024, where the pattern
+  rows of `privategrants_current` carry $7M a row on average); the 2,213
+  new recovered rows add matches (389,807 of the 584,684 loaded rows
+  match, 66.7%); the name-only tier matched 40,394 grant tuples against
+  41,221; the one-filer-in-the-state rule left 3,310 tuples unmatched in
+  both runs. October's output is gone, so the split of the 1,803 rows
+  among these is not measured; the 1.96 million rows `named_first` moved
+  between arms change no count. The offline suite passes (860).
+  `tests/test_precision_guards.py` no longer pins the BMF arm's baseline
+  at 0; the runbook's pointer to the worked example is fixed (`4131d27`,
+  not a hash from before a rebase) and names 66b4f76 as the second. The
+  box's clone pulled to the commit afterwards. The matcher's per-relation
+  commits are PR #87 (Afterwards). Next: step 10.
