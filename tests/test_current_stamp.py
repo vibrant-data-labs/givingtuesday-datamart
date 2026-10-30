@@ -5,9 +5,15 @@ older dedup rules, must never be written under a newer prefix. A run builds
 and stamps each relation in a transaction of its own
 (``current_grants.build_current_relations``), recreating in it the views the
 build's DROP ... CASCADE took, so a relation carries a stamp only when it is
-complete and the views are never seen gone. The sessions are faked; the real
-session helper commits each one or rolls it back."""
+complete and the views are never seen gone. ``sources refresh``, ``own_extract
+patch`` and the canonical build rebuild the basic-fields relations through the
+same function, one transaction each, and are driven here on the same fakes.
+The sessions are faked; the real session helper commits each one or rolls it
+back."""
+import argparse
 import json
+import logging
+import re
 from functools import partial
 
 import pandas as pd
@@ -24,7 +30,9 @@ from test_pf_current_rules import _Connection as _BuildConnection, _Result  # no
 VERSIONS = {"irs_990pf_grants": "2026_10_25", "irs_990_basic_fields": "2026_10_25",
             "irs_990pf_basic_fields": "2026_10_25", "irs_eo_bmf": "2026_10_13"}
 TABLES = [t for t, _ in gm._CURRENT_TABLES]
+BASIC_FIELDS = [t for t, _ in cg._BASIC_FIELDS_TABLES]
 STAMP = gm._current_stamp(VERSIONS, "build-1")
+_real_get_session = db.get_session      # the helper itself, for the modules that import it at call time
 
 
 class _Connection(_BuildConnection):
@@ -32,17 +40,26 @@ class _Connection(_BuildConnection):
     a connection, over the build fake: the catalog's comments (one dict
     shared by every session of a rebuild, written by COMMENT ON TABLE,
     taken by DROP TABLE, read by obj_description), the policy the view
-    shows, the source versions, and a statement to fail on."""
+    shows, the source versions, the relations whose run id differs from
+    their staging table's (``stale``) or that do not exist (``missing``),
+    and a statement to fail on (a prefix, or several)."""
 
-    def __init__(self, catalog, fail_on=None, shown=None, versions=None):
+    def __init__(self, catalog, fail_on=None, shown=None, versions=None, stale=(), missing=()):
         super().__init__([])
         self.catalog, self.fail_on, self.shown, self.versions = catalog, fail_on, shown, versions
+        self.stale, self.missing = set(stale), set(missing)
 
     def execute(self, statement, params=None):
         sql = str(statement)
         if self.fail_on and sql.lstrip().startswith(self.fail_on):
             self.statements.append(sql)
             raise RuntimeError("could not extend file: No space left on device")
+        if sql.startswith("SELECT to_regclass('public.") and sql.endswith("IS NOT NULL"):
+            self.statements.append(sql)
+            return _Result(value=sql.split("'")[1].removeprefix("public.") not in self.missing)
+        if "IS DISTINCT FROM" in sql and "_ingest_run_id" in sql:
+            self.statements.append(sql)
+            return _Result(value=re.findall(r"FROM public\.(\w+)\)", sql)[-1] in self.stale)
         if sql.startswith("COMMENT ON TABLE "):
             self.statements.append(sql)
             self.catalog[sql.split()[3]] = params["stamp"]
@@ -62,10 +79,11 @@ class _Connection(_BuildConnection):
 
 
 def sessions_of(monkeypatch, catalog, module=cg, versions_after=None, **connection) -> list[Session]:
-    """Every session ``module``'s get_session opens, in order, each on a
-    connection over the shared catalog and run by the real helper with its
-    engine replaced; ``versions_after`` answers the source versions from
-    the second session on."""
+    """Every session ``module``'s get_session opens (one module or several),
+    in order, each on a connection over the shared catalog and run by the
+    real helper with its engine replaced, carrying the outcomes of the
+    sessions before it as it opened (``opened_after``); ``versions_after``
+    answers the source versions from the second session on."""
     opened: list[Session] = []
 
     def open_session(config=None):
@@ -73,12 +91,19 @@ def sessions_of(monkeypatch, catalog, module=cg, versions_after=None, **connecti
         if versions_after is not None and opened:
             answers["versions"] = versions_after
         session = Session(_Connection(catalog, **answers), state=catalog)
-        session.config = config
+        session.config, session.opened_after = config, [s.outcome for s in opened]
         opened.append(session)
-        return db.get_session(session=session)
+        return _real_get_session(session=session)
 
-    monkeypatch.setattr(module, "get_session", open_session)
+    for each in module if isinstance(module, tuple) else (module,):
+        monkeypatch.setattr(each, "get_session", open_session)
     return opened
+
+
+def built_in(session) -> list[str]:
+    """The relations the session's transaction built."""
+    return [sql.split()[2] for sql in session.connection().statements
+            if sql.lstrip().startswith("CREATE TABLE public.")]
 
 
 def hook(policy="v3", stamp=STAMP):
@@ -251,3 +276,136 @@ def test_a_relation_rebuilt_elsewhere_during_the_run_stops_the_run(monkeypatch):
     catalog = {}
     with pytest.raises(RuntimeError, match="basic_fields_current do not carry the stamp"):
         run_inputs(monkeypatch, catalog, after_build=lambda: catalog.pop("public.basic_fields_current"))
+
+
+# --- the refresh, the patch and the canonical build ---------------------------
+
+
+def test_the_stale_check_compares_each_relations_run_id_with_its_staging_tables():
+    connection = _Connection({}, stale={"basic_fields_pf_current"}, missing={"basic_fields_ez_current"})
+    assert cg.stale_basic_fields_current(connection) == ["basic_fields_pf_current", "basic_fields_ez_current"]
+    compared = [sql for sql in connection.statements if "IS DISTINCT FROM" in sql]
+    assert len(compared) == 2 and "FROM public.basic_fields)" in compared[0]       # a missing relation is not compared
+    assert "FROM public.basic_fields_current)" in compared[0] and "FROM public.basic_fields_pf)" in compared[1]
+
+
+def refresh(monkeypatch, catalog, reloaded, **connection):
+    """``sources refresh``'s rebuild of the relations of the staging tables
+    it ``reloaded``, with the sessions faked: its answer and the sessions."""
+    from givingtuesday_datamart import ingestion
+    from givingtuesday_datamart.sources import __main__ as sources
+
+    monkeypatch.setattr(ingestion, "datamart_config", lambda: {"host": "shared"})
+    opened = sessions_of(monkeypatch, catalog, module=(cg, db), **connection)     # db: imported at call time there
+    return sources._rebuild_dependent_current(set(reloaded)), opened
+
+
+def test_a_refresh_rebuilds_the_relations_of_the_sources_it_reloaded_one_transaction_each(monkeypatch):
+    ok, opened = refresh(monkeypatch, {}, {"basic_fields_pf", "basic_fields", "schedule_o"})
+    assert ok
+    assert [built_in(s) for s in opened] == [["public.basic_fields_current"], ["public.basic_fields_pf_current"]]
+    assert [s.outcome for s in opened] == ["committed", "committed"]
+    assert opened[1].opened_after == ["committed"]                                 # the first committed before the second began
+    assert [s.config for s in opened] == [{"host": "shared"}] * 2
+    assert not any("COMMENT ON" in sql or "VIEW " in sql for s in opened for sql in s.connection().statements)
+    ok, opened = refresh(monkeypatch, {}, {"schedule_o"})
+    assert ok and opened == []
+
+
+def test_a_refresh_that_fails_on_the_second_relation_keeps_the_first_and_names_the_rest(monkeypatch, caplog):
+    with caplog.at_level(logging.ERROR):
+        ok, opened = refresh(monkeypatch, {}, {"basic_fields", "basic_fields_pf", "basic_fields_ez"},
+                             fail_on="CREATE TABLE public.basic_fields_pf_current",
+                             stale={"basic_fields_pf_current", "basic_fields_ez_current"})
+    assert not ok
+    assert [s.outcome for s in opened] == ["committed", "rolled back", "committed"]
+    assert [built_in(s) for s in opened] == [["public.basic_fields_current"], ["public.basic_fields_pf_current"], []]
+    check = opened[2].connection().statements                                     # after the rollback, in a session of its own
+    assert check and all("to_regclass" in sql or "IS DISTINCT FROM" in sql for sql in check)
+    assert "rebuilding basic_fields_current, basic_fields_pf_current, basic_fields_ez_current FAILED" in caplog.text
+    assert "basic_fields_current rebuilt and committed; basic_fields_pf_current, basic_fields_ez_current do not match staging" in caplog.text
+    assert "python -m givingtuesday_datamart.current_grants --only basic_fields_pf_current --only basic_fields_ez_current" in caplog.text
+
+
+def test_when_the_check_after_a_failure_cannot_run_the_error_says_to_rerun_for_every_relation(monkeypatch, caplog):
+    with caplog.at_level(logging.WARNING):
+        ok, opened = refresh(monkeypatch, {}, {"basic_fields", "basic_fields_pf"},
+                             fail_on=("CREATE TABLE public.basic_fields_pf_current", "SELECT to_regclass"))
+    assert not ok and [s.outcome for s in opened] == ["committed", "rolled back", "rolled back"]
+    assert "Could not check which of basic_fields_current, basic_fields_pf_current match staging" in caplog.text
+    assert "could not be checked, so rerun for all of them: python -m givingtuesday_datamart.current_grants " \
+           "--only basic_fields_current --only basic_fields_pf_current" in caplog.text
+
+
+def patch_cli(monkeypatch, catalog, **connection):
+    """``own_extract patch`` with the patch itself and the sessions faked."""
+    from givingtuesday_datamart.own_extract import __main__ as cli
+
+    monkeypatch.setattr(cli, "datamart_config", lambda: {})
+    monkeypatch.setattr(cli.parity, "prepare", lambda session: None)
+    monkeypatch.setattr(cli.patch, "apply", lambda session: {
+        "basic_fields": {"gt_release": "2026_06_16", "gt_rows": 10, "earlier_patch_rows": 0, "inserted": 12}})
+    return cli, sessions_of(monkeypatch, catalog, module=(cli, cg), **connection)
+
+
+def test_the_patch_commits_then_rebuilds_the_basic_fields_relations_one_transaction_each(monkeypatch, capsys):
+    cli, opened = patch_cli(monkeypatch, {})
+    assert cli._patch(argparse.Namespace()) == 0
+    assert [s.outcome for s in opened] == ["committed"] * 4
+    assert [built_in(s) for s in opened] == [[]] + [[f"public.{t}"] for t in BASIC_FIELDS]
+    assert "SET statement_timeout = 0" in opened[0].connection().statements        # the patch's session builds nothing
+    assert opened[1].opened_after == ["committed"]
+    out = capsys.readouterr().out
+    assert out.index("basic_fields: GT's 2026_06_16 less 10 rows") < out.index("public.basic_fields_current rebuilt: 16,648,094 rows")
+    assert "public.basic_fields_ez_current rebuilt: 16,648,094 rows" in out
+
+
+def test_a_patch_whose_rebuild_fails_keeps_the_patch_and_the_relations_before_the_failure(monkeypatch, capsys):
+    cli, opened = patch_cli(monkeypatch, {}, fail_on="CREATE TABLE public.basic_fields_pf_current")
+    with pytest.raises(RuntimeError, match="No space left"):
+        cli._patch(argparse.Namespace())
+    assert [s.outcome for s in opened] == ["committed", "committed", "rolled back"]
+    out = capsys.readouterr().out
+    assert "public.basic_fields_current rebuilt" in out and "basic_fields_pf_current rebuilt" not in out
+
+
+def canonical_build(monkeypatch, catalog, **connection):
+    """``sources build-canonical`` with the identity builds faked: the
+    module, the sessions, and each identity build with the session it ran on."""
+    from givingtuesday_datamart.canonical import build as cb
+
+    ran: list[tuple[str, int]] = []
+    opened = sessions_of(monkeypatch, catalog, module=(cb, cg), **connection)
+    monkeypatch.setattr(cb, "datamart_config", lambda: {})
+    monkeypatch.setattr(cb, "ensure_canonical_meta", lambda: None)
+    monkeypatch.setattr(cb, "latest_successful_run_ids", lambda: {"irs_990_basic_fields": "run-2"})
+    for name in ("_build_schedule_o_part_iii", "_build_nonprofit_canonical", "_build_nonprofit_text",
+                 "_build_funder_canonical"):
+        monkeypatch.setattr(cb, name, lambda session, name=name: ran.append((name, opened.index(session))) or 3)
+    return cb, opened, ran
+
+
+def test_the_canonical_build_checks_staleness_and_rebuilds_before_its_own_transaction(monkeypatch):
+    cb, opened, ran = canonical_build(monkeypatch, {}, stale={"basic_fields_pf_current"})
+    result = cb.build_canonical()
+    assert [s.outcome for s in opened] == ["committed"] * 5
+    assert [built_in(s) for s in opened] == [[], [], ["public.basic_fields_pf_current"], [], []]
+    check = opened[1].connection().statements
+    assert check and all("to_regclass" in sql or "IS DISTINCT FROM" in sql for sql in check)
+    assert [i for _, i in ran] == [3] * 4 and opened[3].opened_after == ["committed"] * 3   # one transaction, after the rebuild committed
+    assert any("status = 'success'" in sql for sql in opened[4].connection().statements)
+    assert result.nonprofit_canonical_rows == 3
+    cb, opened, ran = canonical_build(monkeypatch, {})                                  # nothing stale: no rebuild
+    cb.build_canonical()
+    assert [built_in(s) for s in opened] == [[], [], [], []] and [i for _, i in ran] == [2] * 4
+
+
+def test_a_canonical_build_whose_rebuild_fails_keeps_the_relations_before_it_and_ends_failed(monkeypatch):
+    cb, opened, ran = canonical_build(monkeypatch, {}, stale={"basic_fields_current", "basic_fields_pf_current"},
+                                      fail_on="CREATE TABLE public.basic_fields_pf_current")
+    with pytest.raises(RuntimeError, match="No space left"):
+        cb.build_canonical()
+    assert [s.outcome for s in opened] == ["committed", "committed", "committed", "rolled back", "committed"]
+    assert [built_in(s) for s in opened] == [[], [], ["public.basic_fields_current"], ["public.basic_fields_pf_current"], []]
+    assert ran == []                                                                    # the identity builds never began
+    assert any("status = 'failed'" in sql for sql in opened[4].connection().statements)

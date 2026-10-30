@@ -395,6 +395,9 @@ class Session:
     def connection(self):
         return self.connection_
 
+    def execute(self, statement, params=None):
+        return self.connection_.execute(statement, params)
+
     def commit(self):
         self.outcome = "committed"
 

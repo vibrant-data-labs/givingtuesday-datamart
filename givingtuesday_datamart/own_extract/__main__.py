@@ -42,6 +42,7 @@ from pathlib import Path
 from sqlalchemy import text
 
 from givingtuesday_datamart._internal.db import get_session
+from givingtuesday_datamart.current_grants import _BASIC_FIELDS_TABLES, build_current_relations
 from givingtuesday_datamart.ingestion import datamart_config
 from givingtuesday_datamart.own_extract import (batches, checks, discover, extract, load, parity, patch,
                                                 proof, release, report)
@@ -272,9 +273,10 @@ def _discover(args) -> int:
 def _patch(args) -> int:
     # After `sources refresh`: GT's rows under our urls out, ours in, in one
     # transaction; then the basic-fields relations the client reads, as a
-    # refresh rebuilds them. The grants relations are the matcher run's.
-    from givingtuesday_datamart.current_grants import build_basic_fields_current
-
+    # refresh rebuilds them, each in a transaction of its own
+    # (build_current_relations) and reported once it has committed, so a
+    # failure shows what is rebuilt already (`current_grants --only` the
+    # rest). The grants relations are the matcher run's.
     with get_session(config=datamart_config()) as session:
         parity.prepare(session)
         session.execute(text("SET statement_timeout = 0"))
@@ -282,9 +284,9 @@ def _patch(args) -> int:
     for table, c in counts.items():
         print(f"{table}: GT's {c['gt_release']} less {c['gt_rows']:,} rows, earlier patch rows "
               f"{c['earlier_patch_rows']:,} out, ours {c['inserted']:,} in", flush=True)
-    with get_session(config=datamart_config()) as session:
-        for table, n in build_basic_fields_current(session.connection()).items():
-            print(f"public.{table} rebuilt: {n:,} rows", flush=True)
+    for table, ddl in _BASIC_FIELDS_TABLES:
+        n = build_current_relations(datamart_config(), [(table, ddl)])[table]
+        print(f"public.{table} rebuilt: {n:,} rows", flush=True)
     return 0
 
 

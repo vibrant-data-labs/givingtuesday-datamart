@@ -341,7 +341,10 @@ table (`pf_grant_matching_temp_table`, under a gigabyte) is dropped in a
 transaction of its own before the write phase, so its old copy is not
 held through it, and the views over `privategrants_current` are
 recreated in the transaction that rebuilds it, so no session sees them
-gone.
+gone. The refresh, the own-extract patch and the canonical build rebuild
+the three basic-fields relations (about 8 GB of the 26) the same way,
+one transaction each, so none of them holds more than one relation's old
+copy at a time either.
 
 ### Trace a filing back to the IRS
 
@@ -407,11 +410,14 @@ python -m givingtuesday_datamart.sources loaded
 
 # 2. Refresh staging. Validation (hard-fail + soft-warn) runs per
 #    source automatically; already-loaded (source, version) pairs skip.
-#    Reloading basic_fields / basic_fields_pf also rebuilds their
-#    _current relations (~11.5 min) — the client, the frontend and the
-#    canonical identity builds read those, so a reload that left them
-#    behind would serve the previous drop. The grants _current relations
-#    are NOT rebuilt here; matching owns those.
+#    Reloading basic_fields / basic_fields_pf / basic_fields_ez also
+#    rebuilds their _current relations (~11.5 min), each in a transaction
+#    of its own — the client, the frontend and the canonical identity
+#    builds read those, so a reload that left them behind would serve
+#    the previous drop. A rebuild that fails part-way leaves the
+#    relations built before it in place; the error names the rest and
+#    the `current_grants --only` command that rebuilds them. The grants
+#    _current relations are NOT rebuilt here; matching owns those.
 python -m givingtuesday_datamart.sources refresh
 
 # 3. Verify the refresh before building anything on top: every source
@@ -419,10 +425,11 @@ python -m givingtuesday_datamart.sources refresh
 python -m givingtuesday_datamart.sources loaded
 
 # 4. Rebuild the canonical layer (~10 min). Checks that
-#    basic_fields[_pf]_current match staging before building identity
-#    from them, and rebuilds only if they don't — normally a no-op,
-#    since step 2 already did it. Reads public.eo_bmf for the BMF
-#    columns, so refresh irs_eo_bmf first when the IRS has republished.
+#    basic_fields[_pf|_ez]_current match staging before building identity
+#    from them, and rebuilds only the ones that don't, each committed
+#    before the canonical transaction opens — normally a no-op, since
+#    step 2 already did it. Reads public.eo_bmf for the BMF columns, so
+#    refresh irs_eo_bmf first when the IRS has republished.
 python -m givingtuesday_datamart.sources build-canonical
 
 # 5. Corrections preflight (~10 min, any machine). Required after any

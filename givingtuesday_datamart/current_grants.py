@@ -1070,28 +1070,6 @@ def _log_unhalved_doubles(found: list[tuple[str, str]]) -> None:
         len(found), ", ".join(f"{ein}/{year}" for ein, year in found[:10]))
 
 
-def build_basic_fields_current(
-    connection, *, only: Iterable[str] | None = None
-) -> dict[str, int]:
-    """(Re)build the two filer-financial relations. Returns row counts.
-
-    Split out from the full rebuild because these are what the ingestion
-    path and the canonical layer care about: the grants relations are the
-    expensive ones (10-30 min each against 11-20 GB) and are read only by
-    the matching pipeline, which rebuilds them itself at the start of
-    every run.
-
-    ``only`` restricts the rebuild to the named ``_current`` relations —
-    a refresh of just ``irs_990pf_basic_fields`` has no reason to rebuild
-    the 990 side.
-    """
-    wanted = _BASIC_FIELDS_TABLES
-    if only is not None:
-        keep = set(only)
-        wanted = tuple((t, d) for t, d in _BASIC_FIELDS_TABLES if t in keep)
-    return {table: _build_one(connection, table, ddl) for table, ddl in wanted}
-
-
 def stale_basic_fields_current(connection) -> list[str]:
     """Which filer-financial ``_current`` relations no longer match staging.
 
@@ -1132,6 +1110,13 @@ def build_current_relations(config: dict, tables: Iterable[tuple[str, str]] = _T
     """(Re)build the ``_current`` relations in ``tables`` (every one by
     default), each in a session and transaction of its own against the
     database ``config`` names. Returns row counts.
+
+    Every rebuild goes through here: the matcher's and the CLI's below of
+    all six, ``sources refresh``'s and ``own_extract patch``'s of the
+    basic-fields relations (what the client, the frontend and the
+    canonical identity builds read), the canonical build's of the ones it
+    finds stale (``stale_basic_fields_current``), and the own-extract
+    release's on a scratch host.
 
     One transaction per relation, never one for all of them: Postgres
     frees a dropped table's files only when the transaction that dropped

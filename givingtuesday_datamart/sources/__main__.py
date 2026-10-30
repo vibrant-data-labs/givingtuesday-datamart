@@ -339,44 +339,78 @@ def _rebuild_dependent_current(reloaded_tables: set[str]) -> bool:
     each — rebuilding them here would turn a routine refresh into a
     much longer job to no one's benefit.
 
+    Each relation is rebuilt in a transaction of its own
+    (``current_grants.build_current_relations``), so a failure leaves the
+    relations built before it complete and committed and only the rest on
+    the previous drop. The error says which is which, from a check of
+    every relation against staging once the failed transaction has rolled
+    back, and gives the command that rebuilds what is left.
+
     A failure here does NOT invalidate the ingest: the staging data is
     loaded and its run row stays 'success'. It's loud, and it sets a
     non-zero exit so the caller notices, but the fix is to rerun the
     rebuild, not the refresh.
     """
-    from givingtuesday_datamart._internal.db import get_session
-    from givingtuesday_datamart.current_grants import (
-        build_basic_fields_current,
-        stale_basic_fields_current,
-    )
+    from givingtuesday_datamart.current_grants import build_current_relations, with_dependents
     from givingtuesday_datamart.ingestion import datamart_config
 
-    wanted = sorted(
+    wanted = with_dependents(
         f"{table}_current"
         for table in reloaded_tables
         if table in ("basic_fields", "basic_fields_pf", "basic_fields_ez")
     )
     if not wanted:
         return True
+    names = [table for table, _ddl in wanted]
 
-    logger.info("Rebuilding filing-version dedup relations: %s", ", ".join(wanted))
+    logger.info("Rebuilding filing-version dedup relations, one transaction each: %s", ", ".join(names))
     try:
-        with get_session(config=datamart_config()) as session:
-            counts = build_basic_fields_current(session.connection(), only=wanted)
+        counts = build_current_relations(datamart_config(), wanted)
     except Exception:
         logger.exception(
             "Staging reloaded successfully, but rebuilding %s FAILED. The "
-            "staging tables are correct; %s still hold the previous drop's "
-            "rows, so the client, the frontend and the canonical identity "
-            "builds will read stale data until this is rerun: "
-            "python -m givingtuesday_datamart.current_grants",
-            ", ".join(wanted),
-            ", ".join(wanted),
+            "staging tables are correct, and each relation commits on its "
+            "own. %s",
+            ", ".join(names),
+            _what_is_left(names, _stale_after_failure(names)),
         )
         return False
     for table, count in counts.items():
         logger.info("public.%s rebuilt: %s rows", table, f"{count:,}")
     return True
+
+
+def _stale_after_failure(wanted: list[str]) -> list[str] | None:
+    """The basic-fields relations that differ from staging once a rebuild
+    has failed: the ones the failure left on the previous drop, a missing
+    one included (``current_grants.stale_basic_fields_current``, in a
+    session of its own, after the failed transaction rolled back). None
+    when the check itself cannot run."""
+    from givingtuesday_datamart._internal.db import get_session
+    from givingtuesday_datamart.current_grants import stale_basic_fields_current
+    from givingtuesday_datamart.ingestion import datamart_config
+
+    try:
+        with get_session(config=datamart_config()) as session:
+            return stale_basic_fields_current(session.connection())
+    except Exception as err:
+        logger.warning("Could not check which of %s match staging: %s", ", ".join(wanted), err)
+        return None
+
+
+def _what_is_left(names: list[str], left: list[str] | None) -> str:
+    """What a failed rebuild of ``names`` leaves behind, given the relations
+    that differ from staging after it, and the command that rebuilds them."""
+    if left is None:
+        state, left = "Which of them match staging could not be checked, so rerun for all of them", names
+    else:
+        rebuilt = [table for table in names if table not in left]
+        state = f"{', '.join(rebuilt)} rebuilt and committed" if rebuilt else "None committed"
+        if not left:
+            return f"{state}; every relation matches staging now, nothing to rerun."
+        state += (f"; {', '.join(left)} do not match staging, so the client, the frontend and the canonical "
+                  "identity builds read stale data from them until they are rebuilt")
+    return f"{state}: python -m givingtuesday_datamart.current_grants {' '.join(f'--only {t}' for t in left)}"
 
 
 def cmd_refresh(source_names: list[str] | None, *, force: bool) -> int:

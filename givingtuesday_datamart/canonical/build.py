@@ -51,8 +51,9 @@ from sqlalchemy import text
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart.current_grants import (
-    build_basic_fields_current,
+    build_current_relations,
     stale_basic_fields_current,
+    with_dependents,
 )
 from givingtuesday_datamart.ingestion import (
     INGEST_RUNS_TABLE,
@@ -1020,8 +1021,11 @@ def build_canonical(*, include_people: bool = False) -> BuildResult:
 
     All tables build inside a single transaction so a failure leaves the
     old canonical state intact — downstream consumers never see a
-    half-built canonical layer. The overall build is recorded in
-    ``datamart_meta.canonical_builds`` for lineage.
+    half-built canonical layer. The basic-fields ``_current`` relations
+    the build finds stale are rebuilt before that transaction, each in
+    one of its own (``current_grants.build_current_relations``). The
+    overall build is recorded in ``datamart_meta.canonical_builds`` for
+    lineage.
 
     ``include_people`` controls the officers-derived tables
     (``person_canonical`` + ``org_person_role``). They are off by default
@@ -1060,22 +1064,33 @@ def build_canonical(*, include_people: bool = False) -> BuildResult:
         build_id, include_people,
     )
     try:
+        # Both identity builds read basic_fields[_pf][_ez]_current. The
+        # ingestion path rebuilds those as part of any refresh that
+        # reloads their source, so this is normally a no-op — but it
+        # is checked rather than assumed, because building identity
+        # from the previous drop is silent and would persist until
+        # someone noticed a stale name or a missing EIN. The guard is
+        # two scalar reads per relation.
         with get_session(config=datamart_config()) as session:
-            # Both identity builds read basic_fields[_pf][_ez]_current. The
-            # ingestion path rebuilds those as part of any refresh that
-            # reloads their source, so this is normally a no-op — but it
-            # is checked rather than assumed, because building identity
-            # from the previous drop is silent and would persist until
-            # someone noticed a stale name or a missing EIN. The guard is
-            # two scalar reads per relation.
             stale = stale_basic_fields_current(session.connection())
-            if stale:
-                logger.warning(
-                    "%s stale or missing — rebuilding before identity builds. "
-                    "Expected only if staging was loaded outside `sources refresh`.",
-                    ", ".join(stale),
-                )
-                build_basic_fields_current(session.connection(), only=stale)
+        if stale:
+            logger.warning(
+                "%s stale or missing — rebuilding before identity builds. "
+                "Expected only if staging was loaded outside `sources refresh`.",
+                ", ".join(stale),
+            )
+            # Before the identity builds' transaction, one transaction per
+            # relation (build_current_relations), not inside theirs: the
+            # rebuild has to precede the identity builds, and that is all
+            # it has to do. Inside theirs, Postgres would hold every rebuilt
+            # relation's old copy on disk until the whole build committed
+            # (a dropped table's files are freed at commit), and a failed
+            # identity build would roll the rebuilt relations back with
+            # it. A failure here leaves the relations rebuilt before it
+            # committed, the canonical tables untouched, and the build row
+            # 'failed' like any other.
+            build_current_relations(datamart_config(), with_dependents(stale))
+        with get_session(config=datamart_config()) as session:
             # schedule_o_part_iii must land before nonprofit_text because the
             # text build reads from it. All builds share one transaction so
             # downstream consumers never see a half-built canonical layer.
