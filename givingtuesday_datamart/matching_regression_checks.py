@@ -20,15 +20,17 @@ hard rules are what holds.
 Operational guide — how to diagnose a failure and when/how to update the
 baselines below: docs/matching-regression-runbook.md.
 
-Baselines are the August 4, 2026 run (2026_06 source drops +
-filing-version dedup + expanded corrections registry; matched rows
-6.04M -> 7.58M). After a matcher change is *accepted* (per the
-evaluation protocol in the proposal), update the baselines here in the
-same commit — they define "no worse than the last accepted matcher."
+Baselines are the October 30, 2026 run (the June 2026 GT release patched
+from the IRS batch archive under concordance ce054c032e56, the BMF of
+2026-10-13 as the filer universe's fourth arm, the recovered grants of
+policy v3, the named_first recipient ranking; matched rows 7.58M ->
+10.93M). After a matcher change is *accepted* (per the evaluation
+protocol in the proposal), update the baselines here in the same commit
+— they define "no worse than the last accepted matcher."
 
-Two checks added 2026-10-15 with the precision guards (no new accepted run;
-their constants are measured on the August 4 output): the match_source
-breakdown, and government-named recipients matched below an exact name.
+Two checks added 2026-10-15 with the precision guards and first accepted
+on the October 30 run: the match_source breakdown, and government-named
+recipients matched below an exact name (a hard zero).
 """
 
 from __future__ import annotations
@@ -53,25 +55,34 @@ from givingtuesday_datamart.grant_matching import Relations
 from givingtuesday_datamart.placeholder_recovery import loader as recovered_loader
 from givingtuesday_datamart.placeholder_recovery.view import FROM_RECOVERY
 
-# --- Baselines: August 4, 2026 run (dedup + corrections registry) ---------
+# --- Baselines: October 30, 2026 run (own extract + BMF arm + named_first) --
 
 # Recall floors — a matcher change must not lose previously-won coverage.
-PF_PAIR_COVERAGE_FLOOR = 63.1       # %, external labeled pairs, PF funders
-NP_PAIR_COVERAGE_FLOOR = 94.5       # %, 990 funders. Not moved by matching
-                                    # itself — the jump from 84.7 came from the
-                                    # 2026_06 Schedule I drop (Fidelity et al.);
-                                    # a drop below means data went missing.
+PF_PAIR_COVERAGE_FLOOR = 71.9       # %, external labeled pairs, PF funders.
+                                    # 63.1 on August 4; the BMF arm lifted it
+                                    # to 71.2 (2026-10-28, the old winner
+                                    # order) and named_first to 71.9.
+NP_PAIR_COVERAGE_FLOOR = 94.7       # %, 990 funders. Not moved by matching
+                                    # itself — the jump from 84.7 to 94.5 came
+                                    # from the 2026_06 Schedule I drop (Fidelity
+                                    # et al.), 94.7 since 2026-10-28; a drop
+                                    # below means data went missing.
 # Recipient-side sentinels: EIN as matched recipient, minimum matched rows
-# (95% of the August 4 count, so ordinary data drift doesn't trip the gate).
+# (95% of the October 30 count, so ordinary data drift doesn't trip the gate).
 RECIPIENT_SENTINEL_FLOORS = {
-    "134141945": ("Michael J. Fox Foundation", 3044),      # 3,204 rows (corrections)
+    # 4,667 rows of the 5,369 grant rows that name it (3,204 on August 4;
+    # 4,668 on 2026-10-28 under the old winner order, so the rise is not the
+    # order: 958 rows come through a BMF line carrying its name, 272 are
+    # recovered grants, 297 are 2025 filer-years of the IRS patch).
+    "134141945": ("Michael J. Fox Foundation", 4434),
     # The university. Its 990 gives the tax office at 3910 Keswick Road, so
     # under the weighted winner order the grants naming it at the campus
     # went to the club and to BMF lines carrying its name, and it won 200
-    # rows on 2026-10-27 (95%: 190). Provisional, as a floor no ranking
-    # should go under: the commit that accepts the first run under the new
-    # order sets it from that run.
-    "520595110": ("Johns Hopkins University", 190),
+    # rows on 2026-10-27 (a provisional floor of 190 in PR #84). Under
+    # named_first its filing holds the grants that name it: 3,852 rows on
+    # 2026-10-30, 2,314 by address and name, 1,538 by state and name, none
+    # left to a BMF line.
+    "520595110": ("Johns Hopkins University", 3659),
 }
 # Recipient-side ceilings: EIN as matched recipient, maximum matched rows,
 # for an EIN that took another organization's grants.
@@ -79,47 +90,67 @@ RECIPIENT_SENTINEL_CEILINGS = {
     # The Johns Hopkins Club, a social club at a Cockeysville PO box in care
     # of the university. Until 2026-10-28 a floor guarded it as if it were
     # the university: 1,826 rows on August 4, the university's grants
-    # matched to its filing at the campus address; 706 on 2026-10-27. It
-    # keeps what names it; it must not grow back.
-    "520368135": ("Johns Hopkins Club (held the university's rows)", 706),
+    # matched to its filing at the campus address; 706 on 2026-10-27, once
+    # BMF lines carrying the university's name took part of them; 428 on
+    # 2026-10-30 under named_first. No grant row names the club: the 428
+    # name the university or one of its schools inexactly ("johns hopkins",
+    # "johns hopkins u", "johns hopkins medicine", "... whiting school of
+    # engineering") at 3400 N Charles Street, the campus address the club's
+    # filing gives, so no filer name is exact and the address decides. A
+    # residual for the corrections registry (the university at the campus
+    # address); as a wrong-recipient class its ceiling is the count itself.
+    "520368135": ("Johns Hopkins Club (held the university's rows)", 428),
 }
 # Funder-side sentinels: EIN as funder, minimum rows that matched anything.
 FUNDER_SENTINEL_FLOORS = {
-    "911663695": ("Gates Trust (transfer to Gates Foundation)", 9),  # 10 rows
+    "911663695": ("Gates Trust (transfer to Gates Foundation)", 9),  # 10 rows, as on August 4
 }
 
 # Precision ceilings — false-positive classes must not grow faster than the
-# matched corpus. Absolute counts from the August 4 run (matched rows +25%
-# vs July 23; every class below grew slower than that).
+# matched corpus. Absolute counts from the October 30 run (matched rows +44%
+# vs August 4; no class below grew).
 PLACEHOLDER_ROWS_MATCHED_CEILING = 0       # hard zero since input shape 6: the
                                            # grants view leaves out every tuple
                                            # whose name keys match the pattern,
                                            # and the check counts with that same
                                            # predicate. August: 349; 2026-10-27:
-                                           # 415 (59 bare "SEE" to BMF orgs SEE).
-CORPORATE_NAME_ROWS_MATCHED_CEILING = 14   # proxy: rows named PFIZER%
+                                           # 415 (59 bare "SEE" to BMF orgs SEE);
+                                           # 2026-10-30: 0.
+CORPORATE_NAME_ROWS_MATCHED_CEILING = 14   # proxy: rows named PFIZER%; 14 since
+                                           # August 4.
 FOREIGN_ROWS_MATCHED_CEILING = 2           # proxy: WORLD HEALTH ORGANI%. The
                                            # 2nd row is "WORLD HEALTH ORGANIZATION
                                            # OF UN FDN" -> UN Foundation
                                            # (521071570) — a defensible match the
                                            # name proxy can't distinguish.
 PERSON_ROWS_MATCHED_CEILING = 0            # hard zero
-SELF_MATCH_CEILING = 3641                  # funder matched to itself; tracked,
-                                           # uninvestigated — do not let it grow
+SELF_MATCH_CEILING = 3419                  # funder matched to itself; tracked,
+                                           # uninvestigated — do not let it grow.
+                                           # 3,641 on August 4, 3,661 on
+                                           # 2026-10-28, 3,419 on 2026-10-30.
 
-# Matched rows per arm of the filer universe (August 4 run; eo_bmf had not
-# joined the universe yet — its first rerun sets the number). Reported, and
-# a WARN when an arm moves more than MATCH_SOURCE_SHIFT_WARN from here, never
-# a FAIL: when an arm is added rows move between arms by design (a BMF
-# alias identical to a filed tuple collapses into the filing; a correction
-# the BMF now supplies is prunable, docs/corrections-plan.md), and the
-# recall floors above are what must hold. A shift nobody expected is still
-# the first thing to look at (runbook question 2).
+# Matched rows per arm of the filer universe (October 30 run, the first
+# accepted with the eo_bmf arm in the universe and under named_first).
+# Reported, and a WARN when an arm moves more than MATCH_SOURCE_SHIFT_WARN
+# from here, never a FAIL: when an arm is added rows move between arms by
+# design (a BMF alias identical to a filed tuple collapses into the filing;
+# a correction the BMF now supplies is prunable, docs/corrections-plan.md),
+# and the recall floors above are what must hold. A shift nobody expected
+# is still the first thing to look at (runbook question 2).
+# Against August 4 (7,478,348 / 85,071 / 0 / 15,376): the BMF arm's first
+# run; basic_fields_pf is down 18.5% because the recipients that file a
+# 990-PF now match through a BMF line carrying their name (21,877 rows) or
+# a 990 filing of theirs (20,371) as well as through their PF filing
+# (69,348) — 111,596 rows for them, more than August's 85,071, and the PF
+# coverage floor rose. Against the old order's run of 2026-10-28
+# (5,718,304 / 60,316 / 5,132,662 / 16,362) named_first moved 1.96M rows
+# from eo_bmf to basic_fields: the filing wins over the BMF line of the
+# same organization.
 MATCH_SOURCE_ROWS_BASELINE = {
-    "basic_fields": 7478348,
-    "basic_fields_pf": 85071,
-    "eo_bmf": 0,
-    "correction": 15376,
+    "basic_fields": 7679858,
+    "basic_fields_pf": 69348,
+    "eo_bmf": 3160323,
+    "correction": 16312,
 }
 MATCH_SOURCE_SHIFT_WARN = 0.05
 # Government-named recipients ("city of", "university of", ... —
@@ -132,7 +163,8 @@ MATCH_SOURCE_SHIFT_WARN = 0.05
 # the University of Utah Asia Campus, "university of chicago" -> its cancer
 # research foundation; exploratory.government_name_guard reproduces the
 # count) and has no match_name_score column, so against it the check
-# reports itself skipped. docs/matching-precision-guards.md.
+# reports itself skipped. 0 of 8,059 non-exact government-named rows on
+# 2026-10-30 (0 of 8,191 on 2026-10-28). docs/matching-precision-guards.md.
 GOVERNMENT_NONEXACT_ROWS_CEILING = 0
 
 AMT = r"CASE WHEN {col} ~ '^-?[0-9]+(\.[0-9]+)?$' THEN {col}::numeric END"

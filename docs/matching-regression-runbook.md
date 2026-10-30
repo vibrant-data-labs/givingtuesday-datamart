@@ -155,7 +155,10 @@ statement of "this is the quality we accepted":
   the name pattern can't tell apart from a real WHO grant).
 - Rerun the gate after updating; commit only on `GATE: PASS`.
 
-Commit `0a3f8e9` (August 4, 2026) is the worked example to imitate.
+Commit `4131d27` (August 4, 2026) is the worked example to imitate, and
+*Regression baselines: accept the 2026-10-30 run* (October 30, 2026,
+`git log --grep 'accept the 2026-10-30 run'`) the second: a run whose
+arms moved by design, each move explained from the output.
 
 ## A worked failure, so you know what "normal" looks like
 
