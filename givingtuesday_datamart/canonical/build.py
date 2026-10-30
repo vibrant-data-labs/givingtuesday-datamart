@@ -51,9 +51,10 @@ from sqlalchemy import text
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart.current_grants import (
+    apply_build_memory,
+    basic_fields_relations,
     build_current_relations,
     stale_basic_fields_current,
-    with_dependents,
 )
 from givingtuesday_datamart.ingestion import (
     INGEST_RUNS_TABLE,
@@ -235,28 +236,31 @@ def ensure_canonical_meta() -> None:
         )
 
 
-def latest_successful_run_ids() -> dict[str, str | None]:
+def latest_successful_run_ids(connection=None) -> dict[str, str | None]:
     """Map each logical_name → most recent successful run_id (or None).
 
     Recorded on every canonical build (and every grant matching run) so we
     can later answer "which source versions is this canonical/matched
     table derived from?" without re-deriving. Shared between the Phase 2
-    canonical builder and the grant matching pipeline.
+    canonical builder and the grant matching pipeline. Read on
+    ``connection``, in the caller's transaction, when one is given.
     """
     from givingtuesday_datamart.sources.registry import REGISTRY
 
-    with get_session(config=datamart_config()) as session:
-        rows = session.execute(
-            text(
-                f"""
-                SELECT DISTINCT ON (logical_name)
-                    logical_name, run_id::text, source_version
-                FROM {INGEST_RUNS_TABLE}
-                WHERE status = 'success'
-                ORDER BY logical_name, finished_at DESC
-                """
-            )
-        ).all()
+    if connection is None:
+        with get_session(config=datamart_config()) as session:
+            return latest_successful_run_ids(session.connection())
+    rows = connection.execute(
+        text(
+            f"""
+            SELECT DISTINCT ON (logical_name)
+                logical_name, run_id::text, source_version
+            FROM {INGEST_RUNS_TABLE}
+            WHERE status = 'success'
+            ORDER BY logical_name, finished_at DESC
+            """
+        )
+    ).all()
     latest = {r.logical_name: f"{r.run_id}@{r.source_version}" for r in rows}
     # Backfill None for any registered source that has never successfully run.
     for spec in REGISTRY:
@@ -1016,6 +1020,26 @@ def _build_org_person_role(session) -> int:
     return count
 
 
+def _open_identity_transaction(connection, source_runs: dict[str, str | None]) -> None:
+    """Ready the identity builds' transaction on ``connection``: the
+    builder's memory budget (``current_grants.apply_build_memory``, the one
+    every build on the shared instance runs at), and the basic-fields
+    staging tables and ``_current`` relations locked until it commits
+    (ACCESS SHARE: reads go on, a refresh's DROP waits for the commit).
+    Then stop the build if a source was ingested since ``source_runs`` was
+    read at its start: the staleness check and the rebuild before this
+    transaction hold no lock across it, so a refresh could have landed in
+    between, and the build row would name runs the identity builds did not
+    read."""
+    apply_build_memory(connection)
+    tables = [name for table, _ddl in basic_fields_relations() for name in (table.removesuffix("_current"), table)]
+    connection.execute(text(f"LOCK TABLE {', '.join(f'public.{t}' for t in tables)} IN ACCESS SHARE MODE"))
+    now = latest_successful_run_ids(connection)
+    moved = sorted(name for name, run in now.items() if run != source_runs.get(name))
+    if moved:
+        raise RuntimeError(f"{', '.join(moved)} ingested since the canonical build began: run it again")
+
+
 def build_canonical(*, include_people: bool = False) -> BuildResult:
     """Rebuild all Phase 2 canonical tables from current staging.
 
@@ -1023,9 +1047,11 @@ def build_canonical(*, include_people: bool = False) -> BuildResult:
     old canonical state intact — downstream consumers never see a
     half-built canonical layer. The basic-fields ``_current`` relations
     the build finds stale are rebuilt before that transaction, each in
-    one of its own (``current_grants.build_current_relations``). The
-    overall build is recorded in ``datamart_meta.canonical_builds`` for
-    lineage.
+    one of its own (``current_grants.build_current_relations``); the
+    transaction then holds them until it commits, and stops if a source
+    was ingested since the build began (``_open_identity_transaction``).
+    The overall build is recorded in ``datamart_meta.canonical_builds``
+    for lineage.
 
     ``include_people`` controls the officers-derived tables
     (``person_canonical`` + ``org_person_role``). They are off by default
@@ -1069,28 +1095,23 @@ def build_canonical(*, include_people: bool = False) -> BuildResult:
         # reloads their source, so this is normally a no-op — but it
         # is checked rather than assumed, because building identity
         # from the previous drop is silent and would persist until
-        # someone noticed a stale name or a missing EIN. The guard is
-        # two scalar reads per relation.
+        # someone noticed a stale name or a missing EIN. The check reads
+        # each relation and its staging table in full
+        # (stale_basic_fields_current).
         with get_session(config=datamart_config()) as session:
             stale = stale_basic_fields_current(session.connection())
         if stale:
             logger.warning(
                 "%s stale or missing — rebuilding before identity builds. "
-                "Expected only if staging was loaded outside `sources refresh`.",
+                "Expected only if staging was loaded outside `sources refresh`, "
+                "or a refresh's rebuild of them failed.",
                 ", ".join(stale),
             )
-            # Before the identity builds' transaction, one transaction per
-            # relation (build_current_relations), not inside theirs: the
-            # rebuild has to precede the identity builds, and that is all
-            # it has to do. Inside theirs, Postgres would hold every rebuilt
-            # relation's old copy on disk until the whole build committed
-            # (a dropped table's files are freed at commit), and a failed
-            # identity build would roll the rebuilt relations back with
-            # it. A failure here leaves the relations rebuilt before it
-            # committed, the canonical tables untouched, and the build row
-            # 'failed' like any other.
-            build_current_relations(datamart_config(), with_dependents(stale))
+            # One transaction each, before the identity builds': inside
+            # theirs, a failed identity build would roll them back too.
+            build_current_relations(datamart_config(), basic_fields_relations(stale))
         with get_session(config=datamart_config()) as session:
+            _open_identity_transaction(session.connection(), source_runs)
             # schedule_o_part_iii must land before nonprofit_text because the
             # text build reads from it. All builds share one transaction so
             # downstream consumers never see a half-built canonical layer.

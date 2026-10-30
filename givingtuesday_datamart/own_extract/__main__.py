@@ -42,7 +42,8 @@ from pathlib import Path
 from sqlalchemy import text
 
 from givingtuesday_datamart._internal.db import get_session
-from givingtuesday_datamart.current_grants import _BASIC_FIELDS_TABLES, build_current_relations
+from givingtuesday_datamart._internal.logger import configure_cli_logging
+from givingtuesday_datamart.current_grants import basic_fields_relations, build_current_relations
 from givingtuesday_datamart.ingestion import datamart_config
 from givingtuesday_datamart.own_extract import (batches, checks, discover, extract, load, parity, patch,
                                                 proof, release, report)
@@ -137,10 +138,6 @@ def _parity(args) -> int:
 def _gt_release(args) -> int:
     # GT's release into a scratch host's public.<table>, for `parity --host`:
     # production's staging holds our rows since the patch.
-    import logging
-
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
-                        datefmt="%H:%M:%S")
     for summary in release.load(_config(args.host), args.version, args.table or None, args.jobs):
         print(f"{summary['table']}: {summary['kept']:,} of GT's {summary['gt_rows']:,} rows kept "
               f"({summary['file']}, {summary['bytes'] / 1e9:.2f} GB, sha256 {summary['sha256'][:12]})",
@@ -273,10 +270,9 @@ def _discover(args) -> int:
 def _patch(args) -> int:
     # After `sources refresh`: GT's rows under our urls out, ours in, in one
     # transaction; then the basic-fields relations the client reads, as a
-    # refresh rebuilds them, each in a transaction of its own
-    # (build_current_relations) and reported once it has committed, so a
-    # failure shows what is rebuilt already (`current_grants --only` the
-    # rest). The grants relations are the matcher run's.
+    # refresh rebuilds them, one transaction each (build_current_relations
+    # logs each as it commits and names what is left on a failure). The
+    # grants relations are the matcher run's.
     with get_session(config=datamart_config()) as session:
         parity.prepare(session)
         session.execute(text("SET statement_timeout = 0"))
@@ -284,9 +280,7 @@ def _patch(args) -> int:
     for table, c in counts.items():
         print(f"{table}: GT's {c['gt_release']} less {c['gt_rows']:,} rows, earlier patch rows "
               f"{c['earlier_patch_rows']:,} out, ours {c['inserted']:,} in", flush=True)
-    for table, ddl in _BASIC_FIELDS_TABLES:
-        n = build_current_relations(datamart_config(), [(table, ddl)])[table]
-        print(f"public.{table} rebuilt: {n:,} rows", flush=True)
+    build_current_relations(datamart_config(), basic_fields_relations())
     return 0
 
 
@@ -390,6 +384,7 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=_prove_patch)
 
     args = parser.parse_args(argv)
+    configure_cli_logging()
     return args.func(args)
 
 

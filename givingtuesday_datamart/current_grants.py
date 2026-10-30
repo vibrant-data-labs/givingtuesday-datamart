@@ -964,6 +964,15 @@ def with_dependents(tables: Iterable[str]) -> list[tuple[str, str]]:
     return [(t, d) for t, d in _TABLES if t in wanted]
 
 
+def basic_fields_relations(names: Iterable[str] | None = None) -> list[tuple[str, str]]:
+    """The ``(table, ddl)`` pairs of the basic-fields relations named (all
+    three by default; any other name is ignored), in build order: what a
+    refresh, the own-extract patch and the canonical build rebuild. Never
+    a grants relation, whatever ``_READS_CURRENT`` comes to say."""
+    keep = None if names is None else set(names)
+    return [(t, d) for t, d in _BASIC_FIELDS_TABLES if keep is None or t in keep]
+
+
 _MiB, _GiB = 1024 ** 2, 1024 ** 3
 # The build's memory defaults, what the 4 GB shared instance takes:
 # work_mem, maintenance_work_mem, parallel workers (``_build_one``).
@@ -1078,9 +1087,12 @@ def stale_basic_fields_current(connection) -> list[str]:
     relation whose id differs was built from an older drop; one that
     doesn't exist yet counts as stale too.
 
-    Lets consumers guard cheaply (two scalar reads per relation) instead
-    of rebuilding unconditionally — the ingestion path already rebuilds
-    these, so the usual answer is "nothing to do".
+    Two MAX reads per relation, each a full read of the table, staging's
+    and the relation's (``_ingest_run_id`` has no index): cheaper than a
+    rebuild, not cheap on the shared instance. It compares run ids, not
+    their status, so a staging table whose last ingest failed validation
+    (its rows stay) makes its relation stale. The ingestion path already
+    rebuilds these, so the usual answer is "nothing to do".
     """
     stale: list[str] = []
     for table, _ddl in _BASIC_FIELDS_TABLES:
@@ -1105,18 +1117,50 @@ def stale_basic_fields_current(connection) -> list[str]:
     return stale
 
 
+CLI = "python -m givingtuesday_datamart.current_grants"
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """The command line at the end of this module."""
+    parser = argparse.ArgumentParser(prog=CLI)
+    parser.add_argument("--only", action="append", choices=[t for t, _ in _TABLES], default=None,
+                        help="rebuild this relation and no other; may be passed several times")
+    return parser
+
+
+def rebuild_command(tables: Iterable[str]) -> str:
+    """The command line that rebuilds ``tables`` and no other relation."""
+    return " ".join([CLI, *(f"--only {t}" for t in tables)])
+
+
+def _rules_sql(tables: Iterable[str]) -> str:
+    """Rows by dedup rule over ``tables``: the command line's closing summary."""
+    return " UNION ALL ".join(
+        f"SELECT '{t}' AS relation, dedup_rule, COUNT(*) AS rows FROM public.{t} GROUP BY 1, 2"
+        for t in tables) + " ORDER BY 1, 3 DESC"
+
+
+class CurrentRebuildFailed(RuntimeError):
+    """A rebuild that stopped part-way, raised from the error that stopped
+    it. ``built`` holds the relations committed before the failure, with
+    their row counts; ``left`` the one that failed and the ones never
+    begun, in build order, each as it was."""
+
+    def __init__(self, built: dict[str, int], left: list[str], cause: BaseException):
+        self.built, self.left = built, left
+        lines = str(cause).strip().splitlines()
+        super().__init__(
+            f"public.{left[0]} failed to rebuild. Committed before it: {', '.join(built) or 'none'}. "
+            f"Not rebuilt, each as it was: {', '.join(left)} ({rebuild_command(left)} rebuilds them). "
+            f"Cause: {lines[0] if lines else type(cause).__name__}")
+
+
 def build_current_relations(config: dict, tables: Iterable[tuple[str, str]] = _TABLES, *,
                             after: Callable[[Any, str], None] | None = None) -> dict[str, int]:
     """(Re)build the ``_current`` relations in ``tables`` (every one by
     default), each in a session and transaction of its own against the
-    database ``config`` names. Returns row counts.
-
-    Every rebuild goes through here: the matcher's and the CLI's below of
-    all six, ``sources refresh``'s and ``own_extract patch``'s of the
-    basic-fields relations (what the client, the frontend and the
-    canonical identity builds read), the canonical build's of the ones it
-    finds stale (``stale_basic_fields_current``), and the own-extract
-    release's on a scratch host.
+    database ``config`` names. Returns row counts. Every rebuild of a
+    ``_current`` relation goes through here.
 
     One transaction per relation, never one for all of them: Postgres
     frees a dropped table's files only when the transaction that dropped
@@ -1124,9 +1168,15 @@ def build_current_relations(config: dict, tables: Iterable[tuple[str, str]] = _T
     relation until it ends (the matcher's did, until October 2026; the
     README's Storage note has the figures). Committed one at a time, a
     relation's old copy is gone before the next is built, and the dip is
-    one relation's new copy and the sort spill of its build. A failure
+    one relation's new copy and the sort spill of its build.
+
+    Each relation is logged once its transaction has committed. A failure
     leaves the relations before it complete, the failing one as it was
-    (its transaction rolls back), and the rest untouched.
+    (its transaction rolls back) and the rest untouched, and raises
+    :class:`CurrentRebuildFailed` naming them and the command that
+    rebuilds what is left, so no caller reads the database to find out. A
+    commit whose acknowledgement is lost counts as failed; building that
+    relation again is harmless.
 
     ``after(connection, table)`` runs in the transaction that built
     ``table``, after its indexes, ANALYZE and count: what must commit with
@@ -1142,13 +1192,19 @@ def build_current_relations(config: dict, tables: Iterable[tuple[str, str]] = _T
     run. A rebuilt relation carries no comment otherwise, the DROP having
     taken the old one.
     """
-    counts = {}
-    for table, ddl in tables:
-        with get_session(config=config) as session:
-            connection = session.connection()
-            counts[table] = _build_one(connection, table, ddl)
-            if after is not None:
-                after(connection, table)
+    tables = list(tables)
+    counts: dict[str, int] = {}
+    for i, (table, ddl) in enumerate(tables):
+        try:
+            with get_session(config=config) as session:
+                connection = session.connection()
+                count = _build_one(connection, table, ddl)
+                if after is not None:
+                    after(connection, table)
+        except Exception as err:
+            raise CurrentRebuildFailed(counts, [t for t, _ in tables[i:]], err) from err
+        counts[table] = count
+        logger.info("public.%s committed", table)
     return counts
 
 
@@ -1169,10 +1225,7 @@ if __name__ == "__main__":
     # when the basic-fields relations were rebuilt on 2026-10-26.
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
 
-    _parser = argparse.ArgumentParser(prog="python -m givingtuesday_datamart.current_grants")
-    _parser.add_argument("--only", action="append", choices=[t for t, _ in _TABLES], default=None,
-                         help="rebuild this relation and no other; may be passed several times")
-    _only = _parser.parse_args().only
+    _only = build_parser().parse_args().only
     _wanted = [(t, d) for t, d in _TABLES if _only is None or t in _only]
 
     # The policy the view of current and recovered grants shows, read
@@ -1196,24 +1249,10 @@ if __name__ == "__main__":
     # run's), so the next matcher run rebuilds what this built.
     _hook = partial(after_current_build, recovered_policy=_policy) if _policy is not None else None
     build_current_relations(datamart_config(), _wanted, after=_hook)
+    # Rows by rule over the relations just built and no other: over all
+    # five, the summary took the last eleven minutes of a basic-fields
+    # rebuild and its swap peak on 2026-10-26.
     with get_session(config=datamart_config()) as session:
-        conn = session.connection()
-        rules = conn.execute(text("""
-            SELECT 'sched_i' AS side, dedup_rule, COUNT(*) AS rows
-            FROM public.grants_to_domestic_organizations_current GROUP BY 1, 2
-            UNION ALL
-            SELECT 'pf', dedup_rule, COUNT(*)
-            FROM public.privategrants_current GROUP BY 1, 2
-            UNION ALL
-            SELECT 'pf_future', dedup_rule, COUNT(*)
-            FROM public.privategrants_future_current GROUP BY 1, 2
-            UNION ALL
-            SELECT 'basic_fields', dedup_rule, COUNT(*)
-            FROM public.basic_fields_current GROUP BY 1, 2
-            UNION ALL
-            SELECT 'basic_fields_pf', dedup_rule, COUNT(*)
-            FROM public.basic_fields_pf_current GROUP BY 1, 2
-            ORDER BY 1, 3 DESC
-        """)).fetchall()
-    for side, rule, n in rules:
-        logger.info("%s %-28s %s rows", side, rule, f"{n:,}")
+        rules = session.connection().execute(text(_rules_sql(t for t, _ in _wanted))).fetchall()
+    for relation, rule, n in rules:
+        logger.info("%s %-28s %s rows", relation, rule, f"{n:,}")

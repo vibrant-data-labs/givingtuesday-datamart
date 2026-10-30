@@ -32,7 +32,6 @@ VERSIONS = {"irs_990pf_grants": "2026_10_25", "irs_990_basic_fields": "2026_10_2
 TABLES = [t for t, _ in gm._CURRENT_TABLES]
 BASIC_FIELDS = [t for t, _ in cg._BASIC_FIELDS_TABLES]
 STAMP = gm._current_stamp(VERSIONS, "build-1")
-_real_get_session = db.get_session      # the helper itself, for the modules that import it at call time
 
 
 class _Connection(_BuildConnection):
@@ -93,17 +92,17 @@ def sessions_of(monkeypatch, catalog, module=cg, versions_after=None, **connecti
         session = Session(_Connection(catalog, **answers), state=catalog)
         session.config, session.opened_after = config, [s.outcome for s in opened]
         opened.append(session)
-        return _real_get_session(session=session)
+        return db.get_session(session=session)
 
     for each in module if isinstance(module, tuple) else (module,):
         monkeypatch.setattr(each, "get_session", open_session)
     return opened
 
 
-def built_in(session) -> list[str]:
-    """The relations the session's transaction built."""
-    return [sql.split()[2] for sql in session.connection().statements
-            if sql.lstrip().startswith("CREATE TABLE public.")]
+def relations_in(session, verb="CREATE TABLE") -> list[str]:
+    """The public relations the session's transaction ran ``verb`` on."""
+    return [sql.lstrip()[len(verb):].split()[0] for sql in session.connection().statements
+            if sql.lstrip().startswith(f"{verb} public.")]
 
 
 def hook(policy="v3", stamp=STAMP):
@@ -119,13 +118,12 @@ def test_a_rebuild_builds_and_stamps_each_relation_in_a_transaction_of_its_own(m
     assert list(cg.build_current_relations({"host": "scratch"}, after=hook())) == TABLES
     assert [session.outcome for session in opened] == ["committed"] * len(TABLES)
     assert [session.config for session in opened] == [{"host": "scratch"}] * len(TABLES)   # the caller's database
+    # each began once the one before it had committed
+    assert [session.opened_after for session in opened] == [["committed"] * i for i in range(len(TABLES))]
     for session, table in zip(opened, TABLES):
-        statements = session.connection().statements
-        ddl = [sql for sql in statements if sql.lstrip().startswith(("DROP TABLE IF EXISTS public.",
-                                                                     "CREATE TABLE public."))]
-        assert [sql.split()[4 if sql.lstrip().startswith("DROP") else 2] for sql in ddl] == [f"public.{table}"] * 2
+        assert relations_in(session, "DROP TABLE IF EXISTS") == relations_in(session) == [f"public.{table}"]
         # last, after the indexes, the ANALYZE and the count: nothing is stamped before it is complete
-        assert statements[-1] == f"COMMENT ON TABLE public.{table} IS :stamp"
+        assert session.connection().statements[-1] == f"COMMENT ON TABLE public.{table} IS :stamp"
     assert json.loads(catalog["public.privategrants_current"]) == {
         "source_versions": VERSIONS, "shape": gm.MATCHING_INPUT_SHAPE_VERSION, "build_id": "build-1"}
     assert sorted(catalog) == sorted(f"public.{t}" for t in TABLES)
@@ -153,8 +151,10 @@ def test_a_failure_leaves_each_relation_complete_and_stamped_or_untouched(monkey
     catalog = {f"public.{t}": older for t in TABLES}                                   # the last run's stamps
     failing = TABLES[3]
     opened = sessions_of(monkeypatch, catalog, fail_on=f"CREATE TABLE public.{failing}")
-    with pytest.raises(RuntimeError, match="No space left"):                           # match_records marks the build failed
+    with pytest.raises(cg.CurrentRebuildFailed, match="No space left") as failed:      # match_records marks the build failed
         cg.build_current_relations({}, after=hook())
+    assert list(failed.value.built) == TABLES[:3] and failed.value.left == TABLES[3:]
+    assert cg.rebuild_command(TABLES[3:]) in str(failed.value)
     assert [session.outcome for session in opened] == ["committed"] * 3 + ["rolled back"]
     assert not any(sql.startswith("COMMENT ON") for sql in opened[3].connection().statements)
     assert catalog[f"public.{failing}"] == older                                       # as it was: the DROP rolled back
@@ -202,6 +202,29 @@ def test_a_rebuild_of_the_paid_relation_takes_the_future_relation_with_it():
     assert [t for t, _ in cg.with_dependents(["basic_fields_pf_current", "basic_fields_current"])] == [
         "basic_fields_current", "basic_fields_pf_current"]
     assert cg.with_dependents([]) == []
+
+
+def test_the_basic_fields_callers_take_basic_fields_relations_and_no_other(monkeypatch):
+    monkeypatch.setitem(cg._READS_CURRENT, "privategrants_current", "basic_fields_pf_current")   # an edge they must not follow
+    assert [t for t, _ in cg.basic_fields_relations(["privategrants_current", "basic_fields_ez_current",
+                                                     "basic_fields_pf_current"])] == ["basic_fields_pf_current",
+                                                                                      "basic_fields_ez_current"]
+    assert cg.basic_fields_relations() == list(cg._BASIC_FIELDS_TABLES)
+    assert [t for t, _ in cg.with_dependents(["basic_fields_pf_current"])] == [
+        "basic_fields_pf_current", "privategrants_current"]                         # the matcher's resolver follows it
+
+
+def test_the_recovery_command_is_one_the_command_line_takes():
+    command = cg.rebuild_command(["basic_fields_pf_current", "basic_fields_ez_current"])
+    assert command.startswith(f"{cg.build_parser().prog} ")
+    assert cg.build_parser().parse_args(command.split()[3:]).only == ["basic_fields_pf_current", "basic_fields_ez_current"]
+
+
+def test_the_command_lines_summary_reads_the_relations_it_built_and_no_other():
+    sql = cg._rules_sql(["basic_fields_pf_current"])
+    assert "FROM public.basic_fields_pf_current GROUP BY 1, 2" in sql
+    assert "privategrants" not in sql and "UNION ALL" not in sql
+    assert cg._rules_sql(t for t, _ in cg._TABLES).count("UNION ALL") == len(cg._TABLES) - 1
 
 
 # --- the run's database phases ------------------------------------------------
@@ -296,45 +319,33 @@ def refresh(monkeypatch, catalog, reloaded, **connection):
     from givingtuesday_datamart.sources import __main__ as sources
 
     monkeypatch.setattr(ingestion, "datamart_config", lambda: {"host": "shared"})
-    opened = sessions_of(monkeypatch, catalog, module=(cg, db), **connection)     # db: imported at call time there
+    opened = sessions_of(monkeypatch, catalog, **connection)
     return sources._rebuild_dependent_current(set(reloaded)), opened
 
 
 def test_a_refresh_rebuilds_the_relations_of_the_sources_it_reloaded_one_transaction_each(monkeypatch):
     ok, opened = refresh(monkeypatch, {}, {"basic_fields_pf", "basic_fields", "schedule_o"})
     assert ok
-    assert [built_in(s) for s in opened] == [["public.basic_fields_current"], ["public.basic_fields_pf_current"]]
+    assert [relations_in(s) for s in opened] == [["public.basic_fields_current"], ["public.basic_fields_pf_current"]]
     assert [s.outcome for s in opened] == ["committed", "committed"]
-    assert opened[1].opened_after == ["committed"]                                 # the first committed before the second began
     assert [s.config for s in opened] == [{"host": "shared"}] * 2
-    assert not any("COMMENT ON" in sql or "VIEW " in sql for s in opened for sql in s.connection().statements)
     ok, opened = refresh(monkeypatch, {}, {"schedule_o"})
     assert ok and opened == []
 
 
-def test_a_refresh_that_fails_on_the_second_relation_keeps_the_first_and_names_the_rest(monkeypatch, caplog):
+def test_a_refresh_that_fails_names_what_it_left_from_the_build_and_reads_nothing_after(monkeypatch, caplog):
+    # basic_fields_ez_current differs from staging (its source's last ingest failed validation, which leaves
+    # the rows), but this refresh did not reload it: not this rebuild's to name, nor to send anyone to rebuild
     with caplog.at_level(logging.ERROR):
-        ok, opened = refresh(monkeypatch, {}, {"basic_fields", "basic_fields_pf", "basic_fields_ez"},
-                             fail_on="CREATE TABLE public.basic_fields_pf_current",
-                             stale={"basic_fields_pf_current", "basic_fields_ez_current"})
-    assert not ok
-    assert [s.outcome for s in opened] == ["committed", "rolled back", "committed"]
-    assert [built_in(s) for s in opened] == [["public.basic_fields_current"], ["public.basic_fields_pf_current"], []]
-    check = opened[2].connection().statements                                     # after the rollback, in a session of its own
-    assert check and all("to_regclass" in sql or "IS DISTINCT FROM" in sql for sql in check)
-    assert "rebuilding basic_fields_current, basic_fields_pf_current, basic_fields_ez_current FAILED" in caplog.text
-    assert "basic_fields_current rebuilt and committed; basic_fields_pf_current, basic_fields_ez_current do not match staging" in caplog.text
-    assert "python -m givingtuesday_datamart.current_grants --only basic_fields_pf_current --only basic_fields_ez_current" in caplog.text
-
-
-def test_when_the_check_after_a_failure_cannot_run_the_error_says_to_rerun_for_every_relation(monkeypatch, caplog):
-    with caplog.at_level(logging.WARNING):
         ok, opened = refresh(monkeypatch, {}, {"basic_fields", "basic_fields_pf"},
-                             fail_on=("CREATE TABLE public.basic_fields_pf_current", "SELECT to_regclass"))
-    assert not ok and [s.outcome for s in opened] == ["committed", "rolled back", "rolled back"]
-    assert "Could not check which of basic_fields_current, basic_fields_pf_current match staging" in caplog.text
-    assert "could not be checked, so rerun for all of them: python -m givingtuesday_datamart.current_grants " \
-           "--only basic_fields_current --only basic_fields_pf_current" in caplog.text
+                             fail_on="CREATE TABLE public.basic_fields_pf_current", stale={"basic_fields_ez_current"})
+    assert not ok
+    assert [s.outcome for s in opened] == ["committed", "rolled back"]                 # no session after the failure
+    failed = caplog.records[-1].exc_info[1]
+    assert isinstance(failed, cg.CurrentRebuildFailed)
+    assert list(failed.built) == ["basic_fields_current"] and failed.left == ["basic_fields_pf_current"]
+    assert cg.rebuild_command(["basic_fields_pf_current"]) in caplog.text
+    assert "basic_fields_ez_current" not in caplog.text
 
 
 def patch_cli(monkeypatch, catalog, **connection):
@@ -348,64 +359,94 @@ def patch_cli(monkeypatch, catalog, **connection):
     return cli, sessions_of(monkeypatch, catalog, module=(cli, cg), **connection)
 
 
-def test_the_patch_commits_then_rebuilds_the_basic_fields_relations_one_transaction_each(monkeypatch, capsys):
+def test_the_patch_commits_then_rebuilds_the_basic_fields_relations_one_transaction_each(monkeypatch, caplog):
     cli, opened = patch_cli(monkeypatch, {})
-    assert cli._patch(argparse.Namespace()) == 0
+    with caplog.at_level(logging.INFO):
+        assert cli._patch(argparse.Namespace()) == 0
     assert [s.outcome for s in opened] == ["committed"] * 4
-    assert [built_in(s) for s in opened] == [[]] + [[f"public.{t}"] for t in BASIC_FIELDS]
+    assert [relations_in(s) for s in opened] == [[]] + [[f"public.{t}"] for t in BASIC_FIELDS]
     assert "SET statement_timeout = 0" in opened[0].connection().statements        # the patch's session builds nothing
-    assert opened[1].opened_after == ["committed"]
-    out = capsys.readouterr().out
-    assert out.index("basic_fields: GT's 2026_06_16 less 10 rows") < out.index("public.basic_fields_current rebuilt: 16,648,094 rows")
-    assert "public.basic_fields_ez_current rebuilt: 16,648,094 rows" in out
+    assert opened[1].opened_after == ["committed"]                                 # the patch committed before the first rebuild
+    assert [r.getMessage() for r in caplog.records if r.getMessage().endswith(" committed")] == [
+        f"public.{t} committed" for t in BASIC_FIELDS]
 
 
-def test_a_patch_whose_rebuild_fails_keeps_the_patch_and_the_relations_before_the_failure(monkeypatch, capsys):
+def test_a_patch_whose_rebuild_fails_keeps_the_patch_and_the_relations_before_the_failure(monkeypatch):
     cli, opened = patch_cli(monkeypatch, {}, fail_on="CREATE TABLE public.basic_fields_pf_current")
-    with pytest.raises(RuntimeError, match="No space left"):
+    with pytest.raises(cg.CurrentRebuildFailed, match="No space left") as failed:
         cli._patch(argparse.Namespace())
     assert [s.outcome for s in opened] == ["committed", "committed", "rolled back"]
-    out = capsys.readouterr().out
-    assert "public.basic_fields_current rebuilt" in out and "basic_fields_pf_current rebuilt" not in out
+    assert list(failed.value.built) == ["basic_fields_current"]
+    assert failed.value.left == ["basic_fields_pf_current", "basic_fields_ez_current"]
 
 
-def canonical_build(monkeypatch, catalog, **connection):
+def test_the_own_extract_command_line_shows_its_progress(monkeypatch):
+    from givingtuesday_datamart.own_extract import __main__ as cli
+
+    calls = []
+    monkeypatch.setattr(cli, "configure_cli_logging", lambda: calls.append("logging"))
+    monkeypatch.setattr(cli, "_patch", lambda args: calls.append("patch") or 0)
+    assert cli.main(["patch"]) == 0 and calls == ["logging", "patch"]                # the builder's lines reach the console
+
+
+def canonical_build(monkeypatch, catalog, runs_after=None, **connection):
     """``sources build-canonical`` with the identity builds faked: the
-    module, the sessions, and each identity build with the session it ran on."""
+    module, the sessions, each identity build with the session it ran on,
+    and the connections the successful runs were read on (None: a session
+    of their own). The runs read again in the identity builds' transaction
+    are ``runs_after``, the same as at the start by default."""
     from givingtuesday_datamart.canonical import build as cb
 
-    ran: list[tuple[str, int]] = []
+    for name in ("GT_BUILD_WORK_MEM", "GT_BUILD_MAINTENANCE_WORK_MEM", "GT_BUILD_PARALLEL_WORKERS"):
+        monkeypatch.delenv(name, raising=False)
+    runs, reads, ran = {"irs_990_basic_fields": "run-2@2026_06_16"}, [], []
     opened = sessions_of(monkeypatch, catalog, module=(cb, cg), **connection)
     monkeypatch.setattr(cb, "datamart_config", lambda: {})
     monkeypatch.setattr(cb, "ensure_canonical_meta", lambda: None)
-    monkeypatch.setattr(cb, "latest_successful_run_ids", lambda: {"irs_990_basic_fields": "run-2"})
+    monkeypatch.setattr(cb, "latest_successful_run_ids", lambda connection=None: reads.append(connection) or (
+        runs if len(reads) == 1 else runs_after or runs))
     for name in ("_build_schedule_o_part_iii", "_build_nonprofit_canonical", "_build_nonprofit_text",
                  "_build_funder_canonical"):
         monkeypatch.setattr(cb, name, lambda session, name=name: ran.append((name, opened.index(session))) or 3)
-    return cb, opened, ran
+    return cb, opened, ran, reads
 
 
-def test_the_canonical_build_checks_staleness_and_rebuilds_before_its_own_transaction(monkeypatch):
-    cb, opened, ran = canonical_build(monkeypatch, {}, stale={"basic_fields_pf_current"})
+def test_the_canonical_build_rebuilds_what_is_stale_then_holds_it_through_its_own_transaction(monkeypatch):
+    cb, opened, ran, reads = canonical_build(monkeypatch, {}, stale={"basic_fields_pf_current"})
     result = cb.build_canonical()
     assert [s.outcome for s in opened] == ["committed"] * 5
-    assert [built_in(s) for s in opened] == [[], [], ["public.basic_fields_pf_current"], [], []]
+    assert [relations_in(s) for s in opened] == [[], [], ["public.basic_fields_pf_current"], [], []]
     check = opened[1].connection().statements
     assert check and all("to_regclass" in sql or "IS DISTINCT FROM" in sql for sql in check)
+    identity = opened[3].connection()
     assert [i for _, i in ran] == [3] * 4 and opened[3].opened_after == ["committed"] * 3   # one transaction, after the rebuild committed
+    assert identity.settings["max_parallel_workers_per_gather"] == "0"               # the builder's memory budget
+    assert ("LOCK TABLE public.basic_fields, public.basic_fields_current, public.basic_fields_pf, "
+            "public.basic_fields_pf_current, public.basic_fields_ez, public.basic_fields_ez_current "
+            "IN ACCESS SHARE MODE") in identity.statements
+    assert reads == [None, identity]                                                 # the runs, read again under the locks
     assert any("status = 'success'" in sql for sql in opened[4].connection().statements)
     assert result.nonprofit_canonical_rows == 3
-    cb, opened, ran = canonical_build(monkeypatch, {})                                  # nothing stale: no rebuild
+    cb, opened, ran, _ = canonical_build(monkeypatch, {})                            # nothing stale: no rebuild
     cb.build_canonical()
-    assert [built_in(s) for s in opened] == [[], [], [], []] and [i for _, i in ran] == [2] * 4
+    assert [relations_in(s) for s in opened] == [[], [], [], []] and [i for _, i in ran] == [2] * 4
 
 
 def test_a_canonical_build_whose_rebuild_fails_keeps_the_relations_before_it_and_ends_failed(monkeypatch):
-    cb, opened, ran = canonical_build(monkeypatch, {}, stale={"basic_fields_current", "basic_fields_pf_current"},
-                                      fail_on="CREATE TABLE public.basic_fields_pf_current")
-    with pytest.raises(RuntimeError, match="No space left"):
+    cb, opened, ran, _ = canonical_build(monkeypatch, {}, stale={"basic_fields_current", "basic_fields_pf_current"},
+                                         fail_on="CREATE TABLE public.basic_fields_pf_current")
+    with pytest.raises(cg.CurrentRebuildFailed, match="No space left"):
         cb.build_canonical()
     assert [s.outcome for s in opened] == ["committed", "committed", "committed", "rolled back", "committed"]
-    assert [built_in(s) for s in opened] == [[], [], ["public.basic_fields_current"], ["public.basic_fields_pf_current"], []]
+    assert [relations_in(s) for s in opened] == [[], [], ["public.basic_fields_current"],
+                                                 ["public.basic_fields_pf_current"], []]
     assert ran == []                                                                    # the identity builds never began
     assert any("status = 'failed'" in sql for sql in opened[4].connection().statements)
+
+
+def test_a_source_ingested_since_the_canonical_build_began_stops_it_before_the_identity_builds(monkeypatch):
+    cb, opened, ran, _ = canonical_build(monkeypatch, {}, runs_after={"irs_990_basic_fields": "run-3@2026_06_16"})
+    with pytest.raises(RuntimeError, match="irs_990_basic_fields ingested since the canonical build began"):
+        cb.build_canonical()
+    assert ran == [] and [s.outcome for s in opened] == ["committed", "committed", "rolled back", "committed"]
+    assert any("status = 'failed'" in sql for sql in opened[3].connection().statements)

@@ -343,8 +343,13 @@ held through it, and the views over `privategrants_current` are
 recreated in the transaction that rebuilds it, so no session sees them
 gone. The refresh, the own-extract patch and the canonical build rebuild
 the three basic-fields relations (about 8 GB of the 26) the same way,
-one transaction each, so none of them holds more than one relation's old
-copy at a time either.
+one transaction each. The canonical build's own tables still build in
+one transaction, so a failure leaves the canonical layer as it was: on
+2026-10-27 that transaction took free storage from 69.8 to 56.3 GB during
+`nonprofit_text`, while its four parallel workers spilled to temp files
+at the server's default 4 MB `work_mem`, and gave it back at its commit,
+a 13.5 GB dip. The identity builds now run at the builder's memory budget
+(no parallel workers); that dip has not been measured since.
 
 ### Trace a filing back to the IRS
 
@@ -411,13 +416,15 @@ python -m givingtuesday_datamart.sources loaded
 # 2. Refresh staging. Validation (hard-fail + soft-warn) runs per
 #    source automatically; already-loaded (source, version) pairs skip.
 #    Reloading basic_fields / basic_fields_pf / basic_fields_ez also
-#    rebuilds their _current relations (~11.5 min), each in a transaction
-#    of its own — the client, the frontend and the canonical identity
-#    builds read those, so a reload that left them behind would serve
-#    the previous drop. A rebuild that fails part-way leaves the
-#    relations built before it in place; the error names the rest and
-#    the `current_grants --only` command that rebuilds them. The grants
-#    _current relations are NOT rebuilt here; matching owns those.
+#    rebuilds their _current relations (11 to 13 min each on the medium
+#    instance class, 2026-10-26), each in a transaction of its own — the
+#    client, the frontend and the canonical identity builds read those,
+#    so a reload that left them behind would serve the previous drop. A
+#    rebuild that fails part-way keeps the relations committed before
+#    it; the error names the rest and the `current_grants --only`
+#    command that rebuilds them (rerunning the refresh does not: its
+#    sources are loaded already). The grants _current relations are NOT
+#    rebuilt here; matching owns those.
 python -m givingtuesday_datamart.sources refresh
 
 # 3. Verify the refresh before building anything on top: every source
@@ -428,8 +435,10 @@ python -m givingtuesday_datamart.sources loaded
 #    basic_fields[_pf|_ez]_current match staging before building identity
 #    from them, and rebuilds only the ones that don't, each committed
 #    before the canonical transaction opens — normally a no-op, since
-#    step 2 already did it. Reads public.eo_bmf for the BMF columns, so
-#    refresh irs_eo_bmf first when the IRS has republished.
+#    step 2 already did it. That transaction stops if a source was
+#    ingested since the build began, so run it after step 2, not beside
+#    it. Reads public.eo_bmf for the BMF columns, so refresh irs_eo_bmf
+#    first when the IRS has republished.
 python -m givingtuesday_datamart.sources build-canonical
 
 # 5. Corrections preflight (~10 min, any machine). Required after any
