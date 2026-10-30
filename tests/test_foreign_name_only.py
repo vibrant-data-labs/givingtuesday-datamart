@@ -51,9 +51,9 @@ def eins(u, g, policy):
 def test_the_selection_reads_the_matchers_tuples_with_its_filters_and_its_state_keys():
     sql = " ".join(fn.selection_sql().split())
     assert "FROM public.privategrants_w_column_keys_view g" in sql
-    assert "NOT (trim(name1_key) = '' AND trim(name2_key) = '')" in sql and ":placeholder" in sql
+    assert "NOT (trim(g.name1_key) = '' AND trim(g.name2_key) = '')" in sql and ":placeholder" in sql
     assert "HAVING bool_or(taxyear::int >= 2015)" in sql
-    assert "lower(trim(addressstate_key)) = ANY(CAST(:us_keys AS text[]))" in sql
+    assert "lower(trim(g.addressstate_key)) = ANY(CAST(:us_keys AS text[]))" in sql
     assert fn.FOREIGN_COUNTRY in sql and "'pfizer%'" in sql and "'%world health organi%'" in sql
 
 

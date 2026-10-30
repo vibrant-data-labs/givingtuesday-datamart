@@ -84,27 +84,28 @@ def selection_sql() -> str:
     placeholder); eligibility is one row of 2015 or later; the foreign
     cohort is ``no_us_address`` in SQL, less what the old rule took."""
     keys = ", ".join(gm._KEYS)
-    name = "concat_ws(' ', name1_key, name2_key)"
+    keyed = ", ".join("g." + k for k in gm._KEYS)
+    name = "concat_ws(' ', g.name1_key, g.name2_key)"
     amount = AMT.format(col="sigocpyamoun")
-    sample = f"mod(abs(hashtextextended(jsonb_build_array({keys})::text, 0)), :one_in) = 0"
-    us_state = "lower(trim(addressstate_key)) = ANY(CAST(:us_keys AS text[]))"
-    no_keys = "trim(addressstate_key) = '' AND trim(addresszip_key) = ''"
+    sample = f"mod(abs(hashtextextended(jsonb_build_array({keyed})::text, 0)), :one_in) = 0"
+    us_state = "lower(trim(g.addressstate_key)) = ANY(CAST(:us_keys AS text[]))"
+    no_keys = "trim(g.addressstate_key) = '' AND trim(g.addresszip_key) = ''"
     gate = " OR ".join(f"sigocpyrbnbn1 ILIKE '{pattern}'" for pattern in GATE_PATTERNS)
     return f"""
         WITH pool AS (
             SELECT * FROM jsonb_to_recordset(CAST(:pool AS jsonb)) AS p(name1_key text, name2_key text)
         ),
         tuples AS (
-            SELECT {keys},
+            SELECT {keyed},
                    bool_or(taxyear::int >= 2015 AND {FOREIGN_COUNTRY}) AS foreign_country,
                    bool_or(p.name1_key IS NOT NULL) AS pool,
                    bool_or({gate}) AS gate,
                    ({sample}) AS sample
             FROM public.privategrants_w_column_keys_view g
             LEFT JOIN pool p ON p.name1_key = g.name1_key AND p.name2_key = g.name2_key
-            WHERE NOT (trim(name1_key) = '' AND trim(name2_key) = '')
+            WHERE NOT (trim(g.name1_key) = '' AND trim(g.name2_key) = '')
               AND NOT ({name} ~* :placeholder)
-            GROUP BY {keys}
+            GROUP BY {keyed}
             HAVING bool_or(taxyear::int >= 2015)
                AND (bool_or(p.name1_key IS NOT NULL) OR bool_or({gate}) OR ({sample})
                     OR (NOT ({us_state}) AND NOT ({no_keys}))
