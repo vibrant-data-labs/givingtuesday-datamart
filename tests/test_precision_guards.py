@@ -266,7 +266,7 @@ def test_explainer_reports_the_refusal():
 def test_gate_baseline_covers_exactly_the_universe_arms():
     arms = re.findall(r"'(\w+)' AS source", corrections_preflight._UNIVERSE_SQL)
     assert set(gate.MATCH_SOURCE_ROWS_BASELINE) == set(arms)
-    assert gate.MATCH_SOURCE_ROWS_BASELINE["eo_bmf"] == 0   # no accepted run with the arm yet
+    assert gate.MATCH_SOURCE_ROWS_BASELINE["eo_bmf"] > 0   # the run of 2026-10-30 accepted the arm
 
 
 def test_gate_government_check_is_a_hard_zero_on_the_guards_own_decision():
