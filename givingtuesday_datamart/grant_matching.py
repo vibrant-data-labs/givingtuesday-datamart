@@ -2259,14 +2259,13 @@ def matched_tuples(universe_df: pd.DataFrame, grants_df: pd.DataFrame, matches: 
     })
 
 
-def write_matches(connection, full_data_df: pd.DataFrame, relations: Relations = Relations()) -> tuple[int, int]:
-    """Write the join table, then build ``privategrants_w_recipients`` and
-    ``unioned_grants`` from it, under the run's names. Returns the row
-    counts of the two."""
+def _write_privategrants_w_recipients(connection, full_data_df: pd.DataFrame,
+                                      relations: Relations = Relations()) -> None:
+    """Write the join table, then build ``privategrants_w_recipients``
+    from it, under the run's names."""
     temp_join_table_name = relations.of("pf_grant_matching_temp_table")
     keys_view = relations.of("privategrants_w_column_keys_view")
     private_grants_w_recipient_table_name = relations.of("privategrants_w_recipients")
-    unioned = relations.of("unioned_grants")
 
     logger.info(f"Writing to database: {temp_join_table_name}")
     full_data_df.to_sql(
@@ -2311,10 +2310,14 @@ def write_matches(connection, full_data_df: pd.DataFrame, relations: Relations =
     # NOTE: Uncomment this to drop the temporary table but leave for now for debugging
     # connection.execute(text(f"DROP TABLE IF EXISTS public.{temp_join_table_name}"))
 
-    # Final step: rebuild the public.unioned_grants table from the freshly-
-    # written privategrants_w_recipients + the 990 Schedule I grants. Same
-    # session as the SELECT INTO above so a mid-pipeline failure leaves an
-    # obviously-incomplete state rather than a stale unioned_grants.
+
+def _write_unioned_grants(connection, relations: Relations = Relations()) -> tuple[int, int]:
+    """Rebuild ``unioned_grants`` from the freshly written
+    ``privategrants_w_recipients`` and the 990 Schedule I grants, then the
+    post-build maintenance of both. Returns the row counts of the two."""
+    private_grants_w_recipient_table_name = relations.of("privategrants_w_recipients")
+    unioned = relations.of("unioned_grants")
+
     rebuild_unioned_grants(connection, relations)
 
     # Post-build maintenance (previously a manual post-rebuild step):
@@ -2342,6 +2345,43 @@ def write_matches(connection, full_data_df: pd.DataFrame, relations: Relations =
     return pg_rows, ug_rows
 
 
+def write_matches(connection, full_data_df: pd.DataFrame, relations: Relations = Relations()) -> tuple[int, int]:
+    """Write the join table, then build ``privategrants_w_recipients`` and
+    ``unioned_grants`` from it, under the run's names, on one connection.
+    One transaction by design: a mid-pipeline failure rolls both tables
+    back to what the last run left, never a new
+    ``privategrants_w_recipients`` next to a stale ``unioned_grants``.
+    Returns the row counts of the two."""
+    _write_privategrants_w_recipients(connection, full_data_df, relations)
+    return _write_unioned_grants(connection, relations)
+
+
+def _write_outputs(full_data_df: pd.DataFrame, commit_between_outputs: bool = False) -> tuple[int, int]:
+    """The write phase of a production run: ``write_matches`` in one
+    transaction, or, with ``commit_between_outputs``,
+    ``privategrants_w_recipients`` committed before ``unioned_grants`` is
+    rebuilt.
+
+    Postgres frees a dropped table's files only at commit, so one
+    transaction holds the old copies of the join table,
+    ``privategrants_w_recipients`` and ``unioned_grants`` until it ends:
+    the phase took 26 GB of the shared instance's free storage on
+    2026-10-30. A commit after ``privategrants_w_recipients`` frees the
+    first two old copies before ``unioned_grants`` is rebuilt, roughly
+    9 GB less at the deepest point, at the cost of ``write_matches``'s
+    guarantee: a failure in the second transaction leaves a new
+    ``privategrants_w_recipients`` next to a stale ``unioned_grants`` (the
+    build row says failed) until the matcher is rerun. Off by default.
+    """
+    if not commit_between_outputs:
+        with get_session(config=datamart_config()) as session:
+            return write_matches(session.connection(), full_data_df)
+    with get_session(config=datamart_config()) as session:
+        _write_privategrants_w_recipients(session.connection(), full_data_df)
+    with get_session(config=datamart_config()) as session:
+        return _write_unioned_grants(session.connection())
+
+
 def match_records(
     chunk_size: int = 50000,
     s3_bucket: str = "givingtuesday-datamart",
@@ -2353,6 +2393,7 @@ def match_records(
     skip_rebuild: bool = False,
     workers: int = 1,
     ranking: str = RANKING,
+    commit_between_outputs: bool = False,
 ):
     """Run the recordlinkage grant-matching pipeline against gt_datamart.
 
@@ -2387,6 +2428,13 @@ def match_records(
     ``ranking`` names the winner order (``RANKINGS``): "named_first" by
     default, "weighted" for the order of the runs up to 2026-10-27. It
     acts after the checkpoints, so either one resumes the same chunks.
+
+    ``commit_between_outputs`` writes the two output tables in two
+    transactions instead of one, ``privategrants_w_recipients`` committed
+    before ``unioned_grants`` is rebuilt (``_write_outputs``): less of the
+    shared instance's free storage at the deepest point, and the two
+    tables from different runs after a failure in the second. Off by
+    default.
 
     Each run is recorded in ``datamart_meta.canonical_builds`` with
     ``build_kind='grant_matching'``, the ingest_run_ids of every staging
@@ -2430,6 +2478,7 @@ def match_records(
             skip_rebuild=skip_rebuild,
             workers=workers,
             ranking=ranking,
+            commit_between_outputs=commit_between_outputs,
         )
     except BaseException as err:
         _finalize_build_failed(build_id, err)
@@ -2477,6 +2526,7 @@ def _do_match_records(
     skip_rebuild: bool = False,
     workers: int = 1,
     ranking: str = RANKING,
+    commit_between_outputs: bool = False,
 ):
     """Inner pipeline body. Returns ``(full_data_df, pg_rows, ug_rows)``.
 
@@ -2689,8 +2739,7 @@ def _do_match_records(
 
     full_data_df = matched_tuples(basic_fields_df, private_foundations_df, matches)
 
-    with get_session(config=datamart_config()) as session:
-        pg_rows, ug_rows = write_matches(session.connection(), full_data_df)
+    pg_rows, ug_rows = _write_outputs(full_data_df, commit_between_outputs)
     return full_data_df, pg_rows, ug_rows
 
 
@@ -2795,6 +2844,20 @@ if __name__ == "__main__":
             "under either."
         ),
     )
+    parser.add_argument(
+        "--commit-between-outputs",
+        action="store_true",
+        help=(
+            "Commit privategrants_w_recipients in a transaction of its own "
+            "before unioned_grants is rebuilt, so the old join table and the "
+            "old privategrants_w_recipients are freed first: roughly 9 GB "
+            "less of the write phase's 26 GB dip in the shared instance's "
+            "free storage. The cost: a failure in the unioned_grants rebuild "
+            "leaves a new privategrants_w_recipients next to a stale "
+            "unioned_grants, where the default (one transaction) leaves both "
+            "as the last run left them. Rerun the matcher to put them right."
+        ),
+    )
     args = parser.parse_args()
 
     match_records(
@@ -2806,4 +2869,5 @@ if __name__ == "__main__":
         skip_rebuild=args.skip_rebuild,
         workers=args.workers,
         ranking=args.ranking,
+        commit_between_outputs=args.commit_between_outputs,
     )

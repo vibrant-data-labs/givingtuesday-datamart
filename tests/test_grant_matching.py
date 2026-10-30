@@ -374,3 +374,88 @@ def test_a_run_under_a_prefix_never_touches_the_view():
         gm.create_or_replace_views(connection, gm.Relations(prefix="scratch_matcher_", grants=grants))
         assert not any(f"VIEW public.{view.VIEW}" in sql for sql in connection.ran)
         assert any("scratch_matcher_corrections_org_identities" in sql for sql in connection.ran)
+
+
+# --- the write phase's transactions -------------------------------------------
+
+
+class Session:
+    """A session the real helper commits after a clean block."""
+
+    def __init__(self):
+        self.connection_, self.outcome = Connection(None), None
+
+    def connection(self):
+        return self.connection_
+
+    def commit(self):
+        self.outcome = "committed"
+
+    def rollback(self):
+        self.outcome = "rolled back"
+
+    def close(self):
+        pass
+
+
+def write_phase(monkeypatch, commit_between_outputs: bool):
+    """The two writes of a run's write phase as they happen, each with the
+    session it ran on and the outcome of every session opened so far; then
+    the outcomes at the end."""
+    from givingtuesday_datamart._internal import db
+
+    opened: list[Session] = []
+    steps: list[tuple] = []
+
+    def open_session(config=None):
+        opened.append(Session())
+        return db.get_session(session=opened[-1])
+
+    def step(name, connection):
+        steps.append((name, [s.connection_ for s in opened].index(connection), [s.outcome for s in opened]))
+
+    monkeypatch.setattr(gm, "get_session", open_session)
+    monkeypatch.setattr(gm, "datamart_config", lambda: {})
+    monkeypatch.setattr(gm, "_write_privategrants_w_recipients",
+                        lambda connection, df, relations=None: step("recipients", connection))
+    monkeypatch.setattr(gm, "_write_unioned_grants",
+                        lambda connection, relations=None: (step("unioned", connection), (7, 11))[1])
+    assert gm._write_outputs(pd.DataFrame(), commit_between_outputs) == (7, 11)
+    return steps, [s.outcome for s in opened]
+
+
+def test_by_default_both_outputs_are_written_in_one_transaction(monkeypatch):
+    steps, outcomes = write_phase(monkeypatch, commit_between_outputs=False)
+    assert steps == [("recipients", 0, [None]), ("unioned", 0, [None])]        # one session, open throughout
+    assert outcomes == ["committed"]
+
+
+def test_on_the_flag_privategrants_w_recipients_is_committed_before_unioned_grants_is_rebuilt(monkeypatch):
+    steps, outcomes = write_phase(monkeypatch, commit_between_outputs=True)
+    assert steps == [("recipients", 0, [None]), ("unioned", 1, ["committed", None])]
+    assert outcomes == ["committed", "committed"]
+
+
+def test_write_matches_is_the_two_writes_on_one_connection(monkeypatch):
+    ran: list[tuple] = []
+    monkeypatch.setattr(gm, "_write_privategrants_w_recipients",
+                        lambda connection, df, relations: ran.append(("recipients", connection, relations)))
+    monkeypatch.setattr(gm, "_write_unioned_grants",
+                        lambda connection, relations: (ran.append(("unioned", connection, relations)), (7, 11))[1])
+    connection, names = Connection(None), gm.Relations(prefix="scratch_matcher_")
+    assert gm.write_matches(connection, pd.DataFrame(), names) == (7, 11)
+    assert ran == [("recipients", connection, names), ("unioned", connection, names)]
+
+
+def test_the_default_write_keeps_its_statement_order():
+    """The split moved no statement: the join table, then privategrants_w_recipients,
+    then unioned_grants, then the index, the ANALYZEs and the counts."""
+    import inspect
+
+    first = inspect.getsource(gm._write_privategrants_w_recipients)
+    second = inspect.getsource(gm._write_unioned_grants)
+    assert first.index("to_sql(") < first.index("ANALYZE public.{temp_join_table_name}") < first.index(
+        "DROP TABLE IF EXISTS public.{private_grants_w_recipient_table_name}") < first.index("INTO public.")
+    assert second.index("rebuild_unioned_grants(") < second.index("CREATE INDEX IF NOT EXISTS") < second.index(
+        "ANALYZE public.{private_grants_w_recipient_table_name}") < second.index(
+        "ANALYZE public.{unioned}") < second.index("SELECT COUNT(*)")

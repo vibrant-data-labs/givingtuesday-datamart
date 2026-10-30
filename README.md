@@ -316,10 +316,15 @@ its spill is a gigabyte or two under the larger instance's memory budget
 64 MB `work_mem`, where the same build dipped 32 GB on 2026-10-27. The
 write phase is one transaction by design, so a failure leaves both
 output tables as the last run left them, and it dips about 26 GB
-(2026-10-30). Set the watchdog's floor
-([`watchdog.py`](givingtuesday_datamart/watchdog.py), 35 GB by default)
-at least 26 GB under the free storage the write phase will start with:
-from the 59 GB free in October 2026, a floor of 30 GB or lower.
+(2026-10-30); `--commit-between-outputs` commits
+`privategrants_w_recipients` in a transaction of its own before
+`unioned_grants` is rebuilt, roughly 9 GB less at the deepest point, at
+the cost of that guarantee (a failure in the second transaction leaves
+the two tables from different runs until the matcher is rerun). Set the
+watchdog's floor ([`watchdog.py`](givingtuesday_datamart/watchdog.py),
+35 GB by default) at least 26 GB under the free storage the write phase
+will start with, 17 GB with the flag: from the 59 GB free in October
+2026, a floor of 30 GB or lower, or the default with the flag.
 
 ### Trace a filing back to the IRS
 
