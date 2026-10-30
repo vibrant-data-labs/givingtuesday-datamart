@@ -1,9 +1,9 @@
 # The `_current` relations' stamp: one rule for staleness
 
-*October 2026. A design, not built yet: the rule that would replace the two
-ways the pipeline decides today whether a `_current` relation must be
-rebuilt, what each writer and reader would do, the migration, the cost and
-the decisions it needs. The code it would replace:
+*October 2026. A design, decided on 2026-10-30 and being built in the three
+PRs of the plan below: the rule that replaces the two ways the pipeline
+decides today whether a `_current` relation must be rebuilt, what each
+writer and reader does, the migration, the cost and the decisions taken. The code it would replace:
 `current_grants.stale_basic_fields_current`, the matcher's stamp
 (`grant_matching._current_stamp`, `_unstamped_current_relations`) and the
 run-id check of the canonical build's identity transaction (PR #88).*
@@ -213,7 +213,8 @@ rebuilds the rest (11 to 13 minutes each on the medium instance class).
 
 ## Decisions
 
-Each with the choice I recommend first.
+Each with the choice I recommended first. All five were decided on
+2026-10-30 as recommended: the first choice in each.
 
 1. **Where stamps live:** table comments, as the matcher's are now (they
    commit with the data and die with the table), or a
