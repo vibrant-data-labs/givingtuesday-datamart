@@ -2,8 +2,8 @@
 
 *For the person running `matching_regression_checks.py` a quarter from
 now, who remembers roughly what grant matching is but none of the
-details. Last updated: October 2026 (the match_source breakdown and the
-government-name check).*
+details. Last updated: October 2026 (the match_source breakdown, the
+government-name check, and the Global Fund as the foreign canary).*
 
 ## What this is, in one paragraph
 
@@ -39,12 +39,18 @@ pairs our matched output also found. It's the closest thing we have to
 ground truth; everything else in the gate is internal consistency.
 
 **3. A few organizations act as early-warning canaries.** Michael J.
-Fox Foundation, Johns Hopkins, and the Gates Trust have been
-investigated by hand, so we know roughly how many matched rows each
+Fox Foundation, Johns Hopkins, the Gates Trust and the Global Fund have
+been investigated by hand, so we know roughly how many matched rows each
 *should* have. If MJFF's count collapses, something specific and
 diagnosable broke. Their thresholds sit at 95% of the accepted run's
 count so ordinary data wobble doesn't page you. (The script's output
-calls these "sentinel" checks.)
+calls these "sentinel" checks.) The Global Fund is the canary for a
+class, grants to foreign recipients that match on the name alone (their
+address fills the US address columns with a province and a postal code;
+[docs/foreign-recipients-name-only-2026-10-30.md](foreign-recipients-name-only-2026-10-30.md)):
+its floor was set from that proof's expected count before the first run
+under the rule, so against the output of 2026-10-30 that one line fails
+until the next run.
 
 **4. Wrong matches cluster, so we count name patterns.** We can't list
 every wrong match, but the wrong ones tend to look alike: grants to
@@ -146,7 +152,10 @@ statement of "this is the quality we accepted":
   explain **every number that moved** in the commit message. If you
   can't explain one, you're not done diagnosing.
 - Canary organizations get the observed count in a comment and a
-  threshold at 95% of it.
+  threshold at 95% of it. A canary added for a class the matcher could
+  not reach yet gets the proof's expected count instead, with the proof
+  named, and the commit that accepts the first run under the change
+  replaces it with the observed one.
 - The `match_source` breakdown gets the observed rows per arm, as they
   are (`MATCH_SOURCE_ROWS_BASELINE`); an arm that has not run yet stays
   at 0 and warns once, on its first run.

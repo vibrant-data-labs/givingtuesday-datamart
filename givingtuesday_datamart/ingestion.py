@@ -193,8 +193,13 @@ def _finalize_run(
     column_list: list[str] | None = None,
     validation: list[dict] | None = None,
     source_manifest: list[dict] | None = None,
+    stamp: tuple[str, dict] | None = None,
 ) -> None:
     """Write the terminal state of an ingest run.
+
+    ``stamp``, a staging table and its stamp, is written in the same
+    transaction, so a table carries the stamp of a run exactly when that
+    run is recorded a success.
 
     ``column_list`` and ``validation`` are JSONB on the DB side; we cast the
     bound parameter explicitly so sqlalchemy/psycopg2 doesn't try to infer.
@@ -236,6 +241,8 @@ def _finalize_run(
                 ),
             },
         )
+        if stamp is not None:
+            write_stamp(session, *stamp)
 
 
 def _apply_post_ingest_indexes(spec: SourceSpec, db_config: dict) -> None:
@@ -314,6 +321,40 @@ def _lineage_values(run_id: str, version: str, url: str, ingested_at: datetime) 
         "_ingested_at": ingested_at.isoformat(),
         "_ingest_run_id": run_id,
     }
+
+
+# A staging table's stamp: a JSON comment written in the transaction that
+# makes its rows final (an ingest's success, the own-extract patch), so a
+# ``_current`` relation's stamp can name what it was built from, and a
+# table whose load is running, failed or was interrupted carries none: a
+# load commits its new table before its rows, and a new table has no
+# comment (docs/current-relations-stamp.md).
+STAMP_VERSION = 1
+
+
+def staging_stamp(run_id: str | None, source_version: str | None, patch_run_id: str | None = None,
+                  **extra) -> dict:
+    """A staging table's stamp: the ingest run its rows come from, and the
+    own-extract patch run applied on top of them, if any."""
+    return {"stamp": STAMP_VERSION, "run_id": run_id, "source_version": source_version,
+            "patch_run_id": patch_run_id, **extra}
+
+
+def read_stamp(connection, table: str) -> dict | None:
+    """``table``'s stamp (a schema-qualified name), or None: no table, no
+    comment, or a comment that is not a stamp (the matcher's older ones)."""
+    comment = connection.execute(
+        text("SELECT obj_description(to_regclass(:name), 'pg_class')"), {"name": table}).scalar()
+    try:
+        stamp = json.loads(comment) if comment else None
+    except ValueError:
+        return None
+    return stamp if isinstance(stamp, dict) and stamp.get("stamp") == STAMP_VERSION else None
+
+
+def write_stamp(connection, table: str, stamp: dict) -> None:
+    """Write ``stamp`` on ``table`` (schema-qualified), in the caller's transaction."""
+    connection.execute(text(f"COMMENT ON TABLE {table} IS :stamp"), {"stamp": json.dumps(stamp, sort_keys=True)})
 
 
 def ingest_source(
@@ -471,6 +512,7 @@ def ingest_source(
         column_list=column_list,
         validation=[c.to_dict() for c in check_results],
         source_manifest=manifest,
+        stamp=(spec.staging_table_name, staging_stamp(run_id, resolved.version_date)),
     )
     logger.info(
         "Ingest success: %s rows=%s duration=%.1fs",

@@ -42,7 +42,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import text
 
-from givingtuesday_datamart.ingestion import LINEAGE_COLUMN_NAMES
+from givingtuesday_datamart.ingestion import LINEAGE_COLUMN_NAMES, read_stamp, write_stamp
 from givingtuesday_datamart.own_extract import batches, extract
 from givingtuesday_datamart.own_extract.load import LOGICAL_NAME, SCHEMA
 
@@ -132,7 +132,8 @@ def apply(session, *, source: str = SCHEMA, target: str = "public",
     """Patch every table in one transaction (the caller commits); return the counts per table.
 
     ``target`` and ``source`` let a scratch copy stand in for production;
-    ``record`` writes the runs to ``datamart_meta.ingest_runs``.
+    ``record`` writes the runs to ``datamart_meta.ingest_runs``, and each
+    run on its table's stamp (``stamp_patched``).
     """
     concordance = extract.load()
     runs = batch_runs(session, concordance.sha256, source)
@@ -156,14 +157,28 @@ def apply(session, *, source: str = SCHEMA, target: str = "public",
         manifest = {"concordance_sha256": concordance.sha256, "batches": [r["batch"] for r in runs]}
         finished = datetime.now(timezone.utc)
         for table, counts in out.items():
+            patch_run = str(uuid.uuid4())
             session.execute(text(
                 """INSERT INTO datamart_meta.ingest_runs
                        (run_id, logical_name, staging_table, source_version, source_url,
                         started_at, finished_at, status, row_count, source_manifest)
                    VALUES (:id, :name, :table, :version, :url, :started, :finished, 'success',
                            :rows, CAST(:manifest AS JSONB))"""),
-                {"id": str(uuid.uuid4()), "name": PATCH, "table": f"{target}.{table}",
+                {"id": patch_run, "name": PATCH, "table": f"{target}.{table}",
                  "version": f"{SCHEMA}@{concordance.sha256[:12]}", "url": ARCHIVES, "started": started,
                  "finished": finished, "rows": counts["inserted"],
                  "manifest": json.dumps({**manifest, **counts})})
+            stamp_patched(session, f"{target}.{table}", patch_run)
     return out
+
+
+def stamp_patched(session, table: str, patch_run_id: str) -> bool:
+    """Record the patch run on ``table``'s stamp, in the patch's
+    transaction; False when the table carries none (loaded before the
+    stamps, or its last ingest did not finish), where ``current_grants
+    --adopt`` reads the patch run from ``ingest_runs`` instead."""
+    stamp = read_stamp(session, table)
+    if stamp is None:
+        return False
+    write_stamp(session, table, {**stamp, "patch_run_id": patch_run_id})
+    return True

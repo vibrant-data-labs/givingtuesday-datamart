@@ -22,35 +22,15 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
-import logging
 import sys
 
 import requests
 from botocore.exceptions import BotoCoreError, ClientError
 
-from givingtuesday_datamart._internal.logger import logger
+from givingtuesday_datamart._internal.logger import configure_cli_logging, logger
 from givingtuesday_datamart.sources.registry import REGISTRY, S3_BUCKET, S3_PREFIX, get_source
 from givingtuesday_datamart.sources.resolver import BucketListing, list_bucket, resolve_source
 from givingtuesday_datamart.sources.spec import SourceSpec
-
-
-def _configure_cli_logging() -> None:
-    """Attach a console handler so INFO progress lines are visible from the CLI.
-
-    The package logger deliberately ships without handlers (see
-    _internal/logger.py) so library consumers control their own output. But
-    with no handler anywhere, Python's last-resort handler only prints
-    WARNING and above — which silently eats all the per-source progress
-    logging (Starting ingest / Rows written / Created table) when run as a
-    command-line tool.
-    """
-    if logger.handlers:
-        return
-    handler = logging.StreamHandler()
-    handler.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
-    )
-    logger.addHandler(handler)
 
 
 def _format_size(size: int | None) -> str:
@@ -339,43 +319,33 @@ def _rebuild_dependent_current(reloaded_tables: set[str]) -> bool:
     each — rebuilding them here would turn a routine refresh into a
     much longer job to no one's benefit.
 
+    Each relation is rebuilt in a transaction of its own
+    (``current_grants.build_current_relations``), so a failure leaves the
+    relations built before it committed and the rest as they were; the
+    error names both and the command that rebuilds the rest.
+
     A failure here does NOT invalidate the ingest: the staging data is
     loaded and its run row stays 'success'. It's loud, and it sets a
     non-zero exit so the caller notices, but the fix is to rerun the
-    rebuild, not the refresh.
+    rebuild, not the refresh: a rerun skips the loaded sources and
+    rebuilds nothing.
     """
-    from givingtuesday_datamart._internal.db import get_session
-    from givingtuesday_datamart.current_grants import (
-        build_basic_fields_current,
-        stale_basic_fields_current,
-    )
+    from givingtuesday_datamart.current_grants import basic_fields_relations, build_current_relations
     from givingtuesday_datamart.ingestion import datamart_config
 
-    wanted = sorted(
-        f"{table}_current"
-        for table in reloaded_tables
-        if table in ("basic_fields", "basic_fields_pf", "basic_fields_ez")
-    )
+    wanted = basic_fields_relations(f"{table}_current" for table in reloaded_tables)
     if not wanted:
         return True
-
-    logger.info("Rebuilding filing-version dedup relations: %s", ", ".join(wanted))
+    logger.info("Rebuilding filing-version dedup relations, one transaction each: %s",
+                ", ".join(table for table, _ddl in wanted))
     try:
-        with get_session(config=datamart_config()) as session:
-            counts = build_basic_fields_current(session.connection(), only=wanted)
-    except Exception:
+        build_current_relations(datamart_config(), wanted, built_by="sources refresh")
+    except Exception as err:
         logger.exception(
-            "Staging reloaded successfully, but rebuilding %s FAILED. The "
-            "staging tables are correct; %s still hold the previous drop's "
-            "rows, so the client, the frontend and the canonical identity "
-            "builds will read stale data until this is rerun: "
-            "python -m givingtuesday_datamart.current_grants",
-            ", ".join(wanted),
-            ", ".join(wanted),
-        )
+            "Staging reloaded successfully, but the rebuild of its dedup relations stopped: %s "
+            "The staging tables are correct; the client, the frontend and the canonical identity "
+            "builds read the relations not rebuilt as they were until they are.", err)
         return False
-    for table, count in counts.items():
-        logger.info("public.%s rebuilt: %s rows", table, f"{count:,}")
     return True
 
 
@@ -503,7 +473,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
-    _configure_cli_logging()
+    configure_cli_logging()
     if args.command == "status":
         return cmd_status()
     if args.command == "loaded":
