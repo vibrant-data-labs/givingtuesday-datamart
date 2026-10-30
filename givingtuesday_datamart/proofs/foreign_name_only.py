@@ -48,8 +48,9 @@ holds the findings.
 the same frozen files, with nothing written to the database. It adds the
 registry's rows that the frozen universe lacks, keyed as
 ``corrections_unique_names_view`` keys them, and matches again every
-selected tuple a new row can change: one it blocks with, or one of its
-name, since a new row is a new owner of its name for the name-only tier.
+selected tuple a registry row can change, the frozen universe's own
+correction rows included: one it blocks with, or one of its name, since a
+new row is a new owner of its name for the name-only tier.
 It matches them against every universe row that can block with those
 tuples (``corrections_preflight`` has the argument). The same slice without
 the new rows must reproduce ``compare``'s matches; ``corrections.csv`` lists
@@ -553,10 +554,13 @@ def measure_corrections(universe: pd.DataFrame, grants: pd.DataFrame, after: pd.
     logger.info("Selected tuples the registry's rows can change: %s", len(hit))
     hit_blocks = _blocks(hit)
     zips, names = set(hit_blocks["block_zip"].dropna()), set(hit_blocks["full_name"])
+    # The blocks of the new universe serve the frozen one too: its rows are
+    # the same rows with the same keys, less the ones added after them.
+    blocks = _blocks(new_universe)
+    can_block = blocks["block_zip"].isin(zips) | blocks["full_name"].isin(names)
     winners = {}
     for label, frame in (("without", universe), ("with", new_universe)):
-        b = _blocks(frame)
-        part = frame[b["block_zip"].isin(zips) | b["full_name"].isin(names)].copy()
+        part = frame[can_block.reindex(frame.index, fill_value=False)].copy()
         gm.prepare(part)
         if label == "without":
             gm.prepare(hit)

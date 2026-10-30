@@ -388,10 +388,16 @@ def test_the_us_state_keys_are_the_codes_and_the_names_of_the_states_and_territo
     assert not {"", "on", "ontario", "ge", "geneva", "11", "england", "aa", "ae", "ap"} & gm.US_STATE_KEYS
 
 
+def test_a_state_key_is_read_with_letters_and_single_spaces():
+    keys = pd.Series(["N.Y.", "d.c.", "ny 10001", "new  york", "Puerto Rico", "on", "11", "", None, "gu"])
+    assert gm.us_state(keys).tolist() == [True, True, True, True, True, False, False, False, False, True]
+
+
 def test_a_tuple_has_no_us_address_when_its_state_key_is_no_us_state_or_a_row_names_another_country():
     df = pd.DataFrame({"addressstate_key": ["", "ny", "New York ", "ontario", "ge", "pr", "puerto rico", "tn", "tn", "11"],
                        "addresszip_key": ["", "", "10018", "m5v 1", "1218", "00646", "", "60000", "60000", "1218"]})
     assert gm.no_us_address(df).tolist() == [True, False, False, True, True, False, False, False, False, True]
+    assert not gm.no_us_address(pd.DataFrame({"addressstate_key": ["d.c.", "n.y."]})).any()
     df["foreign_country"] = [False, False, False, False, False, False, False, True, None, False]
     assert gm.no_us_address(df).tolist() == [True, False, False, True, True, False, False, True, False, True]
 
@@ -625,4 +631,7 @@ def test_the_guard_can_be_set_aside_to_measure_it():
     assert gm.all_matches(scored, filers, tuples).empty
     found = gm.all_matches(scored, filers, tuples, one_word_guard=False)
     assert found[gm.INDEX_COLS[0]].map(filers["filerein_key"]).tolist() == ["921368036"]
+    # a gain measurement without the precision guards goes without this one too, unless it says otherwise
+    assert len(gm.all_matches(scored, filers, tuples, guards=False)) == 1
+    assert gm.all_matches(scored, filers, tuples, guards=False, one_word_guard=True).empty
     assert gm.one_word_namesakes(tuples, filers.iloc[[0]]).tolist() == [True]

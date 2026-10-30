@@ -581,8 +581,8 @@ def _read_corrections_csv(path: Path | None = None) -> pd.DataFrame:
     The state is a two-letter code, or, for a recipient abroad, its
     province or country as the grant row writes it ("OXFORDSHIRE"): the
     keys of a foreign grant hold what the filer typed (``no_us_address``).
-    A US state spelled out is refused, as a dead row: its grants carry the
-    code.
+    A US state spelled out or punctuated ("New York", "N.Y.") is refused,
+    as a dead row: its grants carry the code.
     """
     path = _CORRECTIONS_CSV_PATH if path is None else path
     if not path.exists():
@@ -611,7 +611,7 @@ def _read_corrections_csv(path: Path | None = None) -> pd.DataFrame:
         if not row.name1.strip():
             errors.append(f"line {line_no}: name1 is empty")
         state = row.state.strip()
-        if not (re.fullmatch(r"[A-Za-z]{2}", state) or (state and state.lower() not in US_STATE_KEYS)):
+        if not (re.fullmatch(r"[A-Za-z]{2}", state) or (state and not us_state(pd.Series([state])).iloc[0])):
             errors.append(
                 f"line {line_no}: state {row.state!r} is not a 2-letter code or a foreign province as written"
             )
@@ -1524,6 +1524,17 @@ _TERRITORY_ABBREVIATIONS = {
 US_STATE_KEYS = frozenset(
     key for table in (_STATE_ABBREVIATIONS, _TERRITORY_ABBREVIATIONS) for key in (*table, *table.values())
 )
+
+
+def us_state(states: pd.Series) -> pd.Series:
+    """Which state keys name a US state or territory (``US_STATE_KEYS``),
+    read with letters and single spaces only: a filer who typed "N.Y.",
+    "D.C." or "NY 10001" gave a US state."""
+    bare = (states.fillna('').astype(str).str.lower().str.replace(r'[^a-z ]', '', regex=True)
+            .str.replace(r'\s+', ' ', regex=True).str.strip())
+    return bare.isin(US_STATE_KEYS)
+
+
 # Abbreviations and truncations grant rows use for words the filer spells
 # out ("univ of florida fndtn", "umass foundat", "mt st vincent"); each
 # pattern matches the whole token.
@@ -2231,10 +2242,10 @@ def no_us_address(grants_df: pd.DataFrame) -> pd.Series:
     domestic row of our extract carries a state code, and GT's rows with an
     empty state key are foreign (Paris, Jerusalem, Nairobi, Beijing),
     whatever their zip key; the country column is set on every foreign row
-    of our extract and on none of GT's, which carry USA on 1.5M domestic
-    rows and nothing on the rest (docs/foreign-recipients-name-only-2026-10-30.md).
+    of our extract and on 7 of GT's, which carry USA on 1.5M domestic rows
+    and nothing on the rest (docs/foreign-recipients-name-only-2026-10-30.md).
     """
-    foreign = ~grants_df['addressstate_key'].fillna('').str.strip().str.lower().isin(US_STATE_KEYS)
+    foreign = ~us_state(grants_df['addressstate_key'])
     if 'foreign_country' in grants_df:
         foreign |= grants_df['foreign_country'].eq(True)
     return foreign
@@ -2271,7 +2282,7 @@ def one_word_namesakes(grants_df: pd.DataFrame, filers_df: pd.DataFrame) -> np.n
         grants_df['addresszip_key'].fillna('').str.strip() != '')
     abroad = (no_us_address(grants_df) & keyed).to_numpy()
     one_word = (grants_df['full_name'].str.split().str.len() == 1).to_numpy()
-    filer_in_us = filers_df['addressstate_key'].fillna('').str.strip().str.lower().isin(US_STATE_KEYS).to_numpy()
+    filer_in_us = us_state(filers_df['addressstate_key']).to_numpy()
     domestic = ~filers_df['filerein_key'].astype(str).str.startswith('98').to_numpy()
     return abroad & one_word & filer_in_us & domestic
 
@@ -2328,13 +2339,16 @@ def name_only_matches(universe_df: pd.DataFrame, grants_df: pd.DataFrame, matche
 def all_matches(features: pd.DataFrame, universe_df: pd.DataFrame, grants_df: pd.DataFrame,
                 one_filer_in_state: str = ONE_FILER_IN_STATE, *, guards: bool = True,
                 ranking: str = RANKING, eligible: pd.Series | None = None,
-                one_word_guard: bool = True) -> pd.DataFrame:
+                one_word_guard: bool | None = None) -> pd.DataFrame:
     """Every match of a run, one row per grant tuple matched: the winners
     of the scored pairs under ``ranking``, then the name-only tier on what
     they left. ``match_tier`` says which; ``match_name_words`` is missing
     but on a name-only match. ``eligible`` and ``one_word_guard`` are the
     name-only tier's (``name_only_matches``): a proof passes them to
-    measure another rule."""
+    measure another rule. ``guards`` sets the precision guards aside for a
+    gain measurement, the one-word guard with them unless
+    ``one_word_guard`` says otherwise."""
+    one_word_guard = guards if one_word_guard is None else one_word_guard
     placeholder = placeholder_names(grants_df)  # one pass of the pattern over the grant tuples
     matches = resolve_matches(features, universe_df, grants_df, one_filer_in_state, guards=guards,
                               ranking=ranking, placeholder=placeholder)

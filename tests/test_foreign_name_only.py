@@ -203,7 +203,7 @@ def test_a_foreign_row_may_carry_its_province_as_written_but_not_a_us_state_spel
     oxford = ("986001062", "OXFORD UNIVERSITY", "", "WELLINGTON SQUARE", "", "OXFORD", "OXFORDSHIRE", "OX1 2JD",
               "https://projects.propublica.org/nonprofits/organizations/986001062", "zein", "2026-10-30", "")
     assert len(gm._read_corrections_csv(registry(tmp_path, [SICKKIDS_ROW, oxford]))) == 2
-    for state in ("New York", "new york", "Puerto Rico", ""):
+    for state in ("New York", "new york", "Puerto Rico", "N.Y.", "D.C.", ""):
         bad = SICKKIDS_ROW[:6] + (state,) + SICKKIDS_ROW[7:]
         with pytest.raises(RuntimeError, match="not a 2-letter code or a foreign province"):
             gm._read_corrections_csv(registry(tmp_path, [bad]))
