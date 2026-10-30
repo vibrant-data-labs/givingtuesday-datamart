@@ -43,6 +43,20 @@ last run's winner for every tuple, and no rule may lose or move a match:
 the tier only adds. ``refused.csv`` lists what the guard refuses. The reports go beside
 the frozen files; ``docs/foreign-recipients-name-only-2026-10-30.md``
 holds the findings.
+
+``corrections --out DIR [--csv FILE]`` measures the corrections registry on
+the same frozen files, with nothing written to the database. It adds the
+registry's rows that the frozen universe lacks, keyed as
+``corrections_unique_names_view`` keys them, and matches again every
+selected tuple a new row can change: one it blocks with, or one of its
+name, since a new row is a new owner of its name for the name-only tier.
+It matches them against every universe row that can block with those
+tuples (``corrections_preflight`` has the argument). The same slice without
+the new rows must reproduce ``compare``'s matches; ``corrections.csv`` lists
+the tuples that move and ``corrections_rows.csv`` what each new row takes.
+Tuples outside the selection that share a new row's zip or name are not
+measured: for a row at a foreign address, those are tuples of its name at
+a US address, which no tier lets a foreign row take.
 """
 
 from __future__ import annotations
@@ -442,17 +456,153 @@ def write_reports(combined: pd.DataFrame, years: pd.DataFrame, matched_rows: pd.
     print(json.dumps(sentinel(gained, matched_rows), indent=2))
 
 
+# ---------------------------------------------------------------------------
+# corrections
+# ---------------------------------------------------------------------------
+
+UNIVERSE_KEYS = ["filerein_key"] + gm._KEYS
+SOURCE_RANK = {"basic_fields": 1, "basic_fields_pf": 2, "correction": 3, "eo_bmf": 4}
+
+
+def keyed_corrections(csv: pd.DataFrame) -> pd.DataFrame:
+    """The registry's rows keyed as ``corrections_unique_names_view`` keys
+    them (lower case; the zip's first five characters), one row per key
+    tuple, with ``line``, the CSV line of its first row."""
+    lower = {column: csv[column].fillna("").str.lower() for column in csv.columns}
+    keyed = pd.DataFrame({
+        "filerein_key": lower["recipient_ein"], "name1_key": lower["name1"], "name2_key": lower["name2"],
+        "address1_key": lower["address1"], "address2_key": lower["address2"], "addresscity_key": lower["city"],
+        "addressstate_key": lower["state"], "addresszip_key": csv["zip"].fillna("").str[:5].str.lower(),
+        "line": range(2, len(csv) + 2), "source": "correction"})
+    return keyed.drop_duplicates(UNIVERSE_KEYS).reset_index(drop=True)
+
+
+def with_corrections(universe: pd.DataFrame, rows: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
+    """The universe with the correction rows it lacks, as the read's
+    DISTINCT ON would hold them. A row whose key tuple a filing has
+    collapses into the filing; one a BMF line has takes the line's place
+    and index; any other comes after the frozen rows, with a new index.
+    Returns the universe and, on its index, the CSV line of each row a
+    correction supplies (missing elsewhere)."""
+    frozen = universe.copy()
+    keys = list(zip(*[frozen[k].fillna("") for k in UNIVERSE_KEYS]))
+    first = {}
+    for label, key in zip(frozen.index, keys):
+        first.setdefault(key, label)
+    line = pd.Series(pd.NA, index=frozen.index, dtype="Int64")
+    added = []
+    for row in rows.itertuples(index=False):
+        key = tuple(getattr(row, k) for k in UNIVERSE_KEYS)
+        if key in first:
+            label = first[key]
+            source = frozen.at[label, "source"]
+            if SOURCE_RANK[source] > SOURCE_RANK["correction"]:
+                frozen.at[label, "source"] = "correction"
+            if SOURCE_RANK[source] >= SOURCE_RANK["correction"]:
+                line[label] = row.line
+            continue
+        added.append({**{k: getattr(row, k) for k in UNIVERSE_KEYS}, "source": "correction", "_line": row.line})
+    if added:
+        new = pd.DataFrame(added)
+        start = int(frozen.index.max()) + 1
+        new.index = range(start, start + len(new))
+        line = pd.concat([line, new.pop("_line").astype("Int64")])
+        frozen = pd.concat([frozen, new])
+    return frozen, line
+
+
+def _blocks(df: pd.DataFrame) -> pd.DataFrame:
+    """The two blocking keys of each row, without ``prepare``'s slow
+    address string: the clean zip where the row has an address, and the
+    cleaned name."""
+    parts = df[["address1_key", "address2_key", "addresscity_key", "addressstate_key"]].fillna("").astype(str)
+    has_address = (parts.agg("".join, axis=1).str.replace(r"[^\w]", "", regex=True) != "")
+    zips = df["addresszip_key"].fillna("").astype(str).map(gm.clean_zip)
+    names = [gm.clean_name(gm.join_name(a, b)) for a, b in zip(df["name1_key"].fillna(""), df["name2_key"].fillna(""))]
+    return pd.DataFrame({"block_zip": zips.where(has_address), "full_name": names}, index=df.index)
+
+
+def reached(grants: pd.DataFrame, rows: pd.DataFrame) -> pd.Series:
+    """The grant tuples a correction row can change: one it blocks with
+    (the same clean zip, both with an address, or the same cleaned name)."""
+    g, r = _blocks(grants), _blocks(rows)
+    same_zip = g["block_zip"].notna() & g["block_zip"].isin(set(r["block_zip"].dropna()))
+    return same_zip | g["full_name"].isin(set(r["full_name"]))
+
+
+def corrections(out: Path, csv: Path | None = None) -> dict:
+    manifest = json.loads((out / "inputs.json").read_text())
+    for name in ("universe.parquet", "grant_years.parquet"):
+        if base._digest(out / name) != manifest["files"][name]["sha256"]:
+            raise RuntimeError(f"Frozen input changed: {name}")
+    universe = pd.read_parquet(out / "universe.parquet")
+    grants = tuples_of(pd.read_parquet(out / "grant_years.parquet"))
+    after = pd.read_parquet(out / "results.parquet", columns=gm._KEYS + ["policy", "ein"])
+    after = after[after["policy"] == "after"].drop(columns="policy").rename(columns={"ein": "compare_ein"})
+    return measure_corrections(universe, grants, after, keyed_corrections(gm._read_corrections_csv(csv)), out)
+
+
+def measure_corrections(universe: pd.DataFrame, grants: pd.DataFrame, after: pd.DataFrame, rows: pd.DataFrame,
+                        out: Path | None = None) -> dict:
+    """The tuples the correction rows move, on frozen frames: ``after`` holds
+    each selected tuple's match under the rule as it stands
+    (``compare_ein``). Writes the two reports under ``out`` when given."""
+    new_universe, line = with_corrections(universe, rows)
+    fresh = new_universe.loc[line.dropna().index]
+    hit = grants[reached(grants, fresh)].copy()
+    logger.info("Selected tuples the registry's rows can change: %s", len(hit))
+    hit_blocks = _blocks(hit)
+    zips, names = set(hit_blocks["block_zip"].dropna()), set(hit_blocks["full_name"])
+    winners = {}
+    for label, frame in (("without", universe), ("with", new_universe)):
+        b = _blocks(frame)
+        part = frame[b["block_zip"].isin(zips) | b["full_name"].isin(names)].copy()
+        gm.prepare(part)
+        if label == "without":
+            gm.prepare(hit)
+        matches = gm.all_matches(gm.score_slice(part, hit), part, hit)
+        winners[label] = matches.set_index(gm.INDEX_COLS[1])[gm.INDEX_COLS[0]].reindex(hit.index)
+        hit[f"ein_{label}"] = winners[label].map(part["filerein_key"]).fillna("")
+    hit["line"] = winners["with"].map(line).astype("Int64")
+    hit = hit.merge(after, on=gm._KEYS, how="left")
+    hit["compare_ein"] = hit["compare_ein"].fillna("")
+    mismatch = hit["ein_without"].ne(hit["compare_ein"])
+    columns = gm._KEYS + ["n_rows", "dollars", "our_rows", "compare_ein", "ein_without", "ein_with", "line"]
+    if mismatch.any():
+        if out is not None:
+            hit.loc[mismatch, columns].to_csv(out / "corrections_parity_mismatches.csv", index=False)
+        raise RuntimeError(f"{int(mismatch.sum())} tuples: the slice without the new rows does not reproduce compare")
+    moved = hit[hit["ein_with"].ne(hit["ein_without"])].sort_values("dollars", ascending=False)
+    lines = sorted(set(line.dropna().astype(int)))
+    taken = hit[hit["line"].notna()].groupby("line").agg(
+        ein=("ein_with", "first"), tuples=("n_rows", "size"), rows=("n_rows", "sum"), dollars=("dollars", "sum"))
+    taken = taken.reindex(lines).fillna({"tuples": 0, "rows": 0, "dollars": 0.0})
+    if out is not None:
+        moved[columns].to_csv(out / "corrections.csv", index=False)
+        taken.to_csv(out / "corrections_rows.csv")
+    summary = {"tuples_reached": len(hit), "parity_mismatches": 0, "tuples_moved": len(moved),
+               "rows_moved": int(moved["n_rows"].sum()), "dollars_moved": float(moved["dollars"].sum())}
+    print(json.dumps(summary))
+    with pd.option_context("display.width", 250, "display.max_colwidth", 40, "display.max_rows", 200):
+        print(moved[columns].to_string(index=False))
+        print(taken.to_string())
+    return {"summary": summary, "moved": moved[columns], "taken": taken}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("extract", "compare"))
+    parser.add_argument("command", choices=("extract", "compare", "corrections"))
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--one-in", type=int, default=500)
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--csv", type=Path, default=None, help="corrections: the registry to measure (default: the repo's)")
     args = parser.parse_args()
     if args.workers < 1:
         parser.error("--workers must be positive")
     if args.command == "extract":
         extract(args.out, args.one_in)
+    elif args.command == "corrections":
+        corrections(args.out, args.csv)
     else:
         compare(args.out, args.workers)
 

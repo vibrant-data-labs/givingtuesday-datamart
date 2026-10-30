@@ -570,23 +570,31 @@ def _corrections_content_hash() -> str:
     return hashlib.sha256(_CORRECTIONS_CSV_PATH.read_bytes()).hexdigest()[:8]
 
 
-def _read_corrections_csv() -> pd.DataFrame:
-    """Read and validate the corrections CSV. Raises on any bad row.
+def _read_corrections_csv(path: Path | None = None) -> pd.DataFrame:
+    """Read and validate the corrections CSV (``path``, the registry by
+    default). Raises on any bad row.
 
     Values are raw and verbatim (normalization is the view's job), but
     structural mistakes — a truncated EIN, a missing provenance field —
     should kill the run loudly rather than author a dead or wrong row.
+
+    The state is a two-letter code, or, for a recipient abroad, its
+    province or country as the grant row writes it ("OXFORDSHIRE"): the
+    keys of a foreign grant hold what the filer typed (``no_us_address``).
+    A US state spelled out is refused, as a dead row: its grants carry the
+    code.
     """
-    if not _CORRECTIONS_CSV_PATH.exists():
+    path = _CORRECTIONS_CSV_PATH if path is None else path
+    if not path.exists():
         raise RuntimeError(
-            f"Corrections CSV not found at {_CORRECTIONS_CSV_PATH}. "
+            f"Corrections CSV not found at {path}. "
             "It is tracked in git (data/corrections/org_identities.csv) — "
             "a missing file means a broken checkout, not 'no corrections'."
         )
     # keep_default_na=False: values are curator-entered strings; an org
     # legitimately named "NA" (or an empty note) must stay a string, not
     # become NaN.
-    df = pd.read_csv(_CORRECTIONS_CSV_PATH, dtype=str, keep_default_na=False)
+    df = pd.read_csv(path, dtype=str, keep_default_na=False)
     if list(df.columns) != _CORRECTIONS_COLUMNS:
         raise RuntimeError(
             f"Corrections CSV columns {list(df.columns)} != expected "
@@ -602,9 +610,10 @@ def _read_corrections_csv() -> pd.DataFrame:
             )
         if not row.name1.strip():
             errors.append(f"line {line_no}: name1 is empty")
-        if not re.fullmatch(r"[A-Za-z]{2}", row.state.strip()):
+        state = row.state.strip()
+        if not (re.fullmatch(r"[A-Za-z]{2}", state) or (state and state.lower() not in US_STATE_KEYS)):
             errors.append(
-                f"line {line_no}: state {row.state!r} is not a 2-letter code"
+                f"line {line_no}: state {row.state!r} is not a 2-letter code or a foreign province as written"
             )
         if not row.zip.strip():
             errors.append(f"line {line_no}: zip is empty")

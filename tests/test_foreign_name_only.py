@@ -181,3 +181,77 @@ def test_the_guard_refuses_a_one_word_namesake_and_the_unguarded_rule_measures_i
         frame["baseline_ein"] = results[0]["ein"]
     table = fn.refused(pd.concat(results, ignore_index=True))
     assert table[["name1_key", "ein", "filer_state"]].values.tolist() == [["cnrs", "921368036", "ne"]]
+
+
+# --- the corrections measurement ---------------------------------------------------
+
+REGISTRY_COLUMNS = ["recipient_ein", "name1", "name2", "address1", "address2", "city", "state", "zip",
+                    "evidence_url", "added_by", "added_date", "note"]
+
+
+def registry(tmp_path, rows):
+    path = tmp_path / "org_identities.csv"
+    pd.DataFrame([dict(zip(REGISTRY_COLUMNS, row)) for row in rows], columns=REGISTRY_COLUMNS).to_csv(path, index=False)
+    return path
+
+
+SICKKIDS_ROW = ("980183325", "THE HOSPITAL FOR SICK CHILDREN", "", "555 UNIVERSITY AVE", "", "TORONTO", "ON", "M5G 1X8",
+                "https://projects.propublica.org/nonprofits/organizations/980183325", "zein", "2026-10-30", "SickKids")
+
+
+def test_a_foreign_row_may_carry_its_province_as_written_but_not_a_us_state_spelled_out(tmp_path):
+    oxford = ("986001062", "OXFORD UNIVERSITY", "", "WELLINGTON SQUARE", "", "OXFORD", "OXFORDSHIRE", "OX1 2JD",
+              "https://projects.propublica.org/nonprofits/organizations/986001062", "zein", "2026-10-30", "")
+    assert len(gm._read_corrections_csv(registry(tmp_path, [SICKKIDS_ROW, oxford]))) == 2
+    for state in ("New York", "new york", "Puerto Rico", ""):
+        bad = SICKKIDS_ROW[:6] + (state,) + SICKKIDS_ROW[7:]
+        with pytest.raises(RuntimeError, match="not a 2-letter code or a foreign province"):
+            gm._read_corrections_csv(registry(tmp_path, [bad]))
+
+
+def test_correction_rows_are_keyed_as_the_view_keys_them(tmp_path):
+    keyed = fn.keyed_corrections(gm._read_corrections_csv(registry(tmp_path, [SICKKIDS_ROW, SICKKIDS_ROW])))
+    assert keyed[fn.UNIVERSE_KEYS].values.tolist() == [[
+        "980183325", "the hospital for sick children", "", "555 university ave", "", "toronto", "on", "m5g 1"]]
+    assert keyed["line"].tolist() == [2] and keyed["source"].tolist() == ["correction"]
+
+
+def test_a_correction_collapses_into_a_filing_replaces_a_bmf_line_or_is_added():
+    universe = pd.DataFrame({
+        "filerein_key": ["1", "2"], "name1_key": ["a", "b"], "name2_key": "", "address1_key": "", "address2_key": "",
+        "addresscity_key": "", "addressstate_key": "", "addresszip_key": "", "source": ["basic_fields", "eo_bmf"]},
+        index=[10, 20])
+    rows = pd.DataFrame({**{k: ["1", "2", "3"] if k == "filerein_key" else (["a", "b", "c"] if k == "name1_key" else "")
+                            for k in fn.UNIVERSE_KEYS}, "line": [2, 3, 4], "source": "correction"})
+    new, line = fn.with_corrections(universe, rows)
+    assert new["source"].tolist() == ["basic_fields", "correction", "correction"]
+    assert new.index.tolist() == [10, 20, 21]
+    assert line.dropna().to_dict() == {20: 3, 21: 4}
+    assert universe["source"].tolist() == ["basic_fields", "eo_bmf"]          # the frozen frame is left as it was
+
+
+def test_the_measurement_moves_sickkids_to_its_foundation_and_leaves_the_rest():
+    universe = pd.DataFrame([
+        ("530204670", "the hospital for sick children", "1731 bunker hill road ne", "washington", "dc", "20017", "basic_fields"),
+        ("980183325", "hospital for sick children foundation", "", "", "", "", "basic_fields"),
+        ("555555555", "visionspring", "20 w 36th st", "new york", "ny", "10018", "eo_bmf"),
+    ], columns=["filerein_key", "name1_key", "address1_key", "addresscity_key", "addressstate_key", "addresszip_key",
+                "source"], index=[0, 1, 2])
+    universe["name2_key"] = universe["address2_key"] = ""
+    grants = pd.DataFrame([
+        ("hospital for sick children the", "555 university ave", "toronto", "on", "m5g1x", 33, 31.8e6),
+        ("the hospital for sick children", "555 university ave", "toronto", "", "", 7, 2.5e6),     # no zip or state
+        ("the hospital for sick children", "1731 bunker hill rd ne", "washington", "dc", "20017", 5, 1e6),
+        ("visionspring", "", "", "", "", 1, 1e3),
+    ], columns=["name1_key", "address1_key", "addresscity_key", "addressstate_key", "addresszip_key", "n_rows", "dollars"])
+    grants["name2_key"] = grants["address2_key"] = ""
+    grants["our_rows"] = 0
+    after = grants[gm._KEYS].assign(compare_ein=["530204670", "530204670", "530204670", ""])
+    rows = fn.keyed_corrections(pd.DataFrame([dict(zip(REGISTRY_COLUMNS, SICKKIDS_ROW))]))
+    result = fn.measure_corrections(universe, grants, after, rows)
+    moved = result["moved"].set_index("addresscity_key")
+    # the address tier, through the exact name, with or without a zip
+    assert moved.loc["toronto", "ein_with"].tolist() == ["980183325", "980183325"]
+    assert "washington" not in moved.index                                      # the DC hospital keeps its own grants
+    assert result["summary"]["tuples_moved"] == 2
+    assert result["taken"].loc[2, ["ein", "tuples", "rows"]].tolist() == ["980183325", 2, 40]
