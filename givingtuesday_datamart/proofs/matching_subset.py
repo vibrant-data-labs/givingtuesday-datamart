@@ -169,6 +169,8 @@ def tuples_sql(names: Relations) -> str:
                coalesce(sum({amount}) FILTER (WHERE f.filerein IS NOT NULL AND NOT {recovered}), 0)::float8
                    AS funder_dollars,
                bool_or(l.filerein IS NOT NULL) AS in_loaded,
+               -- the grants view's column, so the name-only tier sees what the run sees
+               bool_or(UPPER(TRIM(COALESCE(sigocaffrfaco, ''))) NOT IN ('', 'US', 'USA')) AS foreign_country,
                -- the matcher's own placeholder predicate, the name keys, as the gate counts it
                bool_or(concat_ws(' ', name1_key, name2_key) ~* '{PLACEHOLDER_REGEX}'
                        OR sigocpyrbnbn1 ILIKE 'pfizer%' OR sigocpyrbnbn1 ILIKE '%world health organi%') AS in_gate
