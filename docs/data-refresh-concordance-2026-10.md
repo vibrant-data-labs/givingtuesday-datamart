@@ -384,6 +384,17 @@ unrecovered.
   ceiling on the club is that count, from the run of 10-30. A row of the
   registry giving the university a filer row at the campus address would
   take them under `named_first`.
+- Foreign recipients on the name-only tier. The tier takes a grant tuple
+  with no state and no zip whose cleaned name belongs to one filer; a
+  foreign address, which GT and now our extract put in the US address
+  columns, has a postal code and often a province, so the Global Fund,
+  Oxford, AGRA, CIMMYT and 1,280 other recipients whose own EIN is in the
+  universe never reach it (the step 9 correction: $1.77B of our 2023 to
+  2025 rows matched in October and not now; $3.77B of GT's 2009 to 2022
+  rows never matched). A foreign address should count as no US address
+  for the tier; the proof splits the names by whether the filer is the
+  recipient's foreign registration (a 98- EIN) or a domestic namesake, and
+  the gate gets a floor on a foreign recipient. Then a matcher run.
 
 ## Appendix: SQL
 
@@ -742,3 +753,40 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   not a hash from before a rebase) and names 66b4f76 as the second. The
   box's clone pulled to the commit afterwards. The matcher's per-relation
   commits are PR #87 (Afterwards). Next: step 10.
+- **2026-10-30, step 9, correction: where the dollars went.** The entry
+  above and the commit message of 66b4f76 put the matched tables' -$2.40B
+  on the 415 placeholder rows. They carry $0.63B (the BMF policy proof's
+  summary of 10-28,
+  `data/placeholder_recovery/bmf_policy_subset_summary_2026_10_28.csv`,
+  and the diff below). The rest is the foreign address. PR #81's
+  concordance fills the recipient address columns from the foreign address
+  when there is no US one, as GT does; our rows of October left them
+  empty. A grant tuple with a postal code or a province in its keys is not
+  for the name-only tier, so the grants of our extract's filings to
+  foreign recipients that October matched on the name alone to the
+  recipient's own EIN — the Global Fund (980380092), the University of
+  Oxford (986001062), AGRA, CIMMYT, the University of Manitoba, CGIAR, the
+  International Potato Center, 1,284 names in all — are unmatched now:
+  2,595 rows and $1.77B of 2023 to 2025. Measured by diffing the two
+  outputs' matched tuples (the ranking proof of 10-28 kept October's in
+  its `production.parquet`): 2,594,962 tuples then, 2,594,841 now,
+  2,593,649 in both (60,707 with another EIN, the arms' move), 1,313
+  matched in October only — 114 placeholder tuples (413 rows, $0.63B) and
+  1,199 tuples with all five address keys empty, every one matched in
+  October on the name-only tier (593 to a BMF line, 572 to a 990 filing,
+  33 to a 990-PF, 1 to a correction), whose rows now carry the foreign
+  address — and 1,192 matched now only (1,424 rows, $0.12B; 803 of the
+  rows recovered grants). The same gap has always held for GT's rows,
+  which carry the foreign address: under those 1,284 names alone, 6,862
+  rows and $3.77B of 2009 to 2022 are unmatched, as they were in August
+  and in October. So: no regression against the accepted August run; a
+  loss against October's output of $1.77B that the site showed until
+  08:06 UTC; and a measured recall gap of at least $5.6B behind it, with
+  the recipients' own EINs in the universe. The fix is the name-only
+  tier's eligibility — a foreign address is no US address — in a PR of its
+  own with a proof (the 1,284 names as the pool, split by whether the
+  filer's EIN is a foreign registration or a domestic namesake) and a
+  sentinel for a foreign recipient, then a matcher run (Afterwards). The
+  baselines of 66b4f76 are the run's counts and stand. Scripts and parquet
+  files beside the logs: `step9_output_diff.py`, `step9_moved_rows.py`,
+  `step9_foreign_rows.py`, `step9-diff/`.
