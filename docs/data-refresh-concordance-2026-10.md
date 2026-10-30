@@ -342,16 +342,24 @@ unrecovered.
 
 ### 10. Close out
 
-- [ ] `status` once more and the census after, against the census before.
-- [ ] `docs/own-extract.md`: production on `ce054c032e56`;
+- [x] `status` once more and the census after, against the census before.
+      (the status screens 17:29 UTC on 10-30, `status-after.log` beside the
+      logs; the census after and its compare are step 9's, 13:54 UTC)
+- [x] `docs/own-extract.md`: production on `ce054c032e56`;
       `docs/data-refresh-2026-10.md`: its open gate and step 8 pointed here.
-- [ ] Spot checks on the site, once the caches turn over or after a
+      (done 10-30, with the data-problems doc's rows, as the log says)
+- [x] Spot checks on the site, once the caches turn over or after a
       redeploy: Fidelity Charitable (110303001), Johns Hopkins University
       (520595110), Duke University (560532129), the Michael J. Fox
-      Foundation.
+      Foundation. (done 10-30 17:37 to 17:55 UTC after PR #87's merge
+      redeployed the frontend at 17:28 UTC; every count on the pages is the
+      database's, the log has them)
 - [ ] The shared instance back to the medium class in a quiet window, then
       `bigdb.env` deleted on the box; the box back to its usual size.
-- [ ] This log complete; this branch's PR merged.
+      (Zein's: on 10-30 evening the instance is still on the large class
+      and the box on its 256 GB size)
+- [ ] This log complete; this branch's PR merged. (the log is complete and
+      the PR out of draft on 10-30; the merge is Zein's)
 
 ## Afterwards
 
@@ -790,3 +798,44 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   baselines of 66b4f76 are the run's counts and stand. Scripts and parquet
   files beside the logs: `step9_output_diff.py`, `step9_moved_rows.py`,
   `step9_foreign_rows.py`, `step9-diff/`.
+- **2026-10-30, step 10: the close-out.** The status screens once more at
+  17:29 UTC (`run-step10.sh`, `status-after.log` beside the logs): the
+  staging tables on GT's June release and the BMF of 10-13 as in step 0,
+  the ten 2026 batches, `privategrants_current` 17,392,341 rows with
+  October's rule counts, the view on `v3`, the paid lists 4,664 filings /
+  584,684 rows / $16,313.2M and the future lists 177 / 6,671 / $1,295.1M
+  as step 6 left them, `match_tier` in the matcher's output. The census
+  after and its compare are step 9's (13:54 UTC) and its correction. The
+  docs: `own-extract.md` says production holds our rows under
+  `ce054c032e56` since the reload and the patch of 10-29 (the patch
+  bullet, the loaded-archives paragraph, *A concordance change*);
+  `data-refresh-2026-10.md`'s gate and accepting-commit boxes point here
+  and its step 8 is ticked against this entry. The data-problems doc (the
+  Claude Doc of 10-01, *990 Grants Data: Problems Found and Where Each
+  Stands*): twelve rows read live, the nine that read merged and three
+  that read open whose fixes merged and ran since (`field_fill` PR #62,
+  `total_row` PR #69, the BMF arm PR #68 for the 990-EZ recipients); the
+  live tables were read for each entry's example first
+  (`step10_doc_examples.py`: 237093598/2024 1,086 rows, 396040395/2018
+  and 481210113/2016 one row each, 133703640/2021 one row of $64.35M,
+  133981257/2015 its 15 rows, 205905161/2023 the recovered list of 32
+  grants in the view); its intro reads 25 live and 6 open, its reload
+  section says what ran, and its closing paragraph names the
+  foreign-recipient gap. The site: PR #87's merge at 17:27 UTC redeployed
+  the frontend (the production deployment of 17:28 UTC) and with it the
+  hour's cache; read 17:37 to 17:55 UTC, the four pages show the
+  database's counts to the row (`step10_site_counts.py`,
+  `step10-site-counts.log`): Fidelity Charitable 1,937 grants received
+  and 547,110 given, $76.07B (tax year 2024 89,891 rows, from our
+  extract's 2026 05A batch; the profile's lineage names the canonical
+  build of 10-29 22:21 UTC); Johns Hopkins University 9,180 received,
+  $8.15B (3,852 of them 990-PF rows: 2,314 by address and name, 1,538 by
+  state and name), 11,946 given; Duke University 9,570 received, $19.32B
+  (5,235 990-PF rows), 1,261 given; the Michael J. Fox Foundation 5,393
+  received, $1.01B (4,667 990-PF rows: 2,102 on its own filing's address,
+  1,541 through the corrections registry, 958 through its BMF line, 66 by
+  state and name), 2,777 given, 149 of them in tax year 2025. Tax year
+  2025 rows are on every page. Main merged into this branch (f71c12f,
+  PR #87). Left for Zein: the shared instance back to the medium class in
+  a quiet window and `bigdb.env` deleted on the box after it; the box
+  back to its usual size; this PR's merge, out of draft now.

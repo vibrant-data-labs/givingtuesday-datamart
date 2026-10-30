@@ -48,9 +48,12 @@ both hold.
   GT's stay for the years before. Before deciding, the 1,760 990-PF returns
   whose totals differ from production's were checked against each filing's
   line 25: ours matches it, GT's does not (GT's extract writes the block's
-  total into grants, $812.8M of it on 332 returns). `own_extract patch` is
-  built and was proven on a scratch copy with production's own `_current`
-  DDL; it has not run on production.
+  total into grants, $812.8M of it on 332 returns). `own_extract patch` was
+  proven on a scratch copy with production's own `_current` DDL, ran on
+  production on 2026-10-26 under concordance `3d9b48d6e5e7`, and again on
+  2026-10-29 after the reload under `ce054c032e56` (*A concordance change*,
+  below): production's staging tables hold our rows for every batch we
+  read, 20,109,932 of them.
 - **Checks that need no GT** (2026-10-28). Our grant rows against each
   filing's own totals: 96.9% of 990-PFs with grants match line 25, the
   same where GT holds the return and where it does not; 97.7% of Schedule
@@ -146,11 +149,15 @@ python -m givingtuesday_datamart.own_extract patch                # the patch on
 
 Every archive the IRS serves for 2024, 2025 and 2026, loaded on
 2026-10-23 and reloaded twice that evening as the parity runs corrected the
-concordance. The tables hold each archive once, loaded with concordance
-SHA-256 `3d9b48d6e5e7`; the run records in `datamart_meta.ingest_runs` and
-the generated report's batch table carry each archive's Last-Modified and
-SHA-256, the same in every run of it, and each reload's row counts equal
-the first load's in every table of every archive:
+concordance, then once more on 2026-10-29 when the concordance took the
+foreign address (*A concordance change*, below). The tables hold each
+archive once, loaded with concordance SHA-256 `ce054c032e56`; the run
+records in `datamart_meta.ingest_runs` and the generated report's batch
+table carry each archive's Last-Modified and SHA-256, the same in every run
+of it, and each reload's row counts equal the first load's in every table
+of every archive, but for the 257 group rows of the 49 `irs:` returns the
+reload of 2026-10-29 added (230 Schedule O notes, 22 990-EZ programs, 3
+Schedule I grants, 2 990-PF grants):
 
 | year | archives | Form 990 | 990-PF | 990-EZ | schema versions (share of returns) |
 |---|---|---|---|---|---|
@@ -542,8 +549,8 @@ rows under our returns that ours lacks beyond its empty and total-only
 otherwise set by GT: 990-PF grants 81.7% (June 86.4%: the foundation-status
 rename now over many more returns, and AmazonSmile), Schedule I 99.5% of
 GT's rows once the doubled return is set aside (99.5%), future grants all
-114,880. Production still holds the rows of the earlier concordance (*A
-concordance change*, below).
+114,880. Production holds these rows since the reload and the patch of
+2026-10-29 (*A concordance change*, below).
 
 ## Checks that need no GT
 
@@ -720,6 +727,16 @@ relations (an address on 61,612 more grants, the ZIP column now holding a
 foreign postal code where there is one, as GT's rows had before the patch)
 and, through the 49 `irs:` returns, Schedule O and the 990-EZ programs.
 The return tables do not change.
+
+Run on 2026-10-29 (`docs/data-refresh-concordance-2026-10.md`, steps 1 to
+3): the reload of the 38 batches from our S3 copies 19:00 to 20:41 UTC,
+each batch's rows as in the load of 10-23 but for the 49 returns' 257 group
+rows; the patch 21:30 to 21:51 UTC after a manual snapshot, 20,109,675 of
+our rows out and 20,109,932 in, then the vacuum of the ten staging tables
+to 22:13; the basic-fields relations, the grants relations and the
+canonical build the same evening, with October's filer-year, row and
+organization counts to the row. The matcher ran on the result on 10-30 and
+its gate passed (steps 8 and 9 there).
 
 **Undo.** `sources refresh --force` of the ten sources loads GT's release
 again and rebuilds the basic-fields relations; the grants relations and the

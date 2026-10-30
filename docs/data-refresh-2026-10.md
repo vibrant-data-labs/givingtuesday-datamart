@@ -250,8 +250,12 @@ The BMF arm doubles the pairs (PR #68), so the read box does not do.
       41,221 tuples, 3,310 left unmatched by the one-filer-in-state rule;
       `privategrants_w_recipients` 10,927,644 rows (7,578,795 in August),
       `unioned_grants` 19,879,313 (16,044,328); the log)
-- [ ] `python -m givingtuesday_datamart.matching_regression_checks`:
+- [x] `python -m givingtuesday_datamart.matching_regression_checks`:
       `GATE: PASS`, or the diagnosis of what moved.
+      (finished in `docs/data-refresh-concordance-2026-10.md`, step 8: the
+      matcher ran again on 2026-10-30 with the ranking fix of PR #84 on the
+      extract reloaded under concordance `ce054c032e56`, `GATE: PASS` at
+      08:12 UTC; the diagnosis of this run's failure is in the log below)
       (run 03:55:20 to 04:01:02 UTC: **GATE: FAIL** on two checks,
       placeholder rows matched 415 against a ceiling of 349, and the
       Johns Hopkins sentinel 706 rows against a floor of 1,735; every hard
@@ -263,24 +267,41 @@ The BMF arm doubles the pairs (PR #68), so the read box does not do.
       marked as grants to individuals; the diagnosis follows in the log)
 - [x] `python -m givingtuesday_datamart.placeholder_recovery check --policy v3`
       (done 04:01:02 to 04:01:46 UTC after the run, exit 0)
-- [ ] The accepting commit: the baselines updated, every number that moved
+- [x] The accepting commit: the baselines updated, every number that moved
       explained, the gate rerun on `PASS`
       (`docs/matching-regression-runbook.md`, *Updating the baselines*).
+      (done in the concordance plan's step 9 as 66b4f76, *Regression
+      baselines: accept the 2026-10-30 run*; its census paragraph is
+      corrected in that plan's log, step 9 correction)
 
 ### 8. Close out (laptop)
 
-- [ ] `status` once more: the three rules, the view on `v3`, the loaded
-      rows under `v3`, `match_tier` in the matcher's output.
-- [ ] The data-problems doc: rows that read "merged" read "live".
-- [ ] `docs/own-extract.md`: the patch's production numbers; a line in the
+Finished on 2026-10-30 in `docs/data-refresh-concordance-2026-10.md`,
+step 10, whose log entry has the figures.
+
+- [x] `status` once more: the three rules, the view on `v3`, the loaded
+      rows under `v3`, `match_tier` in the matcher's output. (10-30 17:29
+      UTC: 17,392,341 rows with the three rules, the view on `v3`, 584,684
+      paid rows under `v3`, `match_tier` present)
+- [x] The data-problems doc: rows that read "merged" read "live". (10-30:
+      the nine, and three open rows whose fixes merged and ran since; each
+      entry's example read in the live tables first)
+- [x] `docs/own-extract.md`: the patch's production numbers; a line in the
       parity section that the Schedule I and 3b same-total counts are the
-      ones before the counting fix.
-- [ ] The frontend redeployed, so the hour's cache and the day's stale
-      pages go.
-- [ ] Spot checks on the site: Fidelity Charitable (EIN 110303001), the
+      ones before the counting fix. (the parity section has the line: the
+      990-PF count corrected, Schedule I's and 3b's by the next run; the
+      production numbers of the patch of 10-26 and the re-patch of 10-29
+      are in *The patch, ours first* and *A concordance change*)
+- [x] The frontend redeployed, so the hour's cache and the day's stale
+      pages go. (PR #87's merge, 10-30 17:27 UTC, deployed at 17:28)
+- [x] Spot checks on the site: Fidelity Charitable (EIN 110303001), the
       Michael J. Fox Foundation's corrected grants, and a 2025 990-PF GT
-      never had.
-- [ ] This log complete; this document's PR merged.
+      never had. (10-30: Fidelity's tax year 2024 return from the 2026 05A
+      batch on its page, 89,891 grants given; the Fox Foundation's 4,667
+      990-PF rows received, 1,541 of them through the corrections
+      registry; tax year 2025 990-PF grants on every page read)
+- [x] This log complete; this document's PR merged. (PR #83, 2026-10-28;
+      the entry below closes the log)
 
 ## Afterwards, monthly
 
@@ -785,3 +806,16 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   baseline moved. The complete offline suite passed 698 tests, with
   130 DB tests deselected. The draft PR includes the operational changes,
   rerunnable proofs, archived small reports and these remaining limits.
+- **2026-10-30, close-out.** Step 7's gate and step 8 are finished in
+  `docs/data-refresh-concordance-2026-10.md` (steps 8 to 10): the matcher
+  ran again on 10-30 on the extract reloaded under `ce054c032e56`, with
+  the ranking fix of PR #84 and under a 10 GB storage floor, `GATE: PASS`
+  at 08:12 UTC, the baselines accepted as 66b4f76 (that commit's census
+  paragraph is corrected in the plan's log: the matched tables' -$2.40B
+  against October's output is foreign recipients leaving the name-only
+  tier under the new concordance, not the placeholder rows); the status
+  screens, the docs, the data-problems doc, the redeploy (PR #87's merge,
+  17:28 UTC) and the site's spot checks are in that plan's step 10 entry.
+  This document's PR (#83) merged on 10-28. Open there: the shared
+  instance back to the medium class, the box back to its size, and the
+  foreign-recipient fix for the name-only tier.
