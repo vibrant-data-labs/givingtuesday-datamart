@@ -55,6 +55,14 @@ normalization is applied in code (below), so a curator typing
 are also better provenance (record what you observed; derive what you
 match on).
 
+A recipient abroad (since 2026-10-30): the grant's keys hold what the
+filer typed, a province or a country in the state column, a postal code in
+the zip, so the row carries the state as the grant writes it
+("OXFORDSHIRE"). The validation takes a two-letter code or such a value,
+and refuses a US state spelled out. A row at the grant's own address wins
+through the exact name, zip or not, and takes the name from a namesake for
+the name-only tier ([foreign-recipients-name-only-2026-10-30.md](foreign-recipients-name-only-2026-10-30.md)).
+
 ## Pipeline integration (all in `grant_matching.py`)
 
 1. **Loader**: at the start of a matching run, read the CSV and replace
@@ -123,4 +131,7 @@ match on).
 - Match *rejections* (suppressing a false positive) — the union design
   can't express these; if one surfaces in practice, add a small
   exclusion mapping applied after the final join, with the same
-  provenance columns.
+  provenance columns. Surfaced 2026-10-30: twelve foreign recipients with
+  no EIN whose grants the name-only tier gives to a US namesake ($27.1M;
+  [foreign-recipients-name-only-2026-10-30.md](foreign-recipients-name-only-2026-10-30.md)).
+  Not built.

@@ -323,10 +323,83 @@ them: EarthEnable, a US nonprofit working in Uganda and Rwanda ($1.5M),
 and perhaps the US friends of the Salzburg Mozarteum ($2.0M). The full
 list is archived as `refused`.
 
-The guard leaves the longer namesakes. The DC Hospital for Sick Children
-holding SickKids Toronto's $49.7M is the largest found; it wants a
-corrections row for the right recipient, or a refusal where the universe
-has none. The rest of the class beyond the twenty largest is unread.
+The guard leaves the longer namesakes; the next section corrects the two
+whose right recipient has an EIN.
+
+## Corrections for the namesakes
+
+I read the 104 recipients of this class that gain at least $1M under the
+rule: $897M of its $991M. The reading is by name and address. I checked
+the records only for the rows read as another organization, against the
+universe and the organizations' public filings.
+
+| reading | recipients | rows | dollars |
+|---|---:|---:|---:|
+| the recipient's US arm or friends organization | 63 | 1,112 | $613.9M |
+| the recipient itself, registered in the US | 19 | 265 | $171.3M |
+| another organization, whose recipient has an EIN: corrected | 2 | 94 | $65.7M |
+| another organization, whose recipient has no EIN | 12 | 63 | $27.1M |
+| unclear | 8 | 48 | $18.9M |
+
+**The two corrected.** Six rows in the corrections registry
+(`data/corrections/org_identities.csv`), each at an address the grant rows
+write:
+
+- **SickKids.** The grants to the Hospital for Sick Children at 555
+  University Avenue, 686 Bay Street and 170 Elizabeth Street in Toronto
+  went to the Hospital for Sick Children in Washington, DC (530204670, the
+  HSC Pediatric Center), a different hospital. Three rows give the name at
+  those addresses to the Hospital for Sick Children Foundation
+  (98-0183325), the hospital's foundation, a 501(c)(3) that files Form 990
+  from Toronto.
+- **Oxford.** The grants to "Oxford University" at Wellington Square, the
+  Finance Division and South Parks Road went to 136024454, the American
+  Trust for Oxford University & Eastman, a Wilmington Trust account whose
+  BMF line carries the name. Three rows give the name at those addresses to
+  the university's own registration (98-6001062).
+
+A correction row is a filer row of its EIN. At the grant's own address it
+passes an address tier through the exact name, with or without a zip, and
+it makes the name one that two filers carry, so the name-only tier stops
+sending any other tuple of the name to the namesake. A foreign row carries
+its province as the grant writes it ("OXFORDSHIRE"); the registry's
+validation now accepts that, and still refuses a US state spelled out.
+
+**Measured** with the proof's `corrections` command on the same frozen
+files, with nothing written to the database. It re-matched the 951
+selected tuples the registry's rows can reach, against every universe row
+they block with. The slice without the new rows reproduces the comparison
+for all 951. With them, exactly 18 tuples move, and each of the six rows
+wins at least one:
+
+| recipient | tuples | rows | dollars | from | to |
+|---|---:|---:|---:|---|---|
+| SickKids | 10 | 83 | $52.5M | 530204670 | 980183325 |
+| Oxford | 8 | 22 | $16.0M | 136024454 | 986001062 |
+
+Two of the SickKids tuples (11 rows, $2.8M) have no address in their keys
+and are matched to the DC hospital in today's output already; the
+corrections fix those too.
+
+**The twelve without an EIN** ($27.1M) stay matched to the US organization
+of their name. A correction cannot say "unmatched": the registry only adds
+identities (docs/corrections-plan.md, "Match rejections"). They are London
+Community Foundation of London, Ohio, for grants to London, England
+($7.7M); a Fern Foundation in Salt Lake City for FERN in Brussels ($4.1M);
+One Economy of Des Moines for One Economy in Windhoek ($3.1M); a Windsong
+Foundation in Virginia for grants to Anguilla ($2.2M); St. Andrews College
+of North Carolina for St. Andrew's College in Ontario and South Africa
+($2.0M); and seven of about $1M each: City Harvest New York for City
+Harvest London; a North Dakota namesake for Youth Opportunities Unlimited
+in London, Ontario; an Indiana namesake for CARE India; an Arizona private
+foundation named "United Nations"; a Colorado namesake for the Bailey
+Theatre in Camrose; a West Virginia hospice for Hospice Care on the Isle of
+Man; and St. Michael's Hospital of Tyndall, South Dakota, for St.
+Michael's in Toronto. A Washington friends organization (994406734) may be
+Toronto St. Michael's, but its records do not say so. Fixing these needs a
+small exclusion mapping applied after the final join; that is a decision
+for Zein, not built here. The 8 unclear and the class below $1M ($94M)
+are unread.
 
 ## The gate
 
@@ -353,8 +426,11 @@ On the inputs of 2026-10-30 (a run on newer inputs moves with them):
   (+9,143), and +$8.526B, by tax year as in the table above.
   `unioned_grants` gains the same rows less any its `UNION` folds as
   identical.
-- The arms: `basic_fields` +6,025 rows, `eo_bmf` +2,959, `basic_fields_pf`
-  +158, `correction` +1.
+- The arms, with the six correction rows: `basic_fields` +5,942 rows,
+  `eo_bmf` +2,937, `basic_fields_pf` +158, `correction` +106. The
+  corrections move rows between EINs and arms, never in or out: SickKids'
+  83 rows go to 98-0183325 (11 of them leave the DC hospital, 530204670,
+  which holds them today) and Oxford's 22 go to 98-6001062.
 - The gate: the Global Fund at 56 (floor 53); everything else as on
   2026-10-30.
 
@@ -367,6 +443,8 @@ On the inputs of 2026-10-30 (a run on newer inputs moves with them):
 - [The 60 largest gains to a domestic EIN](../data/placeholder_recovery/foreign_name_only_examples_2026_10_30.csv)
 - [What each signal adds](../data/placeholder_recovery/foreign_name_only_signals_2026_10_30.csv)
 - [The 246 tuples the one-word guard refuses](../data/placeholder_recovery/foreign_name_only_refused_2026_10_30.csv)
+- [The 104 largest domestic-EIN recipients, read](../data/placeholder_recovery/foreign_name_only_domestic_review_2026_10_30.csv)
+- [The 18 tuples the correction rows move](../data/placeholder_recovery/foreign_name_only_corrections_2026_10_30.csv)
 
 The frozen inputs, the score cache and `results.parquet` stay in the
 proof's directory on the box, out of git. Nothing was written to the
