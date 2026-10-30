@@ -358,20 +358,32 @@ or of the ones named:
 
     python -m givingtuesday_datamart.current_grants
     python -m givingtuesday_datamart.current_grants --only privategrants_future_current
+
+Every build stamps its relation: a JSON comment naming the stamps of the
+tables it was built from and a hash of its rules, written last in its
+transaction (docs/current-relations-stamp.md). Each relation's state from
+the stamps alone, and the stamping of what was loaded and built before
+them (once, by night):
+
+    python -m givingtuesday_datamart.current_grants --check
+    python -m givingtuesday_datamart.current_grants --adopt [--verify]
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
 import os
+import uuid
+from datetime import datetime, timezone
 from typing import Any, Callable, Iterable
 
 from sqlalchemy import text
 
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart._internal.logger import logger
-from givingtuesday_datamart.ingestion import datamart_config
+from givingtuesday_datamart.ingestion import STAMP_VERSION, datamart_config, read_stamp, staging_stamp, write_stamp
 
 _NUMERIC_RE = r"'^-?[0-9]+(\.[0-9]+)?$'"
 
@@ -954,6 +966,21 @@ _MATCHING_VIEW_TABLES = ("grants_to_domestic_organizations_current", "privategra
 # What a relation is built from besides staging: rebuilding the relation
 # named rebuilds the relations that read it.
 _READS_CURRENT = {"privategrants_future_current": "privategrants_current"}
+# What each relation is built from: the staging tables and the relation
+# its DDL reads, as its FROM and JOIN clauses name them (a test holds the
+# two together). A relation's stamp records the stamps of these
+# (docs/current-relations-stamp.md).
+_INPUTS = {
+    "basic_fields_current": ("basic_fields",),
+    "basic_fields_pf_current": ("basic_fields_pf",),
+    "basic_fields_ez_current": ("basic_fields_ez",),
+    "grants_to_domestic_organizations_current": ("grants_to_domestic_organizations", "basic_fields"),
+    "privategrants_current": ("privategrants", "basic_fields_pf"),
+    "privategrants_future_current": ("privategrants_future", "basic_fields_pf", "privategrants_current"),
+}
+# The logical name the own-extract patch records its runs under
+# (``own_extract.patch.PATCH``; imported there, not here).
+_PATCH_RUNS = "irs_extract_patch"
 
 
 def with_dependents(tables: Iterable[str]) -> list[tuple[str, str]]:
@@ -1125,6 +1152,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=CLI)
     parser.add_argument("--only", action="append", choices=[t for t, _ in _TABLES], default=None,
                         help="rebuild this relation and no other; may be passed several times")
+    parser.add_argument("--check", action="store_true",
+                        help="print each relation's state (current, stale, blocked) and why, build nothing; "
+                             "exit 1 when any is not current")
+    parser.add_argument("--adopt", action="store_true",
+                        help="stamp the staging tables and basic-fields relations loaded or built before the "
+                             "stamps; once, by night: the relations' check reads them in full")
+    parser.add_argument("--verify", action="store_true",
+                        help="with --adopt, check every row of each staging table, not a sample of its pages")
     return parser
 
 
@@ -1138,6 +1173,139 @@ def _rules_sql(tables: Iterable[str]) -> str:
     return " UNION ALL ".join(
         f"SELECT '{t}' AS relation, dedup_rule, COUNT(*) AS rows FROM public.{t} GROUP BY 1, 2"
         for t in tables) + " ORDER BY 1, 3 DESC"
+
+
+def ddl_hash(table: str) -> str:
+    """``table``'s rules as its stamp records them: a hash of its DDL and
+    its indexes, so a change to either makes the relations built under the
+    old ones stale, with no number to remember to bump."""
+    return hashlib.sha256("\n".join([dict(_TABLES)[table], *_INDEX_DDL[table]]).encode()).hexdigest()[:16]
+
+
+def _input_entry(name: str, stamp: dict | None) -> dict | None:
+    """What a relation's stamp records of an input: a staging table's stamp
+    as it is, a relation's identity (its stamp's ``id``), or None for an
+    input without a stamp."""
+    if stamp is None:
+        return None
+    return {"id": stamp.get("id")} if name in _INPUTS else stamp
+
+
+def _lock_inputs(connection, table: str) -> dict[str, dict | None]:
+    """Lock ``table``'s inputs until the transaction ends (ACCESS SHARE:
+    reads go on, an ingest's DROP of one waits for the commit), then read
+    their stamps, which the relation's stamp records."""
+    names = _INPUTS[table]
+    connection.execute(text(f"LOCK TABLE {', '.join(f'public.{n}' for n in names)} IN ACCESS SHARE MODE"))
+    return {n: _input_entry(n, read_stamp(connection, f"public.{n}")) for n in names}
+
+
+def _relation_stamp(table: str, inputs: dict, built_by: str | None, extra: dict | None = None) -> dict:
+    """A relation's stamp: its inputs' stamps, its rules, a new id (what a
+    relation built from it records), who built it and when, beside any keys
+    of the caller's (the matcher's)."""
+    return {**(extra or {}), "stamp": STAMP_VERSION, "id": str(uuid.uuid4()), "inputs": inputs,
+            "ddl": ddl_hash(table), "built_by": built_by, "built_at": datetime.now(timezone.utc).isoformat()}
+
+
+def relation_states(connection) -> dict[str, tuple[str, str]]:
+    """Each relation's state, in build order, with the reason: ``current``
+    (its stamp records its inputs' stamps as they are now, and today's
+    rules), ``stale`` (rebuild it), or ``blocked`` (an input carries no
+    stamp: its load is running, failed or was interrupted, and a rebuild
+    would read it as it is). Comments only: no table is read."""
+    stamps: dict[str, dict | None] = {}
+
+    def stamp_of(name: str) -> dict | None:
+        if name not in stamps:
+            stamps[name] = read_stamp(connection, f"public.{name}")
+        return stamps[name]
+
+    states: dict[str, tuple[str, str]] = {}
+    for table, _ddl in _TABLES:
+        blocked = [f"{n} has no stamp" for n in _INPUTS[table] if n not in _INPUTS and stamp_of(n) is None]
+        blocked += [f"{n} is blocked" for n in _INPUTS[table] if states.get(n, ("",))[0] == "blocked"]
+        own = stamp_of(table)
+        if blocked:
+            states[table] = ("blocked", "; ".join(blocked))
+        elif own is None or "inputs" not in own:
+            states[table] = ("stale", "no stamp: missing, or not built since the stamps")
+        elif own.get("ddl") != ddl_hash(table):
+            states[table] = ("stale", "built under other rules")
+        else:
+            moved = [n for n in _INPUTS[table] if states.get(n, ("current",))[0] != "current"
+                     or own["inputs"].get(n) != _input_entry(n, stamp_of(n))]
+            states[table] = ("stale", f"built from another {', '.join(moved)}") if moved else ("current", "")
+    return states
+
+
+def adoptable_staging_tables(connection) -> list[str]:
+    """The staging tables an ingest has written (``ingest_runs``) that exist."""
+    rows = connection.execute(text("""
+        SELECT DISTINCT staging_table FROM datamart_meta.ingest_runs
+        WHERE staging_table LIKE :public AND logical_name <> :patch ORDER BY 1"""),
+        {"public": "public.%", "patch": _PATCH_RUNS}).fetchall()
+    return [t for (t,) in rows
+            if connection.execute(text("SELECT to_regclass(:name) IS NOT NULL"), {"name": t}).scalar()]
+
+
+def adopt_staging(connection, table: str, *, verify: bool = False) -> str:
+    """Stamp ``table`` (schema-qualified), loaded before the stamps, and
+    say what was done. It takes the stamp of its latest ingest run when
+    that run succeeded (an ingest after it, failed or unfinished, may have
+    replaced its rows), with the last patch run after it, if any. A sample
+    of its pages (every row with ``verify``) must carry that run's id, or
+    the patch's ``irs:`` version; anything else leaves it unstamped."""
+    if read_stamp(connection, table) is not None:
+        return f"{table}: stamped already"
+    runs = connection.execute(text("""
+        SELECT run_id::text, logical_name, source_version, status FROM datamart_meta.ingest_runs
+        WHERE staging_table = :name ORDER BY started_at"""), {"name": table}).fetchall()
+    ingests = [r for r in runs if r[1] != _PATCH_RUNS]
+    if not ingests or ingests[-1][3] != "success":
+        why = f"its last ingest, run {ingests[-1][0]}, is {ingests[-1][3]}" if ingests else "no ingest run"
+        return f"{table}: NOT adopted: {why}; reload it"
+    run_id, _name, version, _status = ingests[-1]
+    patches = [r[0] for r in runs[runs.index(ingests[-1]) + 1:] if r[1] == _PATCH_RUNS and r[3] == "success"]
+    patch_run = patches[-1] if patches else None
+    rows_of = f"{table}" if verify else f"{table} TABLESAMPLE SYSTEM (0.1)"
+    check = """SELECT _ingest_run_id = :run AS ingest, _source_version LIKE :patched AS patched, COUNT(*)
+               FROM {rows} GROUP BY 1, 2"""
+    params = {"run": run_id, "patched": "irs:%"}
+    seen = connection.execute(text(check.format(rows=rows_of)), params).fetchall()
+    if not seen and not verify:          # a small table can sample no page
+        seen = connection.execute(text(check.format(
+            rows=f"(SELECT _ingest_run_id, _source_version FROM {table} LIMIT 1000) s")), params).fetchall()
+    other = sum(n for ingest, patched, n in seen if not ingest and not (patched and patch_run))
+    if other:
+        return f"{table}: NOT adopted: {other:,} of the rows read carry another run than {run_id}; reload it"
+    write_stamp(connection, table, staging_stamp(run_id, version, patch_run, adopted=True))
+    patched = f", patch run {patch_run}" if patch_run else ""
+    return f"{table}: adopted run {run_id} ({version}){patched}; {sum(n for *_, n in seen):,} rows checked"
+
+
+def adopt_relations(connection) -> list[str]:
+    """Stamp the basic-fields relations built before the stamps, where
+    today's scan (``stale_basic_fields_current``) finds each built from its
+    staging table's run and the staging table carries a stamp, on the
+    assumption, which nothing here can check, that each was built under
+    today's DDL. The grants relations are left to the matcher's next
+    rebuild. One line per relation."""
+    stale = set(stale_basic_fields_current(connection))
+    lines = []
+    for table, _ddl in _BASIC_FIELDS_TABLES:
+        if read_stamp(connection, f"public.{table}") is not None:
+            lines.append(f"public.{table}: stamped already")
+            continue
+        inputs = {n: _input_entry(n, read_stamp(connection, f"public.{n}")) for n in _INPUTS[table]}
+        if table in stale or None in inputs.values():
+            why = "built from another run" if table in stale else "its staging table has no stamp"
+            lines.append(f"public.{table}: NOT adopted: {why}; the canonical build rebuilds it")
+            continue
+        write_stamp(connection, f"public.{table}", _relation_stamp(table, inputs, "current_grants --adopt",
+                                                                   {"adopted": True}))
+        lines.append(f"public.{table}: adopted")
+    return lines
 
 
 class CurrentRebuildFailed(RuntimeError):
@@ -1156,7 +1324,8 @@ class CurrentRebuildFailed(RuntimeError):
 
 
 def build_current_relations(config: dict, tables: Iterable[tuple[str, str]] = _TABLES, *,
-                            after: Callable[[Any, str], None] | None = None) -> dict[str, int]:
+                            after: Callable[[Any, str], None] | None = None,
+                            stamp_extra: dict | None = None, built_by: str | None = None) -> dict[str, int]:
     """(Re)build the ``_current`` relations in ``tables`` (every one by
     default), each in a session and transaction of its own against the
     database ``config`` names. Returns row counts. Every rebuild of a
@@ -1178,19 +1347,22 @@ def build_current_relations(config: dict, tables: Iterable[tuple[str, str]] = _T
     commit whose acknowledgement is lost counts as failed; building that
     relation again is harmless.
 
+    Each relation's transaction locks its inputs first and reads their
+    stamps, and ends by writing the relation's stamp: its inputs' stamps,
+    a hash of its rules, an id, ``built_by``, and ``stamp_extra`` (the
+    matcher's keys), so a relation carries a stamp only when it is
+    complete (``relation_states``; docs/current-relations-stamp.md).
+
     ``after(connection, table)`` runs in the transaction that built
     ``table``, after its indexes, ANALYZE and count: what must commit with
     the build or not at all. The matcher's hook
     (``grant_matching.after_current_build``) recreates the views the DROP
     ... CASCADE of ``privategrants_current`` takes with it (the view of
     current and recovered grants and the matching views over it), so no
-    session ever sees them gone and a later failure cannot lose them, and
-    stamps the relation with the source versions, so a relation carries
-    the stamp only when it is complete. The CLI below passes the same
-    hook when the view's policy is known; with no view it says so up
-    front, builds the tables, and leaves the views to the next matcher
-    run. A rebuilt relation carries no comment otherwise, the DROP having
-    taken the old one.
+    session ever sees them gone and a later failure cannot lose them.
+    The command line (``main``) passes the same hook when the view's
+    policy is known; with no view it says so up front, builds the tables,
+    and leaves the views to the next matcher run.
     """
     tables = list(tables)
     counts: dict[str, int] = {}
@@ -1198,9 +1370,11 @@ def build_current_relations(config: dict, tables: Iterable[tuple[str, str]] = _T
         try:
             with get_session(config=config) as session:
                 connection = session.connection()
+                inputs = _lock_inputs(connection, table)
                 count = _build_one(connection, table, ddl)
                 if after is not None:
                     after(connection, table)
+                write_stamp(connection, f"public.{table}", _relation_stamp(table, inputs, built_by, stamp_extra))
         except Exception as err:
             raise CurrentRebuildFailed(counts, [t for t, _ in tables[i:]], err) from err
         counts[table] = count
@@ -1208,12 +1382,11 @@ def build_current_relations(config: dict, tables: Iterable[tuple[str, str]] = _T
     return counts
 
 
-if __name__ == "__main__":
-    # Standalone rebuild + matching-view restore (imported lazily: at
-    # module level grant_matching imports this module). One session per
-    # step: each table build is a 10-30 min transaction
-    # (build_current_relations), and a failure in a later step must not
-    # roll an earlier table back.
+def main(argv: list[str] | None = None) -> int:
+    """The command line: rebuild the relations (every one, or ``--only``
+    those), print their states (``--check``), or stamp what was loaded and
+    built before the stamps (``--adopt``)."""
+    # Imported here: at module level grant_matching imports this module.
     from functools import partial
 
     from givingtuesday_datamart.grant_matching import after_current_build
@@ -1224,18 +1397,40 @@ if __name__ == "__main__":
     # counts and the doubling watch at the end of a paid build were silent
     # when the basic-fields relations were rebuilt on 2026-10-26.
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
+    args = build_parser().parse_args(argv)
 
-    _only = build_parser().parse_args().only
-    _wanted = [(t, d) for t, d in _TABLES if _only is None or t in _only]
+    if args.check:
+        with get_session(config=datamart_config()) as session:
+            states = relation_states(session.connection())
+        for table, (state, why) in states.items():
+            print(f"{table:42s} {state:8s} {why}".rstrip(), flush=True)
+        return 0 if all(state == "current" for state, _ in states.values()) else 1
+    if args.adopt:
+        # One transaction a table, at the builder's memory budget (no
+        # parallel workers on the shared instance).
+        with get_session(config=datamart_config()) as session:
+            tables = adoptable_staging_tables(session.connection())
+        for table in tables:
+            with get_session(config=datamart_config()) as session:
+                apply_build_memory(session.connection())
+                print(adopt_staging(session.connection(), table, verify=args.verify), flush=True)
+        with get_session(config=datamart_config()) as session:
+            apply_build_memory(session.connection())
+            for line in adopt_relations(session.connection()):
+                print(line, flush=True)
+        return 0
 
+    # Rebuild: one session per step: each table build is a 10-30 min
+    # transaction (build_current_relations), and a failure in a later step
+    # must not roll an earlier table back.
+    wanted = [(t, d) for t, d in _TABLES if args.only is None or t in args.only]
     # The policy the view of current and recovered grants shows, read
     # before the rebuild: the DROP ... CASCADE of privategrants_current
     # takes the view, and the policy is written nowhere else. The view is
     # created again for that policy, never for a default.
     with get_session(config=datamart_config()) as session:
-        _policy = shown_policy(session)
-    _needs_views = any(t in _MATCHING_VIEW_TABLES for t, _ in _wanted)
-    if _needs_views and _policy is None:
+        policy = shown_policy(session)
+    if policy is None and any(t in _MATCHING_VIEW_TABLES for t, _ in wanted):
         # Said before the builds, not after them: with no view there is no
         # policy to create the matching views for, and a run of the matcher
         # would stop at the same point.
@@ -1245,14 +1440,19 @@ if __name__ == "__main__":
             "givingtuesday_datamart.placeholder_recovery view --policy <version>`); the next matcher run "
             "creates the matching views on it.", VIEW)
     # The hook recreates the views in the transaction that drops them, so
-    # no session sees them gone; it stamps nothing (the stamp is a matcher
-    # run's), so the next matcher run rebuilds what this built.
-    _hook = partial(after_current_build, recovered_policy=_policy) if _policy is not None else None
-    build_current_relations(datamart_config(), _wanted, after=_hook)
+    # no session sees them gone. The builder's stamp carries no matcher
+    # keys, so the next matcher run rebuilds what this built.
+    hook = partial(after_current_build, recovered_policy=policy) if policy is not None else None
+    build_current_relations(datamart_config(), wanted, after=hook, built_by="current_grants")
     # Rows by rule over the relations just built and no other: over all
     # five, the summary took the last eleven minutes of a basic-fields
     # rebuild and its swap peak on 2026-10-26.
     with get_session(config=datamart_config()) as session:
-        rules = session.connection().execute(text(_rules_sql(t for t, _ in _wanted))).fetchall()
+        rules = session.connection().execute(text(_rules_sql(t for t, _ in wanted))).fetchall()
     for relation, rule, n in rules:
         logger.info("%s %-28s %s rows", relation, rule, f"{n:,}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

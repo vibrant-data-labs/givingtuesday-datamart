@@ -1109,7 +1109,8 @@ def build_canonical(*, include_people: bool = False) -> BuildResult:
             )
             # One transaction each, before the identity builds': inside
             # theirs, a failed identity build would roll them back too.
-            build_current_relations(datamart_config(), basic_fields_relations(stale))
+            build_current_relations(datamart_config(), basic_fields_relations(stale),
+                                    built_by="sources build-canonical")
         with get_session(config=datamart_config()) as session:
             _open_identity_transaction(session.connection(), source_runs)
             # schedule_o_part_iii must land before nonprofit_text because the

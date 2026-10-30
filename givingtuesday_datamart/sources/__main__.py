@@ -339,7 +339,7 @@ def _rebuild_dependent_current(reloaded_tables: set[str]) -> bool:
     logger.info("Rebuilding filing-version dedup relations, one transaction each: %s",
                 ", ".join(table for table, _ddl in wanted))
     try:
-        build_current_relations(datamart_config(), wanted)
+        build_current_relations(datamart_config(), wanted, built_by="sources refresh")
     except Exception as err:
         logger.exception(
             "Staging reloaded successfully, but the rebuild of its dedup relations stopped: %s "

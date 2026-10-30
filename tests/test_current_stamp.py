@@ -31,7 +31,8 @@ VERSIONS = {"irs_990pf_grants": "2026_10_25", "irs_990_basic_fields": "2026_10_2
             "irs_990pf_basic_fields": "2026_10_25", "irs_eo_bmf": "2026_10_13"}
 TABLES = [t for t, _ in gm._CURRENT_TABLES]
 BASIC_FIELDS = [t for t, _ in cg._BASIC_FIELDS_TABLES]
-STAMP = gm._current_stamp(VERSIONS, "build-1")
+MATCHER = gm._current_stamp(VERSIONS, "build-1")        # the keys a run has the builder write
+STAMP = json.dumps(MATCHER)                             # a relation a run stamped, as the catalog holds it
 
 
 class _Connection(_BuildConnection):
@@ -105,8 +106,8 @@ def relations_in(session, verb="CREATE TABLE") -> list[str]:
             if sql.lstrip().startswith(f"{verb} public.")]
 
 
-def hook(policy="v3", stamp=STAMP):
-    return partial(gm.after_current_build, recovered_policy=policy, stamp=stamp)
+def hook(policy="v3"):
+    return partial(gm.after_current_build, recovered_policy=policy)
 
 
 # --- one transaction per relation ---------------------------------------------
@@ -115,7 +116,7 @@ def hook(policy="v3", stamp=STAMP):
 def test_a_rebuild_builds_and_stamps_each_relation_in_a_transaction_of_its_own(monkeypatch):
     catalog = {}
     opened = sessions_of(monkeypatch, catalog)
-    assert list(cg.build_current_relations({"host": "scratch"}, after=hook())) == TABLES
+    assert list(cg.build_current_relations({"host": "scratch"}, after=hook(), stamp_extra=MATCHER)) == TABLES
     assert [session.outcome for session in opened] == ["committed"] * len(TABLES)
     assert [session.config for session in opened] == [{"host": "scratch"}] * len(TABLES)   # the caller's database
     # each began once the one before it had committed
@@ -124,8 +125,10 @@ def test_a_rebuild_builds_and_stamps_each_relation_in_a_transaction_of_its_own(m
         assert relations_in(session, "DROP TABLE IF EXISTS") == relations_in(session) == [f"public.{table}"]
         # last, after the indexes, the ANALYZE and the count: nothing is stamped before it is complete
         assert session.connection().statements[-1] == f"COMMENT ON TABLE public.{table} IS :stamp"
-    assert json.loads(catalog["public.privategrants_current"]) == {
-        "source_versions": VERSIONS, "shape": gm.MATCHING_INPUT_SHAPE_VERSION, "build_id": "build-1"}
+    stamp = json.loads(catalog["public.privategrants_current"])
+    assert {key: stamp[key] for key in MATCHER} == MATCHER                       # the run's keys, beside the builder's
+    assert stamp["ddl"] == cg.ddl_hash("privategrants_current") and set(stamp["inputs"]) == {"privategrants",
+                                                                                              "basic_fields_pf"}
     assert sorted(catalog) == sorted(f"public.{t}" for t in TABLES)
     assert gm._unstamped_current_relations(_Connection(catalog), VERSIONS) == []       # a restart takes them
 
@@ -147,12 +150,12 @@ def test_the_views_the_drop_takes_come_back_in_the_same_transaction(monkeypatch)
 
 
 def test_a_failure_leaves_each_relation_complete_and_stamped_or_untouched(monkeypatch):
-    older = gm._current_stamp({**VERSIONS, "irs_990pf_grants": "2026_06_16"}, "build-0")
+    older = json.dumps(gm._current_stamp({**VERSIONS, "irs_990pf_grants": "2026_06_16"}, "build-0"))
     catalog = {f"public.{t}": older for t in TABLES}                                   # the last run's stamps
     failing = TABLES[3]
     opened = sessions_of(monkeypatch, catalog, fail_on=f"CREATE TABLE public.{failing}")
     with pytest.raises(cg.CurrentRebuildFailed, match="No space left") as failed:      # match_records marks the build failed
-        cg.build_current_relations({}, after=hook())
+        cg.build_current_relations({}, after=hook(), stamp_extra=MATCHER)
     assert list(failed.value.built) == TABLES[:3] and failed.value.left == TABLES[3:]
     assert cg.rebuild_command(TABLES[3:]) in str(failed.value)
     assert [session.outcome for session in opened] == ["committed"] * 3 + ["rolled back"]
@@ -161,13 +164,14 @@ def test_a_failure_leaves_each_relation_complete_and_stamped_or_untouched(monkey
     assert gm._unstamped_current_relations(_Connection(catalog), VERSIONS) == TABLES[3:]  # what the restart rebuilds
 
 
-def test_a_rebuild_outside_a_run_stamps_nothing(monkeypatch):
-    # the current_grants CLI and the own-extract release: a new table, no stamp, so the next run rebuilds it
+def test_a_rebuild_outside_a_run_carries_no_matcher_keys(monkeypatch):
+    # the current_grants command line, the refresh, the release: the builder's stamp alone, so the next run rebuilds it
     catalog = {f"public.{t}": STAMP for t in TABLES}
     opened = sessions_of(monkeypatch, catalog)
-    counts = cg.build_current_relations({}, [cg._TABLES[-1]], after=hook(stamp=None))
+    counts = cg.build_current_relations({}, [cg._TABLES[-1]], after=hook(), built_by="current_grants")
     assert counts == {"privategrants_future_current": 16_648_094}
-    assert len(opened) == 1 and not any(sql.startswith("COMMENT ON") for sql in opened[0].connection().statements)
+    stamp = json.loads(catalog["public.privategrants_future_current"])
+    assert len(opened) == 1 and "source_versions" not in stamp and stamp["built_by"] == "current_grants"
     assert gm._unstamped_current_relations(_Connection(catalog), VERSIONS) == ["privategrants_future_current"]
 
 
@@ -237,11 +241,12 @@ def run_inputs(monkeypatch, catalog, *, skip_rebuild=False, versions_after=None,
     calls: list[tuple] = []
     opened = sessions_of(monkeypatch, catalog, module=gm, shown="v3", versions=VERSIONS, versions_after=versions_after)
 
-    def build(config, tables, *, after):
+    def build(config, tables, *, after, stamp_extra, built_by):
         calls.append(("build", [t for t, _ in tables], [s.outcome for s in opened]))
-        for table, _ in tables:                          # the hook, on a connection of its own, as the loop runs it
+        for table, _ in tables:            # the hook, then the builder's stamp, on a connection of its own, as the loop runs them
             connection = _Connection(catalog)
             after(connection, table)
+            cg.write_stamp(connection, f"public.{table}", {**stamp_extra, "stamp": 1, "built_by": built_by})
             calls.append(("after", table, [sql.split()[0] for sql in connection.statements]))
         if after_build is not None:
             after_build()
@@ -278,7 +283,7 @@ def test_a_run_reads_the_versions_once_rebuilds_between_its_sessions_and_reads_a
 
 
 def test_skip_rebuild_takes_the_stamped_relations_and_rebuilds_the_rest_with_what_reads_them(monkeypatch):
-    older = gm._current_stamp({**VERSIONS, "irs_990pf_grants": "2026_06_16"}, "build-0")
+    older = json.dumps(gm._current_stamp({**VERSIONS, "irs_990pf_grants": "2026_06_16"}, "build-0"))
     catalog = {f"public.{t}": (STAMP if t in TABLES[:4] else older) for t in TABLES}    # stopped at privategrants_current
     calls, opened, _ = run_inputs(monkeypatch, catalog, skip_rebuild=True)
     assert calls[0] == ("build", ["privategrants_current", "privategrants_future_current"], ["committed"])

@@ -36,7 +36,8 @@ from sqlalchemy import text
 
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart.current_grants import build_current_relations
-from givingtuesday_datamart.ingestion import _apply_post_ingest_indexes, _lineage_values, datamart_config
+from givingtuesday_datamart.ingestion import (_apply_post_ingest_indexes, _lineage_values, datamart_config,
+                                              staging_stamp, write_stamp)
 from givingtuesday_datamart.irs_source import GT_DATALAKE
 from givingtuesday_datamart.own_extract import extract
 from givingtuesday_datamart.own_extract.load import SCHEMA
@@ -112,9 +113,10 @@ def load_table(config: dict, version: str, table: str, url: str) -> dict:
     ``current_grants`` reads GT's rows in.
     """
     raw = f"{RAW}.{table}"
+    run_id = str(uuid.uuid4())
     streamed = stream_csv_url_to_table(
         url=url, table_name=raw, overwrite=True, db_config=config,
-        extra_columns=_lineage_values(str(uuid.uuid4()), version, url, datetime.now(timezone.utc)))
+        extra_columns=_lineage_values(run_id, version, url, datetime.now(timezone.utc)))
     with get_session(config=config) as session:
         session.execute(text(f"DROP TABLE IF EXISTS public.{table} CASCADE"))
         session.execute(text(
@@ -122,6 +124,7 @@ def load_table(config: dict, version: str, table: str, url: str) -> dict:
                 WHERE r.url IN (SELECT url FROM {URLS}) ORDER BY r.ctid"""))
         session.execute(text(f"DROP TABLE {raw}"))
         kept = session.execute(text(f"SELECT count(*) FROM public.{table}")).scalar_one()
+        write_stamp(session, f"public.{table}", staging_stamp(run_id, version))
     _apply_post_ingest_indexes(specs()[table], config)
     logger.info("public.%s: %s of GT's %s rows kept", table, f"{kept:,}", f"{streamed.rows:,}")
     return {"table": table, "file": url.rsplit("/", 1)[-1], "gt_rows": streamed.rows,
@@ -140,5 +143,5 @@ def load(config: dict, version: str, tables: list[str] | None = None, jobs: int 
     with cf.ProcessPoolExecutor(max_workers=jobs) as pool:
         loaded = list(pool.map(load_table, [config] * len(wanted), [version] * len(wanted),
                                wanted, [urls[t] for t in wanted]))
-    build_current_relations(config)
+    build_current_relations(config, built_by="own_extract gt-release")
     return loaded
