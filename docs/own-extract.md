@@ -641,8 +641,10 @@ in one transaction:
    `irs_extract_patch`), with GT's release it sat on and the counts.
 
 Then the basic-fields `_current` relations are rebuilt, as a refresh
-rebuilds them. The patch refuses a batch loaded with another concordance
-than the file's.
+rebuilds them, each in a transaction of its own and logged as it commits;
+a failure part-way names the relations not rebuilt and the
+`current_grants --only` command for them. The patch refuses a batch
+loaded with another concordance than the file's.
 
 **Url by url within a table.** Where our table has no row for a return GT
 has rows for, GT's rows stay. On 2024-2026 that is 27,321 990-PF grant rows

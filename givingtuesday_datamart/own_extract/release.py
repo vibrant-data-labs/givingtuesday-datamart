@@ -140,6 +140,5 @@ def load(config: dict, version: str, tables: list[str] | None = None, jobs: int 
     with cf.ProcessPoolExecutor(max_workers=jobs) as pool:
         loaded = list(pool.map(load_table, [config] * len(wanted), [version] * len(wanted),
                                wanted, [urls[t] for t in wanted]))
-    for table, n in build_current_relations(config).items():
-        logger.info("public.%s built: %s rows", table, f"{n:,}")
+    build_current_relations(config)
     return loaded
