@@ -284,7 +284,7 @@ row does not, so "university of utah" no longer resolves to the
 University of Utah Asia Campus
 ([docs/matching-precision-guards.md](docs/matching-precision-guards.md)).
 At the start of every run it reloads the corrections CSV,
-rebuilds all four filing-version-deduped `_current` relations
+rebuilds all six filing-version-deduped `_current` relations
 ([`current_grants.py`](givingtuesday_datamart/current_grants.py), issues
 #33 and #34), and recreates the matching views — no separate step needed.
 
@@ -301,6 +301,25 @@ any input change forces a clean recompute at a fresh prefix.
 memory and needs an r7a.4xlarge-class host (~128 GB). A 16 GB laptop is
 killed at the indexing step. Checkpoints make interrupted runs cheap to
 resume on the same inputs.
+
+**Storage:** two phases of the run dip the shared instance's free
+storage and give it back: the rebuild of the six `_current` relations
+and the write of the two output tables. Postgres frees a dropped table's
+files only when the transaction that dropped it commits, so a phase
+holds the old and the new copy of whatever it rebuilds until it commits.
+The rebuild commits one relation at a time (since October 2026; one
+transaction for all six, held to the end of the reads, dipped 27 GB on
+2026-10-30), so its dip is one relation's new copy with its indexes plus
+the sort spill of that build: `privategrants_current` is 11.4 GB, and
+its spill is a gigabyte or two under the larger instance's memory budget
+(expect about 13 GB in all) and some twenty under the shared instance's
+64 MB `work_mem`, where the same build dipped 32 GB on 2026-10-27. The
+write phase is one transaction by design, so a failure leaves both
+output tables as the last run left them, and it dips about 26 GB
+(2026-10-30). Set the watchdog's floor
+([`watchdog.py`](givingtuesday_datamart/watchdog.py), 35 GB by default)
+at least 26 GB under the free storage the write phase will start with:
+from the 59 GB free in October 2026, a floor of 30 GB or lower.
 
 ### Trace a filing back to the IRS
 

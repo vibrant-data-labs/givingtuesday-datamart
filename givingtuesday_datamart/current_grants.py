@@ -1107,8 +1107,29 @@ def stale_basic_fields_current(connection) -> list[str]:
     return stale
 
 
-def build_current_relations(connection) -> dict[str, int]:
-    """(Re)build every `_current` relation. Returns row counts.
+def build_current_relations(config: dict, tables: Iterable[tuple[str, str]] = _TABLES, *,
+                            comment: str | None = None) -> dict[str, int]:
+    """(Re)build the ``_current`` relations in ``tables`` (every one by
+    default), each in a session and transaction of its own against the
+    database ``config`` names. Returns row counts.
+
+    One transaction per relation, never one for all of them: Postgres
+    frees a dropped table's files only when the transaction that dropped
+    it commits, so under one transaction the old and new copies of every
+    relation coexist until it ends, about 26 GB with their indexes. The
+    matcher's run of 2026-10-30 held one transaction from its rebuild to
+    the end of its reads, and free storage on the shared instance fell by
+    27 GB until then. Committed one at a time, a relation's old copy is
+    gone before the next is built, and the dip is one relation's new copy
+    and the sort spill of its build. A failure leaves the relations before
+    it complete, the failing one as it was (its transaction rolls back),
+    and the rest untouched.
+
+    ``comment`` is written on each relation (COMMENT ON TABLE) in the
+    transaction that builds it: the matcher's stamp of the source versions
+    (``grant_matching._current_stamp``), which a relation therefore
+    carries only when it is complete. Without it a rebuilt relation
+    carries no comment, the DROP having taken the old one.
 
     NOTE: the DROP ... CASCADE removes any views defined over
     ``privategrants_current`` (the matching keys/unique views). Callers
@@ -1118,14 +1139,22 @@ def build_current_relations(connection) -> dict[str, int]:
     says so up front, builds the tables, and leaves the matching views to
     the next matcher run.
     """
-    return {table: _build_one(connection, table, ddl) for table, ddl in _TABLES}
+    counts = {}
+    for table, ddl in tables:
+        with get_session(config=config) as session:
+            connection = session.connection()
+            counts[table] = _build_one(connection, table, ddl)
+            if comment is not None:
+                connection.execute(text(f"COMMENT ON TABLE public.{table} IS :comment"), {"comment": comment})
+    return counts
 
 
 if __name__ == "__main__":
     # Standalone rebuild + matching-view restore (imported lazily: at
     # module level grant_matching imports this module). One session per
-    # step: each table build is a 10-30 min transaction, and a failure in
-    # a later step must not roll an earlier table back.
+    # step: each table build is a 10-30 min transaction
+    # (build_current_relations), and a failure in a later step must not
+    # roll an earlier table back.
     from givingtuesday_datamart.grant_matching import create_or_replace_views
     from givingtuesday_datamart.placeholder_recovery.view import VIEW, shown_policy
 
@@ -1157,9 +1186,7 @@ if __name__ == "__main__":
             "matching views are NOT created here. Create the view (`python -m "
             "givingtuesday_datamart.placeholder_recovery view --policy <version>`); the next matcher run "
             "creates the matching views on it.", VIEW)
-    for _table, _ddl in _wanted:
-        with get_session(config=datamart_config()) as session:
-            _build_one(session.connection(), _table, _ddl)
+    build_current_relations(datamart_config(), _wanted)
     with get_session(config=datamart_config()) as session:
         conn = session.connection()
         if _needs_views and _policy is not None:

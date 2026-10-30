@@ -128,14 +128,11 @@ def load_table(config: dict, version: str, table: str, url: str) -> dict:
 
 
 def build_current(config: dict) -> dict[str, int]:
-    """Every ``_current`` relation, by production's DDL, over the loaded rows."""
+    """Every ``_current`` relation, by production's DDL, over the loaded rows,
+    one transaction each."""
     from givingtuesday_datamart import current_grants as cg
 
-    counts = {}
-    for table, ddl in cg._TABLES:
-        with get_session(config=config) as session:
-            counts[table] = cg._build_one(session.connection(), table, ddl)
-    return counts
+    return cg.build_current_relations(config)
 
 
 def load(config: dict, version: str, tables: list[str] | None = None, jobs: int = 1) -> list[dict]:

@@ -1070,15 +1070,17 @@ def _source_versions(connection) -> dict[str, str]:
 
 
 # A run that rebuilds the ``_current`` relations writes on each of them
-# (COMMENT ON TABLE) the source versions the checkpoint prefix is keyed on.
-# ``--skip-rebuild`` takes the relations only when every one carries the
-# versions the prefix names now: without that, chunks computed on
-# relations built from an older drop would be written under a newer
-# drop's prefix, and a later run would resume them against shifted rows.
-# A relation rebuilt anywhere else (``sources refresh``, the current_grants
-# CLI) is a new table without the stamp, so the next run rebuilds it. A
-# stamp is a catalog read, where comparing the relations with staging
-# (``stale_basic_fields_current``) scans every row of both.
+# (COMMENT ON TABLE, in the transaction that builds it) the source versions
+# the checkpoint prefix is keyed on, so a relation carries the stamp only
+# when it is complete. ``--skip-rebuild`` takes the relations only when
+# every one carries the versions the prefix names now: without that,
+# chunks computed on relations built from an older drop would be written
+# under a newer drop's prefix, and a later run would resume them against
+# shifted rows. A relation rebuilt anywhere else (``sources refresh``, the
+# current_grants CLI) is a new table without the stamp, so the next run
+# rebuilds it, as it rebuilds all six after a run that failed partway
+# through them. A stamp is a catalog read, where comparing the relations
+# with staging (``stale_basic_fields_current``) scans every row of both.
 def _current_stamp(versions: dict[str, str], build_id: str | None) -> str:
     return json.dumps({"source_versions": versions, "build_id": build_id}, sort_keys=True)
 
@@ -1091,12 +1093,6 @@ def _stamped_versions(comment: str | None) -> dict | None:
     except ValueError:
         return None
     return stamp.get("source_versions") if isinstance(stamp, dict) else None
-
-
-def _stamp_current_relations(connection, versions: dict[str, str], build_id: str | None) -> None:
-    stamp = _current_stamp(versions, build_id)
-    for table, _ddl in _CURRENT_TABLES:
-        connection.execute(text(f"COMMENT ON TABLE public.{table} IS :stamp"), {"stamp": stamp})
 
 
 def _unstamped_current_relations(connection, versions: dict[str, str]) -> list[str]:
@@ -2491,22 +2487,28 @@ def _do_match_records(
     # --- 3. APPLY CLEANING ---
     logger.info("Preparing data...")
     # 1. LOAD DATA
+    # Three database phases, each a transaction of its own: the run's
+    # bookkeeping, the rebuild of the _current relations (one transaction
+    # per relation, inside build_current_relations), then the views and the
+    # two reads. Up to 2026-10-30 one transaction held all of it, so the
+    # old copies of the six relations were freed only when the reads
+    # ended, and free storage on the shared instance fell by 27 GB until
+    # then.
     with get_session(config=datamart_config()) as session:
         connection = session.connection()
         # Before anything is rebuilt: the rebuild below drops the view, and
         # with it what says which policy it showed.
         recovered_policy = recovered_policy_of(recovered_view.shown_policy(connection), recovered_policy)
         _load_corrections(connection)
-        # Rebuild the filing-version-deduped inputs (issues #33/#34)
-        # BEFORE the views: the DROP ... CASCADE inside takes the view of
-        # current and recovered grants and the dependent matching views
-        # with it, and create_or_replace_views restores them, in that
-        # order.
+        # The versions the checkpoint prefix is keyed on (_current_stamp),
+        # read before the rebuild: a source with no successful run stops
+        # the run here, not after an hour of builds.
+        versions = _source_versions(connection)
         if skip_rebuild:
             # A restart minutes after a run that rebuilt them, with nothing
             # loaded since: the relations must carry that run's stamp of the
-            # versions the checkpoint prefix is keyed on (_current_stamp).
-            stale = _unstamped_current_relations(connection, _source_versions(connection))
+            # versions the checkpoint prefix is keyed on.
+            stale = _unstamped_current_relations(connection, versions)
             if stale:
                 raise RuntimeError(
                     f"--skip-rebuild: {', '.join('public.' + t for t in stale)} do not carry the source "
@@ -2515,9 +2517,18 @@ def _do_match_records(
                 )
             logger.info("--skip-rebuild: the _current relations carry the current source versions; "
                         "taken as they stand")
-        else:
-            build_current_relations(connection)
-            _stamp_current_relations(connection, _source_versions(connection), build_id)
+    if not skip_rebuild:
+        # Rebuild the filing-version-deduped inputs (issues #33/#34)
+        # BEFORE the views: the DROP ... CASCADE inside takes the view of
+        # current and recovered grants and the dependent matching views
+        # with it, and create_or_replace_views restores them, in that
+        # order. Each relation is stamped in the transaction that builds
+        # it, so a failure leaves every relation either complete and
+        # stamped or untouched, the build row ends failed (match_records),
+        # and the run after it rebuilds all six.
+        build_current_relations(datamart_config(), comment=_current_stamp(versions, build_id))
+    with get_session(config=datamart_config()) as session:
+        connection = session.connection()
         create_or_replace_views(connection, recovered_policy=recovered_policy)
         # The recovered grants the run takes, read once: the build's
         # source_runs and the checkpoint prefix name the same rows.
