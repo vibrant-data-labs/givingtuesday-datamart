@@ -60,6 +60,21 @@ asks for a US state that agrees. The input shape is 8: the grants view
 has one more column, the seven keys, the filter and the order are as
 before, so row positions do not move.
 
+**The one-word guard** (`grant_matching.one_word_namesakes`), added after
+the first proof at Zein's choice: the tier refuses a match when all four
+of these hold.
+
+- The tuple has a foreign address in its keys: no US address, and a
+  state or a zip key. A tuple with no address at all matches as before.
+- Its cleaned name is one word.
+- The filer's row is at a US address.
+- The filer's EIN is not a 98- EIN, the recipient's own registration.
+
+A name that one filer alone carries is strong evidence when it has
+several words and weak when it has one, because unrelated groups share
+an acronym or a short word. Without the guard, grants to CNRS in Paris
+went to a CNRS in Nebraska.
+
 ## Picking the signal from the data
 
 Measured on 2026-10-30 with one scan of `privategrants_current` (the
@@ -120,7 +135,7 @@ has an empty state.
 October proofs ([rank-policy-subset-2026-10-28.md](rank-policy-subset-2026-10-28.md),
 [bmf-policy-subset-2026-10-28.md](bmf-policy-subset-2026-10-28.md)):
 frozen inputs, the matcher's own blocking and scoring against the whole
-universe, four rules resolved from one scoring, nothing written to
+universe, five rules resolved from one scoring, nothing written to
 production.
 
 ```bash
@@ -137,11 +152,13 @@ The tuples, chosen by key alone, every row of each counted:
 | `gate` | the gate's named classes, `PFIZER%` and `WORLD HEALTH ORGANI%` |
 | `sample` | a 1-in-500 hash sample of every tuple: the control, where nothing but a foreign tuple may move |
 
-The four rules: `before` (no state and no zip), `keys` (the state key
+The five rules: `before` (no state and no zip), `keys` (the state key
 alone), `country` (the old rule plus the country column), `after`
-(production's rule, both). The rule before must reproduce the run of
-2026-10-30 for every selected tuple, and no rule may lose or move a
-match: the tier only adds.
+(production's rule: both signals and the one-word guard) and `unguarded`
+(production's rule without the guard). The guard holds for `keys` and
+`country` too. The rule before must reproduce the run of 2026-10-30 for
+every selected tuple, and no rule may lose or move a match: the tier
+only adds.
 
 ## What the proof found
 
@@ -150,63 +167,66 @@ repeatable-read transaction (589 seconds): 3,356,738 universe identities,
 the 2,594,841 matched tuples of the run of 2026-10-30, and 84,723 grant
 tuples (142,273 tuple-year rows). The cohorts overlap: 7,381 tuples under
 the pool's names, 65,904 foreign, 104 of the gate's names, 8,330 in the
-sample. The comparison scored 43,434,369 candidate pairs in 384 seconds
+sample. The comparison scored 43,434,369 candidate pairs in 390 seconds
 on the box, with no database access.
 
 **Parity.** The rule before reproduces the run of 2026-10-30 for all
 84,723 tuples, matched and unmatched: zero mismatches. No rule loses or
 moves a match; every change is a tuple gained on the name-only tier.
 
-**What the rule adds.** 4,099 grant tuples, 9,543 grant rows and $8.570B
-(positive amounts $8.571B), to 1,761 recipients. Every gain is in the
+**What the rule adds.** 3,853 grant tuples, 9,143 grant rows and $8.526B
+(positive amounts $8.527B), to 1,591 recipients. Every gain is in the
 foreign cohort. In the control sample 8 tuples gain, all foreign, and
 nothing else moves there. No recovered grant gains: a recovered row has no
-country and its state comes from a US address or nothing.
+country and its state comes from a US address or nothing. Without the
+guard the rule would add 4,099 tuples, 9,543 rows and $8.570B.
 
 | tax year | tuples | rows | of them our extract's | dollars | under the pool's names |
 |---|---:|---:|---:|---:|---:|
-| 2009-2014 | 340 | 453 | 0 | $1.267B | $0.114B |
-| 2015 | 383 | 457 | 0 | $0.465B | $0.075B |
-| 2016 | 361 | 450 | 0 | $0.467B | $0.079B |
-| 2017 | 390 | 503 | 0 | $0.496B | $0.091B |
-| 2018 | 449 | 648 | 0 | $0.930B | $0.497B |
-| 2019 | 559 | 776 | 0 | $0.923B | $0.562B |
-| 2020 | 788 | 1,110 | 0 | $0.701B | $0.665B |
-| 2021 | 825 | 1,161 | 19 | $0.748B | $0.683B |
-| 2022 | 874 | 1,215 | 151 | $0.771B | $0.719B |
-| 2023 | 900 | 1,304 | 1,304 | $0.835B | $0.800B |
-| 2024 | 874 | 1,281 | 1,281 | $0.906B | $0.875B |
-| 2025 | 176 | 185 | 185 | $0.062B | $0.059B |
-| **all** | **4,099** | **9,543** | **2,940** | **$8.570B** | **$5.218B** |
+| 2009-2014 | 328 | 441 | 0 | $1.261B | $0.111B |
+| 2015 | 365 | 438 | 0 | $0.463B | $0.075B |
+| 2016 | 346 | 435 | 0 | $0.461B | $0.075B |
+| 2017 | 372 | 485 | 0 | $0.491B | $0.088B |
+| 2018 | 418 | 616 | 0 | $0.928B | $0.496B |
+| 2019 | 533 | 750 | 0 | $0.921B | $0.562B |
+| 2020 | 735 | 1,054 | 0 | $0.697B | $0.662B |
+| 2021 | 772 | 1,100 | 19 | $0.744B | $0.681B |
+| 2022 | 832 | 1,163 | 146 | $0.769B | $0.717B |
+| 2023 | 855 | 1,248 | 1,248 | $0.828B | $0.793B |
+| 2024 | 840 | 1,241 | 1,241 | $0.901B | $0.870B |
+| 2025 | 165 | 172 | 172 | $0.061B | $0.059B |
+| **all** | **3,853** | **9,143** | **2,826** | **$8.526B** | **$5.190B** |
 
 *The tuples column counts a tuple in each year it has rows; the last line counts it once.*
 
-So $1.802B is our extract's (2023-2025) and $6.768B is GT's release
-(2009-2022, with 170 rows of ours in 2021-2022).
+So $1.791B is our extract's (2023-2025) and $6.735B is GT's release
+(2009-2022, with 165 rows of ours in 2021-2022).
 
 **The $1.77B back.** Our 2023-2025 rows under the pool's names that the
 run of 2026-10-30 left unmatched are 2,903 rows and $1.761B. The rule
-matches 2,391 of them, $1.733B. The other 512 rows ($28M) carry a US
-address under the same names (Food for Education and the United Nations
-in New York, the Global Fund's Washington office), which the rule leaves
-to the address tiers as before. (The step 9 correction gave 2,595 rows
-and $1.77B for the same names under another filter; the dollars agree.)
+matches 2,297 of them, $1.722B. Of the other 606 rows ($38.7M), 512
+($27.6M) carry a US address under the same names (Food for Education and
+the United Nations in New York, the Global Fund's Washington office),
+which the rule leaves to the address tiers as before, and the guard
+refuses the rest, chiefly BRAC in Dhaka ($11.1M), which October had sent
+to a BRAC in Nebraska. (The step 9 correction gave 2,595 rows and $1.77B
+for the same names under another filter; the dollars agree.)
 
 **GT's rows.** Under the pool's names GT's release has 6,862 rows and
-$3.767B that never matched. The rule matches 4,167 of them, $3.448B. Of
-the rest, 1,280 rows ($0.258B) are tuples with no row of 2015 or later,
-which the matcher's view leaves out, and 1,415 rows ($0.061B) carry a US
-state key with no country, which on GT's rows cannot be told from a US
-address. Beyond the pool, the rule matches 2,844 rows and $3.352B more,
-mostly GT's.
+$3.767B that never matched. The rule matches 4,075 of them, $3.431B. Of
+the rest, 1,280 rows ($0.259B) are tuples with no row of 2015 or later,
+which the matcher's view leaves out; 1,507 rows ($0.078B) stay unmatched,
+most with a US state key and no country, which on GT's rows cannot be
+told from a US address, and some refused by the guard. Beyond the pool,
+the rule matches 2,635 rows and $3.337B more, mostly GT's.
 
-**What each signal does.**
+**What each signal does** (all with the guard):
 
 | rule | tuples gained | rows | dollars | of which this signal alone |
 |---|---:|---:|---:|---:|
-| the state key alone | 4,077 | 9,510 | $8.556B | 2,512 tuples, $5.050B (GT's rows) |
-| the country column alone | 1,587 | 4,648 | $3.520B | 22 tuples, $13.6M (provinces that read as US codes) |
-| both (production) | 4,099 | 9,543 | $8.570B | |
+| the state key alone | 3,833 | 9,112 | $8.513B | 2,345 tuples, $5.029B (GT's rows) |
+| the country column alone | 1,508 | 4,491 | $3.497B | 20 tuples, $13.6M (provinces that read as US codes) |
+| both (production) | 3,853 | 9,143 | $8.526B | |
 
 ## Who the matches go to
 
@@ -218,7 +238,7 @@ be two different things, by where the filer's own row is.
 |---|---:|---:|---:|---:|---:|
 | a 98- EIN, the recipient's foreign registration | 1,159 | 161 | 3,516 | 1,088 | $6.769B |
 | a domestic EIN filing from abroad: the recipient itself, registered in the US | 527 | 114 | 1,342 | 388 | $0.767B |
-| a domestic EIN at a US address: a US arm, a friends organization or a namesake | 2,413 | 1,486 | 4,685 | 1,464 | $1.035B |
+| a domestic EIN at a US address: a US arm, a friends organization or a namesake | 2,167 | 1,316 | 4,285 | 1,350 | $0.991B |
 
 The filer's row is the universe row the match won with. The second line
 is the CGIAR centers and other international bodies that file a 990 from
@@ -250,10 +270,11 @@ The recipients gaining the most:
 
 The full list of the 60 largest is archived with the proof.
 
-### The question for Zein: domestic EINs at a US address
+### Domestic EINs at a US address: the decision
 
-The third class is $1.035B, 4,685 rows. The twenty largest, read by name
-and address only (not verified against filings):
+The first proof, without the guard, put this class at 2,413 tuples, 4,685
+rows and $1.035B. The twenty largest, read by name and address only (not
+verified against filings):
 
 | EIN | matched name | filer's city | grants addressed to | rows | dollars | reading |
 |---|---|---|---|---:|---:|---|
@@ -274,29 +295,38 @@ and address only (not verified against filings):
 | 042730954 | fauna and flora international | Chevy Chase, MD | Cambridge | 48 | $13.7M | US arm |
 | 271269519 | international trade union confederation | Washington, DC | Brussels | 16 | $12.5M | US office |
 | 952248462 | project concern international | San Diego, CA | New Delhi | 17 | $11.5M | the recipient itself |
-| 832074441 | brac | Crete, NE | Dhaka | 10 | $11.1M | another organization of the same one-word name |
+| 832074441 | brac | Crete, NE | Dhaka | 10 | $11.1M | another organization; refused by the guard |
 | 135596846 | american university of beirut | New York | Beirut | 49 | $10.5M | the recipient itself, US-chartered |
 | 521923660 | confederation of indian industry | Arlington, VA | New Delhi | 12 | $10.1M | US office |
 
 Most are the recipient's US arm or friends organization, or the recipient
-itself; a few are another organization with the same name (the DC
-Hospital for Sick Children for SickKids in Toronto; for one-word names,
-a Nebraska filer named BRAC for grants to Dhaka, one in South Carolina
-named FAU for Erlangen, one in Nebraska named CNRS for Paris). The one-word names are 246 tuples, 400 rows and $44M of the
-class. October's run matched our rows this way too: of the 1,199 tuples
-the run of 2026-10-30 lost, 1,041 had gone to a domestic EIN.
+itself. A few are another organization with the same name, and the
+one-word names are where they cluster. October's run matched our rows
+this way too: of the 1,199 tuples the run of 2026-10-30 lost, 1,041 had
+gone to a domestic EIN.
 
-The choices, with what each keeps:
+The choices the first proof put to Zein:
 
 | choice | keeps | drops |
 |---|---:|---:|
-| accept domestic EINs, as built and as October did | $8.570B | nothing |
+| accept domestic EINs, as October did | $8.570B | nothing |
 | refuse a foreign tuple's name-only match to a filer at a US address | $7.535B | 2,413 tuples, 4,685 rows, $1.035B |
-| refuse only one-word names to a filer at a US address | $8.526B | 246 tuples, 400 rows, $0.044B |
+| **refuse only one-word names to a domestic filer at a US address (chosen)** | **$8.526B** | **246 tuples, 400 rows, $0.044B** |
 
-Whichever is chosen, the namesakes that carry money (the DC Hospital for
-Sick Children) want a corrections row for the right recipient. I built the
-rule as the task asked and as October behaved; the choice is Zein's.
+**Zein chose the one-word guard on 2026-10-30.** What it refuses, by my
+reading of the largest: BRAC in Dhaka to a BRAC in Crete, Nebraska
+($11.1M); FAU in Erlangen to an FAU in South Carolina ($6.5M); CNRS in
+Paris and Montpellier to a CNRS in Goehner, Nebraska ($2.0M); the UK charities Crisis,
+Catch22 and Foxglove to namesakes in Michigan and Texas; Epicentre in
+Paris to an Epicentre in San Antonio. It refuses a few right ones with
+them: EarthEnable, a US nonprofit working in Uganda and Rwanda ($1.5M),
+and perhaps the US friends of the Salzburg Mozarteum ($2.0M). The full
+list is archived as `refused`.
+
+The guard leaves the longer namesakes. The DC Hospital for Sick Children
+holding SickKids Toronto's $49.7M is the largest found; it wants a
+corrections row for the right recipient, or a refusal where the universe
+has none. The rest of the class beyond the twenty largest is unread.
 
 ## The gate
 
@@ -306,7 +336,7 @@ gained), a floor of 53. It fails against the output of 2026-10-30 until
 the run, by design, and the commit that accepts the run sets it from the
 run's count ([runbook](matching-regression-runbook.md)). No other check
 moves: the gate's named classes (`PFIZER%`, `WORLD HEALTH ORGANI%`, 104
-tuples) match the same EINs under all four rules (no filer owns the WHO's
+tuples) match the same EINs under all five rules (no filer owns the WHO's
 cleaned name alone, so its Geneva tuples stay unmatched); of the other
 sentinels' EINs only the Michael J. Fox Foundation gains, one row of
 $104; a name-only match scores as an exact name, so the government-name
@@ -317,11 +347,13 @@ proof does not measure the self-match count, a WARN.
 
 On the inputs of 2026-10-30 (a run on newer inputs moves with them):
 
-- The name-only tier: 40,394 grant tuples, 44,493 after (+4,099).
-- `privategrants_w_recipients`: 10,925,841 rows, 10,935,384 after (+9,543),
-  and +$8.570B, by tax year as in the table above. `unioned_grants` gains
-  the same rows less any its `UNION` folds as identical.
-- The arms: `basic_fields` +6,151 rows, `eo_bmf` +3,233, `basic_fields_pf`
+- The name-only tier: 40,394 grant tuples, 44,247 after (+3,853), and a
+  log line counting the tuples the guard refuses (246).
+- `privategrants_w_recipients`: 10,925,841 rows, 10,934,984 after
+  (+9,143), and +$8.526B, by tax year as in the table above.
+  `unioned_grants` gains the same rows less any its `UNION` folds as
+  identical.
+- The arms: `basic_fields` +6,025 rows, `eo_bmf` +2,959, `basic_fields_pf`
   +158, `correction` +1.
 - The gate: the Global Fund at 56 (floor 53); everything else as on
   2026-10-30.
@@ -334,6 +366,7 @@ On the inputs of 2026-10-30 (a run on newer inputs moves with them):
 - [The 60 recipients gaining most](../data/placeholder_recovery/foreign_name_only_recipients_2026_10_30.csv)
 - [The 60 largest gains to a domestic EIN](../data/placeholder_recovery/foreign_name_only_examples_2026_10_30.csv)
 - [What each signal adds](../data/placeholder_recovery/foreign_name_only_signals_2026_10_30.csv)
+- [The 246 tuples the one-word guard refuses](../data/placeholder_recovery/foreign_name_only_refused_2026_10_30.csv)
 
 The frozen inputs, the score cache and `results.parquet` stay in the
 proof's directory on the box, out of git. Nothing was written to the
