@@ -463,6 +463,8 @@ def test_empty_slices_match_nothing(ranking):
 # to (the views, the universe read, the grants read), per input shape.
 ROW_POSITION_SQL = {
     7: "2a63219916ecef8d8bef952db2177b7d6591339aeeff5ad14841f29c612c224a",
+    # v8: the grants view carries foreign_country; same keys, filter and order.
+    8: "676db4302f3a5fb425bb2e61c1739945cfd4a368c5b85bd631f620a7f70c192a",
 }
 
 

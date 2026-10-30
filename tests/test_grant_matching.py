@@ -374,3 +374,84 @@ def test_a_run_under_a_prefix_never_touches_the_view():
         gm.create_or_replace_views(connection, gm.Relations(prefix="scratch_matcher_", grants=grants))
         assert not any(f"VIEW public.{view.VIEW}" in sql for sql in connection.ran)
         assert any("scratch_matcher_corrections_org_identities" in sql for sql in connection.ran)
+
+
+# --- a foreign address is no US address --------------------------------------
+
+
+def test_the_us_state_keys_are_the_codes_and_the_names_of_the_states_and_territories():
+    assert {"ny", "new york", "dc", "district of columbia", "pr", "puerto rico", "gu", "as", "mp"} <= gm.US_STATE_KEYS
+    assert len(gm.US_STATE_KEYS) == 2 * (51 + 5)
+    assert not {"", "on", "ontario", "ge", "geneva", "11", "england", "aa", "ae", "ap"} & gm.US_STATE_KEYS
+
+
+def test_a_tuple_has_no_us_address_when_its_state_key_is_no_us_state_or_a_row_names_another_country():
+    df = pd.DataFrame({"addressstate_key": ["", "ny", "New York ", "ontario", "ge", "pr", "puerto rico", "tn", "tn", "11"],
+                       "addresszip_key": ["", "", "10018", "m5v 1", "1218", "00646", "", "60000", "60000", "1218"]})
+    assert gm.no_us_address(df).tolist() == [True, False, False, True, True, False, False, False, False, True]
+    df["foreign_country"] = [False, False, False, False, False, False, False, True, None, False]
+    assert gm.no_us_address(df).tolist() == [True, False, False, True, True, False, False, True, False, True]
+
+
+GLOBAL_FUND = ("980380092", "global fund to fight aids tuberculosis and malaria", "", "", "", "")
+
+
+def test_a_foreign_address_matches_on_a_name_that_belongs_to_one_filer():
+    """The Global Fund's grants carry Geneva's canton and postal code in
+    the state and zip keys, as GT and our extract fill them. The keys say
+    no US state: the tier takes the tuple, as it took it with empty keys."""
+    found = matched([("the global fund to fight aids, tuberculosis and malaria", "chemin du pommier 40",
+                      "grand-saconnex", "ge", "1218")], UNIVERSE + [GLOBAL_FUND])
+    assert found == {"the global fund to fight aids, tuberculosis and malaria": ("980380092", gm.NAME_ONLY, 8)}
+
+
+def test_a_province_spelled_out_and_a_postal_code_of_any_shape_are_no_us_address():
+    # the keys hold the first five characters of a postal code, as the view cuts them
+    found = matched([("visionspring", "20 bay st", "toronto", "ontario", "m5j 2"),          # a province and a postal code
+                     ("river fund inc", "po box 1", "nairobi", "", "00100"),              # a five-digit postal code, no province
+                     ("foreign friends of the arts", "1 rue a", "paris", "", "75001")])
+    assert found == {"visionspring": ("555", gm.NAME_ONLY, 1), "river fund inc": ("111", gm.NAME_ONLY, 2),
+                     "foreign friends of the arts": ("444", gm.NAME_ONLY, 5)}
+
+
+def test_a_foreign_address_whose_name_several_filers_share_is_still_not_matched():
+    assert matched([("open door ministries", "1 rue a", "paris", "", "75001")]) == {}
+
+
+def test_a_us_state_keeps_the_tuple_off_the_tier_whatever_the_zip_looks_like():
+    """A dropped leading zero ("2139" for Cambridge) is still Massachusetts;
+    the state spelled out is still a state. The exact-name tier takes such
+    a tuple where the state agrees, and nothing takes it where it does not."""
+    assert matched([("visionspring", "", "", "ma", "2139"), ("visionspring", "", "", "new york", ""),
+                    ("visionspring", "", "", "ny", "")]) == {"visionspring": ("555", gm.STATE_TIER, None)}
+
+
+def test_a_country_other_than_the_us_makes_the_tuple_eligible_when_its_keys_look_american():
+    """Tamil Nadu's code is Tennessee's and an Indian postal code has five
+    digits to the key: only the country column says the address is abroad."""
+    filers = frame(UNIVERSE, universe=True)
+    tuples = frame([("visionspring", "12 anna salai", "chennai", "tn", "60000")])
+    assert gm.match_slice(filers, tuples).empty
+    tuples["foreign_country"] = True
+    found = gm.matched_tuples(filers, tuples, gm.match_slice(filers, tuples))
+    assert found[["recipeint_ein_key", "match_tier"]].values.tolist() == [["555", gm.NAME_ONLY]]
+
+
+def test_a_proof_can_resolve_the_tier_under_the_rule_before():
+    """``eligible`` replaces the tier's own rule: the rule up to 2026-10-30
+    (no state and no zip) leaves the Geneva tuple unmatched."""
+    filers = frame(UNIVERSE + [GLOBAL_FUND], universe=True)
+    tuples = frame([("global fund to fight aids tuberculosis and malaria", "chemin du pommier 40", "grand-saconnex", "ge", "1218"),
+                    ("visionspring", "", "", "", "")])
+    scored = gm.score_slice(filers, tuples)
+    before = (tuples["addressstate_key"].str.strip() == "") & (tuples["addresszip_key"].str.strip() == "")
+    assert gm.all_matches(scored, filers, tuples, eligible=before)[gm.INDEX_COLS[1]].tolist() == [1]
+    assert sorted(gm.all_matches(scored, filers, tuples)[gm.INDEX_COLS[1]].tolist()) == [0, 1]
+
+
+def test_the_grants_view_carries_whether_a_row_names_a_country_other_than_the_us():
+    ddl = next(sql for sql in gm._view_ddl(gm.Relations())
+               if "CREATE OR REPLACE VIEW public.privategrants_unique_names_view" in sql)
+    assert "bool_or(UPPER(TRIM(COALESCE(sigocaffrfaco, ''))) NOT IN ('', 'US', 'USA')) AS foreign_country" in ddl
+    assert ddl.index("AS foreign_country") < ddl.index("FROM public.privategrants_w_column_keys_view")
+    assert ddl.count("addresszip_key") == 3          # selected, grouped and ordered on, as before
