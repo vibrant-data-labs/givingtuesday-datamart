@@ -379,11 +379,17 @@ unrecovered.
   27 GB the two troughs of 10-30 took, and runs under the 35 GB floor by
   day. The write phase is one transaction by design (a failure leaves no
   stale `unioned_grants`); committing after `privategrants_w_recipients`
-  trades that for the headroom, a decision for the PR. PR #87 (open on
-  10-30): the rebuild commits one relation at a time, and the write
-  phase's two transactions are an opt-in flag, `--commit-between-outputs`,
-  off by default; its headroom after the change is arithmetic on the
-  relation sizes, not measured, so the next full run measures it.
+  trades that for the headroom, a decision for the PR. PR #87 (merged
+  10-30, f34b1b7): the rebuild commits one relation at a time, and the
+  write phase's two transactions are an opt-in flag,
+  `--commit-between-outputs`, off by default; its headroom after the
+  change is arithmetic on the relation sizes, not measured, so the next
+  full run measures it. PR #88 (merged 10-30, 36975ce) does the same for
+  the basic-fields relations on `sources refresh`, `own_extract patch` and
+  `sources build-canonical`; PRs #90 and #91 (merged 10-30, 9be4c4a and
+  8533fe7) add the staleness stamps every ingest, patch and relation build
+  now writes, which nothing reads yet (`current_grants --adopt` stamps
+  what was built before them, at the next update).
 - A corrections row for Johns Hopkins University at the campus address
   (3400 N Charles Street, Baltimore). The club's filing there still takes
   the 428 grants that name the university or one of its schools inexactly
@@ -403,6 +409,14 @@ unrecovered.
   for the tier; the proof splits the names by whether the filer is the
   recipient's foreign registration (a 98- EIN) or a domestic namesake, and
   the gate gets a floor on a foreign recipient. Then a matcher run.
+  PR #89 (merged 10-30, 3c96dea): input shape 8, a one-word guard (a
+  single-word name is weak evidence: CNRS in Paris went to a CNRS in
+  Nebraska without it), the proof module `proofs.foreign_name_only`
+  (3,853 tuples, 9,143 rows and $8.53B expected from the rule, zero
+  parity mismatches), and the Global Fund as the gate's foreign canary at
+  a floor of 53, set from the proof before any run: against the output of
+  10-30 that one line fails by design until the next run's accepting
+  commit. The matcher run is the next update's first step.
 
 ## Appendix: SQL
 
