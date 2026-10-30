@@ -35,6 +35,7 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 
 from givingtuesday_datamart._internal.db import get_session
+from givingtuesday_datamart.current_grants import build_current_relations
 from givingtuesday_datamart.ingestion import _apply_post_ingest_indexes, _lineage_values, datamart_config
 from givingtuesday_datamart.irs_source import GT_DATALAKE
 from givingtuesday_datamart.own_extract import extract
@@ -127,14 +128,6 @@ def load_table(config: dict, version: str, table: str, url: str) -> dict:
             "kept": kept, "bytes": streamed.bytes, "sha256": streamed.sha256}
 
 
-def build_current(config: dict) -> dict[str, int]:
-    """Every ``_current`` relation, by production's DDL, over the loaded rows,
-    one transaction each."""
-    from givingtuesday_datamart import current_grants as cg
-
-    return cg.build_current_relations(config)
-
-
 def load(config: dict, version: str, tables: list[str] | None = None, jobs: int = 1) -> list[dict]:
     """Load GT's release ``version`` for ``tables`` (default all) and build the
     ``_current`` relations; returns one summary per table, largest file first."""
@@ -147,6 +140,6 @@ def load(config: dict, version: str, tables: list[str] | None = None, jobs: int 
     with cf.ProcessPoolExecutor(max_workers=jobs) as pool:
         loaded = list(pool.map(load_table, [config] * len(wanted), [version] * len(wanted),
                                wanted, [urls[t] for t in wanted]))
-    for table, n in build_current(config).items():
+    for table, n in build_current_relations(config).items():
         logger.info("public.%s built: %s rows", table, f"{n:,}")
     return loaded

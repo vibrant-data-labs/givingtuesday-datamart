@@ -7,6 +7,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 
 import boto3
@@ -24,7 +25,13 @@ from givingtuesday_datamart._internal.address_cleaning import ADDRESS_PATTERN, U
 from givingtuesday_datamart._internal.db import get_session
 from givingtuesday_datamart._internal.logger import logger
 from givingtuesday_datamart._internal.parquet_cache import _decode_json as _pqc_decode_json
-from givingtuesday_datamart.current_grants import _TABLES as _CURRENT_TABLES, build_current_relations
+from givingtuesday_datamart.current_grants import (
+    _MATCHING_VIEW_TABLES,
+    _TABLES as _CURRENT_TABLES,
+    apply_build_memory,
+    build_current_relations,
+    with_dependents,
+)
 from givingtuesday_datamart.ingestion import datamart_config
 from givingtuesday_datamart.canonical.build import (
     CANONICAL_BUILDS_TABLE,
@@ -1009,6 +1016,7 @@ def _resolve_checkpoint_prefix(
     connection,
     recovered: dict,
     base_prefix: str = "grant_matching_checkpoints",
+    versions: dict[str, str] | None = None,
 ) -> str:
     """Build an S3 prefix that's keyed on the source versions of all four
     upstream staging tables plus the content hash of the corrections CSV
@@ -1022,13 +1030,16 @@ def _resolve_checkpoint_prefix(
 
     ``recovered`` is ``recovered_digest``'s answer, read once by the run
     and stamped on its build, so the prefix and the build name the same
-    rows.
+    rows. ``versions`` is the run's one read of the source versions
+    (``_source_versions``), the read the ``_current`` relations are
+    stamped from, so the prefix and the stamps name the same drop; read
+    here when the caller has none.
 
     Resolves the latest successful (status='success') ingest_run per
     logical_name from datamart_meta.ingest_runs. Raises if any source has
     no successful run on record.
     """
-    versions = _source_versions(connection)
+    versions = _source_versions(connection) if versions is None else versions
     # Nested rather than flat (`pg_X__bf_Y`) so the prefix is browseable
     # with `aws s3 ls`: each level narrows scope, and a single source
     # version's chunks can be `aws s3 rm --recursive`'d in one shot.
@@ -1071,41 +1082,58 @@ def _source_versions(connection) -> dict[str, str]:
 
 # A run that rebuilds the ``_current`` relations writes on each of them
 # (COMMENT ON TABLE, in the transaction that builds it) the source versions
-# the checkpoint prefix is keyed on, so a relation carries the stamp only
-# when it is complete. ``--skip-rebuild`` takes the relations only when
-# every one carries the versions the prefix names now: without that,
-# chunks computed on relations built from an older drop would be written
-# under a newer drop's prefix, and a later run would resume them against
+# and the input shape the checkpoint prefix is keyed on, from the one read
+# of the versions the prefix is resolved from: a relation carries the stamp
+# only when it is complete, and the stamp and the prefix cannot disagree.
+# ``--skip-rebuild`` takes the relations that carry the stamp the prefix
+# names now and rebuilds the rest: without that, chunks computed on
+# relations built from an older drop, or under older dedup rules, would be
+# written under a newer prefix, and a later run would resume them against
 # shifted rows. A relation rebuilt anywhere else (``sources refresh``, the
 # current_grants CLI) is a new table without the stamp, so the next run
-# rebuilds it, as it rebuilds all six after a run that failed partway
-# through them. A stamp is a catalog read, where comparing the relations
+# rebuilds it. A stamp is a catalog read, where comparing the relations
 # with staging (``stale_basic_fields_current``) scans every row of both.
 def _current_stamp(versions: dict[str, str], build_id: str | None) -> str:
-    return json.dumps({"source_versions": versions, "build_id": build_id}, sort_keys=True)
+    return json.dumps({"source_versions": versions, "shape": MATCHING_INPUT_SHAPE_VERSION, "build_id": build_id},
+                      sort_keys=True)
 
 
-def _stamped_versions(comment: str | None) -> dict | None:
-    """The source versions a relation's comment records, or None when it
-    has no stamp (never stamped, or a comment of another kind)."""
+def _stamp_of(comment: str | None) -> dict | None:
+    """A relation's stamp, parsed from its comment, or None when it has
+    none (never stamped, or a comment of another kind)."""
     try:
         stamp = json.loads(comment) if comment else None
     except ValueError:
         return None
-    return stamp.get("source_versions") if isinstance(stamp, dict) else None
+    return stamp if isinstance(stamp, dict) and "source_versions" in stamp else None
 
 
 def _unstamped_current_relations(connection, versions: dict[str, str]) -> list[str]:
-    """The ``_current`` relations that do not carry ``versions``: missing,
-    rebuilt outside a matcher run, or built from another drop."""
+    """The ``_current`` relations that do not carry ``versions`` under the
+    current input shape: missing, rebuilt outside a matcher run, built
+    from another drop, or built under other dedup rules."""
     stale = []
     for table, _ddl in _CURRENT_TABLES:
         comment = connection.execute(
             text("SELECT obj_description(to_regclass(:name), 'pg_class')"), {"name": f"public.{table}"}
         ).scalar_one()
-        if _stamped_versions(comment) != versions:
+        stamp = _stamp_of(comment)
+        if stamp is None or stamp["source_versions"] != versions or stamp.get("shape") != MATCHING_INPUT_SHAPE_VERSION:
             stale.append(table)
     return stale
+
+
+def after_current_build(connection, table: str, recovered_policy: str, stamp: str | None = None) -> None:
+    """What commits with a ``_current`` relation's build or not at all
+    (``build_current_relations``'s hook): the views the DROP ... CASCADE of
+    the relations the matching views are defined over took with it, back
+    in the same transaction (the view of current and recovered grants for
+    ``recovered_policy``, then the matching views over it), and the
+    matcher's ``stamp``, when there is one, last of all."""
+    if table in _MATCHING_VIEW_TABLES:
+        create_or_replace_views(connection, recovered_policy=recovered_policy)
+    if stamp is not None:
+        connection.execute(text(f"COMMENT ON TABLE public.{table} IS :stamp"), {"stamp": stamp})
 
 
 # Filenames the chunk loop writes/reads. Used by the resume listing to
@@ -2260,9 +2288,10 @@ def matched_tuples(universe_df: pd.DataFrame, grants_df: pd.DataFrame, matches: 
 
 
 def _write_privategrants_w_recipients(connection, full_data_df: pd.DataFrame,
-                                      relations: Relations = Relations()) -> None:
+                                      relations: Relations = Relations()) -> int:
     """Write the join table, then build ``privategrants_w_recipients``
-    from it, under the run's names."""
+    from it, with its filerein index and planner statistics, under the
+    run's names. Returns its row count."""
     temp_join_table_name = relations.of("pf_grant_matching_temp_table")
     keys_view = relations.of("privategrants_w_column_keys_view")
     private_grants_w_recipient_table_name = relations.of("privategrants_w_recipients")
@@ -2310,39 +2339,34 @@ def _write_privategrants_w_recipients(connection, full_data_df: pd.DataFrame,
     # NOTE: Uncomment this to drop the temporary table but leave for now for debugging
     # connection.execute(text(f"DROP TABLE IF EXISTS public.{temp_join_table_name}"))
 
-
-def _write_unioned_grants(connection, relations: Relations = Relations()) -> tuple[int, int]:
-    """Rebuild ``unioned_grants`` from the freshly written
-    ``privategrants_w_recipients`` and the 990 Schedule I grants, then the
-    post-build maintenance of both. Returns the row counts of the two."""
-    private_grants_w_recipient_table_name = relations.of("privategrants_w_recipients")
-    unioned = relations.of("unioned_grants")
-
-    rebuild_unioned_grants(connection, relations)
-
     # Post-build maintenance (previously a manual post-rebuild step):
     # SELECT INTO creates tables with no indexes and no planner stats —
     # downstream consumers (e.g. the canonical pf build step) time out
     # without the ANALYZE, and the filerein index doesn't survive the
-    # DROP/SELECT INTO cycle.
+    # DROP/SELECT INTO cycle. With the table, so that what commits is
+    # complete (--commit-between-outputs commits it on its own).
     logger.info("Recreating filerein index and refreshing planner stats")
     connection.execute(text(
         f"CREATE INDEX IF NOT EXISTS ix_{private_grants_w_recipient_table_name}_filerein "
         f"ON public.{private_grants_w_recipient_table_name} USING btree (filerein)"
     ))
     connection.execute(text(f"ANALYZE public.{private_grants_w_recipient_table_name}"))
-    connection.execute(text(f"ANALYZE public.{unioned}"))
-
-    # Row counts of the two output tables, captured in the same session
-    # that wrote them so they're guaranteed-consistent with what just
-    # committed. Bubbled up to the canonical_builds 'success' row.
-    pg_rows = connection.execute(
+    # Its row count, read in the session that wrote it, so it is consistent
+    # with what commits. Bubbled up to the canonical_builds row.
+    return connection.execute(
         text(f"SELECT COUNT(*) FROM public.{private_grants_w_recipient_table_name}")
     ).scalar_one()
-    ug_rows = connection.execute(
-        text(f"SELECT COUNT(*) FROM public.{unioned}")
-    ).scalar_one()
-    return pg_rows, ug_rows
+
+
+def _write_unioned_grants(connection, relations: Relations = Relations()) -> int:
+    """Rebuild ``unioned_grants`` from the freshly written
+    ``privategrants_w_recipients`` and the 990 Schedule I grants, with its
+    planner statistics. Returns its row count, read in the session that
+    wrote it."""
+    unioned = relations.of("unioned_grants")
+    rebuild_unioned_grants(connection, relations)
+    connection.execute(text(f"ANALYZE public.{unioned}"))
+    return connection.execute(text(f"SELECT COUNT(*) FROM public.{unioned}")).scalar_one()
 
 
 def write_matches(connection, full_data_df: pd.DataFrame, relations: Relations = Relations()) -> tuple[int, int]:
@@ -2352,11 +2376,25 @@ def write_matches(connection, full_data_df: pd.DataFrame, relations: Relations =
     back to what the last run left, never a new
     ``privategrants_w_recipients`` next to a stale ``unioned_grants``.
     Returns the row counts of the two."""
-    _write_privategrants_w_recipients(connection, full_data_df, relations)
-    return _write_unioned_grants(connection, relations)
+    pg_rows = _write_privategrants_w_recipients(connection, full_data_df, relations)
+    return pg_rows, _write_unioned_grants(connection, relations)
 
 
-def _write_outputs(full_data_df: pd.DataFrame, commit_between_outputs: bool = False) -> tuple[int, int]:
+def _record_privategrants_w_recipients(connection, build_id: str, pg_rows: int) -> None:
+    """The build row's count of ``privategrants_w_recipients``, written in
+    the transaction that replaced the table (``--commit-between-outputs``):
+    a failed row with this count and no ``unioned_grants_rows`` says which
+    table the build replaced, where ``_finalize_build_failed`` records only
+    the error."""
+    connection.execute(
+        text(f"UPDATE {CANONICAL_BUILDS_TABLE} SET privategrants_w_recipients_rows = :pg_rows "
+             "WHERE build_id = :build_id"),
+        {"build_id": build_id, "pg_rows": pg_rows},
+    )
+
+
+def _write_outputs(full_data_df: pd.DataFrame, commit_between_outputs: bool = False,
+                   build_id: str | None = None) -> tuple[int, int]:
     """The write phase of a production run: ``write_matches`` in one
     transaction, or, with ``commit_between_outputs``,
     ``privategrants_w_recipients`` committed before ``unioned_grants`` is
@@ -2364,22 +2402,32 @@ def _write_outputs(full_data_df: pd.DataFrame, commit_between_outputs: bool = Fa
 
     Postgres frees a dropped table's files only at commit, so one
     transaction holds the old copies of the join table,
-    ``privategrants_w_recipients`` and ``unioned_grants`` until it ends:
-    the phase took 26 GB of the shared instance's free storage on
-    2026-10-30. A commit after ``privategrants_w_recipients`` frees the
-    first two old copies before ``unioned_grants`` is rebuilt, roughly
-    9 GB less at the deepest point, at the cost of ``write_matches``'s
-    guarantee: a failure in the second transaction leaves a new
-    ``privategrants_w_recipients`` next to a stale ``unioned_grants`` (the
-    build row says failed) until the matcher is rerun. Off by default.
+    ``privategrants_w_recipients`` and ``unioned_grants`` until it ends
+    (README, Storage). The join table, the last run's debugging copy of
+    the matched tuples, goes first in a transaction of its own: ``to_sql``
+    replaces it moments later, and nothing reads it in between. A commit
+    after ``privategrants_w_recipients`` frees its old copy too before
+    ``unioned_grants`` is rebuilt, a shallower dip at the cost of
+    ``write_matches``'s guarantee: a failure in the second transaction
+    leaves a new ``privategrants_w_recipients`` next to a stale
+    ``unioned_grants``, the build row failed with the new table's count
+    (``_record_privategrants_w_recipients``), until the matcher is rerun
+    (``--skip-rebuild``: the chunks are resumed from S3). Off by default.
     """
+    relations = Relations()
+    with get_session(config=datamart_config()) as session:
+        session.connection().execute(
+            text(f"DROP TABLE IF EXISTS public.{relations.of('pf_grant_matching_temp_table')}"))
     if not commit_between_outputs:
         with get_session(config=datamart_config()) as session:
             return write_matches(session.connection(), full_data_df)
     with get_session(config=datamart_config()) as session:
-        _write_privategrants_w_recipients(session.connection(), full_data_df)
+        connection = session.connection()
+        pg_rows = _write_privategrants_w_recipients(connection, full_data_df)
+        if build_id is not None:
+            _record_privategrants_w_recipients(connection, build_id, pg_rows)
     with get_session(config=datamart_config()) as session:
-        return _write_unioned_grants(session.connection())
+        return pg_rows, _write_unioned_grants(session.connection())
 
 
 def match_records(
@@ -2514,71 +2562,76 @@ def _chunk_job(chunk_idx: int) -> tuple[int, pd.DataFrame]:
     return chunk_idx, features
 
 
-def _do_match_records(
-    chunk_size: int,
-    s3_bucket: str,
+def _load_inputs(
     s3_prefix: str | None,
-    resume_from_checkpoints: bool,
-    resume_workers: int = 32,
-    limit: int | None = None,
-    recovered_policy: str | None = None,
-    build_id: str | None = None,
-    skip_rebuild: bool = False,
-    workers: int = 1,
-    ranking: str = RANKING,
-    commit_between_outputs: bool = False,
-):
-    """Inner pipeline body. Returns ``(full_data_df, pg_rows, ug_rows)``.
-
-    Split out from ``match_records`` so the canonical_builds lifecycle
-    (insert started → try → finalize success/failed) wraps the whole
-    pipeline cleanly without indenting 200 lines.
+    limit: int | None,
+    recovered_policy: str | None,
+    build_id: str | None,
+    skip_rebuild: bool,
+) -> tuple[pd.DataFrame, pd.DataFrame, str]:
+    """The run's database phases, each a transaction of its own: the
+    bookkeeping, the rebuild of the ``_current`` relations (one transaction
+    per relation, ``build_current_relations``), then the corrections, the
+    views and the two reads. Returns the universe, the grants and the
+    checkpoint prefix. Up to 2026-10-30 one transaction held all of it, so
+    the old copies of the six relations were freed only when the reads
+    ended (README, Storage).
     """
-    # --- 3. APPLY CLEANING ---
-    logger.info("Preparing data...")
-    # 1. LOAD DATA
-    # Three database phases, each a transaction of its own: the run's
-    # bookkeeping, the rebuild of the _current relations (one transaction
-    # per relation, inside build_current_relations), then the views and the
-    # two reads. Up to 2026-10-30 one transaction held all of it, so the
-    # old copies of the six relations were freed only when the reads
-    # ended, and free storage on the shared instance fell by 27 GB until
-    # then.
+    # 1. The bookkeeping, before anything is rebuilt: the policy the view
+    # shows (the rebuild drops the view, and with it what says which policy
+    # it showed), the source versions the checkpoint prefix is keyed on (a
+    # source with no successful run stops the run here, not after an hour
+    # of builds), and which relations carry their stamp.
     with get_session(config=datamart_config()) as session:
         connection = session.connection()
-        # Before anything is rebuilt: the rebuild below drops the view, and
-        # with it what says which policy it showed.
         recovered_policy = recovered_policy_of(recovered_view.shown_policy(connection), recovered_policy)
-        _load_corrections(connection)
-        # The versions the checkpoint prefix is keyed on (_current_stamp),
-        # read before the rebuild: a source with no successful run stops
-        # the run here, not after an hour of builds.
         versions = _source_versions(connection)
-        if skip_rebuild:
-            # A restart minutes after a run that rebuilt them, with nothing
-            # loaded since: the relations must carry that run's stamp of the
-            # versions the checkpoint prefix is keyed on.
-            stale = _unstamped_current_relations(connection, versions)
-            if stale:
-                raise RuntimeError(
-                    f"--skip-rebuild: {', '.join('public.' + t for t in stale)} do not carry the source "
-                    "versions the checkpoints are keyed on (rebuilt elsewhere, or from an older drop); "
-                    "run without --skip-rebuild"
-                )
-            logger.info("--skip-rebuild: the _current relations carry the current source versions; "
-                        "taken as they stand")
-    if not skip_rebuild:
-        # Rebuild the filing-version-deduped inputs (issues #33/#34)
-        # BEFORE the views: the DROP ... CASCADE inside takes the view of
-        # current and recovered grants and the dependent matching views
-        # with it, and create_or_replace_views restores them, in that
-        # order. Each relation is stamped in the transaction that builds
-        # it, so a failure leaves every relation either complete and
-        # stamped or untouched, the build row ends failed (match_records),
-        # and the run after it rebuilds all six.
-        build_current_relations(datamart_config(), comment=_current_stamp(versions, build_id))
+        stale = _unstamped_current_relations(connection, versions)
+    # 2. The rebuild of the filing-version-deduped inputs (issues #33/#34):
+    # every relation, or (--skip-rebuild) the ones that do not carry the
+    # stamp of these versions under this input shape, and the relations
+    # built from them. Each relation is stamped, and the views its DROP ...
+    # CASCADE took are recreated, in the transaction that builds it
+    # (after_current_build), so a failure leaves every relation either
+    # complete and stamped or untouched, the views in place, and the build
+    # row failed (match_records); the run after it rebuilds what lacks the
+    # stamp.
+    if skip_rebuild:
+        to_build = with_dependents(stale)
+        logger.info("--skip-rebuild: %s carry the stamp of the current source versions and input shape and are "
+                    "taken as they stand; %s rebuilt",
+                    ", ".join(t for t, _ in _CURRENT_TABLES if t not in stale) or "no relations",
+                    ", ".join(t for t, _ in to_build) or "none")
+    else:
+        to_build = list(_CURRENT_TABLES)
+    if to_build:
+        build_current_relations(
+            datamart_config(), to_build,
+            after=partial(after_current_build, recovered_policy=recovered_policy,
+                          stamp=_current_stamp(versions, build_id)))
+    # 3. The corrections, the views and the two reads, one transaction at
+    # the builds' memory budget: the TRUNCATE's lock holds the correction
+    # rows the prefix's hash names until the universe read has them, as
+    # the matcher's one transaction did.
     with get_session(config=datamart_config()) as session:
         connection = session.connection()
+        apply_build_memory(connection)
+        # The relations read carry the stamp of the versions the prefix
+        # names, whichever path built them, and no source was ingested
+        # since the versions were read: the per-relation commits hold no
+        # lock on staging across the rebuild, where the one transaction did.
+        stale = _unstamped_current_relations(connection, versions)
+        if stale:
+            raise RuntimeError(
+                f"{', '.join('public.' + t for t in stale)} do not carry the stamp of the source versions and "
+                "input shape the checkpoints are keyed on (rebuilt elsewhere during the run?); run again"
+            )
+        if _source_versions(connection) != versions:
+            raise RuntimeError(
+                "A source was ingested while the run rebuilt the _current relations "
+                "(datamart_meta.ingest_runs moved); run again"
+            )
+        _load_corrections(connection)
         create_or_replace_views(connection, recovered_policy=recovered_policy)
         # The recovered grants the run takes, read once: the build's
         # source_runs and the checkpoint prefix name the same rows.
@@ -2586,7 +2639,7 @@ def _do_match_records(
         if build_id is not None:
             _stamp_recovered(build_id, recovered)
         if s3_prefix is None:
-            s3_prefix = _resolve_checkpoint_prefix(connection, recovered)
+            s3_prefix = _resolve_checkpoint_prefix(connection, recovered, versions=versions)
             logger.info(f"Resolved checkpoint prefix from lineage: {s3_prefix}")
         else:
             logger.info(f"Using caller-supplied checkpoint prefix: {s3_prefix}")
@@ -2611,7 +2664,35 @@ def _do_match_records(
         basic_fields_df = pd.read_sql_query(text(universe_sql(limit_clause=limit_clause)), connection)
         logger.info("Reading public.privategrants_unique_names_view")
         private_foundations_df = pd.read_sql_query(text(grants_sql(limit_clause=limit_clause)), connection)
+    return basic_fields_df, private_foundations_df, s3_prefix
 
+
+def _do_match_records(
+    chunk_size: int,
+    s3_bucket: str,
+    s3_prefix: str | None,
+    resume_from_checkpoints: bool,
+    resume_workers: int = 32,
+    limit: int | None = None,
+    recovered_policy: str | None = None,
+    build_id: str | None = None,
+    skip_rebuild: bool = False,
+    workers: int = 1,
+    ranking: str = RANKING,
+    commit_between_outputs: bool = False,
+):
+    """Inner pipeline body. Returns ``(full_data_df, pg_rows, ug_rows)``.
+
+    Split out from ``match_records`` so the canonical_builds lifecycle
+    (insert started → try → finalize success/failed) wraps the whole
+    pipeline cleanly without indenting 200 lines.
+    """
+    logger.info("Preparing data...")
+    # 1. LOAD DATA
+    basic_fields_df, private_foundations_df, s3_prefix = _load_inputs(
+        s3_prefix, limit, recovered_policy, build_id, skip_rebuild)
+
+    # --- 3. APPLY CLEANING ---
     logger.info("Cleaning zip codes, names and addresses...")
     prepare(basic_fields_df)
     prepare(private_foundations_df)
@@ -2739,7 +2820,7 @@ def _do_match_records(
 
     full_data_df = matched_tuples(basic_fields_df, private_foundations_df, matches)
 
-    pg_rows, ug_rows = _write_outputs(full_data_df, commit_between_outputs)
+    pg_rows, ug_rows = _write_outputs(full_data_df, commit_between_outputs, build_id)
     return full_data_df, pg_rows, ug_rows
 
 
@@ -2811,11 +2892,11 @@ if __name__ == "__main__":
         "--skip-rebuild",
         action="store_true",
         help=(
-            "Take the _current relations as they stand instead of rebuilding "
-            "them first. Only for a restart minutes after a run that rebuilt "
-            "them, with no load or ingest since; the views are still created. "
-            "The run refuses when a relation lacks the stamp of the source "
-            "versions the checkpoints are keyed on."
+            "Take the _current relations that carry the stamp of the source "
+            "versions and input shape the checkpoints are keyed on as they "
+            "stand, and rebuild only the rest (and what reads them): a restart "
+            "after a run that rebuilt them, or was stopped partway through "
+            "them, with no load or ingest since. The views are still created."
         ),
     )
     parser.add_argument(
@@ -2849,13 +2930,15 @@ if __name__ == "__main__":
         action="store_true",
         help=(
             "Commit privategrants_w_recipients in a transaction of its own "
-            "before unioned_grants is rebuilt, so the old join table and the "
-            "old privategrants_w_recipients are freed first: roughly 9 GB "
-            "less of the write phase's 26 GB dip in the shared instance's "
-            "free storage. The cost: a failure in the unioned_grants rebuild "
-            "leaves a new privategrants_w_recipients next to a stale "
-            "unioned_grants, where the default (one transaction) leaves both "
-            "as the last run left them. Rerun the matcher to put them right."
+            "before unioned_grants is rebuilt, so its old copy is freed "
+            "first: a shallower dip in the shared instance's free storage "
+            "(the README's Storage note has the figures and the watchdog "
+            "floor). The cost: a failure in the unioned_grants rebuild leaves "
+            "a new privategrants_w_recipients next to a stale unioned_grants, "
+            "where the default (one transaction) leaves both as the last run "
+            "left them. Rerun the matcher with --skip-rebuild to put them "
+            "right: the chunks are resumed from S3, and the reads, the pair "
+            "index and the write phase are redone."
         ),
     )
     args = parser.parse_args()

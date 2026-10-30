@@ -311,6 +311,9 @@ class Connection:
     def scalar(self):
         return self.definition
 
+    def scalar_one(self):
+        return self.definition
+
 
 def shows(policy: str) -> str:
     return f"SELECT ... FROM privategrants_recovered WHERE policy_version = '{policy}'::text"
@@ -380,10 +383,14 @@ def test_a_run_under_a_prefix_never_touches_the_view():
 
 
 class Session:
-    """A session the real helper commits after a clean block."""
+    """A session the real helper drives: committed after a clean block,
+    rolled back after an exception, when ``state`` (what its transaction
+    wrote) goes back to what it was when the session opened. Shared with
+    test_current_stamp.py."""
 
-    def __init__(self):
-        self.connection_, self.outcome = Connection(None), None
+    def __init__(self, connection, state: dict | None = None):
+        self.connection_, self.outcome, self.config = connection, None, None
+        self._state, self._before = state, dict(state) if state is not None else None
 
     def connection(self):
         return self.connection_
@@ -392,6 +399,9 @@ class Session:
         self.outcome = "committed"
 
     def rollback(self):
+        if self._state is not None:
+            self._state.clear()
+            self._state.update(self._before)
         self.outcome = "rolled back"
 
     def close(self):
@@ -401,14 +411,14 @@ class Session:
 def write_phase(monkeypatch, commit_between_outputs: bool):
     """The two writes of a run's write phase as they happen, each with the
     session it ran on and the outcome of every session opened so far; then
-    the outcomes at the end."""
+    the outcomes at the end and what each session ran."""
     from givingtuesday_datamart._internal import db
 
     opened: list[Session] = []
     steps: list[tuple] = []
 
     def open_session(config=None):
-        opened.append(Session())
+        opened.append(Session(Connection(None)))
         return db.get_session(session=opened[-1])
 
     def step(name, connection):
@@ -417,45 +427,74 @@ def write_phase(monkeypatch, commit_between_outputs: bool):
     monkeypatch.setattr(gm, "get_session", open_session)
     monkeypatch.setattr(gm, "datamart_config", lambda: {})
     monkeypatch.setattr(gm, "_write_privategrants_w_recipients",
-                        lambda connection, df, relations=None: step("recipients", connection))
+                        lambda connection, df, relations=None: (step("recipients", connection), 7)[1])
     monkeypatch.setattr(gm, "_write_unioned_grants",
-                        lambda connection, relations=None: (step("unioned", connection), (7, 11))[1])
-    assert gm._write_outputs(pd.DataFrame(), commit_between_outputs) == (7, 11)
-    return steps, [s.outcome for s in opened]
+                        lambda connection, relations=None: (step("unioned", connection), 11)[1])
+    assert gm._write_outputs(pd.DataFrame(), commit_between_outputs, "build-1") == (7, 11)
+    return steps, [s.outcome for s in opened], [s.connection_.ran for s in opened]
+
+
+def test_the_last_runs_join_table_is_dropped_in_a_transaction_of_its_own_first(monkeypatch):
+    steps, outcomes, ran = write_phase(monkeypatch, commit_between_outputs=False)
+    assert ran[0] == ["DROP TABLE IF EXISTS public.pf_grant_matching_temp_table"]
+    assert steps[0] == ("recipients", 1, ["committed", None])                 # committed before the write began
 
 
 def test_by_default_both_outputs_are_written_in_one_transaction(monkeypatch):
-    steps, outcomes = write_phase(monkeypatch, commit_between_outputs=False)
-    assert steps == [("recipients", 0, [None]), ("unioned", 0, [None])]        # one session, open throughout
-    assert outcomes == ["committed"]
-
-
-def test_on_the_flag_privategrants_w_recipients_is_committed_before_unioned_grants_is_rebuilt(monkeypatch):
-    steps, outcomes = write_phase(monkeypatch, commit_between_outputs=True)
-    assert steps == [("recipients", 0, [None]), ("unioned", 1, ["committed", None])]
+    steps, outcomes, ran = write_phase(monkeypatch, commit_between_outputs=False)
+    assert steps == [("recipients", 1, ["committed", None]), ("unioned", 1, ["committed", None])]
     assert outcomes == ["committed", "committed"]
+    assert not any("privategrants_w_recipients_rows" in sql for sql in ran[1])   # the success row carries the counts
+
+
+def test_on_the_flag_privategrants_w_recipients_is_committed_and_recorded_before_unioned_grants(monkeypatch):
+    steps, outcomes, ran = write_phase(monkeypatch, commit_between_outputs=True)
+    assert steps == [("recipients", 1, ["committed", None]), ("unioned", 2, ["committed", "committed", None])]
+    assert outcomes == ["committed"] * 3
+    recorded = [sql for sql in ran[1] if "privategrants_w_recipients_rows" in sql]
+    assert len(recorded) == 1 and recorded[0].startswith("UPDATE") and "build_id = :build_id" in recorded[0]
 
 
 def test_write_matches_is_the_two_writes_on_one_connection(monkeypatch):
     ran: list[tuple] = []
     monkeypatch.setattr(gm, "_write_privategrants_w_recipients",
-                        lambda connection, df, relations: ran.append(("recipients", connection, relations)))
+                        lambda connection, df, relations: (ran.append(("recipients", connection, relations)), 7)[1])
     monkeypatch.setattr(gm, "_write_unioned_grants",
-                        lambda connection, relations: (ran.append(("unioned", connection, relations)), (7, 11))[1])
+                        lambda connection, relations: (ran.append(("unioned", connection, relations)), 11)[1])
     connection, names = Connection(None), gm.Relations(prefix="scratch_matcher_")
     assert gm.write_matches(connection, pd.DataFrame(), names) == (7, 11)
     assert ran == [("recipients", connection, names), ("unioned", connection, names)]
 
 
-def test_the_default_write_keeps_its_statement_order():
-    """The split moved no statement: the join table, then privategrants_w_recipients,
-    then unioned_grants, then the index, the ANALYZEs and the counts."""
-    import inspect
+class Frame:
+    """What the write needs of the matched tuples: a frame that writes itself."""
 
-    first = inspect.getsource(gm._write_privategrants_w_recipients)
-    second = inspect.getsource(gm._write_unioned_grants)
-    assert first.index("to_sql(") < first.index("ANALYZE public.{temp_join_table_name}") < first.index(
-        "DROP TABLE IF EXISTS public.{private_grants_w_recipient_table_name}") < first.index("INTO public.")
-    assert second.index("rebuild_unioned_grants(") < second.index("CREATE INDEX IF NOT EXISTS") < second.index(
-        "ANALYZE public.{private_grants_w_recipient_table_name}") < second.index(
-        "ANALYZE public.{unioned}") < second.index("SELECT COUNT(*)")
+    def to_sql(self, name, con, schema=None, if_exists=None, **kwargs):
+        con.ran.append(f"to_sql public.{name} {if_exists}")
+
+
+def test_each_output_table_commits_complete_with_its_index_and_statistics():
+    first, second = Connection(None), Connection(None)
+    gm._write_privategrants_w_recipients(first, Frame())
+    gm._write_unioned_grants(second)
+    heads = [" ".join(sql.split())[:48] for sql in first.ran]
+    assert heads == [
+        "to_sql public.pf_grant_matching_temp_table repla",
+        "ANALYZE public.pf_grant_matching_temp_table",
+        "DROP TABLE IF EXISTS public.privategrants_w_reci",
+        "SELECT pg.*, pfgm.recipeint_ein_key, pfgm.match_",
+        "CREATE INDEX IF NOT EXISTS ix_privategrants_w_re",
+        "ANALYZE public.privategrants_w_recipients",
+        "SELECT COUNT(*) FROM public.privategrants_w_reci",
+    ]
+    assert "INTO public.unioned_grants" in second.ran[0] and "DROP TABLE IF EXISTS public.unioned_grants" in second.ran[0]
+    assert [" ".join(sql.split()) for sql in second.ran[-2:]] == [
+        "ANALYZE public.unioned_grants", "SELECT COUNT(*) FROM public.unioned_grants"]
+    assert not any("privategrants_w_recipients" in sql and ("INDEX" in sql or sql.startswith("ANALYZE")) for sql in second.ran)
+
+
+def test_the_checkpoint_prefix_names_the_versions_the_run_read_once():
+    versions = {name: "2026_06_16" for name in gm._MATCHING_INPUT_LOGICAL_NAMES}
+    prefix = gm._resolve_checkpoint_prefix(Connection(None), {"policy_version": "v3", "rows": 5, "digest": "0a1b2c3d"},
+                                           versions={**versions, "irs_990pf_grants": "2026_10_25"})
+    assert "/pg_2026_10_25/bf_2026_06_16/" in prefix                    # no read: the fake answers no ingest_runs query

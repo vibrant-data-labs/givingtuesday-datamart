@@ -365,7 +365,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
-from typing import Iterable
+from typing import Any, Callable, Iterable
 
 from sqlalchemy import text
 
@@ -951,6 +951,17 @@ _TABLES = _BASIC_FIELDS_TABLES + _GRANTS_TABLES
 # The relations the matching views are defined over: rebuilding one drops
 # the views with it.
 _MATCHING_VIEW_TABLES = ("grants_to_domestic_organizations_current", "privategrants_current")
+# What a relation is built from besides staging: rebuilding the relation
+# named rebuilds the relations that read it.
+_READS_CURRENT = {"privategrants_future_current": "privategrants_current"}
+
+
+def with_dependents(tables: Iterable[str]) -> list[tuple[str, str]]:
+    """The ``(table, ddl)`` pairs of the relations named and of the
+    relations built from them (``_READS_CURRENT``), in build order."""
+    wanted = set(tables)
+    wanted |= {t for t, reads in _READS_CURRENT.items() if reads in wanted}
+    return [(t, d) for t, d in _TABLES if t in wanted]
 
 
 _MiB, _GiB = 1024 ** 2, 1024 ** 3
@@ -990,12 +1001,14 @@ def _check_build_memory(work_mem: int, maintenance_work_mem: int, parallel_worke
         )
 
 
-def _build_one(connection, table: str, ddl: str) -> int:
-    logger.info(
-        "Building public.%s (filing-version dedup, issues #33/#34)", table
-    )
-    # Memory for the build, set_config(..., false), i.e. SET, not SET LOCAL,
-    # so it is session-scoped, survives the per-statement execute()s below
+def apply_build_memory(connection) -> None:
+    """The memory budget every statement on ``connection`` runs under from
+    here on. Every build applies it (``_build_one``), and so does the
+    matcher's session of views and reads: its sorts over the same
+    relations ran at the builds' budget while they shared the builds'
+    connection, and at the server's defaults once they did not."""
+    # set_config(..., false), i.e. SET, not SET LOCAL, so it is
+    # session-scoped, survives the per-statement execute()s that follow
     # and dies with the connection. No parallel workers: a worker gets the
     # whole budget and a hash twice it (hash_mem_multiplier is 2), so the
     # default two workers pushed the 4 GB shared instance a gigabyte into
@@ -1023,6 +1036,13 @@ def _build_one(connection, table: str, ddl: str) -> int:
     for name, value in settings.items():
         connection.execute(text("SELECT set_config(:name, :value, false)"), {"name": name, "value": value})
     _check_build_memory(*connection.execute(text(_BUILD_MEMORY_SQL)).one())
+
+
+def _build_one(connection, table: str, ddl: str) -> int:
+    logger.info(
+        "Building public.%s (filing-version dedup, issues #33/#34)", table
+    )
+    apply_build_memory(connection)
     for stmt in [s for s in ddl.split(";") if s.strip()]:
         connection.execute(text(stmt))
     for stmt in _INDEX_DDL[table]:
@@ -1108,44 +1128,42 @@ def stale_basic_fields_current(connection) -> list[str]:
 
 
 def build_current_relations(config: dict, tables: Iterable[tuple[str, str]] = _TABLES, *,
-                            comment: str | None = None) -> dict[str, int]:
+                            after: Callable[[Any, str], None] | None = None) -> dict[str, int]:
     """(Re)build the ``_current`` relations in ``tables`` (every one by
     default), each in a session and transaction of its own against the
     database ``config`` names. Returns row counts.
 
     One transaction per relation, never one for all of them: Postgres
     frees a dropped table's files only when the transaction that dropped
-    it commits, so under one transaction the old and new copies of every
-    relation coexist until it ends, about 26 GB with their indexes. The
-    matcher's run of 2026-10-30 held one transaction from its rebuild to
-    the end of its reads, and free storage on the shared instance fell by
-    27 GB until then. Committed one at a time, a relation's old copy is
-    gone before the next is built, and the dip is one relation's new copy
-    and the sort spill of its build. A failure leaves the relations before
-    it complete, the failing one as it was (its transaction rolls back),
-    and the rest untouched.
+    it commits, so one transaction would hold the old copies of every
+    relation until it ends (the matcher's did, until October 2026; the
+    README's Storage note has the figures). Committed one at a time, a
+    relation's old copy is gone before the next is built, and the dip is
+    one relation's new copy and the sort spill of its build. A failure
+    leaves the relations before it complete, the failing one as it was
+    (its transaction rolls back), and the rest untouched.
 
-    ``comment`` is written on each relation (COMMENT ON TABLE) in the
-    transaction that builds it: the matcher's stamp of the source versions
-    (``grant_matching._current_stamp``), which a relation therefore
-    carries only when it is complete. Without it a rebuilt relation
-    carries no comment, the DROP having taken the old one.
-
-    NOTE: the DROP ... CASCADE removes any views defined over
-    ``privategrants_current`` (the matching keys/unique views). Callers
-    that need those views must recreate them afterwards —
-    ``grant_matching._do_match_records`` does, and the standalone CLI
-    below does when the recovered view's policy is known; with no view it
-    says so up front, builds the tables, and leaves the matching views to
-    the next matcher run.
+    ``after(connection, table)`` runs in the transaction that built
+    ``table``, after its indexes, ANALYZE and count: what must commit with
+    the build or not at all. The matcher's hook
+    (``grant_matching.after_current_build``) recreates the views the DROP
+    ... CASCADE of ``privategrants_current`` takes with it (the view of
+    current and recovered grants and the matching views over it), so no
+    session ever sees them gone and a later failure cannot lose them, and
+    stamps the relation with the source versions, so a relation carries
+    the stamp only when it is complete. The CLI below passes the same
+    hook when the view's policy is known; with no view it says so up
+    front, builds the tables, and leaves the views to the next matcher
+    run. A rebuilt relation carries no comment otherwise, the DROP having
+    taken the old one.
     """
     counts = {}
     for table, ddl in tables:
         with get_session(config=config) as session:
             connection = session.connection()
             counts[table] = _build_one(connection, table, ddl)
-            if comment is not None:
-                connection.execute(text(f"COMMENT ON TABLE public.{table} IS :comment"), {"comment": comment})
+            if after is not None:
+                after(connection, table)
     return counts
 
 
@@ -1155,7 +1173,9 @@ if __name__ == "__main__":
     # step: each table build is a 10-30 min transaction
     # (build_current_relations), and a failure in a later step must not
     # roll an earlier table back.
-    from givingtuesday_datamart.grant_matching import create_or_replace_views
+    from functools import partial
+
+    from givingtuesday_datamart.grant_matching import after_current_build
     from givingtuesday_datamart.placeholder_recovery.view import VIEW, shown_policy
 
     # The package logger has no handler of its own, so without this only
@@ -1186,11 +1206,13 @@ if __name__ == "__main__":
             "matching views are NOT created here. Create the view (`python -m "
             "givingtuesday_datamart.placeholder_recovery view --policy <version>`); the next matcher run "
             "creates the matching views on it.", VIEW)
-    build_current_relations(datamart_config(), _wanted)
+    # The hook recreates the views in the transaction that drops them, so
+    # no session sees them gone; it stamps nothing (the stamp is a matcher
+    # run's), so the next matcher run rebuilds what this built.
+    _hook = partial(after_current_build, recovered_policy=_policy) if _policy is not None else None
+    build_current_relations(datamart_config(), _wanted, after=_hook)
     with get_session(config=datamart_config()) as session:
         conn = session.connection()
-        if _needs_views and _policy is not None:
-            create_or_replace_views(conn, recovered_policy=_policy)
         rules = conn.execute(text("""
             SELECT 'sched_i' AS side, dedup_rule, COUNT(*) AS rows
             FROM public.grants_to_domestic_organizations_current GROUP BY 1, 2
