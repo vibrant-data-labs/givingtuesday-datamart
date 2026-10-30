@@ -313,16 +313,22 @@ unrecovered.
 - [x] `python -m givingtuesday_datamart.placeholder_recovery check --policy v3`.
 - [x] `python -m givingtuesday_datamart.corrections_preflight` (2 h 50 min
       in October; 2 h 49 min on 10-29, `GATE: PASS`).
-- [ ] `python -m givingtuesday_datamart.grant_matching --workers 12`: a
+- [x] `python -m givingtuesday_datamart.grant_matching --workers 12`: a
       full run, which rebuilds the `_current` relations and stamps them.
       In October the integer index took about an hour and the pool an hour
       and a half. The first attempt of 10-30 was stopped by the watchdog
       at the 35 GB storage floor during the rebuild (see the log): a full
       run dips about 30 GB below its resting level twice, once in the
-      rebuild and once in the write phase, each a single transaction.
-- [ ] `python -m givingtuesday_datamart.matching_regression_checks`:
-      `GATE: PASS`, or the diagnosis of what moved.
-- [ ] `python -m givingtuesday_datamart.placeholder_recovery check --policy v3`.
+      rebuild and once in the write phase, each a single transaction. The
+      second attempt, under a 10 GB floor, ran 04:15 to 08:06 UTC on 10-30
+      (3 h 51 min; build c6aee914, lineage `success`); the two troughs were
+      31.4 and 33.9 GB.
+- [x] `python -m givingtuesday_datamart.matching_regression_checks`:
+      `GATE: PASS` at 08:12 UTC on 10-30: 18 PASS, 2 WARN (the arms against
+      the August baselines; the recovered rows of lists marked as grants to
+      individuals, October's numbers), no FAIL.
+- [x] `python -m givingtuesday_datamart.placeholder_recovery check --policy v3`:
+      9 of 9 ok at 08:13 UTC on 10-30.
 
 ### 9. The accepting commit (laptop)
 
@@ -355,6 +361,13 @@ unrecovered.
 - Worth building after this run: one `refresh` command with resumable steps
   and the census at both ends; incremental matching, which rescores only the
   recipient tuples that changed.
+- The matcher's rebuild of the `_current` relations and its write phase
+  committing per relation, as the standalone rebuild does, so that a full
+  run needs about 12 GB of headroom on the shared instance rather than the
+  27 GB the two troughs of 10-30 took, and runs under the 35 GB floor by
+  day. The write phase is one transaction by design (a failure leaves no
+  stale `unioned_grants`); committing after `privategrants_w_recipients`
+  trades that for the headroom, a decision for the PR.
 
 ## Appendix: SQL
 
@@ -599,3 +612,63 @@ WHERE logical_name = 'irs_extract_patch' ORDER BY finished_at DESC;
   dips, and no one else uses the instance tonight. It starts at the
   matcher; the check and the preflight stand from the first attempt, with
   nothing written in between. About four hours.
+- **2026-10-30, step 8, second attempt, done: `GATE: PASS`.** 04:15 to
+  08:13 UTC, `run-matcher-2.sh` under the watchdog with `--min-free-gb 10`,
+  the box's clone on 285701d; build c6aee914, lineage `success` at
+  08:06:40, its `source_runs` naming the reload of step 1 (batch 09A), the
+  patch run of step 2, the BMF of 2026-10-13 and the ranking `named_first`.
+  The matcher took 3 h 51 min. The rebuild of the six `_current` relations
+  ran 04:15 to 04:52 (37 min) and gave the counts of steps 2 and 4 to the
+  row (3,992,135 / 1,226,420 / 2,257,600 / 9,190,418 / 17,392,341 /
+  452,460; doubled filer-years 0); the universe and grants reads and the
+  cleaning took to 05:04; the integer index 05:04 to 05:52 (48 min;
+  2,304,254,598 candidate pairs in 46,086 chunks); the pool 05:52 to 07:41
+  (1 h 48 min, twelve workers, about seven chunks a second; no chunk was
+  reusable, the checkpoint prefix carries the ranking's new shape); the
+  ranking itself two minutes (27,663,249 scored pairs; the
+  one-filer-in-the-state rule refused 254,871 pairs of 4,609 grant tuples
+  and left 3,310 of them unmatched; 2,554,447 pairs after resolution;
+  40,394 tuples on the name-only tier); the write phase 07:43 to 08:06
+  (23 min: the temp table, `privategrants_w_recipients`, `unioned_grants`,
+  the index and the statistics). Outputs: `privategrants_w_recipients`
+  10,925,841 rows (October's run 10,927,644), `unioned_grants` 19,877,536
+  (19,879,313). The gate ran 08:06 to 08:12: 18 PASS, 2 WARN, no FAIL. The
+  two failures of October's run are gone: placeholder rows matched 0
+  (October 415 against a ceiling of 349; the ceiling is the hard zero of
+  input shape 6 now) and Johns Hopkins University 3,852 rows (200 in
+  October, when the club held 706; the club now holds 428 under its
+  ceiling of 706). Self-matches 3,419 (ceiling 3,641; October's 3,661 was
+  a WARN); the Michael J. Fox Foundation 4,667; the Gates Trust 10; the
+  government guard refused nothing of 8,059 non-exact government-named
+  rows; the fan-out and subset invariants all hold; labeled-pair coverage
+  PF 71.9% (October 71.2%, floor 63.1%), 990 94.7% (floor 94.5%). The
+  first WARN is the rows per arm against the August baselines:
+  basic_fields 7,679,858 (+2.7% on 7,478,348), basic_fields_pf 69,348
+  (-18.5% on 85,071), eo_bmf 3,160,323 (the arm's first accepted run; its
+  baseline is 0), correction 16,312 (+6.1% on 15,376). Against October's
+  run under the old order the arms moved as the new order means them to:
+  1.96 million rows from eo_bmf (5,132,662) to basic_fields (5,718,304),
+  the recipient's own filing winning over the BMF line that carries its
+  name, and the PF arm up from 60,316. The PF arm's fall from August is a
+  move between arms, not a loss: the recipients that file a 990-PF hold
+  111,596 matched rows in this run, 69,348 through their PF filing (13,783
+  recipients), 21,877 through a BMF line carrying their name (3,631) and
+  20,371 through a 990 filing of theirs (1,528); the first two alone exceed
+  August's 85,071, and the PF labeled-pair coverage is up. The second WARN,
+  recovered rows of
+  lists marked as grants to individuals, is 2,972 rows, 494 of them on
+  the name alone: October's two numbers. `check --policy v3` after: 9 of
+  9 ok, 584,684 rows of 4,664 filings in the view, as step 6 left them.
+  The watchdog: 238 polls, no breach; swap flat at 0.04 to 0.05 GB,
+  freeable memory never under 20.8 GB; free storage 58.7 GB at the start,
+  the rebuild's trough 31.4 GB at 04:54 (27.2 GB down; it held while the
+  reads ran inside the same transaction and was released at 04:57), the
+  write's trough 33.9 GB at 08:02 (25.7 GB down), 57.5 GB at rest
+  afterwards, where it was before. Both troughs sat above the 25 GB floor
+  I had proposed; the 35 GB default would have stopped both phases, as it
+  stopped the first attempt. The default stays 35 for the shared instance
+  by day; until the rebuild and the write commit per relation
+  (Afterwards), a full run takes the quiet window and a lower floor. Step 8
+  took 7 h 18 min over its two attempts, the seven hours planned. No
+  backend but ours was on the database when it ended. Next: step 9, the
+  accepting commit, with the census after as its evidence.
